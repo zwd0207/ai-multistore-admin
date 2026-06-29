@@ -189,3 +189,17 @@ Still excluded:
 - AI model calls.
 
 Details and validation notes: see `PHASE_6A_PLATFORM_LOGIN.md`.
+
+## Phase 6A-3 - API Credential Structured Fields
+
+Phase 6A-3 adds structured API credential fields for future Naver / Coupang API capability validation.
+
+Implemented:
+
+- Coupang-oriented metadata: Vendor ID, Market, API local status, API remark.
+- Naver-oriented metadata: Client ID, Access Token status, Refresh Token status, Token expiry, API local status, API remark.
+- Sensitive key/secret/token values are accepted only through blank-on-edit password inputs and are never displayed.
+- The existing Access Key / Secret Key flow remains compatible with 5D-2 and 5D-3 mock sync.
+- Test connection remains a local-only notice and does not claim real API validation.
+
+Codex1 uses an idempotent SQLite schema upgrade script for existing local databases. This phase still excludes real Naver/Coupang API calls, token refresh, and real API connection tests.

@@ -13,6 +13,7 @@ import { useStoreContext } from '../context/StoreContext';
 import dataProvider from '../services/dataProvider';
 
 const statusOptions = ['active', 'inactive'];
+const authStatusOptions = ['not_configured', 'configured', 'needs_test', 'test_failed', 'test_passed'];
 const platformOptions = [
   { value: 'naver', label: 'Naver' },
   { value: 'coupang', label: 'Coupang' },
@@ -22,23 +23,39 @@ const initialForm = {
   name: '',
   platform: 'naver',
   status: 'active',
+  vendorId: '',
+  clientId: '',
   accessKeyInput: '',
   secretKeyInput: '',
+  accessTokenInput: '',
+  refreshTokenInput: '',
+  tokenExpiresAt: '',
+  market: 'KR',
+  authStatus: 'not_configured',
+  apiRemark: '',
 };
 
 const columns = [
   { key: 'name', title: '凭证名称', render: (value) => <strong>{value}</strong> },
   { key: 'store', title: '店铺' },
   { key: 'platform', title: '平台' },
+  { key: 'identityLabel', title: '平台标识' },
   { key: 'accessKeyStatus', title: '访问配置' },
   { key: 'secretKeyStatus', title: '密钥配置' },
+  { key: 'tokenStatus', title: 'Token 配置' },
+  { key: 'authStatus', title: 'API 本地状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'createdAt', title: '创建时间' },
+  { key: 'lastTestedAt', title: '上次测试' },
   { key: 'updatedAt', title: '更新时间' },
 ];
 
 function cleanError(error) {
   return error?.message || '后端保存失败，请检查 Codex1 后端状态或表单内容';
+}
+
+function toDatetimeLocalValue(value) {
+  if (!value) return '';
+  return String(value).slice(0, 16);
 }
 
 export default function BackendCredentialPage({ embedded = false }) {
@@ -90,16 +107,26 @@ export default function BackendCredentialPage({ embedded = false }) {
     ...nextForm,
     accessKeyInput: '',
     secretKeyInput: '',
+    accessTokenInput: '',
+    refreshTokenInput: '',
   });
 
   const openModal = (record = null) => {
     setModal({ open: true, record });
     setForm(record ? {
       name: record.name || '',
-      platform: String(record.platform || 'naver').toLowerCase(),
+      platform: String(record.rawPlatform || record.platform || 'naver').toLowerCase(),
       status: record.status || 'active',
+      vendorId: record.vendorId || '',
+      clientId: record.clientId || '',
       accessKeyInput: '',
       secretKeyInput: '',
+      accessTokenInput: '',
+      refreshTokenInput: '',
+      tokenExpiresAt: toDatetimeLocalValue(record.tokenExpiresAt),
+      market: record.market || 'KR',
+      authStatus: record.authStatus || 'not_configured',
+      apiRemark: record.apiRemark || '',
     } : initialForm);
     setErrors({});
     setSaveError('');
@@ -120,6 +147,7 @@ export default function BackendCredentialPage({ embedded = false }) {
     if (!String(form.name || '').trim()) nextErrors.name = '请填写凭证名称';
     if (!String(form.platform || '').trim()) nextErrors.platform = '请选择平台';
     if (!String(form.status || '').trim()) nextErrors.status = '请选择状态';
+    if (!String(form.authStatus || '').trim()) nextErrors.authStatus = '请选择 API 本地状态';
     if (!modal.record && !String(form.accessKeyInput || '').trim()) nextErrors.accessKeyInput = '请填写访问配置';
     if (!modal.record && !String(form.secretKeyInput || '').trim()) nextErrors.secretKeyInput = '请填写密钥配置';
     setErrors(nextErrors);
@@ -161,7 +189,7 @@ export default function BackendCredentialPage({ embedded = false }) {
   };
 
   const showTestNotice = () => {
-    setNotice('当前仅保存本地配置，未进行真实平台校验');
+    setNotice('待真实 API 能力验证：当前仅保存本地配置，未进行真实 API 校验');
   };
 
   const search = () => setQuery({ ...draftQuery, page: 1 });
@@ -224,7 +252,15 @@ export default function BackendCredentialPage({ embedded = false }) {
           <>
             <DataTable
               columns={columns}
-              rows={result.data || []}
+              rows={(result.data || []).map((row) => ({
+                ...row,
+                identityLabel: row.rawPlatform === 'coupang'
+                  ? row.vendorId || '未配置 Vendor ID'
+                  : row.clientId || '未配置 Client ID',
+                tokenStatus: row.rawPlatform === 'naver'
+                  ? `${row.accessTokenStatus} / ${row.refreshTokenStatus}`
+                  : '不适用',
+              }))}
               loading={loading || storeLoading}
               renderActions={(row) => (
                 <>
@@ -256,9 +292,26 @@ export default function BackendCredentialPage({ embedded = false }) {
               {platformOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </FormField>
+          {form.platform === 'coupang' ? (
+            <FormField label="Vendor ID">
+              <input value={form.vendorId} disabled={submitting} onChange={(event) => setForm({ ...form, vendorId: event.target.value })} placeholder="请输入 Coupang Vendor ID" />
+            </FormField>
+          ) : (
+            <FormField label="Client ID">
+              <input value={form.clientId} disabled={submitting} onChange={(event) => setForm({ ...form, clientId: event.target.value })} placeholder="请输入 Naver Client ID" />
+            </FormField>
+          )}
+          <FormField label="Market">
+            <input value={form.market} disabled={submitting} onChange={(event) => setForm({ ...form, market: event.target.value })} placeholder="例如 KR" />
+          </FormField>
           <FormField label="状态" required error={errors.status}>
             <select value={form.status} disabled={submitting} onChange={(event) => setForm({ ...form, status: event.target.value })}>
               {statusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </FormField>
+          <FormField label="API 本地状态" required error={errors.authStatus}>
+            <select value={form.authStatus} disabled={submitting} onChange={(event) => setForm({ ...form, authStatus: event.target.value })}>
+              {authStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </FormField>
           <FormField label="访问配置" required={!modal.record} error={errors.accessKeyInput}>
@@ -266,6 +319,22 @@ export default function BackendCredentialPage({ embedded = false }) {
           </FormField>
           <FormField label="密钥配置" required={!modal.record} error={errors.secretKeyInput}>
             <input type="password" value={form.secretKeyInput} disabled={submitting} onChange={(event) => setForm({ ...form, secretKeyInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '请输入密钥配置'} />
+          </FormField>
+          {form.platform === 'naver' && (
+            <>
+              <FormField label="Access Token">
+                <input type="password" value={form.accessTokenInput} disabled={submitting} onChange={(event) => setForm({ ...form, accessTokenInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '可选填写 Access Token'} />
+              </FormField>
+              <FormField label="Refresh Token">
+                <input type="password" value={form.refreshTokenInput} disabled={submitting} onChange={(event) => setForm({ ...form, refreshTokenInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '可选填写 Refresh Token'} />
+              </FormField>
+              <FormField label="Token 到期时间">
+                <input type="datetime-local" value={form.tokenExpiresAt} disabled={submitting} onChange={(event) => setForm({ ...form, tokenExpiresAt: event.target.value })} />
+              </FormField>
+            </>
+          )}
+          <FormField label="API 备注">
+            <input value={form.apiRemark} disabled={submitting} onChange={(event) => setForm({ ...form, apiRemark: event.target.value })} placeholder="例如授权 IP、HMAC 备注或本地配置说明" />
           </FormField>
         </div>
       </Modal>

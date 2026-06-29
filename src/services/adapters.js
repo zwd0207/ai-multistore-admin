@@ -79,6 +79,18 @@ function normalizeAccountStatusForBackend(value) {
   return statuses[String(value || '').trim()] || value || 'active';
 }
 
+function normalizeAuthStatusForBackend(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const statuses = {
+    not_configured: 'not_configured',
+    configured: 'configured',
+    needs_test: 'needs_test',
+    test_failed: 'test_failed',
+    test_passed: 'test_passed',
+  };
+  return statuses[normalized] || normalized || 'not_configured';
+}
+
 export function adaptStore(item = {}) {
   return {
     id: item.id,
@@ -330,13 +342,25 @@ export function adaptCredential(item = {}) {
     id: item.id,
     storeId: item.store_id,
     platform: adaptPlatform(item.platform),
+    rawPlatform: item.platform,
     name: item.credential_name,
     credentialName: item.credential_name,
+    vendorId: item.vendor_id,
+    clientId: item.client_id,
+    market: item.market,
+    authStatus: item.auth_status || 'not_configured',
+    lastTestedAt: item.last_tested_at,
+    tokenExpiresAt: item.token_expires_at,
+    apiRemark: item.api_remark,
     status: item.status,
     hasAccessKey: Boolean(item.has_access_key),
     hasSecretKey: Boolean(item.has_secret_key),
+    hasAccessToken: Boolean(item.has_access_token),
+    hasRefreshToken: Boolean(item.has_refresh_token),
     accessKeyStatus: item.has_access_key ? '已配置' : '未配置',
     secretKeyStatus: item.has_secret_key ? '已配置' : '未配置',
+    accessTokenStatus: item.has_access_token ? '已配置' : '未配置',
+    refreshTokenStatus: item.has_refresh_token ? '已配置' : '未配置',
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
@@ -365,14 +389,22 @@ export function adaptPlatformLogin(item = {}) {
 
 export function toBackendCredentialPayload(item = {}, storeId) {
   const credentialName = item.name || item.credentialName;
-  return compactPayload({
-    store_id: Number(item.storeId || storeId),
-    platform: normalizeCredentialPlatformForBackend(item.platform),
-    credential_name: credentialName ? String(credentialName).trim() : undefined,
-    access_key: item.accessKeyInput ? String(item.accessKeyInput) : undefined,
-    secret_key: item.secretKeyInput ? String(item.secretKeyInput) : undefined,
-    status: normalizeAccountStatusForBackend(item.status),
-  });
+  const payload = { store_id: Number(item.storeId || storeId) };
+  if ('platform' in item) payload.platform = normalizeCredentialPlatformForBackend(item.platform);
+  if (credentialName) payload.credential_name = String(credentialName).trim();
+  if ('vendorId' in item) payload.vendor_id = item.vendorId ? String(item.vendorId).trim() : null;
+  if ('clientId' in item) payload.client_id = item.clientId ? String(item.clientId).trim() : null;
+  if (item.accessKeyInput) payload.access_key = String(item.accessKeyInput);
+  if (item.secretKeyInput) payload.secret_key = String(item.secretKeyInput);
+  if (item.accessTokenInput) payload.access_token = String(item.accessTokenInput);
+  if (item.refreshTokenInput) payload.refresh_token = String(item.refreshTokenInput);
+  if ('tokenExpiresAt' in item) payload.token_expires_at = item.tokenExpiresAt || null;
+  if ('market' in item) payload.market = item.market ? String(item.market).trim() : null;
+  if ('authStatus' in item) payload.auth_status = normalizeAuthStatusForBackend(item.authStatus);
+  if ('lastTestedAt' in item) payload.last_tested_at = item.lastTestedAt || null;
+  if ('apiRemark' in item) payload.api_remark = item.apiRemark || null;
+  if ('status' in item) payload.status = normalizeAccountStatusForBackend(item.status);
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 
 export function toBackendPlatformLoginPayload(item = {}, storeId) {

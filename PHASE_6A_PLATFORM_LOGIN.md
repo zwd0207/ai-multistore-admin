@@ -71,3 +71,28 @@ Phase 6A-2 verification:
 - UTF-8 replacement scan returned 0.
 - mojibake scan had no abnormal findings.
 - Forbidden real-login and real-success UI wording scan returned 0.
+
+## Phase 6A-3 API Credential Structured Fields
+
+Phase 6A-3 extends API Credential structure for future API capability validation. It does not call real Naver or Coupang APIs and does not refresh tokens.
+
+Backend 6A-3-1 adds structured fields to Codex1 `api_credentials`:
+
+- `vendor_id`
+- `client_id`
+- encrypted access / refresh token storage
+- `token_expires_at`
+- `market`
+- `auth_status`
+- `last_tested_at`
+- `api_remark`
+
+Frontend 6A-3-2 updates the API Development Credentials section:
+
+- Coupang shows Vendor ID, Access Key, Secret Key, Market, API local status, and API remark.
+- Naver shows Client ID, Client Secret, Access Token, Refresh Token, Token expiry, API local status, and API remark.
+- Sensitive inputs are blank on edit; blank values are not sent as updates.
+- Lists show only configuration states such as `已配置 / 未配置`.
+- `authStatus` is displayed as API local status only and does not mean real API validation succeeded.
+
+The existing 5D-2 credential create/edit/inactive flow remains compatible, and 5D-3 mock sync continues to use existing `platform`, `status`, `hasAccessKey`, and `hasSecretKey` metadata.
