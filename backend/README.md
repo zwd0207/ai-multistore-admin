@@ -4,7 +4,7 @@ FastAPI backend for the AI multi-store operations and environment management sys
 
 ## Current Scope
 
-Stage 1E provides the backend foundation, secure credential base, mock data sync pipeline, and local analytics APIs:
+Stage 1F provides the backend foundation, secure credential base, mock data sync pipeline, local analytics APIs, and mock operations support modules:
 
 - Versioned API prefix at `/api/v1`
 - Compatible legacy health check at `/health`
@@ -17,11 +17,13 @@ Stage 1E provides the backend foundation, secure credential base, mock data sync
 - Sales statistics service and endpoints
 - Dashboard summary endpoint
 - AI daily context endpoint with structured data only
+- Device environment, email account, important email, and appeal case models
+- CRUD endpoints for device environments, email accounts, important emails, and appeal cases
 - Sync log service and read endpoint
 - Unified success and error response structure
 - Repeatable seed data for Chinese, Korean, and mixed UTF-8 text
 
-This stage still does not call real Naver or Coupang APIs. Real platform signing, real data crawling, frontend pages, devices, email, and appeals are not implemented in this stage. The AI daily context endpoint does not call OpenAI, DeepSeek, or any other model, and does not generate final AI report prose.
+This stage still does not call real Naver or Coupang APIs. It also does not connect to real Gmail, Naver, Daum, Outlook, or other mail providers; does not read real mail; does not upload attachments; does not run OCR; and does not call OpenAI, DeepSeek, or any other model.
 
 ## Setup
 
@@ -294,6 +296,118 @@ It does not call any model and does not generate final AI prose. `recommended_fo
 
 The response does not include plaintext platform credentials, full buyer phone numbers, addresses, ID numbers, or other sensitive privacy fields.
 
+## Operations Support Models
+
+Stage 1F adds local-only support modules. All records are bound to `store_id`.
+
+`device_environments` stores only environment labels and metadata:
+
+```text
+environment_name
+device_type
+os_name
+browser_name
+ip_label
+proxy_label
+status
+last_used_at
+remark
+```
+
+Do not store real full IP addresses, proxy passwords, remote desktop passwords, or similar secrets.
+
+`email_accounts` stores email account metadata:
+
+```text
+email_address
+provider
+account_label
+encrypted_password_or_token
+status
+last_checked_at
+remark
+```
+
+`password_or_token` is encrypted with the same Fernet encryption service used for platform credentials. API responses never return plaintext password/token and do not expose the encrypted value.
+
+`important_emails` stores mock important mail records only:
+
+```text
+platform
+mail_type
+sender
+subject
+snippet
+body_text
+received_at
+status
+priority
+related_case_id
+raw_data
+```
+
+No real attachments are stored.
+
+`appeal_cases` stores mock appeal case metadata:
+
+```text
+platform
+case_type
+case_title
+case_status
+external_case_id
+deadline_at
+summary
+action_required
+raw_data
+```
+
+Do not store real ID cards, bank cards, full addresses, legal files, or other private materials.
+
+## Operations Support APIs
+
+Device environments:
+
+```text
+GET    /api/v1/device-environments?store_id={store_id}
+POST   /api/v1/device-environments
+GET    /api/v1/device-environments/{environment_id}
+PUT    /api/v1/device-environments/{environment_id}
+DELETE /api/v1/device-environments/{environment_id}
+```
+
+Email accounts:
+
+```text
+GET    /api/v1/email-accounts?store_id={store_id}
+POST   /api/v1/email-accounts
+GET    /api/v1/email-accounts/{email_account_id}
+PUT    /api/v1/email-accounts/{email_account_id}
+DELETE /api/v1/email-accounts/{email_account_id}
+```
+
+Important emails:
+
+```text
+GET    /api/v1/important-emails?store_id={store_id}
+POST   /api/v1/important-emails
+GET    /api/v1/important-emails/{email_id}
+PUT    /api/v1/important-emails/{email_id}
+DELETE /api/v1/important-emails/{email_id}
+```
+
+Appeal cases:
+
+```text
+GET    /api/v1/appeal-cases?store_id={store_id}
+POST   /api/v1/appeal-cases
+GET    /api/v1/appeal-cases/{case_id}
+PUT    /api/v1/appeal-cases/{case_id}
+DELETE /api/v1/appeal-cases/{case_id}
+```
+
+List endpoints support `page` and `page_size`. Missing stores return `STORE_NOT_FOUND`.
+
 ## Platform Client Placeholders
 
 Current platform clients are mock placeholders only:
@@ -371,7 +485,7 @@ The seed data intentionally includes:
 
 Use `GET /api/v1/stores` after running the seed script to verify Chinese and Korean text is stored and returned without mojibake.
 
-Stage 1E verification writes Chinese, Korean, and mixed product/order/inquiry data, then reads it back through stats, dashboard, and AI context APIs. It also verifies sync logs, risk flags, and masked buyer phones.
+Stage 1F verification writes Chinese, Korean, and mixed device/email/important-email/appeal-case data, then reads it back through APIs. It also verifies encrypted email token storage and checks that real IPs, proxy passwords, platform keys, full phones, full addresses, ID numbers, and bank card numbers are not returned.
 
 ## PostgreSQL Migration Note
 

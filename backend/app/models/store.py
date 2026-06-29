@@ -54,3 +54,23 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    device_environments = relationship(
+        "DeviceEnvironment",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    email_accounts = relationship(
+        "EmailAccount",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    important_emails = relationship(
+        "ImportantEmail",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    appeal_cases = relationship(
+        "AppealCase",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )

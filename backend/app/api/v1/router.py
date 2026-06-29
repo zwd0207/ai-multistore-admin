@@ -2,10 +2,14 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     ai,
+    appeal_cases,
     credentials,
     customer_inquiries,
     dashboard,
+    device_environments,
+    email_accounts,
     health,
+    important_emails,
     orders,
     products,
     stats,
@@ -20,6 +24,10 @@ api_router.include_router(health.router)
 api_router.include_router(stats.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)
+api_router.include_router(device_environments.router)
+api_router.include_router(email_accounts.router)
+api_router.include_router(important_emails.router)
+api_router.include_router(appeal_cases.router)
 api_router.include_router(credentials.router)
 api_router.include_router(stores.router)
 api_router.include_router(products.router)

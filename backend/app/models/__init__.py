@@ -1,10 +1,25 @@
 """SQLAlchemy models are registered from this package."""
 
 from app.models.api_credential import ApiCredential
+from app.models.appeal_case import AppealCase
 from app.models.customer_inquiry import CustomerInquiry
+from app.models.device_environment import DeviceEnvironment
+from app.models.email_account import EmailAccount
+from app.models.important_email import ImportantEmail
 from app.models.order import Order
 from app.models.product import Product
 from app.models.store import Store
 from app.models.sync_log import SyncLog
 
-__all__ = ["ApiCredential", "CustomerInquiry", "Order", "Product", "Store", "SyncLog"]
+__all__ = [
+    "ApiCredential",
+    "AppealCase",
+    "CustomerInquiry",
+    "DeviceEnvironment",
+    "EmailAccount",
+    "ImportantEmail",
+    "Order",
+    "Product",
+    "Store",
+    "SyncLog",
+]
