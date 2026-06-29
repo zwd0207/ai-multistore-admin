@@ -4,6 +4,18 @@ The development database is SQLite. The schema is created with SQLAlchemy `Base.
 
 All business records must be tied to `store_id` unless they are top-level stores or platform credentials that themselves point to a store.
 
+## Timezone Rules
+
+Business timezone is fixed by `APP_TIMEZONE`, defaulting to `Asia/Seoul`.
+
+Rules:
+
+- Stored datetimes are UTC aware values.
+- Windows display timezone is not used as a business-time source.
+- SQLite may return older local development rows as naive datetimes; service code treats those as UTC for compatibility.
+- Daily sales, daily order grouping, and AI daily context use Korean natural days.
+- SyncLog writes UTC timestamps. Frontend display should convert UTC timestamps to KST.
+
 ## Store
 
 Table: `stores`
@@ -293,6 +305,7 @@ Rules:
 - Upsert key: `store_id + platform + external_order_id`.
 - Only masked phone numbers are stored.
 - Full phone, full address, ID number, and payment sensitive data are not modeled.
+- `ordered_at` and `paid_at` are stored in UTC; daily grouping converts `ordered_at` to KST before taking the date.
 
 Future integration notes:
 

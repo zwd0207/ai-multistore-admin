@@ -1,11 +1,12 @@
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, to_business_timezone
 from app.core.exceptions import ApiError
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
@@ -29,18 +30,6 @@ def parse_date(value: str | None, field_name: str) -> date | None:
         ) from exc
 
 
-def _date_start(value: date | None) -> datetime | None:
-    if value is None:
-        return None
-    return datetime.combine(value, time.min)
-
-
-def _date_end(value: date | None) -> datetime | None:
-    if value is None:
-        return None
-    return datetime.combine(value, time.max)
-
-
 def _decimal_to_string(value: Decimal) -> str:
     if not isinstance(value, Decimal):
         value = Decimal(str(value))
@@ -58,13 +47,24 @@ def _order_filters(
         filters.append(Order.store_id == store_id)
     if platform is not None:
         filters.append(Order.platform == platform)
-    start = _date_start(start_date)
-    end = _date_end(end_date)
-    if start is not None:
+    if start_date is not None:
+        start, _ = get_business_day_range(start_date)
         filters.append(Order.ordered_at >= start)
-    if end is not None:
-        filters.append(Order.ordered_at <= end)
+    if end_date is not None:
+        _, end = get_business_day_range(end_date)
+        filters.append(Order.ordered_at < end)
     return filters
+
+
+def _business_scope_metadata(target_date: date | None = None) -> dict[str, str]:
+    business_date = target_date or get_business_date()
+    start, end = get_business_day_range(business_date)
+    return {
+        "business_timezone": get_business_timezone().key,
+        "business_date": business_date.isoformat(),
+        "business_day_start": start.isoformat(),
+        "business_day_end": end.isoformat(),
+    }
 
 
 def _apply_filters(statement, model, store_id: int | None = None, platform: str | None = None):
@@ -184,7 +184,7 @@ def get_sales_by_date(
     orders = db.scalars(select(Order).where(*_order_filters(store_id, platform, start_date, end_date))).all()
     grouped: dict[date, dict[str, Any]] = defaultdict(lambda: {"total_orders": 0, "total_sales_amount": Decimal("0")})
     for order in orders:
-        order_date = order.ordered_at.date()
+        order_date = to_business_timezone(order.ordered_at).date()
         grouped[order_date]["total_orders"] += 1
         grouped[order_date]["total_sales_amount"] += order.order_amount or Decimal("0")
 
@@ -240,13 +240,14 @@ def get_recent_orders(
     db: Session,
     store_id: int | None = None,
     platform: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     limit: int = 5,
 ) -> list[dict]:
-    statement = select(Order).order_by(Order.ordered_at.desc(), Order.id.desc())
-    if store_id is not None:
-        statement = statement.where(Order.store_id == store_id)
-    if platform is not None:
-        statement = statement.where(Order.platform == platform)
+    statement = select(Order).where(*_order_filters(store_id, platform, start_date, end_date)).order_by(
+        Order.ordered_at.desc(),
+        Order.id.desc(),
+    )
     return [_safe_order(item) for item in db.scalars(statement.limit(limit)).all()]
 
 
@@ -333,7 +334,9 @@ def get_dashboard_summary(
         platform = normalize_platform(platform)
 
     sales = get_sales_stats(db, store_id=store_id, platform=platform, start_date=start_date, end_date=end_date)
+    business_metadata = _business_scope_metadata(start_date if start_date == end_date else None)
     return {
+        **business_metadata,
         "store_count": len(_get_stores(db, store_id)),
         "product_count": _count_records(db, Product, store_id=store_id, platform=platform),
         "order_count": sales["total_orders"],
@@ -353,13 +356,13 @@ def get_daily_context(
     context_date: date | None = None,
 ) -> dict:
     if context_date is None:
-        context_date = date.today()
+        context_date = get_business_date()
     store = ensure_store_exists(db, store_id) if store_id is not None else None
-    sales_summary = get_sales_stats(db, store_id=store_id)
+    sales_summary = get_sales_stats(db, store_id=store_id, start_date=context_date, end_date=context_date)
     risk_flags = build_risk_flags(db, store_id=store_id)
     open_inquiries = _count_records(db, CustomerInquiry, store_id=store_id)
     sync_logs = get_latest_sync_logs(db, store_id=store_id, limit=5)
-    recent_orders = get_recent_orders(db, store_id=store_id, limit=5)
+    recent_orders = get_recent_orders(db, store_id=store_id, start_date=context_date, end_date=context_date, limit=5)
 
     focus = []
     if open_inquiries:
@@ -379,6 +382,9 @@ def get_daily_context(
 
     return {
         "date": context_date.isoformat(),
+        "business_timezone": get_business_timezone().key,
+        "business_day_start": get_business_day_range(context_date)[0].isoformat(),
+        "business_day_end": get_business_day_range(context_date)[1].isoformat(),
         "scope": {
             "store_id": store_id,
             "platform": store.platform if store else None,

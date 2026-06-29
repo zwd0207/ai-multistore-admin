@@ -65,6 +65,12 @@ proxy passwords
 remote desktop passwords
 ```
 
+## Timezone Rules
+
+Business time is fixed to `APP_TIMEZONE=Asia/Seoul`. Windows display timezone is not used as a business-time source. Database datetimes are UTC aware values; older SQLite development rows that come back as naive datetimes are treated as UTC for compatibility.
+
+Daily filters and default daily context use Korean natural days. A KST date is converted to a UTC half-open range `[start, next_start)`. Frontend display should render UTC timestamps such as SyncLog times in KST.
+
 ## Health
 
 | Method | Path | store_id | Sensitive Fields |
@@ -481,6 +487,8 @@ Common errors: `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `PLATFORM_NOT_SUPPORTE
 | GET | `/api/v1/stats/sales/by-platform` | `store_id`, `start_date`, `end_date` | None | Optional | No |
 | GET | `/api/v1/stats/sales/by-date` | `store_id`, `platform`, `start_date`, `end_date` | None | Optional | No |
 
+Date filters are interpreted as KST business dates. `/stats/sales/by-date` groups orders after converting `ordered_at` to KST.
+
 Response example:
 
 ```json
@@ -517,6 +525,10 @@ Response example:
   "message": "ok",
   "data": {
     "store_count": 1,
+    "business_timezone": "Asia/Seoul",
+    "business_date": "2026-06-30",
+    "business_day_start": "2026-06-29T15:00:00+00:00",
+    "business_day_end": "2026-06-30T15:00:00+00:00",
     "product_count": 3,
     "order_count": 3,
     "customer_inquiry_count": 3,
@@ -536,6 +548,8 @@ Response example:
 }
 ```
 
+Dashboard date filters use KST business dates. Without date filters, dashboard counts are scope totals, not automatically today-only totals.
+
 ## AI Daily Context
 
 | Method | Path | Query | Body | store_id | Sensitive Fields |
@@ -551,7 +565,10 @@ Response example:
   "success": true,
   "message": "ok",
   "data": {
-    "date": "2026-06-29",
+    "date": "2026-06-30",
+    "business_timezone": "Asia/Seoul",
+    "business_day_start": "2026-06-29T15:00:00+00:00",
+    "business_day_end": "2026-06-30T15:00:00+00:00",
     "scope": {
       "store_id": 1,
       "platform": "naver"
@@ -565,6 +582,8 @@ Response example:
   }
 }
 ```
+
+If `date` is omitted, the backend uses the current KST business date.
 
 ## Operations Support
 

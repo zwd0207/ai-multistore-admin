@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.core.timezone import get_business_date
 from app.services import sync_log_service
 
 
@@ -162,9 +163,11 @@ def main() -> None:
         assert "010-****-5678" in str(dashboard), dashboard
         assert "010-****-9012" in str(dashboard), dashboard
 
-        context = assert_success(client.get(f"/api/v1/ai/daily-context?store_id={store_id}&date=2026-06-29"))
+        business_date = get_business_date().isoformat()
+        context = assert_success(client.get(f"/api/v1/ai/daily-context?store_id={store_id}&date={business_date}"))
         context_data = context["data"]
-        assert context_data["date"] == "2026-06-29", context
+        assert context_data["date"] == business_date, context
+        assert context_data["business_timezone"] == "Asia/Seoul", context
         assert context_data["scope"]["store_id"] == store_id, context
         assert context_data["sales_summary"]["total_orders"] == 3, context
         assert context_data["order_summary"]["recent_orders"], context

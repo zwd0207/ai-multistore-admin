@@ -2,6 +2,8 @@ import subprocess
 import sys
 import os
 import uuid
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -89,6 +91,11 @@ EXPECTED_CREDENTIAL_COLUMNS = {
 EXPECTED_API_CAPABILITY_TABLES = {
     "api_capability_checks",
     "api_capability_test_results",
+}
+
+FORBIDDEN_TIME_PATTERNS = {
+    "datetime.utcnow(": "use app.core.timezone.get_utc_now()",
+    "date.today(": "use app.core.timezone.get_business_date() for business dates",
 }
 
 
@@ -434,6 +441,102 @@ def verify_api_capabilities() -> None:
     print("api capabilities docs/manual base: ok")
 
 
+def verify_kst_business_timezone() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now, to_business_timezone
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models.order import Order
+
+    assert get_business_timezone().key == "Asia/Seoul"
+    assert get_business_date() == get_utc_now().astimezone(get_business_timezone()).date()
+    start, end = get_business_day_range("2026-06-30")
+    assert start.isoformat() == "2026-06-29T15:00:00+00:00", start
+    assert end.isoformat() == "2026-06-30T15:00:00+00:00", end
+
+    for path in (BACKEND_DIR / "app").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for pattern, suggestion in FORBIDDEN_TIME_PATTERNS.items():
+            assert pattern not in text, f"{pattern} found in {path}; {suggestion}"
+
+    with TestClient(app) as client:
+        suffix = uuid.uuid4().hex[:8]
+        store = client.post("/api/v1/stores", json={
+            "name": f"Phase 6B-0A KST Time Store {suffix}",
+            "platform": "naver",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        })
+        assert store.status_code == 201, store.text
+        store_id = store.json()["data"]["id"]
+
+        with SessionLocal() as db:
+            db.add_all([
+                Order(
+                    store_id=store_id,
+                    platform="naver",
+                    external_order_id=f"kst-prev-{suffix}",
+                    buyer_name="KST boundary buyer",
+                    buyer_masked_phone="010-****-0001",
+                    product_name="KST previous day order",
+                    quantity=1,
+                    order_amount=Decimal("1000.00"),
+                    currency="KRW",
+                    order_status="paid",
+                    paid_at=datetime(2026, 6, 29, 14, 59, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 6, 29, 14, 59, tzinfo=timezone.utc),
+                    raw_data={"source": "verify_kst_business_timezone"},
+                ),
+                Order(
+                    store_id=store_id,
+                    platform="naver",
+                    external_order_id=f"kst-current-{suffix}",
+                    buyer_name="KST boundary buyer",
+                    buyer_masked_phone="010-****-0002",
+                    product_name="KST current day order",
+                    quantity=1,
+                    order_amount=Decimal("2000.00"),
+                    currency="KRW",
+                    order_status="paid",
+                    paid_at=datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc),
+                    raw_data={"source": "verify_kst_business_timezone"},
+                ),
+            ])
+            db.commit()
+
+        by_date = client.get(f"/api/v1/stats/sales/by-date?store_id={store_id}&start_date=2026-06-29&end_date=2026-06-30")
+        assert by_date.status_code == 200, by_date.text
+        grouped = {item["date"]: item for item in by_date.json()["data"]["items"]}
+        assert grouped["2026-06-29"]["total_sales_amount"] == "1000.00", grouped
+        assert grouped["2026-06-30"]["total_sales_amount"] == "2000.00", grouped
+
+        daily_sales = client.get(f"/api/v1/stats/sales?store_id={store_id}&start_date=2026-06-30&end_date=2026-06-30")
+        assert daily_sales.status_code == 200, daily_sales.text
+        assert daily_sales.json()["data"]["total_orders"] == 1, daily_sales.text
+        assert daily_sales.json()["data"]["total_sales_amount"] == "2000.00", daily_sales.text
+
+        dashboard = client.get(f"/api/v1/dashboard/summary?store_id={store_id}")
+        assert dashboard.status_code == 200, dashboard.text
+        dashboard_data = dashboard.json()["data"]
+        assert dashboard_data["business_timezone"] == "Asia/Seoul", dashboard_data
+        assert "business_day_start" in dashboard_data and "business_day_end" in dashboard_data
+
+        context = client.get(f"/api/v1/ai/daily-context?store_id={store_id}")
+        assert context.status_code == 200, context.text
+        context_data = context.json()["data"]
+        assert context_data["date"] == get_business_date().isoformat(), context_data
+        assert context_data["business_timezone"] == "Asia/Seoul", context_data
+        assert context_data["business_day_start"] == get_business_day_range(get_business_date())[0].isoformat()
+
+        converted = to_business_timezone(datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc))
+        assert converted.date() == date(2026, 6, 30), converted
+
+    print("KST business timezone: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -446,14 +549,19 @@ def verify_git_tracking() -> None:
     status = run(["git", "status", "--short"], cwd=ROOT_DIR, echo=False)
     allowed_prefixes = (
         " M backend/README.md",
+        " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        " M backend/app/config.py",
         " M backend/app/models/__init__.py",
         " M backend/app/models/api_credential.py",
         " M backend/app/models/store.py",
         " M backend/app/schemas/credential.py",
+        " M backend/app/services/stats_service.py",
         " M backend/app/services/credential_service.py",
         " M backend/docs/",
         " M backend/scripts/verify_all.py",
+        " M backend/scripts/verify_stage_1e.py",
+        "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/schemas/api_capability.py",
@@ -488,6 +596,7 @@ def main() -> None:
     verify_openapi()
     verify_api_credential_schema_and_security()
     verify_api_capabilities()
+    verify_kst_business_timezone()
     verify_git_tracking()
     verify_docs_no_real_secrets()
     print("verify_all: ok")

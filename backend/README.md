@@ -84,11 +84,24 @@ Configure it in a local `.env` file:
 
 ```text
 CREDENTIAL_ENCRYPTION_KEY=<generated Fernet key>
+APP_TIMEZONE=Asia/Seoul
 ```
 
 `.env.example` contains only the field name and a placeholder. Do not commit `.env`, generated encryption keys, real platform access keys, or real platform secret keys.
 
 If `CREDENTIAL_ENCRYPTION_KEY` is missing or invalid, credential create/update/decrypt operations return a clear API error instead of silently using a fallback key.
+
+## Business Timezone
+
+The backend business timezone is fixed by `APP_TIMEZONE`, defaulting to `Asia/Seoul`. Windows display timezone is not used for business dates; the machine clock only needs to be network-synchronized accurately.
+
+Rules:
+
+- Database datetimes are stored as UTC aware values.
+- SQLite may return older local development rows without offsets; service code treats naive datetimes as UTC for compatibility.
+- "today", daily sales, daily order grouping, and AI daily context default dates use Korean natural days.
+- Korean business day ranges use `[start, next_start)` in UTC. KST `2026-06-30` maps to UTC `2026-06-29T15:00:00+00:00` through `2026-06-30T15:00:00+00:00`.
+- SyncLog timestamps are written in UTC. Frontend display should convert timestamps to KST in a later frontend stage.
 
 ## Run
 
@@ -317,6 +330,8 @@ Mock inquiry data includes `正品申诉资料咨询`, `배송지연 문의`, an
 
 Statistics are calculated from the local `orders` table only. The logic lives in `app/services/stats_service.py`, not in endpoint handlers.
 
+Date filters use Korean business dates from `APP_TIMEZONE=Asia/Seoul`. Orders are filtered by the UTC range for the selected KST natural day. `/stats/sales/by-date` groups by converting `ordered_at` to KST before taking the date.
+
 ```text
 GET /api/v1/stats/sales?store_id={store_id}
 GET /api/v1/stats/sales/by-platform?store_id={store_id}
@@ -361,10 +376,16 @@ end_date
 
 The dashboard summary is calculated from local `stores`, `products`, `orders`, `customer_inquiries`, and `sync_logs`.
 
+When date filters are omitted, dashboard totals remain scope totals, not "today" totals. The response includes the current KST business day metadata: `business_timezone`, `business_date`, `business_day_start`, and `business_day_end`.
+
 It returns:
 
 ```text
 store_count
+business_timezone
+business_date
+business_day_start
+business_day_end
 product_count
 order_count
 customer_inquiry_count
@@ -390,6 +411,8 @@ Current `risk_flags` rules:
 ```text
 GET /api/v1/ai/daily-context?store_id={store_id}&date=YYYY-MM-DD
 ```
+
+If `date` is omitted, the backend uses the current Korean business date, not the Windows display date. The response includes `business_timezone`, `business_day_start`, and `business_day_end`.
 
 This endpoint returns structured context for a future AI report pipeline:
 
@@ -536,6 +559,8 @@ They do not call real Naver or Coupang APIs, do not contain real keys, do not im
 ## Sync Logs
 
 Sync logs track future platform operations, credential tests, and Stage 1D mock sync runs. Each log is bound to a `store_id`.
+
+SyncLog timestamps are stored in UTC. Frontend display should convert them to KST for Korean business operations.
 
 Service functions live in:
 
