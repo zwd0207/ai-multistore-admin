@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./codex1.db"
     api_prefix: str = ""
+    credential_encryption_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
