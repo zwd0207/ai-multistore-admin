@@ -121,3 +121,24 @@ New Phase 5C read-only backend modules:
 Credentials and email account pages show only configuration states and never show credential values. Codex1 snake_case response fields stay centralized in `src/services/adapters.js`; page JSX should use adapted frontend fields.
 
 Verification record: see `PHASE_5C_STORE_CONTEXT.md`.
+
+## Phase 5D-1 - Store and Device Environment Writes
+
+Phase 5D-1 keeps `VITE_API_BASE_URL=http://127.0.0.1:8012/api/v1` and `VITE_DATA_SOURCE=backend`.
+
+Implemented backend writes:
+
+- Store create/update through Codex1 `POST /stores` and `PUT /stores/{store_id}`.
+- Device Environment create/update through Codex1 `POST /device-environments` and `PUT /device-environments/{environment_id}`.
+- Store saves refresh `StoreContext` and the topbar `StoreSelector`.
+
+Still excluded in 5D-1:
+
+- Credential writes.
+- Email account writes.
+- mock sync buttons.
+- real Naver/Coupang APIs.
+- real mailbox connections.
+- AI model calls.
+
+Details and validation notes: see `PHASE_5D_WRITE_INTEGRATION.md`.

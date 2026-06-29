@@ -10,6 +10,56 @@ function adaptStatus(value, mapping = {}) {
   return mapping[String(value || '').toLowerCase()] || value || '未知';
 }
 
+function compactPayload(payload) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined && value !== null),
+  );
+}
+
+function normalizePlatformForBackend(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const platforms = {
+    naver: 'naver',
+    coupang: 'coupang',
+    gmarket: 'gmarket',
+    '11街': '11st',
+    '11st': '11st',
+    '옥션': 'auction',
+    auction: 'auction',
+  };
+  return platforms[normalized] || normalized || value;
+}
+
+function normalizeStoreStatusForBackend(value) {
+  const statuses = {
+    '正常运营': 'active',
+    '정상 운영': 'active',
+    active: 'active',
+    '审核中': 'review',
+    '심사중': 'review',
+    review: 'review',
+    '申诉中': 'appeal',
+    appeal: 'appeal',
+    '판매중지': 'inactive',
+    inactive: 'inactive',
+    '使用中止': 'inactive',
+  };
+  return statuses[String(value || '').trim()] || value || 'active';
+}
+
+function normalizeDeviceStatusForBackend(value) {
+  const statuses = {
+    active: 'active',
+    inactive: 'inactive',
+    warning: 'warning',
+    '正常': 'active',
+    '启用': 'active',
+    '停用': 'inactive',
+    '风险': 'warning',
+  };
+  return statuses[String(value || '').trim()] || value || 'active';
+}
+
 export function adaptStore(item = {}) {
   return {
     id: item.id,
@@ -26,6 +76,18 @@ export function adaptStore(item = {}) {
     createdAt: item.created_at,
     updatedAt: emptyText(item.updated_at),
   };
+}
+
+export function toBackendStorePayload(item = {}) {
+  return compactPayload({
+    name: String(item.name || '').trim(),
+    platform: normalizePlatformForBackend(item.platform),
+    country: String(item.country || item.region || 'KR').trim(),
+    language: String(item.language || 'ko-KR').trim(),
+    status: normalizeStoreStatusForBackend(item.status || item.rawStatus),
+    owner_name: item.manager || item.ownerName || item.owner_name || null,
+    remark: item.remark || null,
+  });
 }
 
 export function adaptProduct(item = {}) {
@@ -152,6 +214,21 @@ export function adaptDeviceEnvironment(item = {}) {
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
+}
+
+export function toBackendDeviceEnvironmentPayload(item = {}, storeId) {
+  return compactPayload({
+    store_id: Number(item.storeId || storeId),
+    environment_name: String(item.name || '').trim(),
+    device_type: String(item.deviceType || '').trim(),
+    os_name: item.osName || null,
+    browser_name: item.browserName || null,
+    ip_label: item.ipLabel || null,
+    proxy_label: item.proxyLabel || null,
+    status: normalizeDeviceStatusForBackend(item.status),
+    last_used_at: item.lastUsedAt || null,
+    remark: item.remark || null,
+  });
 }
 
 export function adaptEmailAccount(item = {}) {
@@ -330,6 +407,8 @@ export const adapters = {
   importantEmail: adaptImportantEmail,
   appealCase: adaptAppealCase,
   credential: adaptCredential,
+  toBackendStorePayload,
+  toBackendDeviceEnvironmentPayload,
   dashboardSummary: adaptDashboardSummary,
   aiDailyContext: adaptAiDailyContext,
   list: adaptList,

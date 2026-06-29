@@ -40,6 +40,10 @@ async function getBackendStores() {
   return backendStoresPromise;
 }
 
+function resetBackendStoresCache() {
+  backendStoresPromise = undefined;
+}
+
 async function resolveBackendStore(params = {}) {
   const stores = await getBackendStores();
   const requestedId = params.storeId ?? params.store_id;
@@ -85,6 +89,18 @@ const sourceMethods = {
     if (!isBackendSource) return mockApi.getStores(params);
     return queryBackendRows(await getBackendStores(), params);
   },
+  createStore: async (payload) => {
+    if (!isBackendSource) return mockApi.createStore(payload);
+    const result = adapters.store(await backendApi.createStore(adapters.toBackendStorePayload(payload)));
+    resetBackendStoresCache();
+    return result;
+  },
+  updateStore: async (storeId, payload) => {
+    if (!isBackendSource) return mockApi.updateStore(storeId, payload);
+    const result = adapters.store(await backendApi.updateStore(storeId, adapters.toBackendStorePayload(payload)));
+    resetBackendStoresCache();
+    return result;
+  },
   getProducts: async (params) => {
     if (!isBackendSource) return mockApi.getProducts(params);
     const { store, stores } = await resolveBackendStore(params);
@@ -117,6 +133,18 @@ const sourceMethods = {
     const result = await backendApi.getDeviceEnvironments({ ...params, storeId: store.id });
     const rows = withStoreName(adapters.list(result, adapters.deviceEnvironment).data, stores);
     return queryBackendRows(rows, params);
+  },
+  createDeviceEnvironment: async (payload) => {
+    if (!isBackendSource) return mockApi.createEnvironment(payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.createDeviceEnvironment(adapters.toBackendDeviceEnvironmentPayload(payload, store.id));
+    return withStoreName([adapters.deviceEnvironment(result)], stores)[0];
+  },
+  updateDeviceEnvironment: async (environmentId, payload) => {
+    if (!isBackendSource) return mockApi.updateEnvironment(environmentId, payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updateDeviceEnvironment(environmentId, adapters.toBackendDeviceEnvironmentPayload(payload, store.id));
+    return withStoreName([adapters.deviceEnvironment(result)], stores)[0];
   },
   getEmailAccounts: async (params) => {
     if (!isBackendSource) return mockApi.getEmails(params);

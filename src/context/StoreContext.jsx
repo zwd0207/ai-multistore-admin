@@ -23,11 +23,41 @@ function writeStoredStoreId(storeId) {
   }
 }
 
+function pickSelectedStoreId(nextStores, preferredStoreId) {
+  const candidateId = preferredStoreId || readStoredStoreId();
+  const candidateStore = nextStores.find((store) => String(store.id) === String(candidateId));
+  const fallbackId = nextStores[0]?.id ? String(nextStores[0].id) : '';
+  return candidateStore ? String(candidateStore.id) : fallbackId;
+}
+
 export function StoreProvider({ children }) {
   const [stores, setStores] = useState([]);
   const [selectedStoreId, setSelectedStoreIdState] = useState(readStoredStoreId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const refreshStores = useCallback(async ({ preferredStoreId } = {}) => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await dataProvider.getStores({ page: 1, pageSize: 100 });
+      const nextStores = response.data || response.items || [];
+      setStores(nextStores);
+
+      const nextSelectedId = pickSelectedStoreId(nextStores, preferredStoreId);
+      setSelectedStoreIdState(nextSelectedId);
+      writeStoredStoreId(nextSelectedId);
+      return nextStores;
+    } catch (requestError) {
+      setStores([]);
+      setSelectedStoreIdState('');
+      setError(requestError.message || '店铺列表加载失败');
+      throw requestError;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,12 +68,8 @@ export function StoreProvider({ children }) {
       .then((response) => {
         if (cancelled) return;
         const nextStores = response.data || response.items || [];
+        const nextSelectedId = pickSelectedStoreId(nextStores);
         setStores(nextStores);
-
-        const storedId = readStoredStoreId();
-        const storedStore = nextStores.find((store) => String(store.id) === String(storedId));
-        const fallbackId = nextStores[0]?.id ? String(nextStores[0].id) : '';
-        const nextSelectedId = storedStore ? String(storedStore.id) : fallbackId;
         setSelectedStoreIdState(nextSelectedId);
         writeStoredStoreId(nextSelectedId);
       })
@@ -76,10 +102,11 @@ export function StoreProvider({ children }) {
     selectedStore,
     selectedStoreId,
     setSelectedStoreId,
+    refreshStores,
     loading,
     error,
     isBackendSource,
-  }), [stores, selectedStore, selectedStoreId, setSelectedStoreId, loading, error]);
+  }), [stores, selectedStore, selectedStoreId, setSelectedStoreId, refreshStores, loading, error]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
