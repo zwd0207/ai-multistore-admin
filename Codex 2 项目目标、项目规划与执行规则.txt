@@ -1,0 +1,974 @@
+# Codex 2 项目目标、项目规划与执行规则
+
+## 一、Codex 2 项目角色
+
+Codex 2 负责本项目的 **前端 UI、页面结构、交互流程、mock 数据、状态展示和业务页面原型**。
+
+项目名称：
+
+AI 多店铺运营与环境管理系统
+
+当前阶段重点：
+
+先完成可运行的前端后台，让系统具备完整页面框架、业务表格、操作按钮、mock 数据和后端接口对接预留能力。
+
+Codex 2 不负责真实 Naver / Coupang API 调用。真实 API 由 Codex 1 后端完成。Codex 2 先用 mock 数据开发，后续由 Codex 3 统一接入真实后端接口。
+
+---
+
+## 二、Codex 2 项目目标
+
+第一阶段前端目标如下：
+
+1. 搭建 React 前端项目。
+2. 实现左侧菜单、顶部栏、主内容区。
+3. 实现首页驾驶舱。
+4. 实现店铺管理页面。
+5. 实现店铺详情页面。
+6. 实现平台账号 / API 凭证页面。
+7. 实现 API 同步日志页面。
+8. 实现商品数据页面。
+9. 实现订单数据页面。
+10. 实现客服 / 咨询数据页面。
+11. 实现销售额统计页面。
+12. 实现设备环境页面。
+13. 实现店铺邮箱 / 重点邮件页面。
+14. 实现申诉资料页面。
+15. 实现 AI 日报上下文页面。
+16. 实现 mockApi.js。
+17. 预留真实后端 API 对接方式。
+18. 保证中文和韩文显示正常。
+
+---
+
+## 三、技术栈建议
+
+前端使用：
+
+```text
+React
+Vite
+React Router
+Axios
+Ant Design 或普通 CSS
+```
+
+项目目录结构：
+
+```text
+frontend/
+├── src/
+│   ├── api/
+│   │   ├── mockApi.js
+│   │   └── http.js
+│   ├── components/
+│   │   ├── Layout.jsx
+│   │   ├── Sidebar.jsx
+│   │   ├── Topbar.jsx
+│   │   ├── StatusBadge.jsx
+│   │   ├── DataTable.jsx
+│   │   └── StatCard.jsx
+│   ├── pages/
+│   │   ├── Dashboard.jsx
+│   │   ├── Stores.jsx
+│   │   ├── StoreDetail.jsx
+│   │   ├── Credentials.jsx
+│   │   ├── SyncLogs.jsx
+│   │   ├── Products.jsx
+│   │   ├── Orders.jsx
+│   │   ├── Inquiries.jsx
+│   │   ├── Sales.jsx
+│   │   ├── Devices.jsx
+│   │   ├── Emails.jsx
+│   │   ├── Appeals.jsx
+│   │   └── DailyReportContext.jsx
+│   ├── App.jsx
+│   └── main.jsx
+├── package.json
+└── README.md
+```
+
+---
+
+## 四、前端整体布局
+
+采用后台系统结构：
+
+```text
+左侧菜单
+顶部状态栏
+主内容区
+右侧 AI 助手栏可预留
+```
+
+左侧菜单：
+
+```text
+首页驾驶舱
+店铺管理
+平台账号 / API凭证
+API同步日志
+商品数据
+订单数据
+客服咨询
+销售额统计
+设备环境
+店铺邮箱
+申诉资料
+AI日报上下文
+系统设置
+```
+
+顶部栏显示：
+
+```text
+当前系统名称
+当前用户
+待办数量
+API异常数量
+设备到期数量
+重点邮件数量
+```
+
+---
+
+## 五、全局 UI 规则
+
+状态标签颜色：
+
+```text
+正常：绿色
+待授权：黄色
+异常：红色
+未绑定：灰色
+处理中：蓝色
+已完成：绿色
+待处理：黄色
+```
+
+所有表格都要支持：
+
+```text
+搜索
+筛选
+分页
+刷新
+操作按钮
+```
+
+所有删除操作都要有确认弹窗。
+
+所有表单都要有基础校验。
+
+所有页面必须支持中文和韩文显示。
+
+CSS 字体建议：
+
+```css
+font-family: Arial, "Microsoft YaHei", "Noto Sans KR", "Malgun Gothic", sans-serif;
+```
+
+HTML 必须使用：
+
+```html
+<meta charset="UTF-8" />
+```
+
+---
+
+## 六、页面 1：首页驾驶舱
+
+路径：
+
+```text
+/dashboard
+```
+
+展示内容：
+
+```text
+今日销售额
+今日订单数
+待发货
+待客服
+待申诉
+API异常
+邮箱重点邮件
+设备即将到期
+店铺状态列表
+最近同步状态
+```
+
+店铺状态列表字段：
+
+```text
+店铺名
+平台
+店铺状态
+API状态
+邮箱状态
+设备状态
+今日订单数
+今日销售额
+待客服
+待申诉
+最近同步时间
+操作
+```
+
+数据来源：
+
+```text
+mockApi.getDashboardSummary()
+```
+
+后续对接：
+
+```text
+GET /dashboard/summary
+```
+
+---
+
+## 七、页面 2：店铺管理
+
+路径：
+
+```text
+/stores
+```
+
+功能：
+
+```text
+查看店铺列表
+添加店铺
+编辑店铺
+删除店铺
+进入店铺详情
+```
+
+店铺字段：
+
+```text
+店铺名称
+平台
+公司主体
+负责人
+备注
+状态
+API状态
+邮箱状态
+设备状态
+```
+
+添加店铺弹窗字段：
+
+```text
+店铺名称
+平台：Naver / Coupang
+公司主体
+负责人
+备注
+状态
+```
+
+mock 接口：
+
+```text
+mockApi.getStores()
+mockApi.createStore()
+mockApi.updateStore()
+mockApi.deleteStore()
+```
+
+后续对接：
+
+```text
+GET /stores
+POST /stores
+PUT /stores/{id}
+DELETE /stores/{id}
+```
+
+---
+
+## 八、页面 3：店铺详情
+
+路径：
+
+```text
+/stores/:id
+```
+
+展示模块：
+
+```text
+基础信息
+API绑定状态
+邮箱绑定状态
+设备绑定状态
+商品同步状态
+订单同步状态
+销售额状态
+重点邮件状态
+申诉案件状态
+最近同步日志
+```
+
+这个页面是单个店铺的数据汇总入口。
+
+---
+
+## 九、页面 4：平台账号 / API 凭证
+
+路径：
+
+```text
+/credentials
+```
+
+功能：
+
+```text
+选择店铺
+选择平台
+填写 Naver API 凭证
+填写 Coupang API 凭证
+保存凭证
+测试连接
+显示测试结果
+显示最近测试时间
+显示最近同步时间
+显示错误信息
+```
+
+Naver 表单字段：
+
+```text
+店铺
+Client ID
+Client Secret
+Access Token
+Refresh Token
+Token 到期时间
+API 调用 IP
+```
+
+Coupang 表单字段：
+
+```text
+店铺
+Vendor ID
+Access Key
+Secret Key
+Market：KR
+```
+
+Secret 字段使用 password input。
+
+测试按钮 mock 返回：
+
+```json
+{
+  "success": true,
+  "message": "连接成功",
+  "tested_at": "2026-06-29 12:00:00"
+}
+```
+
+后续对接：
+
+```text
+POST /credentials/naver
+POST /credentials/coupang
+POST /credentials/{id}/test
+```
+
+---
+
+## 十、页面 5：API 同步日志
+
+路径：
+
+```text
+/sync-logs
+```
+
+功能：
+
+```text
+查看 API 调用日志
+按店铺筛选
+按平台筛选
+按接口类型筛选
+按成功 / 失败筛选
+```
+
+字段：
+
+```text
+店铺
+平台
+接口类型
+Endpoint
+请求时间
+响应状态
+成功/失败
+错误信息
+耗时
+```
+
+后续对接：
+
+```text
+GET /sync/logs
+```
+
+---
+
+## 十一、页面 6：商品数据
+
+路径：
+
+```text
+/products
+```
+
+功能：
+
+```text
+查看商品同步数据
+按店铺筛选
+按平台筛选
+手动触发商品同步
+```
+
+字段：
+
+```text
+店铺
+平台
+商品ID
+商品名
+SKU
+售价
+库存
+销售状态
+最近同步时间
+```
+
+按钮：
+
+```text
+同步 Naver 商品
+同步 Coupang 商品
+```
+
+后续对接：
+
+```text
+GET /products
+POST /sync/naver/products
+POST /sync/coupang/products
+```
+
+---
+
+## 十二、页面 7：订单数据
+
+路径：
+
+```text
+/orders
+```
+
+功能：
+
+```text
+查看订单同步数据
+按店铺筛选
+按平台筛选
+按状态筛选
+手动触发订单同步
+```
+
+字段：
+
+```text
+店铺
+平台
+订单号
+商品名
+选项
+数量
+订单金额
+订单状态
+下单时间
+最近同步时间
+```
+
+按钮：
+
+```text
+同步 Naver 订单
+同步 Coupang 订单
+```
+
+后续对接：
+
+```text
+GET /orders
+POST /sync/naver/orders
+POST /sync/coupang/orders
+```
+
+---
+
+## 十三、页面 8：客服 / 咨询数据
+
+路径：
+
+```text
+/inquiries
+```
+
+功能：
+
+```text
+查看平台客服 / 咨询数据
+按店铺筛选
+按平台筛选
+按状态筛选
+手动触发咨询同步
+```
+
+字段：
+
+```text
+店铺
+平台
+咨询标题
+咨询内容
+关联商品
+关联订单
+状态
+平台创建时间
+最近同步时间
+```
+
+后续对接：
+
+```text
+GET /customer-inquiries
+POST /sync/naver/inquiries
+POST /sync/coupang/inquiries
+```
+
+---
+
+## 十四、页面 9：销售额统计
+
+路径：
+
+```text
+/sales
+```
+
+展示内容：
+
+```text
+今日销售额
+今日订单数
+按店铺销售额
+按平台销售额
+取消金额
+退货金额
+净销售额
+```
+
+展示形式：
+
+```text
+顶部统计卡片
+店铺销售额表格
+平台销售额表格
+日期筛选
+```
+
+后续对接：
+
+```text
+GET /sales/summary
+POST /sales/calculate
+```
+
+---
+
+## 十五、页面 10：设备环境
+
+路径：
+
+```text
+/devices
+```
+
+功能：
+
+```text
+添加云平台设备
+添加自有设备
+编辑设备
+删除设备
+绑定店铺
+设置到期时间
+显示设备状态
+显示到期提醒
+```
+
+字段：
+
+```text
+设备名称
+设备类型
+服务商
+IP/地区
+IP地址
+远程地址
+远程端口
+绑定店铺
+到期时间
+状态
+备注
+```
+
+后续对接：
+
+```text
+GET /devices
+POST /devices
+PUT /devices/{id}
+DELETE /devices/{id}
+```
+
+---
+
+## 十六、页面 11：店铺邮箱 / 重点邮件
+
+路径：
+
+```text
+/emails
+```
+
+功能：
+
+```text
+绑定店铺邮箱
+查看邮箱列表
+手动导入重点邮件
+查看重点邮件
+过滤 Naver / Coupang 邮件
+标记验证码邮件
+标记申诉邮件
+```
+
+店铺邮箱字段：
+
+```text
+店铺
+邮箱地址
+邮箱服务商
+授权方式
+授权状态
+最近同步时间
+过滤规则
+```
+
+重点邮件字段：
+
+```text
+店铺
+平台
+发件人
+标题
+收到时间
+邮件类型
+AI分类
+涉及商品
+截止时间
+处理状态
+```
+
+邮件类型：
+
+```text
+申诉邮件
+资料要求
+销售限制
+知识产权
+结算冻结
+验证码
+账号安全
+其他
+```
+
+后续对接：
+
+```text
+GET /store-emails
+POST /store-emails
+GET /important-emails
+POST /important-emails/import
+```
+
+---
+
+## 十七、页面 12：申诉资料
+
+路径：
+
+```text
+/appeals
+```
+
+功能：
+
+```text
+从重点邮件创建申诉案件
+查看申诉案件
+编辑申诉状态
+绑定商品
+记录要求资料
+记录缺失资料
+上传证据文件
+```
+
+字段：
+
+```text
+店铺
+平台
+关联邮件
+商品名称
+申诉类型
+要求资料
+缺失资料
+状态
+截止时间
+```
+
+状态：
+
+```text
+待处理
+资料缺失
+已整理
+已提交
+等待回复
+已完成
+```
+
+后续对接：
+
+```text
+GET /appeal-cases
+POST /appeal-cases
+PUT /appeal-cases/{id}
+```
+
+---
+
+## 十八、页面 13：AI 日报上下文
+
+路径：
+
+```text
+/daily-report-context
+```
+
+功能：
+
+展示后端给 AI 日报准备的结构化数据。
+
+展示区块：
+
+```text
+销售额摘要
+店铺状态
+API异常
+设备到期
+重点邮件
+申诉案件
+客服咨询
+同步失败
+```
+
+后续对接：
+
+```text
+GET /daily-report/context
+```
+
+---
+
+## 十九、mockApi.js 数据要求
+
+mock 数据必须包含中文和韩文，用于测试乱码。
+
+示例：
+
+```text
+店铺名称：韩国美妆1号店
+商品名称：SK-II 피테라 에센스 230ml
+客户咨询：정품 맞나요? 언제 발송되나요?
+邮件标题：[네이버] 판매 상품 증빙자료 제출 요청
+申诉类型：정품 소명 자료 제출
+订单状态：배송중 / 취소요청 / 반품요청
+```
+
+mock 数据模块包括：
+
+```text
+stores
+credentials
+syncLogs
+products
+orders
+customerInquiries
+salesSummary
+devices
+storeEmails
+importantEmails
+appealCases
+dashboardSummary
+dailyReportContext
+```
+
+---
+
+## 二十、交互要求
+
+实现以下交互：
+
+```text
+添加店铺弹窗
+编辑店铺弹窗
+删除确认
+API 凭证保存表单
+API 测试按钮
+同步按钮 loading 状态
+筛选条件
+状态标签
+表格分页
+详情页跳转
+重点邮件创建申诉案件按钮
+日报上下文刷新按钮
+```
+
+---
+
+## 二十一、真实接口对接预留
+
+建立 `src/api/http.js`。
+
+当前先走 `mockApi.js`。
+后续 Codex 3 合并时，把 mock API 替换为真实后端接口。
+
+建议统一封装：
+
+```javascript
+getDashboardSummary()
+getStores()
+createStore()
+updateStore()
+deleteStore()
+getCredentials()
+saveNaverCredential()
+saveCoupangCredential()
+testCredential()
+getSyncLogs()
+getProducts()
+syncProducts()
+getOrders()
+syncOrders()
+getInquiries()
+syncInquiries()
+getSalesSummary()
+getDevices()
+getStoreEmails()
+getImportantEmails()
+getAppealCases()
+getDailyReportContext()
+```
+
+---
+
+## 二十二、执行顺序
+
+按以下顺序执行：
+
+```text
+1. 建立 React + Vite 项目
+2. 建立 Layout / Sidebar / Topbar
+3. 建立 mockApi.js
+4. 完成首页驾驶舱
+5. 完成店铺管理
+6. 完成店铺详情
+7. 完成平台账号 / API 凭证页面
+8. 完成 API 同步日志页面
+9. 完成商品数据页面
+10. 完成订单数据页面
+11. 完成客服 / 咨询页面
+12. 完成销售额统计页面
+13. 完成设备环境页面
+14. 完成店铺邮箱 / 重点邮件页面
+15. 完成申诉资料页面
+16. 完成 AI 日报上下文页面
+17. 完成 README
+18. 整理后端接口对接字段清单
+```
+
+---
+
+## 二十三、交付物
+
+Codex 2 最终交付：
+
+```text
+可运行 React 前端
+README 启动说明
+完整页面路由
+mockApi.js
+http.js 接口预留
+中文和韩文 mock 数据
+每个页面完成情况说明
+后端接口对接字段清单
+```
+
+---
+
+## 二十四、验收标准
+
+完成后需要满足：
+
+```text
+可以打开首页驾驶舱
+可以查看店铺列表
+可以添加 / 编辑 / 删除店铺
+可以进入店铺详情
+可以填写 Naver / Coupang API 凭证
+可以点击 API 测试按钮并显示 mock 结果
+可以查看 API 同步日志
+可以查看商品数据
+可以查看订单数据
+可以查看客服 / 咨询数据
+可以查看销售额统计
+可以添加设备环境
+可以绑定店铺邮箱
+可以导入重点邮件
+可以从重点邮件创建申诉案件
+可以查看 AI 日报上下文
+所有页面可通过左侧菜单切换
+中文和韩文显示不乱码
+```
