@@ -18,6 +18,9 @@ h1, h2, p { margin-top: 0; }
 .store-selector.is-muted { color: #718096; background: #f8fafc; }
 .store-selector.is-error { color: #c83d45; background: #fff5f5; border-color: #ffd5d8; }
 .content-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 2px 7px rgba(31, 41, 55, .025); padding: 20px; }
+.section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+.section-heading h2 { margin: 0 0 6px; font-size: 18px; }
+.section-heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-header h1 { font-size: 24px; margin-bottom: 6px; letter-spacing: -.5px; }
 .page-header p, .card-title p { color: var(--muted); margin-bottom: 0; font-size: 14px; }
@@ -56,7 +59,7 @@ tbody tr:hover { background: #fafbff; }
 .modal-card h2 { font-size: 18px; margin: 0; }.modal-close { border: 0; background: transparent; font-size: 26px; color: #798397; }
 .modal-body { padding: 22px; }.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 17px; }
 .form-field { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 600; color: #455064; }
-.form-field b { color: #e5484d; margin-left: 3px; }.form-field small { color: #d63a42; font-weight: 400; }.form-field.has-error input, .form-field.has-error select, .form-field.has-error textarea { border-color: #e5484d; }
+.form-field b { color: #e5484d; margin-left: 3px; }.form-field small { color: #7c8798; font-weight: 400; }.form-field.has-error small { color: #d63a42; }.form-field.has-error input, .form-field.has-error select, .form-field.has-error textarea { border-color: #e5484d; }
 .form-error { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid #f4b4b8; border-radius: 8px; background: #fff4f4; color: #b4232b; font-size: 13px; }
 .form-info { margin: 12px 0; padding: 10px 12px; border: 1px solid #bfd7ff; border-radius: 8px; background: #f4f8ff; color: #24548f; font-size: 13px; }
 .mock-sync-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }

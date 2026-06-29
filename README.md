@@ -166,3 +166,26 @@ Phase 5D-3 adds local mock sync buttons for backend mode while keeping mock mode
 - Customer inquiries: `POST /sync/customer-inquiries/mock`
 
 All sync controls are explicitly labeled as local mock sync. They write to the local Codex1 backend and refresh the relevant page data, sync logs, Dashboard Summary, and AI Daily Context where applicable. They do not connect to real Naver, Coupang, mailbox, or AI services.
+
+## Phase 6A-2 - Platform Login Frontend Boundary
+
+Phase 6A-2 connects the backend-mode Accounts page to Codex1 Platform Login endpoints while keeping API Credentials separate.
+
+Implemented frontend behavior:
+
+- Platform Login Information section for manual Naver SmartStore / Coupang Wing backend login configuration.
+- API Development Credentials section for existing API Credential create/update/inactive behavior.
+- Platform Login list/create/edit/inactive through `/platform-logins`.
+- Current-store Email Account and Device Environment binding selectors.
+- Password inputs are never prefilled; blank password on edit means no update.
+- `loginStatus` is shown only as local configuration status, not real platform login verification.
+
+Still excluded:
+
+- Real Naver or Coupang login.
+- Verification code reading.
+- Real mailbox connections.
+- Real API credential validation.
+- AI model calls.
+
+Details and validation notes: see `PHASE_6A_PLATFORM_LOGIN.md`.

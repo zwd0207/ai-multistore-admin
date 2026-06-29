@@ -235,6 +235,31 @@ const sourceMethods = {
     const result = await backendApi.updateCredential(credentialId, adapters.toBackendCredentialPayload({ ...payload, status: 'inactive' }, store.id));
     return withStoreName([adapters.credential(result)], stores)[0];
   },
+  getPlatformLogins: async (params) => {
+    if (!isBackendSource) return mockApi.getAccounts(params);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getPlatformLogins({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.platformLogin).data, stores);
+    return queryBackendRows(rows, params);
+  },
+  createPlatformLogin: async (payload) => {
+    if (!isBackendSource) return mockApi.createAccount(payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.createPlatformLogin(adapters.toBackendPlatformLoginPayload(payload, store.id));
+    return withStoreName([adapters.platformLogin(result)], stores)[0];
+  },
+  updatePlatformLogin: async (loginId, payload) => {
+    if (!isBackendSource) return mockApi.updateAccount(loginId, payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updatePlatformLogin(loginId, adapters.toBackendPlatformLoginPayload(payload, store.id));
+    return withStoreName([adapters.platformLogin(result)], stores)[0];
+  },
+  deactivatePlatformLogin: async (loginId, payload = {}) => {
+    if (!isBackendSource) return mockApi.updateAccountStatus(loginId, 'inactive');
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updatePlatformLogin(loginId, adapters.toBackendPlatformLoginPayload({ ...payload, loginStatus: 'inactive' }, store.id));
+    return withStoreName([adapters.platformLogin(result)], stores)[0];
+  },
   getAiDailyContext: async (params) => {
     if (!isBackendSource) return null;
     return adapters.aiDailyContext(await backendApi.getAiDailyContext(params));

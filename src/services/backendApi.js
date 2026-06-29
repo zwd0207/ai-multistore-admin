@@ -68,6 +68,9 @@ export const backendApi = {
   getCredentials: (params) => getData('/credentials', params),
   createCredential: (payload) => sendData('post', '/credentials', payload),
   updateCredential: (credentialId, payload) => sendData('put', `/credentials/${credentialId}`, payload),
+  getPlatformLogins: (params) => getData('/platform-logins', params),
+  createPlatformLogin: (payload) => sendData('post', '/platform-logins', payload),
+  updatePlatformLogin: (loginId, payload) => sendData('put', `/platform-logins/${loginId}`, payload),
 };
 
 export { getData, normalizeParams, sendData };

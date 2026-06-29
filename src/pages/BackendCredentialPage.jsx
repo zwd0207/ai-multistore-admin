@@ -41,7 +41,7 @@ function cleanError(error) {
   return error?.message || '后端保存失败，请检查 Codex1 后端状态或表单内容';
 }
 
-export default function BackendCredentialPage() {
+export default function BackendCredentialPage({ embedded = false }) {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
@@ -173,18 +173,32 @@ export default function BackendCredentialPage() {
 
   return (
     <>
-      <PageHeader
-        title="账号管理"
-        description={storeError || (!selectedStoreId && !storeLoading ? '请先选择店铺' : '维护当前店铺的本地 API 凭证配置，不进行真实平台连接校验。')}
-        actions={(
-          <>
-            <button className="button ghost" onClick={load}>刷新</button>
-            <span className="period-chip">本地后端写入</span>
-            {canWrite && <button className="button primary" onClick={() => openModal()}>新增 API 凭证</button>}
-          </>
-        )}
-      />
+      {!embedded && (
+        <PageHeader
+          title="账号管理"
+          description={storeError || (!selectedStoreId && !storeLoading ? '请先选择店铺' : '维护当前店铺的本地 API 凭证配置，不进行真实平台连接校验。')}
+          actions={(
+            <>
+              <button className="button ghost" onClick={load}>刷新</button>
+              <span className="period-chip">本地后端写入</span>
+              {canWrite && <button className="button primary" onClick={() => openModal()}>新增 API 凭证</button>}
+            </>
+          )}
+        />
+      )}
       <section className="content-card">
+        {embedded && (
+          <div className="section-heading">
+            <div>
+              <h2>API 开发凭证</h2>
+              <p>{storeError || (!selectedStoreId && !storeLoading ? '请先选择店铺' : '用于系统后续调用 Naver / Coupang API。当前仅保存本地配置，不代表真实 API 已校验。')}</p>
+            </div>
+            <div className="page-actions">
+              <button className="button ghost" onClick={load}>刷新</button>
+              {canWrite && <button className="button primary" onClick={() => openModal()}>新增 API 凭证</button>}
+            </div>
+          </div>
+        )}
         <SearchBar
           value={draftQuery.keyword}
           onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })}

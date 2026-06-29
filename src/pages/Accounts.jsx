@@ -1,8 +1,8 @@
 import { isBackendSource } from '../services/dataProvider';
-import BackendCredentialPage from './BackendCredentialPage';
+import BackendAccountsPage from './BackendAccountsPage';
 import MockAccounts from './MockAccounts';
 
 export default function Accounts() {
-  if (isBackendSource) return <BackendCredentialPage />;
+  if (isBackendSource) return <BackendAccountsPage />;
   return <MockAccounts />;
 }

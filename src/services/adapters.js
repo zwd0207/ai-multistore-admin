@@ -342,6 +342,27 @@ export function adaptCredential(item = {}) {
   };
 }
 
+export function adaptPlatformLogin(item = {}) {
+  return {
+    id: item.id,
+    storeId: item.store_id,
+    platform: adaptPlatform(item.platform),
+    rawPlatform: item.platform,
+    label: item.login_label,
+    account: item.login_account,
+    emailAccountId: item.email_account_id,
+    deviceEnvironmentId: item.device_environment_id,
+    loginStatus: item.login_status,
+    status: item.login_status,
+    hasLoginPassword: Boolean(item.hasLoginPassword),
+    passwordStatus: item.hasLoginPassword ? '已保存密码' : '未保存密码',
+    lastLoginCheckAt: item.last_login_check_at,
+    remark: item.remark,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
 export function toBackendCredentialPayload(item = {}, storeId) {
   const credentialName = item.name || item.credentialName;
   return compactPayload({
@@ -352,6 +373,19 @@ export function toBackendCredentialPayload(item = {}, storeId) {
     secret_key: item.secretKeyInput ? String(item.secretKeyInput) : undefined,
     status: normalizeAccountStatusForBackend(item.status),
   });
+}
+
+export function toBackendPlatformLoginPayload(item = {}, storeId) {
+  const payload = { store_id: Number(item.storeId || storeId) };
+  if ('platform' in item) payload.platform = normalizeCredentialPlatformForBackend(item.platform);
+  if ('label' in item) payload.login_label = item.label ? String(item.label).trim() : undefined;
+  if ('account' in item) payload.login_account = item.account ? String(item.account).trim() : null;
+  if (item.passwordInput) payload.login_password = String(item.passwordInput);
+  if ('emailAccountId' in item) payload.email_account_id = item.emailAccountId ? Number(item.emailAccountId) : null;
+  if ('deviceEnvironmentId' in item) payload.device_environment_id = item.deviceEnvironmentId ? Number(item.deviceEnvironmentId) : null;
+  if ('loginStatus' in item || 'status' in item) payload.login_status = normalizeAccountStatusForBackend(item.loginStatus || item.status);
+  if ('remark' in item) payload.remark = item.remark || null;
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 
 export function adaptDashboardSummary(data = {}) {
@@ -450,10 +484,12 @@ export const adapters = {
   importantEmail: adaptImportantEmail,
   appealCase: adaptAppealCase,
   credential: adaptCredential,
+  platformLogin: adaptPlatformLogin,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
   toBackendCredentialPayload,
+  toBackendPlatformLoginPayload,
   dashboardSummary: adaptDashboardSummary,
   aiDailyContext: adaptAiDailyContext,
   list: adaptList,
