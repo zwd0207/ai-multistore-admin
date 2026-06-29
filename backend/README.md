@@ -2,6 +2,26 @@
 
 FastAPI backend for the AI multi-store operations and environment management system.
 
+## Technology Stack
+
+```text
+FastAPI
+SQLAlchemy 2.x
+Pydantic v2
+SQLite for development
+cryptography.Fernet
+Uvicorn
+```
+
+## Documentation Index
+
+```text
+docs/API_CONTRACT.md
+docs/DATABASE_MODELS.md
+docs/CODEX2_FRONTEND_HANDOFF.md
+docs/CODEX3_MERGE_NOTES.md
+```
+
 ## Current Scope
 
 Stage 1F provides the backend foundation, secure credential base, mock data sync pipeline, local analytics APIs, and mock operations support modules:
@@ -32,6 +52,20 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
+
+## Directory Summary
+
+```text
+app/                       FastAPI application package
+app/api/v1/                Public versioned API routes
+app/api/v1/endpoints/      Endpoint modules
+app/models/                SQLAlchemy models
+app/schemas/               Pydantic request/response schemas
+app/services/              Business logic, encryption, stats, mock sync
+app/clients/               Naver/Coupang mock clients
+scripts/                   Key generation, seed, verification scripts
+docs/                      API contract and handoff documents
 ```
 
 ## Credential Encryption Key
@@ -67,6 +101,27 @@ Then open:
 - API v1 health check: http://127.0.0.1:8000/api/v1/health
 - Legacy health check: http://127.0.0.1:8000/health
 - Swagger docs: http://127.0.0.1:8000/docs
+
+## Verification
+
+Run the full regression suite:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe scripts\verify_all.py
+```
+
+Individual stage scripts are also available:
+
+```text
+scripts/verify_stage_1b.py
+scripts/verify_stage_1c.py
+scripts/verify_stage_1d.py
+scripts/verify_stage_1e.py
+scripts/verify_stage_1f.py
+```
+
+The verification scripts rebuild the local SQLite database during tests and should be used for local validation only.
 
 ## API Response Format
 
@@ -496,6 +551,15 @@ DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/codex1
 ```
 
 PostgreSQL driver dependencies and migration tooling will be added in a later stage.
+
+## Productionization Recommendations
+
+- Introduce Alembic before schema changes become collaborative.
+- Add PostgreSQL driver and validate JSON/DateTime behavior before switching from SQLite.
+- Keep platform API clients separated by provider.
+- Keep all external API calls behind service layers.
+- Add audit logging before real credential or email integrations.
+- Continue enforcing UTF-8 for Chinese, Korean, and mixed text.
 
 ## Local Files
 
