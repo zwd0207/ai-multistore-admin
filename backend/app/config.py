@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./codex1.db"
     api_prefix: str = ""
+    cors_allowed_origins: list[str] = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    ]
     credential_encryption_key: str | None = None
 
     model_config = SettingsConfigDict(

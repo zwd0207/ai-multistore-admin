@@ -10,16 +10,50 @@ cd backend
 uvicorn app.main:app --reload
 ```
 
+If backend port `8000` is occupied, use the Codex2 integration port:
+
+```powershell
+uvicorn app.main:app --reload --port 8011
+```
+
 Base URL:
 
 ```text
 http://127.0.0.1:8000
 ```
 
+Codex2 recommended API base URL:
+
+```text
+http://127.0.0.1:8011/api/v1
+```
+
 Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
+```
+
+Codex2 Swagger URL:
+
+```text
+http://127.0.0.1:8011/docs
+```
+
+Frontend `.env`:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8011/api/v1
+VITE_DATA_SOURCE=backend
+```
+
+Local CORS is enabled for:
+
+```text
+http://127.0.0.1:5173
+http://localhost:5173
+http://127.0.0.1:5174
+http://localhost:5174
 ```
 
 ## Setup Data
@@ -180,4 +214,3 @@ Coupang 정산 보류 / 销售资料准备 / 中文备注
 ```
 
 Avoid fixed-width assumptions for mixed Chinese/Korean text.
-

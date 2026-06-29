@@ -95,12 +95,41 @@ If `CREDENTIAL_ENCRYPTION_KEY` is missing or invalid, credential create/update/d
 uvicorn app.main:app --reload
 ```
 
+If port `8000` is occupied during Codex2 frontend integration, run on `8011`:
+
+```powershell
+uvicorn app.main:app --reload --port 8011
+```
+
 Then open:
 
 - API root: http://127.0.0.1:8000/
 - API v1 health check: http://127.0.0.1:8000/api/v1/health
 - Legacy health check: http://127.0.0.1:8000/health
 - Swagger docs: http://127.0.0.1:8000/docs
+
+Codex2 local integration URLs:
+
+```text
+API base URL: http://127.0.0.1:8011/api/v1
+Swagger: http://127.0.0.1:8011/docs
+```
+
+Codex2 Vite environment:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8011/api/v1
+VITE_DATA_SOURCE=backend
+```
+
+Local CORS is enabled for:
+
+```text
+http://127.0.0.1:5173
+http://localhost:5173
+http://127.0.0.1:5174
+http://localhost:5174
+```
 
 ## Verification
 
