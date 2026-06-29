@@ -24,23 +24,37 @@ npm run preview
 
 ## 数据源配置
 
-Codex1 本地接口：`http://127.0.0.1:8000/api/v1`
+Codex1 默认接口：`http://127.0.0.1:8000/api/v1`
 
-Swagger：`http://127.0.0.1:8000/docs`
+当前 Codex2 联调建议接口：`http://127.0.0.1:8011/api/v1`
+
+当前联调 Swagger：`http://127.0.0.1:8011/docs`
 
 在本机创建不提交 Git 的 `.env.local`，按需要设置：
 
 ```text
-VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1
-VITE_DATA_SOURCE=mock
+VITE_API_BASE_URL=http://127.0.0.1:8011/api/v1
+VITE_DATA_SOURCE=backend
 ```
 
 `VITE_DATA_SOURCE` 可选值：
 
 - `mock`：默认值，所有已完成页面继续使用本地 Promise mock 接口。
-- `backend`：Dashboard Summary 等已适配接口读取 Codex1；尚未正式迁移的页面能力仍保留 mock 实现。
+- `backend`：Dashboard、店铺、商品、订单、客服咨询与同步日志读取 Codex1；其他页面继续使用 mock。
 
-修改环境变量后需要重新启动 Vite。需要调用商品、订单、客服咨询、设备环境、邮箱或申诉列表时，应提供 Codex1 合同要求的 `store_id`（前端也接受 `storeId` 并自动转换）。
+修改环境变量后需要重新启动 Vite。商品、订单与客服咨询接口需要 `store_id`；当前 provider 会使用显式传入的 `storeId`，未传时自动选择 Codex1 返回的首个店铺。后续全局店铺选择器接入后可直接覆盖该参数。
+
+## 第五阶段 B 只读联调范围
+
+- Dashboard Summary：后端总览卡片、风险、最近订单及同步日志兼容映射。
+- Stores：后端店铺列表。
+- Products：按 `store_id` 读取商品列表。
+- Orders：按 `store_id` 读取订单，展示脱敏手机号、金额和币种。
+- Customer Service：按 `store_id` 读取咨询，详情使用后端只读结构。
+- Sync Logs：操作日志页增加 Codex1 同步日志区块，原操作审计 mock 保留。
+- AI Daily Context：Dashboard 只展示结构化聚合数据，不调用模型，不生成日报文案。
+
+backend 模式下，上述业务列表隐藏新增、编辑、删除或回复入口，避免把后端读取与 mock 写入混用。接口失败时显示中文错误空状态；mock 模式保留第一至第四阶段的完整交互。
 
 ## 服务层职责
 

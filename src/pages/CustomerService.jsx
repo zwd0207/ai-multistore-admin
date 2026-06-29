@@ -9,6 +9,7 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
@@ -41,12 +42,17 @@ export default function CustomerService() {
   const [activeTicket, setActiveTicket] = useState(null);
   const [replyForm, setReplyForm] = useState({ content: '', nextStatus: '답변 완료' });
   const [replyError, setReplyError] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const load = async (nextQuery = query) => {
     setLoading(true);
+    setLoadError('');
     try {
-      const response = await mockApi.getCustomerTickets(nextQuery);
+      const response = await dataProvider.getCustomerInquiries(nextQuery);
       setResult(response);
+    } catch (error) {
+      setResult({ data: [], total: 0, page: nextQuery.page, pageSize: nextQuery.pageSize });
+      setLoadError(error.message || '客服咨询加载失败');
     } finally {
       setLoading(false);
     }
@@ -57,11 +63,11 @@ export default function CustomerService() {
   }, [query]);
 
   useEffect(() => {
-    mockApi.getReplyTemplates().then(setTemplates);
+    if (!isBackendSource) mockApi.getReplyTemplates().then(setTemplates);
   }, []);
 
   const openDetail = async (row) => {
-    const detail = await mockApi.getCustomerTicketDetail(row.id);
+    const detail = isBackendSource ? row : await mockApi.getCustomerTicketDetail(row.id);
     setActiveTicket(detail);
     setDetailOpen(true);
   };
@@ -106,7 +112,7 @@ export default function CustomerService() {
       <PageHeader
         title="客服管理"
         description="集中处理多平台咨询、回复、退款与换货流转。"
-        actions={<button className="button ghost" onClick={() => load()}>刷新列表</button>}
+        actions={<><button className="button ghost" onClick={() => load()}>刷新列表</button>{isBackendSource && <span className="period-chip">后端只读</span>}</>}
       />
 
       <FilterPanel>
@@ -137,21 +143,22 @@ export default function CustomerService() {
       </FilterPanel>
 
       <section className="content-card">
-        <DataTable
+        {loadError ? <EmptyState title="客服咨询加载失败" description={loadError} /> : <><DataTable
           columns={columns}
-          rows={result.data}
+          rows={result.data || []}
           loading={loading}
           renderActions={(row) => (
             <>
               <button onClick={() => openDetail(row)}>详情</button>
-              <button onClick={() => openReply(row)}>回复</button>
-              <button onClick={() => applyStatus(row, '답변 완료')}>标记完成</button>
-              <button onClick={() => applyStatus(row, '환불 요청')}>转退款</button>
-              <button onClick={() => applyStatus(row, '교환 요청')}>转换货</button>
+              {!isBackendSource && <><button onClick={() => openReply(row)}>回复</button>
+                <button onClick={() => applyStatus(row, '답변 완료')}>标记完成</button>
+                <button onClick={() => applyStatus(row, '환불 요청')}>转退款</button>
+                <button onClick={() => applyStatus(row, '교환 요청')}>转换货</button></>}
             </>
           )}
         />
         <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
+        </>}
       </section>
 
       <DetailModal open={detailOpen} title={activeTicket ? `咨询详情 · ${activeTicket.ticketNo}` : '咨询详情'} onClose={() => setDetailOpen(false)}>

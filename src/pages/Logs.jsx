@@ -8,6 +8,7 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
 const modules = ['店铺管理', '商品管理', '订单管理', '客服管理', '销售数据', '设备管理', '邮箱管理', '申诉管理', '环境管理', '账号管理', '系统设置'];
@@ -30,6 +31,16 @@ const columns = [
   { key: 'riskLevel', title: '风险等级', render: (value) => <StatusBadge value={value} /> },
 ];
 
+const syncColumns = [
+  { key: 'logNo', title: '同步日志编号', render: (value) => <strong>{value}</strong> },
+  { key: 'platform', title: '平台' },
+  { key: 'type', title: '同步类型' },
+  { key: 'message', title: '同步消息' },
+  { key: 'startedAt', title: '开始时间' },
+  { key: 'finishedAt', title: '结束时间' },
+  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
+];
+
 export default function Logs() {
   const [query, setQuery] = useState({ keyword: '', module: '', actionType: '', operator: '', status: '', riskLevel: '', startDate: '', endDate: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
@@ -37,6 +48,9 @@ export default function Logs() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [syncLogs, setSyncLogs] = useState({ data: [], total: 0 });
+  const [syncLoading, setSyncLoading] = useState(isBackendSource);
+  const [syncError, setSyncError] = useState('');
 
   const load = async (nextQuery = query) => {
     setLoading(true);
@@ -51,6 +65,24 @@ export default function Logs() {
     load();
   }, [query]);
 
+  const loadSyncLogs = async () => {
+    if (!isBackendSource) return;
+    setSyncLoading(true);
+    setSyncError('');
+    try {
+      setSyncLogs(await dataProvider.getSyncLogs({ page: 1, pageSize: 10 }));
+    } catch (error) {
+      setSyncLogs({ data: [], total: 0 });
+      setSyncError(error.message || '同步日志加载失败');
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSyncLogs();
+  }, []);
+
   const openDetail = async (row) => {
     setDetail(await mockApi.getOperationLogDetail(row.id));
     setDetailOpen(true);
@@ -64,7 +96,15 @@ export default function Logs() {
 
   return (
     <>
-      <PageHeader title="操作日志" description="审计后台操作、配置修改、绑定行为和风险检测记录。" />
+      <PageHeader title="操作日志" description="审计后台操作、配置修改、绑定行为和风险检测记录。" actions={isBackendSource ? <button className="button ghost" onClick={loadSyncLogs}>刷新同步日志</button> : null} />
+
+      {isBackendSource && <section className="content-card">
+        <div className="card-title">
+          <div><h2>Codex1 同步日志</h2><p>读取 `/api/v1/sync-logs`，原操作审计日志继续保留。</p></div>
+          <span className="period-chip">共 {syncLogs.total} 条</span>
+        </div>
+        {syncError ? <EmptyState title="同步日志加载失败" description={syncError} /> : <DataTable columns={syncColumns} rows={syncLogs.data || []} loading={syncLoading} />}
+      </section>}
 
       <FilterPanel>
         <SearchBar
