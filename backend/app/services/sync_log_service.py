@@ -2,21 +2,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ApiError
-from app.models.store import Store, utc_now
+from app.models.store import utc_now
 from app.models.sync_log import SyncLog
 from app.schemas.sync_log import SyncLogRead
-
-
-def _ensure_store_exists(db: Session, store_id: int) -> Store:
-    store = db.get(Store, store_id)
-    if store is None:
-        raise ApiError(
-            message="店铺不存在，无法记录同步日志",
-            error_code="STORE_NOT_FOUND",
-            status_code=404,
-            detail={"store_id": store_id},
-        )
-    return store
+from app.services.store_service import ensure_store_exists
 
 
 def _serialize_sync_log(sync_log: SyncLog) -> dict:
@@ -31,7 +20,7 @@ def create_sync_log(
     message: str | None = None,
     raw_summary: dict | None = None,
 ) -> dict:
-    _ensure_store_exists(db, store_id)
+    ensure_store_exists(db, store_id)
     sync_log = SyncLog(
         store_id=store_id,
         platform=platform,

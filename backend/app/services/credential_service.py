@@ -3,21 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ApiError
 from app.models.api_credential import ApiCredential
-from app.models.store import Store
 from app.schemas.credential import CredentialCreate, CredentialUpdate, DecryptedCredential
 from app.services.encryption import decrypt_value, encrypt_value
-
-
-def _ensure_store_exists(db: Session, store_id: int) -> Store:
-    store = db.get(Store, store_id)
-    if store is None:
-        raise ApiError(
-            message="店铺不存在，无法保存平台凭证",
-            error_code="STORE_NOT_FOUND",
-            status_code=404,
-            detail={"store_id": store_id},
-        )
-    return store
+from app.services.store_service import ensure_store_exists
 
 
 def _serialize_credential(credential: ApiCredential) -> dict:
@@ -36,7 +24,7 @@ def _serialize_credential(credential: ApiCredential) -> dict:
 
 
 def create_credential(db: Session, payload: CredentialCreate) -> dict:
-    _ensure_store_exists(db, payload.store_id)
+    ensure_store_exists(db, payload.store_id)
     credential = ApiCredential(
         store_id=payload.store_id,
         platform=payload.platform,
@@ -55,7 +43,7 @@ def create_credential(db: Session, payload: CredentialCreate) -> dict:
 def list_credentials(db: Session, store_id: int | None = None) -> list[dict]:
     statement = select(ApiCredential).order_by(ApiCredential.id.asc())
     if store_id is not None:
-        _ensure_store_exists(db, store_id)
+        ensure_store_exists(db, store_id)
         statement = statement.where(ApiCredential.store_id == store_id)
 
     return [_serialize_credential(item) for item in db.scalars(statement).all()]
@@ -90,7 +78,7 @@ def update_credential(db: Session, credential_id: int, payload: CredentialUpdate
     updates = payload.model_dump(exclude_unset=True)
 
     if "store_id" in updates and updates["store_id"] is not None:
-        _ensure_store_exists(db, updates["store_id"])
+        ensure_store_exists(db, updates["store_id"])
         credential.store_id = updates["store_id"]
     if "platform" in updates and updates["platform"] is not None:
         credential.platform = updates["platform"]
@@ -120,6 +108,37 @@ def delete_credential(db: Session, credential_id: int) -> dict:
 
 def get_decrypted_credential_for_internal_use(db: Session, credential_id: int) -> DecryptedCredential:
     credential = _get_credential_model(db, credential_id)
+    return DecryptedCredential(
+        id=credential.id,
+        store_id=credential.store_id,
+        platform=credential.platform,
+        credential_name=credential.credential_name,
+        access_key=decrypt_value(credential.encrypted_access_key),
+        secret_key=decrypt_value(credential.encrypted_secret_key),
+        extra_config=credential.extra_config,
+        status=credential.status,
+    )
+
+
+def get_decrypted_credential_by_store_and_platform(
+    db: Session,
+    store_id: int,
+    platform: str,
+) -> DecryptedCredential:
+    ensure_store_exists(db, store_id)
+    credential = db.scalar(
+        select(ApiCredential).where(
+            ApiCredential.store_id == store_id,
+            ApiCredential.platform == platform,
+        ).order_by(ApiCredential.id.desc())
+    )
+    if credential is None:
+        raise ApiError(
+            message="该店铺缺少平台凭证",
+            error_code="CREDENTIAL_NOT_FOUND",
+            status_code=404,
+            detail={"store_id": store_id, "platform": platform},
+        )
     return DecryptedCredential(
         id=credential.id,
         store_id=credential.store_id,

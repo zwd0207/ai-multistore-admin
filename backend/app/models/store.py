@@ -39,3 +39,18 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    products = relationship(
+        "Product",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    orders = relationship(
+        "Order",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    customer_inquiries = relationship(
+        "CustomerInquiry",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )

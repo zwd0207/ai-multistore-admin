@@ -4,19 +4,21 @@ FastAPI backend for the AI multi-store operations and environment management sys
 
 ## Current Scope
 
-Stage 1C provides the backend foundation and secure credential base only:
+Stage 1D provides the backend foundation, secure credential base, and mock data sync pipeline:
 
 - Versioned API prefix at `/api/v1`
 - Compatible legacy health check at `/health`
-- SQLAlchemy models for stores, API credentials, and sync logs
+- SQLAlchemy models for stores, API credentials, sync logs, products, orders, and customer inquiries
 - Store CRUD endpoints
 - Encrypted API credential storage
 - Naver and Coupang mock client placeholders
+- Mock product, order, and customer inquiry sync services
+- Read endpoints for products, orders, and customer inquiries
 - Sync log service and read endpoint
 - Unified success and error response structure
 - Repeatable seed data for Chinese, Korean, and mixed UTF-8 text
 
-Product sync, order sync, customer inquiries, sales, dashboard, devices, email, appeals, and real Naver/Coupang API calls are not implemented in this stage.
+This stage still does not call real Naver or Coupang APIs. Real platform signing, real data crawling, sales, dashboard, devices, email, and appeals are not implemented in this stage.
 
 ## Setup
 
@@ -124,6 +126,76 @@ Internal decryption is restricted to `app.services.credential_service.get_decryp
 
 Credential deletion is currently a hard delete. A later stage can extend this to soft delete or status-based deactivation.
 
+## Data Models
+
+All business data is bound to `store_id` and stores the source `platform`.
+
+Stage 1D adds:
+
+```text
+products
+orders
+customer_inquiries
+```
+
+`products` stores platform product snapshots with `external_product_id`, `name`, `sku`, `brand`, `category`, `price`, `currency`, `stock_quantity`, and JSON `raw_data`.
+
+`orders` stores mock order snapshots with `external_order_id`, `buyer_name`, `buyer_masked_phone`, `product_name`, `quantity`, `order_amount`, `order_status`, `paid_at`, `ordered_at`, and JSON `raw_data`.
+
+Only masked buyer phones are stored, for example `010-****-1234`. Do not add full phone numbers, full addresses, ID numbers, or other sensitive buyer privacy fields.
+
+`customer_inquiries` stores mock customer inquiry snapshots with `external_inquiry_id`, `inquiry_type`, `customer_name`, `title`, `content`, `status`, `received_at`, `answered_at`, and JSON `raw_data`.
+
+Service-layer upsert avoids duplicate records by:
+
+```text
+products: store_id + platform + external_product_id
+orders: store_id + platform + external_order_id
+customer_inquiries: store_id + platform + external_inquiry_id
+```
+
+## Query APIs
+
+```text
+GET /api/v1/products?store_id={store_id}
+GET /api/v1/orders?store_id={store_id}
+GET /api/v1/customer-inquiries?store_id={store_id}
+```
+
+Optional `platform` filtering is supported:
+
+```text
+GET /api/v1/products?store_id={store_id}&platform=naver
+```
+
+Queries return Chinese, Korean, and mixed UTF-8 content through the unified response format. Missing stores and unsupported platforms return structured errors.
+
+## Mock Sync APIs
+
+Mock sync endpoints:
+
+```text
+POST /api/v1/sync/products/mock?store_id={store_id}&platform={platform}
+POST /api/v1/sync/orders/mock?store_id={store_id}&platform={platform}
+POST /api/v1/sync/customer-inquiries/mock?store_id={store_id}&platform={platform}
+```
+
+The sync service:
+
+1. Validates `store_id` and `platform`.
+2. Finds the encrypted platform credential for `store_id + platform`.
+3. Decrypts credentials internally.
+4. Initializes the matching mock client.
+5. Fetches mock data only.
+6. Upserts data into the local database.
+7. Writes `sync_logs` for running, success, or failed states.
+
+Mock product data includes `SK-II 神仙水测试商品`, `타이틀리스트 캐디백 테스트`, and `ECCO 골프화 / 中文运营测试`.
+
+Mock order data includes only masked phones such as `010-****-1234`, `010-****-5678`, and `010-****-9012`.
+
+Mock inquiry data includes `正品申诉资料咨询`, `배송지연 문의`, and `Naver 정품 소명 / 中文备注`.
+
 ## Platform Client Placeholders
 
 Current platform clients are mock placeholders only:
@@ -135,11 +207,11 @@ app/clients/coupang_client.py
 
 They require an internal decrypted credential object and provide mock methods such as `test_connection()`, `fetch_products_mock()`, `fetch_orders_mock()`, and `fetch_customer_inquiries_mock()`.
 
-They do not call real Naver or Coupang APIs, do not contain real keys, and must not print plaintext credentials.
+They do not call real Naver or Coupang APIs, do not contain real keys, do not implement real signatures, and must not print plaintext credentials.
 
 ## Sync Logs
 
-Sync logs track future platform operations and credential tests. Each log is bound to a `store_id`.
+Sync logs track future platform operations, credential tests, and Stage 1D mock sync runs. Each log is bound to a `store_id`.
 
 Service functions live in:
 
@@ -153,7 +225,7 @@ Read endpoint:
 GET /api/v1/sync-logs?store_id={store_id}
 ```
 
-Supported status values for this stage are `running`, `success`, and `failed`. `message`, `error_detail`, and `raw_summary` support Chinese, Korean, and mixed UTF-8 text.
+Supported status values for this stage are `running`, `success`, and `failed`. `message`, `error_detail`, and `raw_summary` support Chinese, Korean, and mixed UTF-8 text. Mock sync writes `products`, `orders`, and `customer_inquiries` sync types.
 
 ## Database Initialization
 
@@ -201,7 +273,7 @@ The seed data intentionally includes:
 
 Use `GET /api/v1/stores` after running the seed script to verify Chinese and Korean text is stored and returned without mojibake.
 
-Stage 1C verification also writes Chinese and Korean credential metadata and sync log messages, then reads them back through services and API responses.
+Stage 1D verification writes Chinese, Korean, and mixed product/order/inquiry data, then reads it back through APIs. It also verifies sync logs and masked buyer phones.
 
 ## PostgreSQL Migration Note
 
