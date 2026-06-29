@@ -5,10 +5,12 @@ import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
+import MockSyncPanel from '../components/common/MockSyncPanel';
 import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
@@ -34,6 +36,7 @@ const columns = [
 
 export default function CustomerService() {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const { versions } = useSyncRefresh();
   const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
   const [result, setResult] = useState({ data: [], total: 0, page: 1, pageSize: 5 });
@@ -68,7 +71,7 @@ export default function CustomerService() {
 
   useEffect(() => {
     load();
-  }, [query, selectedStoreId, storeLoading, storeError]);
+  }, [query, selectedStoreId, storeLoading, storeError, versions.customerInquiries]);
 
   useEffect(() => {
     if (!isBackendSource) mockApi.getReplyTemplates().then(setTemplates);
@@ -120,7 +123,7 @@ export default function CustomerService() {
       <PageHeader
         title="客服管理"
         description="集中处理多平台咨询、回复、退款与换货流转。"
-        actions={<><button className="button ghost" onClick={() => load()}>刷新列表</button>{isBackendSource && <span className="period-chip">后端只读</span>}</>}
+        actions={<><button className="button ghost" onClick={() => load()}>刷新列表</button>{isBackendSource && <MockSyncPanel types={['customerInquiries']} compact />}{isBackendSource && <span className="period-chip">后端只读</span>}</>}
       />
 
       <FilterPanel>

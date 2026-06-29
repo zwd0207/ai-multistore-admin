@@ -1,5 +1,7 @@
 import ResourcePage from '../components/common/ResourcePage';
+import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
+import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
@@ -34,6 +36,7 @@ const fields = [
 
 export default function Products() {
   const { selectedStoreId } = useStoreContext();
+  const { versions } = useSyncRefresh();
   return (
     <ResourcePage
       title="商品管理"
@@ -47,7 +50,8 @@ export default function Products() {
       initialForm={{ name: '', sku: '', store: '', platform: '', price: 0, stock: 0, status: '' }}
       readOnly={isBackendSource}
       extraParams={isBackendSource ? { storeId: selectedStoreId } : {}}
-      reloadKey={selectedStoreId}
+      reloadKey={`${selectedStoreId}-${versions.products}`}
+      extraActions={isBackendSource ? <MockSyncPanel types={['products']} compact /> : null}
     />
   );
 }

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import ActivityList from '../components/common/ActivityList';
 import EmptyState from '../components/common/EmptyState';
 import InfoGrid from '../components/common/InfoGrid';
+import MockSyncPanel from '../components/common/MockSyncPanel';
 import PageHeader from '../components/common/PageHeader';
 import RiskPanel from '../components/common/RiskPanel';
 import StatGrid from '../components/common/StatGrid';
 import TodoList from '../components/common/TodoList';
+import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
 
@@ -15,6 +17,7 @@ const formatStructured = (value) => (Object.keys(value || {}).length ? JSON.stri
 
 export default function Dashboard() {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const { versions } = useSyncRefresh();
   const [summary, setSummary] = useState(null);
   const [risks, setRisks] = useState([]);
   const [todos, setTodos] = useState([]);
@@ -64,7 +67,7 @@ export default function Dashboard() {
         setTrend(trendData);
       })
       .catch((requestError) => setError(requestError.message || '总览数据加载失败'));
-  }, [selectedStoreId, storeError, storeLoading]);
+  }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
 
   useEffect(() => {
     if (!isBackendSource || storeLoading) return;
@@ -76,7 +79,7 @@ export default function Dashboard() {
     dataProvider.getAiDailyContext({ storeId: selectedStoreId })
       .then(setDailyContext)
       .catch((requestError) => setContextError(requestError.message || 'Daily Context 加载失败'));
-  }, [selectedStoreId, storeLoading]);
+  }, [selectedStoreId, storeLoading, versions.aiDailyContext]);
 
   if (error) {
     return (
@@ -106,7 +109,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title="运营总览" description="这里汇总核心运营、风险、待办和审计数据。" actions={<span className="period-chip">数据源：{DATA_SOURCE}</span>} />
+      <PageHeader title="运营总览" description="这里汇总核心运营、风险、待办和审计数据。" actions={<>{isBackendSource && <MockSyncPanel /> }<span className="period-chip">数据源：{DATA_SOURCE}</span></>} />
       <StatGrid items={stats} />
 
       <section className="panel-grid">

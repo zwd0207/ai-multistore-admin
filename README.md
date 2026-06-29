@@ -156,3 +156,13 @@ Implemented:
 - Test connection buttons are local-only notices and do not claim real Naver, Coupang, or mailbox validation.
 
 Sensitive field names may exist in service and adapter payload mapping where required by Codex1 contracts, but pages, notices, errors, and console output must not display credential plaintext or encrypted credential fields. Edit forms leave sensitive inputs blank; blank values are not sent as updates.
+
+## Phase 5D-3 - Local Mock Sync
+
+Phase 5D-3 adds local mock sync buttons for backend mode while keeping mock mode intact:
+
+- Products: `POST /sync/products/mock`
+- Orders: `POST /sync/orders/mock`
+- Customer inquiries: `POST /sync/customer-inquiries/mock`
+
+All sync controls are explicitly labeled as local mock sync. They write to the local Codex1 backend and refresh the relevant page data, sync logs, Dashboard Summary, and AI Daily Context where applicable. They do not connect to real Naver, Coupang, mailbox, or AI services.

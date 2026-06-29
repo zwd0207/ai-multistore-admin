@@ -134,3 +134,31 @@ Verification notes:
 - build passed with Vite.
 - UTF-8 replacement character scan returned 0.
 - page/component raw backend sensitive field scan returned 0; service/adapter payload field names remain intentionally present for Codex1 mapping.
+
+## Phase 5D-3 - Local Mock Sync Buttons and Refresh Wiring
+
+Phase 5D-3 adds frontend controls for Codex1 local mock sync only:
+
+- Products: `POST /sync/products/mock`
+- Orders: `POST /sync/orders/mock`
+- Customer inquiries: `POST /sync/customer-inquiries/mock`
+
+The UI labels every action as local mock sync and states that no real platform is connected. It does not call real Naver or Coupang APIs, real mailboxes, or AI models.
+
+Refresh behavior:
+
+- Product sync refreshes Products, Sync Logs, and Dashboard Summary.
+- Order sync refreshes Orders, Sync Logs, Dashboard Summary, and AI Daily Context.
+- Customer inquiry sync refreshes Customer Service, Sync Logs, Dashboard Summary, and AI Daily Context.
+
+Platform selection:
+
+- Prefer the selected store platform when it is `naver` or `coupang`.
+- If the store platform is not usable, read current-store credential metadata and use an active configured `naver` or `coupang` platform.
+- If no platform can be inferred, require the user to choose `naver` or `coupang`.
+
+Failure handling:
+
+- Each sync button has independent loading state.
+- Missing store or platform blocks sync with a visible message.
+- backend failures are shown as local mock sync errors and never fallback to mock success.

@@ -57,6 +57,22 @@ function withStoreName(items, stores) {
   return items.map((item) => ({ ...item, store: names.get(String(item.storeId)) || item.store }));
 }
 
+function normalizeSyncPlatform(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'naver') return 'naver';
+  if (normalized === 'coupang') return 'coupang';
+  return normalized;
+}
+
+function mockSyncResult(type, payload = {}) {
+  return {
+    platform: normalizeSyncPlatform(payload.platform),
+    storeId: payload.storeId,
+    syncType: type,
+    message: `local frontend mock ${type} sync completed`,
+  };
+}
+
 async function getMockDashboardData() {
   const [summary, risks, todos, activities] = await Promise.all([
     mockApi.getDashboardSummary(),
@@ -121,6 +137,21 @@ const sourceMethods = {
     const result = await backendApi.getCustomerInquiries({ storeId: store.id, platform: params?.platform });
     const rows = withStoreName(adapters.list(result, adapters.customerInquiry).data, stores);
     return queryBackendRows(rows, params);
+  },
+  syncProductsMock: async (payload) => {
+    if (!isBackendSource) return mockSyncResult('products', payload);
+    const { store } = await resolveBackendStore(payload);
+    return backendApi.syncProductsMock({ storeId: store.id, platform: normalizeSyncPlatform(payload.platform) });
+  },
+  syncOrdersMock: async (payload) => {
+    if (!isBackendSource) return mockSyncResult('orders', payload);
+    const { store } = await resolveBackendStore(payload);
+    return backendApi.syncOrdersMock({ storeId: store.id, platform: normalizeSyncPlatform(payload.platform) });
+  },
+  syncCustomerInquiriesMock: async (payload) => {
+    if (!isBackendSource) return mockSyncResult('customerInquiries', payload);
+    const { store } = await resolveBackendStore(payload);
+    return backendApi.syncCustomerInquiriesMock({ storeId: store.id, platform: normalizeSyncPlatform(payload.platform) });
   },
   getSyncLogs: async (params) => {
     if (!isBackendSource) return mockApi.getOperationLogs(params);

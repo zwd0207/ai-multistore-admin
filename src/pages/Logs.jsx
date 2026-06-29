@@ -4,10 +4,12 @@ import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import InfoGrid from '../components/common/InfoGrid';
+import MockSyncPanel from '../components/common/MockSyncPanel';
 import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
@@ -44,6 +46,7 @@ const syncColumns = [
 
 export default function Logs() {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const { versions } = useSyncRefresh();
   const [query, setQuery] = useState({ keyword: '', module: '', actionType: '', operator: '', status: '', riskLevel: '', startDate: '', endDate: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
   const [result, setResult] = useState({ data: [], total: 0 });
@@ -89,7 +92,7 @@ export default function Logs() {
 
   useEffect(() => {
     loadSyncLogs();
-  }, [selectedStoreId, storeLoading, storeError]);
+  }, [selectedStoreId, storeLoading, storeError, versions.syncLogs]);
 
   const openDetail = async (row) => {
     setDetail(await mockApi.getOperationLogDetail(row.id));
@@ -111,6 +114,7 @@ export default function Logs() {
           <div><h2>Codex1 同步日志</h2><p>读取 `/api/v1/sync-logs`，原操作审计日志继续保留。</p></div>
           <span className="period-chip">共 {syncLogs.total} 条</span>
         </div>
+        <MockSyncPanel onSynced={loadSyncLogs} />
         {syncError ? <EmptyState title="同步日志加载失败" description={syncError} /> : <DataTable columns={syncColumns} rows={syncLogs.data || []} loading={syncLoading} />}
       </section>}
 

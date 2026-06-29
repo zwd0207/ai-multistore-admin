@@ -26,6 +26,7 @@ export default function ResourcePage({
   extraParams = {},
   reloadKey = '',
   onSaved,
+  extraActions,
 }) {
   const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
@@ -87,7 +88,7 @@ export default function ResourcePage({
   const reset = () => { const clean = { keyword: '', status: '', platform: '', page: 1, pageSize: 5 }; setDraftQuery(clean); setQuery(clean); };
 
   return <>
-    <PageHeader title={title} description={description} actions={<><button className="button ghost" onClick={load}>↻ 刷新</button>{readOnly ? <span className="period-chip">后端只读</span> : null}{canCreate ? <button className="button primary" onClick={() => openModal()}>＋ 新增{resourceName}</button> : null}</>} />
+    <PageHeader title={title} description={description} actions={<><button className="button ghost" onClick={load}>↻ 刷新</button>{extraActions}{readOnly ? <span className="period-chip">后端只读</span> : null}{canCreate ? <button className="button primary" onClick={() => openModal()}>＋ 新增{resourceName}</button> : null}</>} />
     <section className="content-card">
       <SearchBar value={draftQuery.keyword} onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })} onSearch={search} onReset={reset} placeholder={`搜索${resourceName}名称、编号或负责人`}>
         {platforms.length > 0 && <select value={draftQuery.platform} onChange={(e) => setDraftQuery({ ...draftQuery, platform: e.target.value })}><option value="">全部平台</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select>}
