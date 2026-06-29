@@ -77,6 +77,91 @@ Future integration notes:
 - Add API capability test records before real API integration.
 - Add token refresh workflow only after real Naver/Coupang API validation is explicitly approved.
 
+## ApiCapabilityCheck
+
+Table: `api_capability_checks`
+
+Main fields:
+
+```text
+id
+platform
+capability_key
+capability_name
+api_category
+endpoint_path
+method
+required_credential_type
+required_permission
+ordinary_store_supported
+test_status
+test_mode
+request_params_summary
+response_fields_summary
+error_codes_summary
+data_usefulness
+first_phase_candidate
+sales_source_type
+official_doc_url
+doc_checked_at
+notes
+last_checked_at
+created_at
+updated_at
+```
+
+Rules:
+
+- Records platform-level API capability definitions and docs/manual confirmation notes.
+- Does not bind to `store_id`; store-specific results live in `api_capability_test_results`.
+- `docs_only` means documentation or manual research only.
+- `tested_success` is a record status only and must not be described as full sync support.
+- `real_readonly` is a future planning value in this stage; no real read-only endpoint is implemented.
+- This table does not store API keys, secrets, tokens, or decrypted credential data.
+
+Future integration notes:
+
+- Link official Naver/Coupang documentation references before any real API implementation.
+- Add explicit real read-only test endpoints only after approval.
+
+## ApiCapabilityTestResult
+
+Table: `api_capability_test_results`
+
+Main fields:
+
+```text
+id
+store_id
+credential_id
+capability_id
+test_mode
+test_status
+http_status
+error_code
+permission_result
+rate_limit_summary
+response_fields_observed
+tested_at
+notes
+created_at
+```
+
+Rules:
+
+- Must bind to an existing `store_id`.
+- Must bind to an existing `capability_id`.
+- Can bind to `credential_id`; when provided, the credential must belong to the same store.
+- Credential platform must match capability platform.
+- Stores manual/docs/mock/sandbox result notes only in Phase 6B-1.
+- Does not decrypt credentials and does not store secret/token values.
+- `real_readonly` result creation is reserved for a future explicit read-only API test endpoint.
+
+Future integration notes:
+
+- Future real read-only tests should write a result record and a separate task/audit summary.
+- Failure records should preserve error code, permission reason, observed fields, and rate limit summary.
+
 ## PlatformLoginCredential
 
 Table: `platform_login_credentials`

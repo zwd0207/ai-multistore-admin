@@ -37,6 +37,7 @@ Stage 1F provides the backend foundation, secure credential base, mock data sync
 - Sales statistics service and endpoints
 - Dashboard summary endpoint
 - AI daily context endpoint with structured data only
+- API capability matrix backend records for docs-only/manual API ability planning
 - Device environment, email account, important email, and appeal case models
 - CRUD endpoints for device environments, email accounts, important emails, and appeal cases
 - Sync log service and read endpoint
@@ -214,6 +215,33 @@ encrypted_secret_key
 Internal decryption is restricted to `app.services.credential_service.get_decrypted_credential_for_internal_use`, intended for platform client initialization. Do not expose that decrypted result through API routes or logs.
 
 Credential deletion is currently a hard delete. A later stage can extend this to soft delete or status-based deactivation.
+
+## API Capability Matrix APIs
+
+Phase 6B-1 adds backend records for API capability planning only:
+
+```text
+GET    /api/v1/api-capabilities
+POST   /api/v1/api-capabilities
+GET    /api/v1/api-capabilities/{capability_id}
+PUT    /api/v1/api-capabilities/{capability_id}
+GET    /api/v1/api-capability-results
+POST   /api/v1/api-capability-results
+GET    /api/v1/api-capability-results/{result_id}
+```
+
+`api_capability_checks` records platform-level docs-only or manual API capability notes. It answers what an endpoint appears to provide and what permission may be required.
+
+`api_capability_test_results` records store and credential-level manual/docs/mock/sandbox notes. It answers whether a selected store/credential has a planning or future test record for that capability.
+
+Important limits:
+
+- This stage does not call Naver or Coupang.
+- This stage does not use real keys or refresh tokens.
+- This stage does not implement a real read-only test endpoint.
+- A docs-only capability record does not mean the selected store credential has been validated.
+- A `tested_success` status is a record status only and must not be described as full sync support.
+- Responses do not include API secrets, tokens, or encrypted credential values.
 
 ## Data Models
 

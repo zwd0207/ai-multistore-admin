@@ -1,6 +1,7 @@
 """SQLAlchemy models are registered from this package."""
 
 from app.models.api_credential import ApiCredential
+from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
 from app.models.appeal_case import AppealCase
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.device_environment import DeviceEnvironment
@@ -14,6 +15,8 @@ from app.models.sync_log import SyncLog
 
 __all__ = [
     "ApiCredential",
+    "ApiCapabilityCheck",
+    "ApiCapabilityTestResult",
     "AppealCase",
     "CustomerInquiry",
     "DeviceEnvironment",

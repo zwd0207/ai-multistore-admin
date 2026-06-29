@@ -257,6 +257,104 @@ Response example:
 
 Common errors: `STORE_NOT_FOUND`, `PLATFORM_NOT_SUPPORTED`, `PLATFORM_LOGIN_NOT_FOUND`, `EMAIL_ACCOUNT_NOT_FOUND`, `EMAIL_ACCOUNT_STORE_MISMATCH`, `DEVICE_ENVIRONMENT_NOT_FOUND`, `DEVICE_ENVIRONMENT_STORE_MISMATCH`, `ENCRYPTION_KEY_MISSING`, `ENCRYPTION_KEY_INVALID`, `VALIDATION_ERROR`.
 
+## API Capabilities
+
+API capability records are platform-level docs-only or manual planning records. They do not prove that a selected store credential can call an endpoint. This stage does not call Naver or Coupang, does not use real keys, and does not create real sync results.
+
+| Method | Path | Query | Body | store_id | Sensitive Fields |
+|---|---|---|---|---:|---|
+| GET | `/api/v1/api-capabilities` | `platform`, `api_category`, `test_status`, `test_mode`, `first_phase_candidate`, `sales_source_type` | None | No | No |
+| POST | `/api/v1/api-capabilities` | None | Capability payload | No | No |
+| GET | `/api/v1/api-capabilities/{capability_id}` | None | None | No | No |
+| PUT | `/api/v1/api-capabilities/{capability_id}` | None | Partial capability payload | No | No |
+
+Create body:
+
+```json
+{
+  "platform": "coupang",
+  "capability_key": "orders.list",
+  "capability_name": "Coupang order list docs-only check",
+  "api_category": "orders",
+  "endpoint_path": "/v2/providers/openapi/apis/api/v4/vendors/{vendorId}/ordersheets",
+  "method": "GET",
+  "required_credential_type": "vendor_id + access_key + secret_key",
+  "required_permission": "manual permission note",
+  "ordinary_store_supported": "unknown",
+  "test_status": "planned",
+  "test_mode": "docs_only",
+  "request_params_summary": "createdAtFrom, createdAtTo",
+  "response_fields_summary": "order id, status, amount fields need future readonly confirmation",
+  "error_codes_summary": "permission and throttling codes need future readonly confirmation",
+  "data_usefulness": "high",
+  "first_phase_candidate": true,
+  "sales_source_type": "order-derived",
+  "official_doc_url": "https://example.invalid/docs-placeholder",
+  "notes": "Platform-level record only."
+}
+```
+
+Supported `test_status` values:
+
+```text
+not_tested
+planned
+tested_success
+tested_failed
+unavailable
+permission_required
+```
+
+Supported `test_mode` values:
+
+```text
+docs_only
+manual
+mock
+sandbox
+real_readonly
+```
+
+`real_readonly` is a future marker for platform-level capability planning only in this stage. There is no real readonly test endpoint in Phase 6B-1.
+
+## API Capability Test Results
+
+API capability test results are store and optional credential-level manual records. They can bind a store, an API credential, and a platform capability. This stage stores manual/docs/mock/sandbox notes only and does not decrypt API credentials.
+
+| Method | Path | Query | Body | store_id | Sensitive Fields |
+|---|---|---|---|---:|---|
+| GET | `/api/v1/api-capability-results` | `store_id`, `credential_id`, `capability_id`, `test_status`, `test_mode` | None | Optional | No secret or token values |
+| POST | `/api/v1/api-capability-results` | None | Result payload | Body | No secret or token values |
+| GET | `/api/v1/api-capability-results/{result_id}` | None | None | No | No secret or token values |
+
+Create body:
+
+```json
+{
+  "store_id": 1,
+  "credential_id": 1,
+  "capability_id": 1,
+  "test_mode": "manual",
+  "test_status": "planned",
+  "http_status": null,
+  "error_code": null,
+  "permission_result": "Manual planning record only.",
+  "rate_limit_summary": null,
+  "response_fields_observed": "No real response observed.",
+  "notes": "No real Naver/Coupang API call was made."
+}
+```
+
+Binding rules:
+
+- `store_id` must exist.
+- `credential_id`, when provided, must exist and belong to the same store.
+- `capability_id` must exist.
+- Credential platform must match capability platform.
+- `real_readonly` test results are reserved for a future explicitly approved read-only API test endpoint.
+
+Common errors: `API_CAPABILITY_NOT_FOUND`, `API_CAPABILITY_RESULT_NOT_FOUND`, `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `CREDENTIAL_STORE_MISMATCH`, `CREDENTIAL_PLATFORM_MISMATCH`, `INVALID_API_CAPABILITY_FILTER`, `VALIDATION_ERROR`.
+
 ## Sync Logs
 
 | Method | Path | Query | Body | store_id | Sensitive Fields |

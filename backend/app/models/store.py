@@ -79,3 +79,8 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    api_capability_test_results = relationship(
+        "ApiCapabilityTestResult",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )

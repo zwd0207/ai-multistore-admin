@@ -1,7 +1,10 @@
 import subprocess
 import sys
 import os
+import uuid
 from pathlib import Path
+
+from cryptography.fernet import Fernet
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -10,6 +13,8 @@ PYTHON = sys.executable
 
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
 
 GIT_CMD_DIR = Path("C:/Program Files/Git/cmd")
 if GIT_CMD_DIR.exists():
@@ -35,6 +40,10 @@ EXPECTED_API_PATHS = {
     "/api/v1/stats/sales/by-date",
     "/api/v1/dashboard/summary",
     "/api/v1/ai/daily-context",
+    "/api/v1/api-capabilities",
+    "/api/v1/api-capabilities/{capability_id}",
+    "/api/v1/api-capability-results",
+    "/api/v1/api-capability-results/{result_id}",
     "/api/v1/device-environments",
     "/api/v1/device-environments/{environment_id}",
     "/api/v1/email-accounts",
@@ -75,6 +84,11 @@ EXPECTED_CREDENTIAL_COLUMNS = {
     "auth_status",
     "last_tested_at",
     "api_remark",
+}
+
+EXPECTED_API_CAPABILITY_TABLES = {
+    "api_capability_checks",
+    "api_capability_test_results",
 }
 
 
@@ -152,8 +166,9 @@ def verify_api_credential_schema_and_security() -> None:
     assert not missing, f"Missing api_credentials columns: {missing}"
 
     with TestClient(app) as client:
+        suffix = uuid.uuid4().hex[:8]
         store = client.post("/api/v1/stores", json={
-            "name": "Phase 6A-3 Credential Verify Store",
+            "name": f"Phase 6A-3 Credential Verify Store {suffix}",
             "platform": "naver",
             "country": "KR",
             "language": "ko-KR",
@@ -219,6 +234,206 @@ def verify_api_credential_schema_and_security() -> None:
     print("api credential schema/security: ok")
 
 
+def verify_api_capabilities() -> None:
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.main import app
+
+    with SessionLocal() as db:
+        tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
+    missing_tables = sorted(EXPECTED_API_CAPABILITY_TABLES - tables)
+    assert not missing_tables, f"Missing API capability tables: {missing_tables}"
+
+    with TestClient(app) as client:
+        suffix = uuid.uuid4().hex[:8]
+        store = client.post("/api/v1/stores", json={
+            "name": f"Phase 6B-1 Capability Verify Store {suffix}",
+            "platform": "naver",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        }).json()["data"]
+        other_store = client.post("/api/v1/stores", json={
+            "name": f"Phase 6B-1 Capability Other Store {suffix}",
+            "platform": "coupang",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        }).json()["data"]
+
+        naver_credential = client.post("/api/v1/credentials", json={
+            "store_id": store["id"],
+            "platform": "naver",
+            "credential_name": "Phase 6B-1 Naver credential",
+            "client_id": "phase-6b-client-id",
+            "access_key": "phase-6b-access-key",
+            "secret_key": "phase-6b-secret-key",
+            "access_token": "phase-6b-access-token",
+            "refresh_token": "phase-6b-refresh-token",
+            "market": "KR",
+            "auth_status": "needs_test",
+        })
+        assert naver_credential.status_code == 201, naver_credential.text
+        credential_id = naver_credential.json()["data"]["id"]
+        assert "phase-6b-secret-key" not in str(naver_credential.json())
+        assert "phase-6b-access-token" not in str(naver_credential.json())
+
+        coupang_credential = client.post("/api/v1/credentials", json={
+            "store_id": other_store["id"],
+            "platform": "coupang",
+            "credential_name": "Phase 6B-1 Coupang credential",
+            "vendor_id": "phase-6b-vendor",
+            "access_key": "phase-6b-coupang-access",
+            "secret_key": "phase-6b-coupang-secret",
+            "market": "KR",
+            "auth_status": "needs_test",
+        })
+        assert coupang_credential.status_code == 201, coupang_credential.text
+        coupang_credential_id = coupang_credential.json()["data"]["id"]
+
+        coupang_capability = client.post("/api/v1/api-capabilities", json={
+            "platform": "coupang",
+            "capability_key": "orders.list",
+            "capability_name": "Coupang order list docs-only check",
+            "api_category": "orders",
+            "endpoint_path": "/v2/providers/openapi/apis/api/v4/vendors/{vendorId}/ordersheets",
+            "method": "GET",
+            "required_credential_type": "vendor_id + access_key + secret_key",
+            "required_permission": "Local docs/manual record only",
+            "ordinary_store_supported": "unknown",
+            "test_status": "planned",
+            "test_mode": "docs_only",
+            "request_params_summary": "createdAtFrom, createdAtTo",
+            "response_fields_summary": "order id, status, amount fields need future readonly confirmation",
+            "error_codes_summary": "permission and throttling codes need future readonly confirmation",
+            "data_usefulness": "high",
+            "first_phase_candidate": True,
+            "sales_source_type": "order-derived",
+            "official_doc_url": "https://example.invalid/coupang-doc-placeholder",
+            "notes": "Platform-level docs-only record; not a store credential validation.",
+        })
+        assert coupang_capability.status_code == 201, coupang_capability.text
+        coupang_capability_id = coupang_capability.json()["data"]["id"]
+
+        naver_capability = client.post("/api/v1/api-capabilities", json={
+            "platform": "naver",
+            "capability_key": "products.list",
+            "capability_name": "Naver product list docs-only check",
+            "api_category": "products",
+            "endpoint_path": "/external/v1/products",
+            "method": "GET",
+            "required_credential_type": "client_id + client_secret + token",
+            "ordinary_store_supported": "unknown",
+            "test_status": "not_tested",
+            "test_mode": "manual",
+            "data_usefulness": "high",
+            "first_phase_candidate": True,
+            "sales_source_type": "not_applicable",
+            "notes": "Manual capability note only; no real API request is performed.",
+        })
+        assert naver_capability.status_code == 201, naver_capability.text
+        naver_data = naver_capability.json()["data"]
+
+        by_platform = client.get("/api/v1/api-capabilities?platform=naver")
+        assert by_platform.status_code == 200, by_platform.text
+        assert by_platform.json()["data"]["total"] >= 1
+        assert all(item["platform"] == "naver" for item in by_platform.json()["data"]["items"])
+
+        by_category = client.get("/api/v1/api-capabilities?api_category=orders")
+        assert by_category.status_code == 200, by_category.text
+        assert any(item["capability_key"] == "orders.list" for item in by_category.json()["data"]["items"])
+
+        by_status = client.get("/api/v1/api-capabilities?test_status=planned")
+        assert by_status.status_code == 200, by_status.text
+        assert any(item["id"] == coupang_capability_id for item in by_status.json()["data"]["items"])
+
+        updated = client.put(f"/api/v1/api-capabilities/{naver_data['id']}", json={
+            "test_status": "planned",
+            "response_fields_summary": "Product fields need future readonly confirmation.",
+            "last_checked_at": "2026-06-30T00:00:00+00:00",
+        })
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["data"]["test_status"] == "planned"
+
+        result = client.post("/api/v1/api-capability-results", json={
+            "store_id": store["id"],
+            "credential_id": credential_id,
+            "capability_id": naver_data["id"],
+            "test_mode": "manual",
+            "test_status": "planned",
+            "permission_result": "Manual planning record only.",
+            "response_fields_observed": "No real response observed.",
+            "notes": "No real Naver/Coupang API call was made.",
+        })
+        assert result.status_code == 201, result.text
+        result_text = str(result.json())
+        for forbidden in [
+            "phase-6b-access-key",
+            "phase-6b-secret-key",
+            "phase-6b-access-token",
+            "phase-6b-refresh-token",
+            "encrypted_access_key",
+            "encrypted_secret_key",
+            "encrypted_access_token",
+            "encrypted_refresh_token",
+        ]:
+            assert forbidden not in result_text, result_text
+
+        missing_store = client.post("/api/v1/api-capability-results", json={
+            "store_id": 999999,
+            "credential_id": credential_id,
+            "capability_id": naver_data["id"],
+            "test_mode": "manual",
+            "test_status": "planned",
+        })
+        assert missing_store.status_code == 404, missing_store.text
+        assert missing_store.json()["error_code"] == "STORE_NOT_FOUND"
+
+        missing_credential = client.post("/api/v1/api-capability-results", json={
+            "store_id": store["id"],
+            "credential_id": 999999,
+            "capability_id": naver_data["id"],
+            "test_mode": "manual",
+            "test_status": "planned",
+        })
+        assert missing_credential.status_code == 404, missing_credential.text
+        assert missing_credential.json()["error_code"] == "CREDENTIAL_NOT_FOUND"
+
+        missing_capability = client.post("/api/v1/api-capability-results", json={
+            "store_id": store["id"],
+            "credential_id": credential_id,
+            "capability_id": 999999,
+            "test_mode": "manual",
+            "test_status": "planned",
+        })
+        assert missing_capability.status_code == 404, missing_capability.text
+        assert missing_capability.json()["error_code"] == "API_CAPABILITY_NOT_FOUND"
+
+        platform_mismatch = client.post("/api/v1/api-capability-results", json={
+            "store_id": other_store["id"],
+            "credential_id": coupang_credential_id,
+            "capability_id": naver_data["id"],
+            "test_mode": "manual",
+            "test_status": "planned",
+        })
+        assert platform_mismatch.status_code == 400, platform_mismatch.text
+        assert platform_mismatch.json()["error_code"] == "CREDENTIAL_PLATFORM_MISMATCH"
+
+        reserved_real_readonly = client.post("/api/v1/api-capability-results", json={
+            "store_id": store["id"],
+            "credential_id": credential_id,
+            "capability_id": naver_data["id"],
+            "test_mode": "real_readonly",
+            "test_status": "planned",
+        })
+        assert reserved_real_readonly.status_code == 400, reserved_real_readonly.text
+        assert reserved_real_readonly.json()["error_code"] == "REAL_READONLY_TEST_RESERVED"
+
+    print("api capabilities docs/manual base: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -232,13 +447,17 @@ def verify_git_tracking() -> None:
     allowed_prefixes = (
         " M backend/README.md",
         " M backend/app/api/v1/router.py",
-        " M backend/app/models/api_credential.py",
         " M backend/app/models/__init__.py",
+        " M backend/app/models/api_credential.py",
         " M backend/app/models/store.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/services/credential_service.py",
         " M backend/docs/",
         " M backend/scripts/verify_all.py",
+        "?? backend/app/api/v1/endpoints/api_capabilities.py",
+        "?? backend/app/models/api_capability.py",
+        "?? backend/app/schemas/api_capability.py",
+        "?? backend/app/services/api_capability_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
         "?? backend/app/schemas/platform_login.py",
@@ -268,6 +487,7 @@ def main() -> None:
     verify_stage_scripts()
     verify_openapi()
     verify_api_credential_schema_and_security()
+    verify_api_capabilities()
     verify_git_tracking()
     verify_docs_no_real_secrets()
     print("verify_all: ok")
