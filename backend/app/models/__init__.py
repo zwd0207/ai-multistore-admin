@@ -7,6 +7,7 @@ from app.models.device_environment import DeviceEnvironment
 from app.models.email_account import EmailAccount
 from app.models.important_email import ImportantEmail
 from app.models.order import Order
+from app.models.platform_login_credential import PlatformLoginCredential
 from app.models.product import Product
 from app.models.store import Store
 from app.models.sync_log import SyncLog
@@ -19,6 +20,7 @@ __all__ = [
     "EmailAccount",
     "ImportantEmail",
     "Order",
+    "PlatformLoginCredential",
     "Product",
     "Store",
     "SyncLog",

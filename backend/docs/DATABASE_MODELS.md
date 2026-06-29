@@ -65,6 +65,43 @@ Future integration notes:
 - Add per-platform credential field mapping.
 - Add token expiry, refresh status, and audit trail for real APIs.
 
+## PlatformLoginCredential
+
+Table: `platform_login_credentials`
+
+Main fields:
+
+```text
+id
+store_id
+platform
+login_label
+login_account
+encrypted_login_password
+email_account_id
+device_environment_id
+login_status
+last_login_check_at
+remark
+created_at
+updated_at
+```
+
+Rules:
+
+- Must bind to `store_id`.
+- Stores manual Naver SmartStore / Coupang Wing backend login metadata only.
+- Login password is encrypted with Fernet.
+- Public APIs return `hasLoginPassword`, never plaintext or encrypted password.
+- `email_account_id` and `device_environment_id` must belong to the same store when provided.
+- `login_status` is local configuration status only; this stage does not perform real platform login checks.
+
+Future integration notes:
+
+- Add login check events if a future manual or automated verification workflow is approved.
+- Add multi-factor verification metadata without storing verification codes.
+- Add binding history if device reuse risk analysis is needed.
+
 ## SyncLog
 
 Table: `sync_logs`
@@ -331,4 +368,3 @@ Rules:
 Future integration notes:
 
 - Add evidence file metadata, workflow events, and platform-specific case status mapping.
-

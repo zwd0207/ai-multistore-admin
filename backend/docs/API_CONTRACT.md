@@ -48,10 +48,12 @@ Sensitive fields are not returned by public APIs:
 ```text
 access_key
 secret_key
+login_password
 password_or_token
 encrypted_password_or_token
 encrypted_access_key
 encrypted_secret_key
+encrypted_login_password
 full phone numbers
 full addresses
 ID numbers
@@ -170,6 +172,59 @@ Response example:
 ```
 
 Common errors: `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `ENCRYPTION_KEY_MISSING`, `ENCRYPTION_KEY_INVALID`, `VALIDATION_ERROR`.
+
+## Platform Logins
+
+Platform login credentials are for manual Naver SmartStore / Coupang Wing backend login records only. They are not API keys and this stage does not perform real platform login checks.
+
+| Method | Path | Query | Body | store_id | Sensitive Fields |
+|---|---|---|---|---:|---|
+| GET | `/api/v1/platform-logins` | `store_id`, `page`, `page_size` | None | Required | No password or encrypted password |
+| POST | `/api/v1/platform-logins` | None | Platform login payload | Body | Input password only |
+| GET | `/api/v1/platform-logins/{login_id}` | None | None | No | No password or encrypted password |
+| PUT | `/api/v1/platform-logins/{login_id}` | None | Partial platform login payload | Optional body | Input password only |
+
+Create body:
+
+```json
+{
+  "store_id": 1,
+  "platform": "naver",
+  "login_label": "Naver SmartStore 后台登录",
+  "login_account": "operator@example.com",
+  "login_password": "test password",
+  "email_account_id": 1,
+  "device_environment_id": 1,
+  "login_status": "unknown",
+  "remark": "本地保存人工登录信息，不进行真实登录校验。"
+}
+```
+
+Response example:
+
+```json
+{
+  "success": true,
+  "message": "created",
+  "data": {
+    "id": 1,
+    "store_id": 1,
+    "platform": "naver",
+    "login_label": "Naver SmartStore 后台登录",
+    "login_account": "operator@example.com",
+    "email_account_id": 1,
+    "device_environment_id": 1,
+    "login_status": "unknown",
+    "last_login_check_at": null,
+    "remark": "本地保存人工登录信息，不进行真实登录校验。",
+    "hasLoginPassword": true,
+    "created_at": "2026-06-30T00:00:00",
+    "updated_at": "2026-06-30T00:00:00"
+  }
+}
+```
+
+Common errors: `STORE_NOT_FOUND`, `PLATFORM_NOT_SUPPORTED`, `PLATFORM_LOGIN_NOT_FOUND`, `EMAIL_ACCOUNT_NOT_FOUND`, `EMAIL_ACCOUNT_STORE_MISMATCH`, `DEVICE_ENVIRONMENT_NOT_FOUND`, `DEVICE_ENVIRONMENT_STORE_MISMATCH`, `ENCRYPTION_KEY_MISSING`, `ENCRYPTION_KEY_INVALID`, `VALIDATION_ERROR`.
 
 ## Sync Logs
 
@@ -488,4 +543,3 @@ Create body:
   "action_required": "准备采购表、销售明细、沟通邮件"
 }
 ```
-

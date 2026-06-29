@@ -34,6 +34,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    platform_login_credentials = relationship(
+        "PlatformLoginCredential",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     sync_logs = relationship(
         "SyncLog",
         back_populates="store",

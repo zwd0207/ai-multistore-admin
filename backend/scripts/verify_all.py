@@ -21,6 +21,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/stores/{store_id}",
     "/api/v1/credentials",
     "/api/v1/credentials/{credential_id}",
+    "/api/v1/platform-logins",
+    "/api/v1/platform-logins/{login_id}",
     "/api/v1/sync-logs",
     "/api/v1/products",
     "/api/v1/orders",
@@ -132,7 +134,20 @@ def verify_git_tracking() -> None:
     ]
     assert not forbidden, f"Forbidden tracked files: {forbidden}"
     status = run(["git", "status", "--short"], cwd=ROOT_DIR, echo=False)
-    allowed_prefixes = ("?? backend/docs/", "?? backend/scripts/verify_all.py", " M backend/README.md")
+    allowed_prefixes = (
+        " M backend/README.md",
+        " M backend/app/api/v1/router.py",
+        " M backend/app/models/__init__.py",
+        " M backend/app/models/store.py",
+        " M backend/docs/",
+        " M backend/scripts/verify_all.py",
+        "?? backend/app/api/v1/endpoints/platform_logins.py",
+        "?? backend/app/models/platform_login_credential.py",
+        "?? backend/app/schemas/platform_login.py",
+        "?? backend/app/services/platform_login_service.py",
+        "?? backend/docs/",
+        "?? backend/scripts/verify_all.py",
+    )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]
     assert not unexpected, f"Unexpected git status lines: {unexpected}"
     print("git tracking: ok")

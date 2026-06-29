@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     health,
     important_emails,
     orders,
+    platform_logins,
     products,
     stats,
     stores,
@@ -29,6 +30,7 @@ api_router.include_router(email_accounts.router)
 api_router.include_router(important_emails.router)
 api_router.include_router(appeal_cases.router)
 api_router.include_router(credentials.router)
+api_router.include_router(platform_logins.router)
 api_router.include_router(stores.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
