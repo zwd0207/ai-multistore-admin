@@ -88,3 +88,36 @@ src/
 ## 编码
 
 HTML 明确声明 UTF-8，源码文件均以 UTF-8 保存。字体栈包含 `Microsoft YaHei`、`Noto Sans KR` 和 `Malgun Gothic`，用于兼容中文与韩文。
+
+## Phase 5C - Store Context and Remaining Read-only Integration
+
+Current formal integration target:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8012/api/v1
+VITE_DATA_SOURCE=backend
+```
+
+Do not switch this phase back to port 8011. Codex1 Swagger is available at `http://127.0.0.1:8012/docs`.
+
+Phase 5C adds global store context in `src/context/StoreContext.jsx` and the topbar `StoreSelector`. The selected store id is persisted as `codex2.selectedStoreId` in `localStorage`; backend read requests that depend on a store explicitly pass `storeId` through `dataProvider`, and `backendApi` converts it to Codex1 `store_id`.
+
+Updated Phase 5B backend reads:
+
+- Dashboard summary: `/dashboard/summary?store_id={selectedStoreId}`
+- Products: `/products?store_id={selectedStoreId}`
+- Orders: `/orders?store_id={selectedStoreId}`
+- Customer inquiries: `/customer-inquiries?store_id={selectedStoreId}`
+- Sync logs: `/sync-logs?store_id={selectedStoreId}`
+- AI daily context: `/ai/daily-context?store_id={selectedStoreId}`
+
+New Phase 5C read-only backend modules:
+
+- Devices and Environment: `/device-environments?store_id={selectedStoreId}`
+- Emails: `/email-accounts?store_id={selectedStoreId}` and `/important-emails?store_id={selectedStoreId}`
+- Appeals: `/appeal-cases?store_id={selectedStoreId}`
+- Accounts / Credentials: `/credentials?store_id={selectedStoreId}`
+
+Credentials and email account pages show only configuration states and never show credential values. Codex1 snake_case response fields stay centralized in `src/services/adapters.js`; page JSX should use adapted frontend fields.
+
+Verification record: see `PHASE_5C_STORE_CONTEXT.md`.

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import StoreSelector from '../components/common/StoreSelector';
 
 const menuItems = [
-  ['◫', '总览', '/dashboard'],
+  ['总', '总览', '/dashboard'],
   ['店', '店铺管理', '/stores'],
   ['品', '商品管理', '/products'],
   ['单', '订单管理', '/orders'],
@@ -19,6 +20,7 @@ const menuItems = [
 
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
+
   return (
     <div className={`admin-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
@@ -28,19 +30,27 @@ export default function AdminLayout() {
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
           {menuItems.map(([icon, label, path]) => (
-            <NavLink key={path} to={path} className={({ isActive }) => isActive ? 'active' : ''} title={label}>
+            <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')} title={label}>
               <span className="menu-icon">{icon}</span>{!collapsed && <span>{label}</span>}
             </NavLink>
           ))}
         </nav>
         <button className="collapse-button" onClick={() => setCollapsed((value) => !value)}>
-          {collapsed ? '›' : '‹ 收起菜单'}
+          {collapsed ? '展开' : '收起菜单'}
         </button>
       </aside>
       <section className="workspace">
         <header className="topbar">
-          <div><strong>AI 多店铺运营与环境管理系统</strong><span className="environment-chip">演示环境</span></div>
-          <div className="topbar-actions"><span className="notification">3</span><span className="avatar">管</span><span><strong>管理员</strong><small>系统管理员</small></span></div>
+          <div>
+            <strong>AI 多店铺运营与环境管理系统</strong>
+            <span className="environment-chip">演示环境</span>
+            <StoreSelector />
+          </div>
+          <div className="topbar-actions">
+            <span className="notification">3</span>
+            <span className="avatar">管</span>
+            <span><strong>管理员</strong><small>系统管理员</small></span>
+          </div>
         </header>
         <main className="main-content"><Outlet /></main>
       </section>

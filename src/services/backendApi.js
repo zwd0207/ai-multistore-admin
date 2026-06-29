@@ -41,6 +41,7 @@ export const backendApi = {
   getEmailAccounts: (params) => getData('/email-accounts', params),
   getImportantEmails: (params) => getData('/important-emails', params),
   getAppealCases: (params) => getData('/appeal-cases', params),
+  getCredentials: (params) => getData('/credentials', params),
 };
 
 export { getData, normalizeParams };

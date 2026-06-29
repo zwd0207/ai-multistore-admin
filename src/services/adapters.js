@@ -201,6 +201,7 @@ export function adaptAppealCase(item = {}) {
     platform: item.platform,
     type: item.case_type,
     title: item.case_title,
+    name: item.case_title,
     status: item.case_status,
     caseNo: item.external_case_id,
     deadlineAt: item.deadline_at,
@@ -211,6 +212,23 @@ export function adaptAppealCase(item = {}) {
     relatedProductId: item.related_product_id,
     submittedAt: item.submitted_at,
     resolvedAt: item.resolved_at,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export function adaptCredential(item = {}) {
+  return {
+    id: item.id,
+    storeId: item.store_id,
+    platform: adaptPlatform(item.platform),
+    name: item.credential_name,
+    credentialName: item.credential_name,
+    status: item.status,
+    hasAccessKey: Boolean(item.has_access_key),
+    hasSecretKey: Boolean(item.has_secret_key),
+    accessKeyStatus: item.has_access_key ? '已配置' : '未配置',
+    secretKeyStatus: item.has_secret_key ? '已配置' : '未配置',
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
@@ -311,6 +329,7 @@ export const adapters = {
   emailAccount: adaptEmailAccount,
   importantEmail: adaptImportantEmail,
   appealCase: adaptAppealCase,
+  credential: adaptCredential,
   dashboardSummary: adaptDashboardSummary,
   aiDailyContext: adaptAiDailyContext,
   list: adaptList,

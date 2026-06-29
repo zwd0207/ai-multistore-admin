@@ -43,9 +43,7 @@ async function getBackendStores() {
 async function resolveBackendStore(params = {}) {
   const stores = await getBackendStores();
   const requestedId = params.storeId ?? params.store_id;
-  const store = requestedId
-    ? stores.find((item) => String(item.id) === String(requestedId))
-    : stores[0];
+  const store = requestedId ? stores.find((item) => String(item.id) === String(requestedId)) : null;
   if (!store) throw new Error('Codex1 后端暂无可用店铺，请先创建或导入店铺数据');
   return { store, stores };
 }
@@ -115,19 +113,38 @@ const sourceMethods = {
   },
   getDeviceEnvironments: async (params) => {
     if (!isBackendSource) return mockApi.getEnvironments(params);
-    return adapters.list(await backendApi.getDeviceEnvironments(params), adapters.deviceEnvironment);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getDeviceEnvironments({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.deviceEnvironment).data, stores);
+    return queryBackendRows(rows, params);
   },
   getEmailAccounts: async (params) => {
     if (!isBackendSource) return mockApi.getEmails(params);
-    return adapters.list(await backendApi.getEmailAccounts(params), adapters.emailAccount);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getEmailAccounts({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.emailAccount).data, stores);
+    return queryBackendRows(rows, params);
   },
   getImportantEmails: async (params) => {
     if (!isBackendSource) return mockApi.getRecentEmails(params);
-    return adapters.list(await backendApi.getImportantEmails(params), adapters.importantEmail);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getImportantEmails({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.importantEmail).data, stores);
+    return queryBackendRows(rows, params);
   },
   getAppealCases: async (params) => {
     if (!isBackendSource) return mockApi.getAppeals(params);
-    return adapters.list(await backendApi.getAppealCases(params), adapters.appealCase);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getAppealCases({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.appealCase).data, stores);
+    return queryBackendRows(rows, params);
+  },
+  getCredentials: async (params) => {
+    if (!isBackendSource) return mockApi.getAccounts(params);
+    const { store, stores } = await resolveBackendStore(params);
+    const result = await backendApi.getCredentials({ ...params, storeId: store.id });
+    const rows = withStoreName(adapters.list(result, adapters.credential).data, stores);
+    return queryBackendRows(rows, params);
   },
   getAiDailyContext: async (params) => {
     if (!isBackendSource) return null;

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback, useEffect, useMemo, useState,
+} from 'react';
 import DataTable from './DataTable';
 import EmptyState from './EmptyState';
 import FormField from './FormField';
@@ -7,7 +9,7 @@ import PageHeader from './PageHeader';
 import Pagination from './Pagination';
 import SearchBar from './SearchBar';
 
-export default function ResourcePage({ title, description, resourceName, api, columns, fields, statuses, platforms = [], initialForm, readOnly = false }) {
+export default function ResourcePage({ title, description, resourceName, api, columns, fields, statuses, platforms = [], initialForm, readOnly = false, extraParams = {}, reloadKey = '' }) {
   const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
   const [result, setResult] = useState({ data: [], total: 0 });
@@ -16,19 +18,21 @@ export default function ResourcePage({ title, description, resourceName, api, co
   const [form, setForm] = useState(initialForm);
   const [errors, setErrors] = useState({});
   const [loadError, setLoadError] = useState('');
+  const extraParamsKey = JSON.stringify(extraParams);
+  const stableExtraParams = useMemo(() => extraParams, [extraParamsKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
-      setResult(await api.list(query));
+      setResult(await api.list({ ...query, ...stableExtraParams }));
     } catch (error) {
       setResult({ data: [], total: 0, page: query.page, pageSize: query.pageSize });
       setLoadError(error.message || `${resourceName}数据加载失败`);
     } finally {
       setLoading(false);
     }
-  }, [api, query]);
+  }, [api, query, stableExtraParams, reloadKey, resourceName]);
   useEffect(() => { load(); }, [load]);
 
   const openModal = (record = null) => {

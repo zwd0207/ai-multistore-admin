@@ -8,6 +8,7 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
@@ -42,6 +43,7 @@ const syncColumns = [
 ];
 
 export default function Logs() {
+  const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [query, setQuery] = useState({ keyword: '', module: '', actionType: '', operator: '', status: '', riskLevel: '', startDate: '', endDate: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
   const [result, setResult] = useState({ data: [], total: 0 });
@@ -67,10 +69,16 @@ export default function Logs() {
 
   const loadSyncLogs = async () => {
     if (!isBackendSource) return;
+    if (storeLoading) return;
     setSyncLoading(true);
     setSyncError('');
     try {
-      setSyncLogs(await dataProvider.getSyncLogs({ page: 1, pageSize: 10 }));
+      if (storeError) throw new Error(storeError);
+      if (!selectedStoreId) {
+        setSyncLogs({ data: [], total: 0 });
+        return;
+      }
+      setSyncLogs(await dataProvider.getSyncLogs({ storeId: selectedStoreId, page: 1, pageSize: 10 }));
     } catch (error) {
       setSyncLogs({ data: [], total: 0 });
       setSyncError(error.message || '同步日志加载失败');
@@ -81,7 +89,7 @@ export default function Logs() {
 
   useEffect(() => {
     loadSyncLogs();
-  }, []);
+  }, [selectedStoreId, storeLoading, storeError]);
 
   const openDetail = async (row) => {
     setDetail(await mockApi.getOperationLogDetail(row.id));
