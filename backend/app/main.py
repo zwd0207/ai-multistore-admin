@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.v1.router import api_router
 from app.config import get_settings
+from app.core.handlers import register_exception_handlers
 from app.database import init_db
 from app.routers import health
 
@@ -26,6 +28,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    register_exception_handlers(app)
+    app.include_router(api_router)
     app.include_router(health.router, prefix=settings.api_prefix)
 
     @app.get("/", tags=["root"])
