@@ -53,6 +53,8 @@ password_or_token
 encrypted_password_or_token
 encrypted_access_key
 encrypted_secret_key
+encrypted_access_token
+encrypted_refresh_token
 encrypted_login_password
 full phone numbers
 full addresses
@@ -141,11 +143,19 @@ Create body:
   "store_id": 1,
   "platform": "naver",
   "credential_name": "Naver mock credential",
+  "vendor_id": null,
+  "client_id": "naver-client-id",
   "access_key": "test access key",
   "secret_key": "test secret key",
+  "access_token": "test access token",
+  "refresh_token": "test refresh token",
+  "token_expires_at": "2026-12-31T00:00:00+00:00",
+  "market": "KR",
+  "auth_status": "configured",
   "extra_config": {
     "allowed_ip": "127.0.0.1"
   },
+  "api_remark": "Local configuration only. No real API validation is performed.",
   "status": "active"
 }
 ```
@@ -161,14 +171,35 @@ Response example:
     "store_id": 1,
     "platform": "naver",
     "credential_name": "Naver mock credential",
+    "vendor_id": null,
+    "client_id": "naver-client-id",
+    "token_expires_at": "2026-12-31T00:00:00+00:00",
+    "market": "KR",
+    "auth_status": "configured",
+    "last_tested_at": null,
+    "api_remark": "Local configuration only. No real API validation is performed.",
     "extra_config": {},
     "status": "active",
     "has_access_key": true,
     "has_secret_key": true,
+    "has_access_token": true,
+    "has_refresh_token": true,
     "created_at": "2026-06-29T00:00:00",
     "updated_at": "2026-06-29T00:00:00"
   }
 }
+```
+
+`auth_status` is a local configuration or future test status only. This stage does not perform real Naver or Coupang API validation and does not refresh tokens.
+
+Supported `auth_status` values:
+
+```text
+not_configured
+configured
+needs_test
+test_failed
+test_passed
 ```
 
 Common errors: `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `ENCRYPTION_KEY_MISSING`, `ENCRYPTION_KEY_INVALID`, `VALIDATION_ERROR`.

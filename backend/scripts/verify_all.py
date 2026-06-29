@@ -65,6 +65,18 @@ FORBIDDEN_DOC_PATTERNS = [
     "4111-1111-1111-1111",
 ]
 
+EXPECTED_CREDENTIAL_COLUMNS = {
+    "vendor_id",
+    "client_id",
+    "encrypted_access_token",
+    "encrypted_refresh_token",
+    "token_expires_at",
+    "market",
+    "auth_status",
+    "last_tested_at",
+    "api_remark",
+}
+
 
 def run(command: list[str], cwd: Path = BACKEND_DIR, echo: bool = True) -> str:
     result = subprocess.run(
@@ -124,6 +136,89 @@ def verify_openapi() -> None:
     print("openapi/docs: ok")
 
 
+def verify_api_credential_schema_and_security() -> None:
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.main import app
+    from scripts.upgrade_api_credentials_schema import upgrade
+
+    upgrade()
+    upgrade()
+    with SessionLocal() as db:
+        columns = {row[1] for row in db.execute(text("PRAGMA table_info(api_credentials)")).all()}
+    missing = sorted(EXPECTED_CREDENTIAL_COLUMNS - columns)
+    assert not missing, f"Missing api_credentials columns: {missing}"
+
+    with TestClient(app) as client:
+        store = client.post("/api/v1/stores", json={
+            "name": "Phase 6A-3 Credential Verify Store",
+            "platform": "naver",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        }).json()["data"]
+        created = client.post("/api/v1/credentials", json={
+            "store_id": store["id"],
+            "platform": "naver",
+            "credential_name": "Phase 6A-3 Naver credential",
+            "client_id": "naver-client-id",
+            "access_key": "legacy-access-key",
+            "secret_key": "naver-client-secret",
+            "access_token": "naver-access-token",
+            "refresh_token": "naver-refresh-token",
+            "token_expires_at": "2026-12-31T00:00:00+00:00",
+            "market": "KR",
+            "auth_status": "configured",
+            "api_remark": "local config only",
+        })
+        assert created.status_code == 201, created.text
+        data = created.json()["data"]
+        assert data["has_access_key"] is True
+        assert data["has_secret_key"] is True
+        assert data["has_access_token"] is True
+        assert data["has_refresh_token"] is True
+        assert data["client_id"] == "naver-client-id"
+        assert data["auth_status"] == "configured"
+        serialized = str(created.json())
+        forbidden = [
+            "legacy-access-key",
+            "naver-client-secret",
+            "naver-access-token",
+            "naver-refresh-token",
+            "encrypted_access_token",
+            "encrypted_refresh_token",
+        ]
+        assert not any(item in serialized for item in forbidden), serialized
+
+        updated = client.put(f"/api/v1/credentials/{data['id']}", json={
+            "credential_name": "Phase 6A-3 Naver credential updated",
+            "auth_status": "needs_test",
+        })
+        assert updated.status_code == 200, updated.text
+        update_data = updated.json()["data"]
+        assert update_data["has_access_token"] is True
+        assert update_data["has_refresh_token"] is True
+        assert update_data["auth_status"] == "needs_test"
+
+        coupang = client.post("/api/v1/credentials", json={
+            "store_id": store["id"],
+            "platform": "coupang",
+            "credential_name": "Phase 6A-3 Coupang credential",
+            "vendor_id": "coupang-vendor-id",
+            "access_key": "coupang-access-key",
+            "secret_key": "coupang-secret-key",
+            "market": "KR",
+            "auth_status": "configured",
+        })
+        assert coupang.status_code == 201, coupang.text
+        assert coupang.json()["data"]["vendor_id"] == "coupang-vendor-id"
+        assert "coupang-secret-key" not in str(coupang.json())
+
+    print("api credential schema/security: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -137,8 +232,11 @@ def verify_git_tracking() -> None:
     allowed_prefixes = (
         " M backend/README.md",
         " M backend/app/api/v1/router.py",
+        " M backend/app/models/api_credential.py",
         " M backend/app/models/__init__.py",
         " M backend/app/models/store.py",
+        " M backend/app/schemas/credential.py",
+        " M backend/app/services/credential_service.py",
         " M backend/docs/",
         " M backend/scripts/verify_all.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
@@ -146,6 +244,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/schemas/platform_login.py",
         "?? backend/app/services/platform_login_service.py",
         "?? backend/docs/",
+        "?? backend/scripts/upgrade_api_credentials_schema.py",
         "?? backend/scripts/verify_all.py",
     )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]
@@ -168,6 +267,7 @@ def main() -> None:
     verify_compile()
     verify_stage_scripts()
     verify_openapi()
+    verify_api_credential_schema_and_security()
     verify_git_tracking()
     verify_docs_no_real_secrets()
     print("verify_all: ok")

@@ -14,10 +14,19 @@ def _serialize_credential(credential: ApiCredential) -> dict:
         "store_id": credential.store_id,
         "platform": credential.platform,
         "credential_name": credential.credential_name,
+        "vendor_id": credential.vendor_id,
+        "client_id": credential.client_id,
+        "token_expires_at": credential.token_expires_at,
+        "market": credential.market,
+        "auth_status": credential.auth_status,
+        "last_tested_at": credential.last_tested_at,
+        "api_remark": credential.api_remark,
         "extra_config": credential.extra_config,
         "status": credential.status,
         "has_access_key": bool(credential.encrypted_access_key),
         "has_secret_key": bool(credential.encrypted_secret_key),
+        "has_access_token": bool(credential.encrypted_access_token),
+        "has_refresh_token": bool(credential.encrypted_refresh_token),
         "created_at": credential.created_at,
         "updated_at": credential.updated_at,
     }
@@ -29,8 +38,17 @@ def create_credential(db: Session, payload: CredentialCreate) -> dict:
         store_id=payload.store_id,
         platform=payload.platform,
         credential_name=payload.credential_name,
+        vendor_id=payload.vendor_id,
+        client_id=payload.client_id,
         encrypted_access_key=encrypt_value(payload.access_key),
         encrypted_secret_key=encrypt_value(payload.secret_key),
+        encrypted_access_token=encrypt_value(payload.access_token),
+        encrypted_refresh_token=encrypt_value(payload.refresh_token),
+        token_expires_at=payload.token_expires_at,
+        market=payload.market,
+        auth_status=payload.auth_status,
+        last_tested_at=payload.last_tested_at,
+        api_remark=payload.api_remark,
         extra_config=payload.extra_config,
         status=payload.status,
     )
@@ -84,10 +102,28 @@ def update_credential(db: Session, credential_id: int, payload: CredentialUpdate
         credential.platform = updates["platform"]
     if "credential_name" in updates and updates["credential_name"] is not None:
         credential.credential_name = updates["credential_name"]
+    if "vendor_id" in updates:
+        credential.vendor_id = updates["vendor_id"] or None
+    if "client_id" in updates:
+        credential.client_id = updates["client_id"] or None
     if "access_key" in updates and updates["access_key"] is not None:
         credential.encrypted_access_key = encrypt_value(updates["access_key"])
     if "secret_key" in updates and updates["secret_key"] is not None:
         credential.encrypted_secret_key = encrypt_value(updates["secret_key"])
+    if "access_token" in updates and updates["access_token"] is not None:
+        credential.encrypted_access_token = encrypt_value(updates["access_token"])
+    if "refresh_token" in updates and updates["refresh_token"] is not None:
+        credential.encrypted_refresh_token = encrypt_value(updates["refresh_token"])
+    if "token_expires_at" in updates:
+        credential.token_expires_at = updates["token_expires_at"]
+    if "market" in updates:
+        credential.market = updates["market"] or None
+    if "auth_status" in updates and updates["auth_status"] is not None:
+        credential.auth_status = updates["auth_status"]
+    if "last_tested_at" in updates:
+        credential.last_tested_at = updates["last_tested_at"]
+    if "api_remark" in updates:
+        credential.api_remark = updates["api_remark"] or None
     if "extra_config" in updates:
         credential.extra_config = updates["extra_config"]
     if "status" in updates and updates["status"] is not None:
@@ -115,6 +151,15 @@ def get_decrypted_credential_for_internal_use(db: Session, credential_id: int) -
         credential_name=credential.credential_name,
         access_key=decrypt_value(credential.encrypted_access_key),
         secret_key=decrypt_value(credential.encrypted_secret_key),
+        access_token=decrypt_value(credential.encrypted_access_token),
+        refresh_token=decrypt_value(credential.encrypted_refresh_token),
+        vendor_id=credential.vendor_id,
+        client_id=credential.client_id,
+        token_expires_at=credential.token_expires_at,
+        market=credential.market,
+        auth_status=credential.auth_status,
+        last_tested_at=credential.last_tested_at,
+        api_remark=credential.api_remark,
         extra_config=credential.extra_config,
         status=credential.status,
     )
@@ -146,6 +191,15 @@ def get_decrypted_credential_by_store_and_platform(
         credential_name=credential.credential_name,
         access_key=decrypt_value(credential.encrypted_access_key),
         secret_key=decrypt_value(credential.encrypted_secret_key),
+        access_token=decrypt_value(credential.encrypted_access_token),
+        refresh_token=decrypt_value(credential.encrypted_refresh_token),
+        vendor_id=credential.vendor_id,
+        client_id=credential.client_id,
+        token_expires_at=credential.token_expires_at,
+        market=credential.market,
+        auth_status=credential.auth_status,
+        last_tested_at=credential.last_tested_at,
+        api_remark=credential.api_remark,
         extra_config=credential.extra_config,
         status=credential.status,
     )

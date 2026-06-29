@@ -45,8 +45,17 @@ id
 store_id
 platform
 credential_name
+vendor_id
+client_id
 encrypted_access_key
 encrypted_secret_key
+encrypted_access_token
+encrypted_refresh_token
+token_expires_at
+market
+auth_status
+last_tested_at
+api_remark
 extra_config
 status
 created_at
@@ -56,14 +65,17 @@ updated_at
 Rules:
 
 - Must bind to `store_id`.
-- Access and secret keys are encrypted with Fernet.
-- Public APIs return only metadata such as `has_access_key` and `has_secret_key`.
+- Access keys, secret keys, access tokens, and refresh tokens are encrypted with Fernet.
+- Public APIs return only metadata such as `has_access_key`, `has_secret_key`, `has_access_token`, and `has_refresh_token`.
 - Decryption is limited to service/client internals.
+- `vendor_id`, `client_id`, `market`, `auth_status`, `last_tested_at`, and `api_remark` are structured local configuration fields.
+- `auth_status` is local configuration or future test status only; it does not mean real platform API validation succeeded in the current stage.
+- `extra_config` stores short-term platform-specific metadata such as HMAC notes, allowed IP notes, and experimental fields.
 
 Future integration notes:
 
-- Add per-platform credential field mapping.
-- Add token expiry, refresh status, and audit trail for real APIs.
+- Add API capability test records before real API integration.
+- Add token refresh workflow only after real Naver/Coupang API validation is explicitly approved.
 
 ## PlatformLoginCredential
 
