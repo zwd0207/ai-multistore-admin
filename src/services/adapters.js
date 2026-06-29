@@ -60,6 +60,25 @@ function normalizeDeviceStatusForBackend(value) {
   return statuses[String(value || '').trim()] || value || 'active';
 }
 
+function normalizeCredentialPlatformForBackend(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const platforms = {
+    naver: 'naver',
+    coupang: 'coupang',
+  };
+  return platforms[normalized] || normalized || value;
+}
+
+function normalizeAccountStatusForBackend(value) {
+  const statuses = {
+    active: 'active',
+    inactive: 'inactive',
+    '鍚敤': 'active',
+    '鍋滅敤': 'inactive',
+  };
+  return statuses[String(value || '').trim()] || value || 'active';
+}
+
 export function adaptStore(item = {}) {
   return {
     id: item.id,
@@ -249,6 +268,18 @@ export function adaptEmailAccount(item = {}) {
   };
 }
 
+export function toBackendEmailAccountPayload(item = {}, storeId) {
+  return compactPayload({
+    store_id: Number(item.storeId || storeId),
+    email_address: String(item.email || '').trim(),
+    provider: String(item.provider || '').trim(),
+    account_label: item.label || null,
+    password_or_token: item.credentialInput ? String(item.credentialInput) : undefined,
+    status: normalizeAccountStatusForBackend(item.status),
+    remark: item.remark || null,
+  });
+}
+
 export function adaptImportantEmail(item = {}) {
   return {
     id: item.id,
@@ -309,6 +340,18 @@ export function adaptCredential(item = {}) {
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   };
+}
+
+export function toBackendCredentialPayload(item = {}, storeId) {
+  const credentialName = item.name || item.credentialName;
+  return compactPayload({
+    store_id: Number(item.storeId || storeId),
+    platform: normalizeCredentialPlatformForBackend(item.platform),
+    credential_name: credentialName ? String(credentialName).trim() : undefined,
+    access_key: item.accessKeyInput ? String(item.accessKeyInput) : undefined,
+    secret_key: item.secretKeyInput ? String(item.secretKeyInput) : undefined,
+    status: normalizeAccountStatusForBackend(item.status),
+  });
 }
 
 export function adaptDashboardSummary(data = {}) {
@@ -409,6 +452,8 @@ export const adapters = {
   credential: adaptCredential,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
+  toBackendEmailAccountPayload,
+  toBackendCredentialPayload,
   dashboardSummary: adaptDashboardSummary,
   aiDailyContext: adaptAiDailyContext,
   list: adaptList,

@@ -86,3 +86,51 @@ Device Environment payload：
 - 本阶段会写入本地 Codex1 SQLite 开发数据，属于本地联调数据变化。
 - Device 与 Environment 共用同一后端 endpoint，两个入口需保持一致。
 - 5D-2 Credential / Email 和 5D-3 mock sync 尚未执行。
+
+## Phase 5D-2 - API Credential and Email Account Writes
+
+Phase 5D-2 keeps the formal local integration target:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8012/api/v1
+VITE_DATA_SOURCE=backend
+```
+
+Implemented backend writes:
+
+- API Credential create/update through Codex1 `POST /credentials` and `PUT /credentials/{credential_id}`.
+- API Credential disable through `PUT /credentials/{credential_id}` with `status: inactive`.
+- Email Account create/update through Codex1 `POST /email-accounts` and `PUT /email-accounts/{email_account_id}`.
+- Saves refresh the current `selectedStoreId` list.
+- Test connection buttons are local notices only and say that no real platform or mailbox validation was performed.
+
+Still excluded:
+
+- Credential DELETE and Email Account DELETE.
+- Real Naver/Coupang connection tests.
+- Real Gmail/Naver/Daum/Outlook mailbox connection.
+- AI calls.
+- Phase 5D-3 mock sync.
+
+Field mapping stays in `src/services/adapters.js`:
+
+- Credential frontend fields map to Codex1 payload fields including `store_id`, `credential_name`, `access_key`, `secret_key`, `platform`, and `status`.
+- Email frontend fields map to Codex1 payload fields including `store_id`, `email_address`, `account_label`, `password_or_token`, `provider`, `status`, and `remark`.
+
+Sensitive field rule:
+
+- Backend field names are allowed in service, adapter, and payload mapper code where required by Codex1 contracts.
+- Pages, visible labels, notices, and errors do not display plaintext credential values or encrypted backend credential fields.
+- Edit forms never prefill sensitive inputs. Leaving a sensitive input blank means it is not updated.
+- On save failure, non-sensitive inputs remain and sensitive input state is cleared.
+- No complete payload is logged to console.
+
+Verification notes:
+
+- backend mode: Credential create/edit/disable and Email Account create/edit were verified against Codex1 on port 8012.
+- mock mode: 13 routes returned 200 on the temporary mock server, and `MockAccounts` / `MockEmails` remained the mock-mode entry points.
+- Important Emails remain read-only in this phase.
+- Backend write errors were verified with a validation failure and were not converted to mock success.
+- build passed with Vite.
+- UTF-8 replacement character scan returned 0.
+- page/component raw backend sensitive field scan returned 0; service/adapter payload field names remain intentionally present for Codex1 mapping.

@@ -58,9 +58,13 @@ export const backendApi = {
   createDeviceEnvironment: (payload) => sendData('post', '/device-environments', payload),
   updateDeviceEnvironment: (environmentId, payload) => sendData('put', `/device-environments/${environmentId}`, payload),
   getEmailAccounts: (params) => getData('/email-accounts', params),
+  createEmailAccount: (payload) => sendData('post', '/email-accounts', payload),
+  updateEmailAccount: (emailAccountId, payload) => sendData('put', `/email-accounts/${emailAccountId}`, payload),
   getImportantEmails: (params) => getData('/important-emails', params),
   getAppealCases: (params) => getData('/appeal-cases', params),
   getCredentials: (params) => getData('/credentials', params),
+  createCredential: (payload) => sendData('post', '/credentials', payload),
+  updateCredential: (credentialId, payload) => sendData('put', `/credentials/${credentialId}`, payload),
 };
 
 export { getData, normalizeParams, sendData };

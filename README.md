@@ -142,3 +142,17 @@ Still excluded in 5D-1:
 - AI model calls.
 
 Details and validation notes: see `PHASE_5D_WRITE_INTEGRATION.md`.
+
+## Phase 5D-2 - API Credential and Email Account Writes
+
+Phase 5D-2 adds local Codex1 backend writes for API Credentials and Email Accounts while keeping mock mode intact.
+
+Implemented:
+
+- API Credential create/update through `POST /credentials` and `PUT /credentials/{credential_id}`.
+- API Credential disable through `PUT /credentials/{credential_id}` with `status: inactive`.
+- Email Account create/update through `POST /email-accounts` and `PUT /email-accounts/{email_account_id}`.
+- Credential and Email Account saves refresh the current `selectedStoreId` list.
+- Test connection buttons are local-only notices and do not claim real Naver, Coupang, or mailbox validation.
+
+Sensitive field names may exist in service and adapter payload mapping where required by Codex1 contracts, but pages, notices, errors, and console output must not display credential plaintext or encrypted credential fields. Edit forms leave sensitive inputs blank; blank values are not sent as updates.

@@ -153,6 +153,18 @@ const sourceMethods = {
     const rows = withStoreName(adapters.list(result, adapters.emailAccount).data, stores);
     return queryBackendRows(rows, params);
   },
+  createEmailAccount: async (payload) => {
+    if (!isBackendSource) return mockApi.createEmail(payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.createEmailAccount(adapters.toBackendEmailAccountPayload(payload, store.id));
+    return withStoreName([adapters.emailAccount(result)], stores)[0];
+  },
+  updateEmailAccount: async (emailAccountId, payload) => {
+    if (!isBackendSource) return mockApi.updateEmail(emailAccountId, payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updateEmailAccount(emailAccountId, adapters.toBackendEmailAccountPayload(payload, store.id));
+    return withStoreName([adapters.emailAccount(result)], stores)[0];
+  },
   getImportantEmails: async (params) => {
     if (!isBackendSource) return mockApi.getRecentEmails(params);
     const { store, stores } = await resolveBackendStore(params);
@@ -173,6 +185,24 @@ const sourceMethods = {
     const result = await backendApi.getCredentials({ ...params, storeId: store.id });
     const rows = withStoreName(adapters.list(result, adapters.credential).data, stores);
     return queryBackendRows(rows, params);
+  },
+  createCredential: async (payload) => {
+    if (!isBackendSource) return mockApi.createAccount(payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.createCredential(adapters.toBackendCredentialPayload(payload, store.id));
+    return withStoreName([adapters.credential(result)], stores)[0];
+  },
+  updateCredential: async (credentialId, payload) => {
+    if (!isBackendSource) return mockApi.updateAccount(credentialId, payload);
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updateCredential(credentialId, adapters.toBackendCredentialPayload(payload, store.id));
+    return withStoreName([adapters.credential(result)], stores)[0];
+  },
+  disableCredential: async (credentialId, payload = {}) => {
+    if (!isBackendSource) return mockApi.updateAccountStatus(credentialId, 'inactive');
+    const { store, stores } = await resolveBackendStore(payload);
+    const result = await backendApi.updateCredential(credentialId, adapters.toBackendCredentialPayload({ ...payload, status: 'inactive' }, store.id));
+    return withStoreName([adapters.credential(result)], stores)[0];
   },
   getAiDailyContext: async (params) => {
     if (!isBackendSource) return null;
