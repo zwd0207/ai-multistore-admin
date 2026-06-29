@@ -4,7 +4,7 @@ FastAPI backend for the AI multi-store operations and environment management sys
 
 ## Current Scope
 
-Stage 1D provides the backend foundation, secure credential base, and mock data sync pipeline:
+Stage 1E provides the backend foundation, secure credential base, mock data sync pipeline, and local analytics APIs:
 
 - Versioned API prefix at `/api/v1`
 - Compatible legacy health check at `/health`
@@ -14,11 +14,14 @@ Stage 1D provides the backend foundation, secure credential base, and mock data 
 - Naver and Coupang mock client placeholders
 - Mock product, order, and customer inquiry sync services
 - Read endpoints for products, orders, and customer inquiries
+- Sales statistics service and endpoints
+- Dashboard summary endpoint
+- AI daily context endpoint with structured data only
 - Sync log service and read endpoint
 - Unified success and error response structure
 - Repeatable seed data for Chinese, Korean, and mixed UTF-8 text
 
-This stage still does not call real Naver or Coupang APIs. Real platform signing, real data crawling, sales, dashboard, devices, email, and appeals are not implemented in this stage.
+This stage still does not call real Naver or Coupang APIs. Real platform signing, real data crawling, frontend pages, devices, email, and appeals are not implemented in this stage. The AI daily context endpoint does not call OpenAI, DeepSeek, or any other model, and does not generate final AI report prose.
 
 ## Setup
 
@@ -196,6 +199,101 @@ Mock order data includes only masked phones such as `010-****-1234`, `010-****-5
 
 Mock inquiry data includes `正品申诉资料咨询`, `배송지연 문의`, and `Naver 정품 소명 / 中文备注`.
 
+## Sales Statistics APIs
+
+Statistics are calculated from the local `orders` table only. The logic lives in `app/services/stats_service.py`, not in endpoint handlers.
+
+```text
+GET /api/v1/stats/sales?store_id={store_id}
+GET /api/v1/stats/sales/by-platform?store_id={store_id}
+GET /api/v1/stats/sales/by-date?store_id={store_id}&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+```
+
+Optional parameters:
+
+```text
+platform
+start_date
+end_date
+```
+
+Sales responses include:
+
+```text
+total_orders
+total_sales_amount
+currency
+paid_orders
+canceled_orders
+failed_orders
+latest_ordered_at
+```
+
+No-data queries return `success: true` with zero totals and empty arrays. Date parsing errors return `INVALID_DATE_FORMAT`.
+
+## Dashboard Summary API
+
+```text
+GET /api/v1/dashboard/summary?store_id={store_id}
+```
+
+Optional parameters:
+
+```text
+platform
+start_date
+end_date
+```
+
+The dashboard summary is calculated from local `stores`, `products`, `orders`, `customer_inquiries`, and `sync_logs`.
+
+It returns:
+
+```text
+store_count
+product_count
+order_count
+customer_inquiry_count
+total_sales_amount
+currency
+latest_sync_logs
+open_customer_inquiries
+recent_orders
+risk_flags
+```
+
+`latest_sync_logs` and `recent_orders` are limited to 5 records. `recent_orders` returns only `buyer_masked_phone`, never full phone numbers or addresses.
+
+Current `risk_flags` rules:
+
+- `FAILED_SYNC_LOG`: failed sync logs exist.
+- `OPEN_CUSTOMER_INQUIRIES`: open customer inquiries exist.
+- `NO_RECENT_ORDERS`: no order data exists in the requested scope.
+- `SUSPENDED_STORE`: store status is `suspended`.
+
+## AI Daily Context API
+
+```text
+GET /api/v1/ai/daily-context?store_id={store_id}&date=YYYY-MM-DD
+```
+
+This endpoint returns structured context for a future AI report pipeline:
+
+```text
+date
+scope
+sales_summary
+order_summary
+customer_inquiry_summary
+sync_summary
+risk_flags
+recommended_focus
+```
+
+It does not call any model and does not generate final AI prose. `recommended_focus` is generated from local rules such as checking open inquiries, failed sync logs, recent order drops, and authenticity-related inquiries.
+
+The response does not include plaintext platform credentials, full buyer phone numbers, addresses, ID numbers, or other sensitive privacy fields.
+
 ## Platform Client Placeholders
 
 Current platform clients are mock placeholders only:
@@ -273,7 +371,7 @@ The seed data intentionally includes:
 
 Use `GET /api/v1/stores` after running the seed script to verify Chinese and Korean text is stored and returned without mojibake.
 
-Stage 1D verification writes Chinese, Korean, and mixed product/order/inquiry data, then reads it back through APIs. It also verifies sync logs and masked buyer phones.
+Stage 1E verification writes Chinese, Korean, and mixed product/order/inquiry data, then reads it back through stats, dashboard, and AI context APIs. It also verifies sync logs, risk flags, and masked buyer phones.
 
 ## PostgreSQL Migration Note
 
