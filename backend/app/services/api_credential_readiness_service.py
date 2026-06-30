@@ -400,6 +400,7 @@ def _run_coupang_sales_read(settings, now, platform_result: dict) -> dict:
                 "vendorId": settings.coupang_vendor_id,
                 "recognitionDateFrom": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
                 "recognitionDateTo": now.strftime("%Y-%m-%d"),
+                "token": "",
                 "maxPerPage": "1",
             }),
         )
