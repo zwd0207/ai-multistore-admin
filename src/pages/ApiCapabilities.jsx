@@ -220,7 +220,7 @@ export default function ApiCapabilities() {
     }
   }, [selectedStoreId, storeError, storeLoading]);
 
-  const loadResults = useCallback(async () => {
+  const loadResults = useCallback(async (credentialRows = credentials) => {
     if (storeLoading) return;
     if (!isBackendSource || storeError || !selectedStoreId) {
       setResults({ data: [], total: 0, page: resultQuery.page, pageSize: resultQuery.pageSize });
@@ -231,18 +231,15 @@ export default function ApiCapabilities() {
     setResultLoading(true);
     setResultError('');
     try {
-      const [credentialRows, resultResponse] = await Promise.all([
-        loadCredentials(),
-        dataProvider.getApiCapabilityResults({
-          storeId: selectedStoreId,
-          credential_id: resultQuery.credentialId || undefined,
-          capability_id: resultQuery.capabilityId || undefined,
-          test_status: resultQuery.testStatus || undefined,
-          test_mode: resultQuery.testMode || undefined,
-          page: resultQuery.page,
-          pageSize: resultQuery.pageSize,
-        }),
-      ]);
+      const resultResponse = await dataProvider.getApiCapabilityResults({
+        storeId: selectedStoreId,
+        credential_id: resultQuery.credentialId || undefined,
+        capability_id: resultQuery.capabilityId || undefined,
+        test_status: resultQuery.testStatus || undefined,
+        test_mode: resultQuery.testMode || undefined,
+        page: resultQuery.page,
+        pageSize: resultQuery.pageSize,
+      });
       setResults({
         ...resultResponse,
         data: enrichResults(resultResponse.data || [], capabilities.data, credentialRows, selectedStoreId, stores),
@@ -253,7 +250,7 @@ export default function ApiCapabilities() {
     } finally {
       setResultLoading(false);
     }
-  }, [capabilities.data, loadCredentials, resultQuery, selectedStoreId, storeError, storeLoading, stores]);
+  }, [capabilities.data, credentials, resultQuery, selectedStoreId, storeError, storeLoading, stores]);
 
   useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
   useEffect(() => { loadCredentials(); }, [loadCredentials]);
