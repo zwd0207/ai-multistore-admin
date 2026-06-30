@@ -23,8 +23,11 @@ class Settings(BaseSettings):
     coupang_secret_key: str | None = None
     naver_client_id: str | None = None
     naver_client_secret: str | None = None
+    naver_api_base: str = "https://api.commerce.naver.com/external"
+    naver_channel_no: str | None = None
     naver_access_token: str | None = None
     naver_refresh_token: str | None = None
+    naver_token_expires_at: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

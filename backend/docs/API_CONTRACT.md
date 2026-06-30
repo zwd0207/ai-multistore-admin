@@ -137,6 +137,7 @@ Common errors: `STORE_NOT_FOUND`, `STORE_NAME_EXISTS`, `VALIDATION_ERROR`.
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
 | GET | `/api/v1/api-credentials/readiness` | None | None | No | No secret, token, password, encrypted, or decrypted values |
+| POST | `/api/v1/api-credentials/smoke-test` | None | `{ "platform": "naver" | "coupang" | "all", "mode": "readonly" }` | No | No secret, token, password, authorization header, request signature, encrypted, or decrypted values |
 | POST | `/api/v1/credentials` | None | Credential payload | Body | Input only, never returned |
 | GET | `/api/v1/credentials` | `store_id` optional | None | Optional | No plaintext or encrypted values |
 | GET | `/api/v1/credentials/{credential_id}` | None | None | No | No plaintext or encrypted values |
@@ -200,6 +201,26 @@ Response example:
 `auth_status` is a local configuration or future test status only. This stage does not perform real Naver or Coupang API validation and does not refresh tokens.
 
 `GET /api/v1/api-credentials/readiness` reads only local environment variable presence. It returns platform status values such as `configured`, `missing`, and `disabled`, plus `real_api_test_enabled` and `real_api_write_enabled`. The endpoint does not decrypt database credentials, does not return access keys, secret keys, client secrets, tokens, passwords, or encrypted values, and does not call Naver or Coupang.
+
+Naver readiness requires only `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, and `NAVER_API_BASE` (default: `https://api.commerce.naver.com/external`). `NAVER_CHANNEL_NO`, `NAVER_ACCESS_TOKEN`, `NAVER_REFRESH_TOKEN`, and `NAVER_TOKEN_EXPIRES_AT` are not manual readiness requirements. Coupang readiness requires `COUPANG_VENDOR_ID`, `COUPANG_ACCESS_KEY`, and `COUPANG_SECRET_KEY`.
+
+`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. If `REAL_API_TEST_ENABLED=false`, it returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/product/order checks and returns only step statuses:
+
+```text
+platform
+enabled
+configured
+token_test
+seller_or_account_test
+product_read_test
+order_read_test
+settlement_read_test
+error_code
+masked_message
+tested_at
+```
+
+The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, or raw external response bodies. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
 
 Example readiness response:
 
