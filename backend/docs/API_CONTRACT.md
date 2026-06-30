@@ -210,6 +210,7 @@ Naver readiness requires only `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, and `NAV
 platform
 enabled
 configured
+http_status
 token_test
 seller_or_account_test
 product_read_test
@@ -221,6 +222,8 @@ tested_at
 ```
 
 The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, or raw external response bodies. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
+
+When `REAL_API_TEST_ENABLED=true`, the smoke-test endpoint may write a store-level `ApiCapabilityTestResult` with `test_mode=real_readonly`. That write is limited to local result metadata: step statuses, `error_code`, `http_status`, `tested_at`, and short operator notes. Public `POST /api/v1/api-capability-results` still rejects manually supplied `real_readonly` payloads; only this readonly smoke-test endpoint can create those records.
 
 Example readiness response:
 
@@ -371,7 +374,7 @@ sandbox
 real_readonly
 ```
 
-`real_readonly` is a future marker for platform-level capability planning only in this stage. There is no real readonly test endpoint in Phase 6B-1.
+`real_readonly` is reserved for the Phase 6C readonly smoke-test endpoint. It must not be created through the generic manual result API.
 
 Summary response:
 
@@ -416,7 +419,7 @@ Summary response:
 }
 ```
 
-`store_result_summary` is an empty array when `store_id` is not provided. Summary timestamps remain UTC aware strings; frontends should display them in KST. Summary counts are local records only: `docs_only` / `manual` mean documentation or operator notes, `tested_success` is only a record status, and `real_readonly_count` is a future marker count. The summary endpoint does not call Naver or Coupang and does not execute sync.
+`store_result_summary` is an empty array when `store_id` is not provided. Summary timestamps remain UTC aware strings; frontends should display them in KST. Summary counts are local records only: `docs_only` / `manual` mean documentation or operator notes, `tested_success` is only a record status, and `real_readonly_count` means local readonly smoke-test records exist. The summary endpoint itself does not call Naver or Coupang and does not execute sync.
 
 ## API Capability Test Results
 
@@ -452,7 +455,7 @@ Binding rules:
 - `credential_id`, when provided, must exist and belong to the same store.
 - `capability_id` must exist.
 - Credential platform must match capability platform.
-- `real_readonly` test results are reserved for a future explicitly approved read-only API test endpoint.
+- `real_readonly` test results are reserved for the explicitly approved readonly smoke-test endpoint and cannot be created by the generic manual result API.
 
 Common errors: `API_CAPABILITY_NOT_FOUND`, `API_CAPABILITY_RESULT_NOT_FOUND`, `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `CREDENTIAL_STORE_MISMATCH`, `CREDENTIAL_PLATFORM_MISMATCH`, `INVALID_API_CAPABILITY_FILTER`, `VALIDATION_ERROR`.
 

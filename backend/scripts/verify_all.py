@@ -302,6 +302,7 @@ def verify_api_credential_readiness() -> None:
             "platform",
             "enabled",
             "configured",
+            "http_status",
             "token_test",
             "seller_or_account_test",
             "product_read_test",

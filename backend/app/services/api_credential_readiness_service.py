@@ -1,14 +1,20 @@
 import base64
 import hashlib
 import hmac
+import re
 import time
 from datetime import timedelta
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.timezone import get_utc_now
+from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
+from app.models.api_credential import ApiCredential
+from app.models.store import Store
 
 
 SMOKE_STEPS = [
@@ -52,6 +58,7 @@ def _new_smoke_result(platform: str) -> dict:
         "platform": platform,
         "enabled": False,
         "configured": False,
+        "http_status": None,
         "error_code": None,
         "masked_message": "",
         "tested_at": get_utc_now().isoformat(),
@@ -71,15 +78,12 @@ def _mask_message(message: str | None) -> str:
     text = str(message or "")
     if not text:
         return ""
-    for field_name in [
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "access_key",
-        "secret_key",
-        "authorization",
-    ]:
-        text = text.replace(field_name, field_name)
+    text = re.sub(
+        r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|access[_-]?key|secret[_-]?key|authorization|signature)",
+        "credential_field",
+        text,
+    )
+    text = re.sub(r"[A-Za-z0-9_\-+/=]{32,}", "[masked]", text)
     return text[:300]
 
 
@@ -89,6 +93,7 @@ def _is_ip_not_allowed(response: httpx.Response) -> bool:
 
 
 def _step_from_response(result: dict, step: str, response: httpx.Response) -> bool:
+    result["http_status"] = response.status_code
     if 200 <= response.status_code < 300:
         result[step] = "success"
         return True
@@ -141,16 +146,24 @@ def get_api_credential_readiness() -> dict:
     }
 
 
-def run_api_credential_smoke_test(platform: str = "all", mode: str = "readonly") -> dict:
+def run_api_credential_smoke_test(
+    db: Session | None = None,
+    platform: str = "all",
+    mode: str = "readonly",
+) -> dict:
     settings = get_settings()
     selected_platforms = ["coupang", "naver"] if platform == "all" else [platform]
+    results = [_run_platform_smoke_test(settings, item) for item in selected_platforms]
+    if db is not None and settings.real_api_test_enabled:
+        for result in results:
+            _record_real_readonly_result(db, result)
 
     return {
         "semantic_notice": SMOKE_NOTICE,
         "mode": mode,
         "real_api_test_enabled": bool(settings.real_api_test_enabled),
         "real_api_write_enabled": bool(settings.real_api_write_enabled),
-        "results": [_run_platform_smoke_test(settings, item) for item in selected_platforms],
+        "results": results,
     }
 
 
@@ -180,7 +193,8 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
 
     result["configured"] = True
     try:
-        access_token = _request_naver_token(settings)
+        access_token, token_status = _request_naver_token(settings)
+        result["http_status"] = token_status
         result["token_test"] = "success"
         headers = {"Authorization": f"Bearer {access_token}"}
         base = settings.naver_api_base.rstrip("/")
@@ -212,13 +226,15 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
         result["token_test"] = "failed"
         _mark_failed(result, "dependency_missing", "bcrypt dependency is required for Naver client_secret_sign")
     except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
         _mark_failed(result, "network_error", str(exc))
     except Exception as exc:
+        result["http_status"] = getattr(exc, "http_status", result.get("http_status"))
         _mark_failed(result, "smoke_test_failed", str(exc))
     return result
 
 
-def _request_naver_token(settings) -> str:
+def _request_naver_token(settings) -> tuple[str, int]:
     import bcrypt
 
     timestamp = str(int(time.time() * 1000))
@@ -237,12 +253,16 @@ def _request_naver_token(settings) -> str:
     with httpx.Client(timeout=10.0) as client:
         response = client.post(f"{base}/v1/oauth2/token", data=payload)
     if response.status_code in {401, 403}:
-        raise RuntimeError("auth_failed")
+        error = RuntimeError("auth_failed")
+        error.http_status = response.status_code
+        raise error
     response.raise_for_status()
     token = response.json().get("access_token")
     if not token:
-        raise RuntimeError("auth_failed")
-    return token
+        error = RuntimeError("auth_failed")
+        error.http_status = response.status_code
+        raise error
+    return token, response.status_code
 
 
 def _extract_channel_no(payload: object) -> str | None:
@@ -294,10 +314,105 @@ def _run_coupang_smoke_test(settings, result: dict) -> dict:
         if not result["masked_message"]:
             result["masked_message"] = "Readonly smoke test completed without returning raw API data."
     except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
         _mark_failed(result, "network_error", str(exc))
     except Exception as exc:
         _mark_failed(result, "smoke_test_failed", str(exc))
     return result
+
+
+def _record_real_readonly_result(db: Session, result: dict) -> None:
+    if not result.get("enabled") or not result.get("configured"):
+        return
+
+    platform = result["platform"]
+    store = db.scalars(
+        select(Store)
+        .where(Store.platform == platform)
+        .order_by(Store.id.asc())
+    ).first()
+    if store is None:
+        return
+
+    capability = db.scalars(
+        select(ApiCapabilityCheck)
+        .where(
+            ApiCapabilityCheck.platform == platform,
+            ApiCapabilityCheck.capability_key == "readonly.smoke_test",
+        )
+        .order_by(ApiCapabilityCheck.id.asc())
+    ).first()
+    if capability is None:
+        capability = ApiCapabilityCheck(
+            platform=platform,
+            capability_key="readonly.smoke_test",
+            capability_name="Readonly smoke-test",
+            api_category="auth",
+            endpoint_path="/api-credentials/smoke-test",
+            method="POST",
+            required_credential_type="local .env platform credentials",
+            ordinary_store_supported="unknown",
+            test_status=_result_status(result),
+            test_mode="real_readonly",
+            response_fields_summary="Only step statuses, error code, HTTP status, and tested_at are recorded.",
+            error_codes_summary="real_api_test_disabled, missing_credentials, auth_failed, ip_not_allowed, readonly_request_failed, network_error",
+            data_usefulness="medium",
+            first_phase_candidate=False,
+            sales_source_type="not_applicable",
+            notes="Local readonly smoke-test capability. It does not perform writes or return credential values.",
+            last_checked_at=get_utc_now(),
+        )
+        db.add(capability)
+        db.flush()
+
+    credential = db.scalars(
+        select(ApiCredential)
+        .where(ApiCredential.store_id == store.id, ApiCredential.platform == platform)
+        .order_by(ApiCredential.id.asc())
+    ).first()
+    tested_at = get_utc_now()
+    item = ApiCapabilityTestResult(
+        store_id=store.id,
+        credential_id=credential.id if credential is not None else None,
+        capability_id=capability.id,
+        test_mode="real_readonly",
+        test_status=_result_status(result),
+        http_status=result.get("http_status"),
+        error_code=result.get("error_code"),
+        permission_result=_permission_result(result),
+        rate_limit_summary=None,
+        response_fields_observed=_response_fields_observed(result),
+        tested_at=tested_at,
+        notes="Recorded from local readonly smoke-test. No write operation was executed and no credential value was stored.",
+    )
+    db.add(item)
+    capability.test_status = item.test_status
+    capability.last_checked_at = tested_at
+    db.commit()
+
+
+def _result_status(result: dict) -> str:
+    if result.get("error_code") == "missing_credentials":
+        return "not_tested"
+    if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
+        return "permission_required"
+    if result.get("error_code"):
+        return "tested_failed"
+    failed_steps = [step for step in SMOKE_STEPS if result.get(step) == "failed"]
+    return "tested_failed" if failed_steps else "tested_success"
+
+
+def _permission_result(result: dict) -> str:
+    if result.get("error_code") == "ip_not_allowed":
+        return "IP allowlist rejected the readonly request."
+    if result.get("error_code") == "auth_failed":
+        return "Authentication or permission rejected the readonly request."
+    return "Readonly smoke-test did not expose credential values or raw external response payloads."
+
+
+def _response_fields_observed(result: dict) -> str:
+    statuses = [f"{step}={result.get(step, 'skipped')}" for step in SMOKE_STEPS]
+    return "; ".join(statuses)
 
 
 def _coupang_get(settings, path: str, query_string: str) -> httpx.Response:

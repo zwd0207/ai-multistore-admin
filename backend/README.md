@@ -222,7 +222,7 @@ Create and update requests accept `access_key` and `secret_key`, but the API nev
 
 `GET /api/v1/api-credentials/readiness` reads only local `.env` variable presence and returns `configured`, `missing`, or `disabled` readiness metadata plus the real API test/write switches. It never returns access keys, secret keys, client secrets, tokens, encrypted values, or decrypted database credentials, and it does not call Naver or Coupang.
 
-`POST /api/v1/api-credentials/smoke-test` accepts `platform: naver | coupang | all` and `mode: readonly`. When `REAL_API_TEST_ENABLED=false`, it returns `disabled` results before creating any external HTTP client. When enabled, it runs only minimal read-only checks and still never returns keys, tokens, authorization headers, request signatures, or raw external response payloads. `REAL_API_WRITE_ENABLED=false` keeps write operations out of scope.
+`POST /api/v1/api-credentials/smoke-test` accepts `platform: naver | coupang | all` and `mode: readonly`. When `REAL_API_TEST_ENABLED=false`, it returns `disabled` results before creating any external HTTP client. When enabled, it runs only minimal read-only checks and still never returns keys, tokens, authorization headers, request signatures, or raw external response payloads. `REAL_API_WRITE_ENABLED=false` keeps write operations out of scope. Enabled smoke tests may write local `ApiCapabilityTestResult` records with `test_mode=real_readonly`; those records contain only step statuses, error code, HTTP status, and timestamps.
 
 The database stores only:
 

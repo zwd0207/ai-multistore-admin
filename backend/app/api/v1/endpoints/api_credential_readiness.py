@@ -1,6 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
+from app.database import get_db
 from app.schemas.api_credential_readiness import ApiCredentialSmokeTestRequest
 from app.services.api_credential_readiness_service import (
     get_api_credential_readiness,
@@ -17,8 +19,12 @@ def read_api_credential_readiness() -> dict:
 
 
 @router.post("/smoke-test")
-def run_readonly_smoke_test(payload: ApiCredentialSmokeTestRequest) -> dict:
+def run_readonly_smoke_test(
+    payload: ApiCredentialSmokeTestRequest,
+    db: Session = Depends(get_db),
+) -> dict:
     return success_response(data=run_api_credential_smoke_test(
+        db=db,
         platform=payload.platform,
         mode=payload.mode,
     ))

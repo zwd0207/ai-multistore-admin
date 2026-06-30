@@ -128,15 +128,15 @@ Rules:
 - Does not bind to `store_id`; store-specific results live in `api_capability_test_results`.
 - `docs_only` means documentation or manual research only.
 - `tested_success` is a record status only and must not be described as full sync support.
-- `real_readonly` is a future planning value in this stage; no real read-only endpoint is implemented.
+- `real_readonly` is reserved for the Phase 6C readonly smoke-test endpoint; it is not a manual docs-only record.
 - This table does not store API keys, secrets, tokens, or decrypted credential data.
 
 Future integration notes:
 
 - Link official Naver/Coupang documentation references before any real API implementation.
-- Add explicit real read-only test endpoints only after approval.
+- Keep explicit real read-only tests limited to the approved readonly smoke-test endpoint.
 - API capability summaries aggregate this table by `platform`; `last_checked_at` is derived from `last_checked_at`, `doc_checked_at`, or `updated_at`.
-- Summary counts are planning records only. `tested_success` does not mean real platform connection, and `real_readonly_count` does not mean a real read-only test ran in the current stage.
+- Summary counts are local records only. `tested_success` does not mean full platform connection, and `real_readonly_count` means readonly smoke-test records exist.
 
 ## ApiCapabilityTestResult
 
@@ -167,13 +167,13 @@ Rules:
 - Must bind to an existing `capability_id`.
 - Can bind to `credential_id`; when provided, the credential must belong to the same store.
 - Credential platform must match capability platform.
-- Stores manual/docs/mock/sandbox result notes only in Phase 6B-1.
+- Stores manual/docs/mock/sandbox notes and approved readonly smoke-test metadata.
 - Does not decrypt credentials and does not store secret/token values.
-- `real_readonly` result creation is reserved for a future explicit read-only API test endpoint.
+- `real_readonly` result creation is reserved for the approved readonly smoke-test endpoint and is rejected by the generic manual result create API.
 
 Future integration notes:
 
-- Future real read-only tests should write a result record and a separate task/audit summary.
+- Readonly smoke tests write result records with step statuses, error code, HTTP status, and timestamps only.
 - Failure records should preserve error code, permission reason, observed fields, and rate limit summary.
 - Store-level summaries aggregate this table by `store_id` and capability platform.
 - `missing_first_phase_candidates` is derived by comparing first-phase platform capabilities against the store's result records.
