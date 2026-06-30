@@ -135,6 +135,12 @@ This page is an API capability confirmation workbench, not a platform connection
 
 Time fields on the page use the shared KST display helpers from `src/utils/time.js`. Mock mode keeps the page reachable with an empty-state notice and does not pretend to maintain Codex1 API capability records.
 
+## Phase 6B-3B - Dashboard API Capability Summary
+
+Dashboard now reads Codex1 `api_capability_summary` and AI Daily Context `api_capability_context` in backend mode. The summary card shows platform-level capability counts, current store-level result counts, attention items, and a link to `/api-capabilities`.
+
+The UI labels `tested_success_count` as `记录为通过`; it does not describe docs-only/manual/mock/sandbox records as real platform connection or real sync coverage. `real_readonly_count` is displayed only as a future reserved count. Mock mode shows an empty-state notice instead of fabricating capability data.
+
 ## Phase 5D-1 - Store and Device Environment Writes
 
 Phase 5D-1 keeps `VITE_API_BASE_URL=http://127.0.0.1:8012/api/v1` and `VITE_DATA_SOURCE=backend`.

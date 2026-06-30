@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ActivityList from '../components/common/ActivityList';
 import EmptyState from '../components/common/EmptyState';
 import InfoGrid from '../components/common/InfoGrid';
@@ -22,7 +23,123 @@ const formatStructured = (value) => (
   Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : '暂无结构化数据'
 );
 
+const emptyApiCapabilitySummary = {
+  semanticNotice: 'mock 模式不维护后端 API 能力摘要，请切换 backend 模式查看 Codex1 记录。',
+  platformSummary: [],
+  storeResultSummary: [],
+  attentionItems: [],
+};
+
+function ApiCapabilitySummarySection({ summary, source = 'dashboard', onOpenMatrix }) {
+  const data = summary || emptyApiCapabilitySummary;
+  const platformRows = data.platformSummary || [];
+  const storeRows = data.storeResultSummary || [];
+  const attentionItems = data.attentionItems || [];
+  const isEmpty = !platformRows.length && !storeRows.length && !attentionItems.length;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>{source === 'ai' ? 'AI 能力上下文' : 'API 能力确认摘要'}</h2>
+          <p>docs-only / manual / mock / sandbox 只是记录状态，不代表已经完成平台连接。</p>
+        </div>
+        <button className="button ghost" onClick={onOpenMatrix}>查看能力矩阵</button>
+      </div>
+      <div className="form-info">
+        tested_success_count 显示为“记录为通过”；real_readonly_count 只是未来预留统计，本阶段未执行真实只读测试。
+      </div>
+      {isEmpty ? (
+        <EmptyState
+          title={source === 'mock' ? 'mock 模式无后端能力摘要' : '暂无 API 能力摘要'}
+          description={data.semanticNotice || '当前没有平台级或店铺级 API 能力记录。'}
+        />
+      ) : (
+        <>
+          <div className="panel-grid">
+            <div className="detail-section">
+              <h3>平台级能力统计</h3>
+              {platformRows.length ? (
+                <div className="detail-list">
+                  {platformRows.map((item) => (
+                    <div className="log-item" key={item.rawPlatform || item.platform}>
+                      <div className="log-item-head">
+                        <strong>{item.platform}</strong>
+                        <span className="period-chip">总能力 {item.totalCapabilities}</span>
+                      </div>
+                      <InfoGrid
+                        columns={3}
+                        items={[
+                          { label: 'docs-only', value: item.docsOnlyCount },
+                          { label: 'manual', value: item.manualCount },
+                          { label: '记录为通过', value: item.testedSuccessCount },
+                          { label: '未确认', value: item.notTestedCount },
+                          { label: '需要权限', value: item.permissionRequiredCount },
+                          { label: '不可用', value: item.unavailableCount },
+                          { label: '首阶段候选', value: item.firstPhaseCandidateCount },
+                          { label: '未来只读预留', value: item.realReadonlyCount },
+                          { label: '最近确认', value: formatKstDateTimeWithLabel(item.lastCheckedAt) },
+                        ]}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState title="暂无平台级记录" description="当前没有 Codex1 API Capability 平台级摘要。" />}
+            </div>
+            <div className="detail-section">
+              <h3>当前店铺级结果</h3>
+              {storeRows.length ? (
+                <div className="detail-list">
+                  {storeRows.map((item) => (
+                    <div className="log-item" key={`${item.storeId}-${item.rawPlatform || item.platform}`}>
+                      <div className="log-item-head">
+                        <strong>{item.platform}</strong>
+                        <span className="period-chip">店铺结果 {item.totalResults}</span>
+                      </div>
+                      <InfoGrid
+                        columns={2}
+                        items={[
+                          { label: '绑定凭证记录', value: item.credentialBoundResults },
+                          { label: 'manual', value: item.manualCount },
+                          { label: 'docs-only', value: item.docsOnlyCount },
+                          { label: 'mock/sandbox', value: `${item.mockCount}/${item.sandboxCount}` },
+                          { label: '记录为通过', value: item.testedSuccessCount },
+                          { label: '记录失败', value: item.testedFailedCount },
+                          { label: '需要权限', value: item.permissionRequiredCount },
+                          { label: '未确认候选', value: item.missingFirstPhaseCandidates.length },
+                          { label: '最近记录', value: formatKstDateTimeWithLabel(item.latestTestedAt) },
+                        ]}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : <EmptyState title="暂无当前店铺级记录" description="选择店铺后，这里显示该店铺的 API 能力人工/文档记录摘要。" />}
+            </div>
+          </div>
+          <div className="detail-section">
+            <h3>需要关注项</h3>
+            {attentionItems.length ? (
+              <div className="risk-panel">
+                {attentionItems.map((item) => (
+                  <div className="risk-item" key={item.id}>
+                    <div className="risk-item-head">
+                      <strong>{item.platform || '全部平台'}</strong>
+                      <span className="period-chip">{item.level} · {item.count}</span>
+                    </div>
+                    <p>{item.message}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <p>暂无权限不足、不可用或首阶段候选缺口提醒。</p>}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const { versions } = useSyncRefresh();
   const [summary, setSummary] = useState(null);
@@ -53,6 +170,7 @@ export default function Dashboard() {
         riskEnvironments: 0,
         unreadImportantEmails: 0,
         businessTimezone: BUSINESS_TIME_ZONE,
+        apiCapabilitySummary: emptyApiCapabilitySummary,
       });
       setRisks([]);
       setTodos([]);
@@ -119,6 +237,9 @@ export default function Dashboard() {
     { label: '未读重要邮件', value: summary.unreadImportantEmails, detail: '优先跟进提醒', tone: 'warning' },
   ];
   const maxTrendSales = Math.max(...trend.map((item) => item.sales), 1);
+  const dashboardCapabilitySummary = isBackendSource ? summary.apiCapabilitySummary : emptyApiCapabilitySummary;
+  const aiCapabilityContext = dailyContext?.apiCapabilityContext;
+  const openApiCapabilities = () => navigate('/api-capabilities');
 
   return (
     <>
@@ -134,6 +255,12 @@ export default function Dashboard() {
         )}
       />
       <StatGrid items={stats} />
+
+      <ApiCapabilitySummarySection
+        summary={dashboardCapabilitySummary}
+        source={isBackendSource ? 'dashboard' : 'mock'}
+        onOpenMatrix={openApiCapabilities}
+      />
 
       <section className="panel-grid">
         <article className="content-card">
@@ -194,6 +321,11 @@ export default function Dashboard() {
                 <div className="detail-section"><h3>销售与订单摘要</h3><pre>{formatStructured({ sales: dailyContext.salesSummary, orders: dailyContext.orderSummary })}</pre></div>
                 <div className="detail-section"><h3>客服与同步摘要</h3><pre>{formatStructured({ inquiries: dailyContext.customerInquirySummary, sync: dailyContext.syncSummary })}</pre></div>
               </div>
+              <ApiCapabilitySummarySection
+                summary={aiCapabilityContext}
+                source="ai"
+                onOpenMatrix={openApiCapabilities}
+              />
               <div className="detail-section"><h3>风险与建议关注</h3><pre>{JSON.stringify({ riskFlags: dailyContext.riskFlags, recommendedFocus: dailyContext.recommendedFocus }, null, 2)}</pre></div>
             </>
           ) : <div className="table-state"><span className="spinner" />正在加载 Daily Context...</div>}

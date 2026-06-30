@@ -511,6 +511,61 @@ export function toBackendApiCapabilityResultPayload(item = {}, storeId) {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && !Number.isNaN(value)));
 }
 
+export function adaptApiCapabilitySummary(data = {}) {
+  return {
+    semanticNotice: data.semantic_notice || '',
+    platformSummary: (data.platform_summary || []).map((item) => ({
+      platform: adaptPlatform(item.platform),
+      rawPlatform: item.platform,
+      totalCapabilities: numberValue(item.total_capabilities),
+      docsOnlyCount: numberValue(item.docs_only_count),
+      manualCount: numberValue(item.manual_count),
+      testedSuccessCount: numberValue(item.tested_success_count),
+      notTestedCount: numberValue(item.not_tested_count),
+      permissionRequiredCount: numberValue(item.permission_required_count),
+      unavailableCount: numberValue(item.unavailable_count),
+      firstPhaseCandidateCount: numberValue(item.first_phase_candidate_count),
+      realReadonlyCount: numberValue(item.real_readonly_count),
+      lastCheckedAt: item.last_checked_at,
+    })),
+    storeResultSummary: (data.store_result_summary || []).map((item) => ({
+      storeId: item.store_id,
+      platform: adaptPlatform(item.platform),
+      rawPlatform: item.platform,
+      totalResults: numberValue(item.total_results),
+      credentialBoundResults: numberValue(item.credential_bound_results),
+      docsOnlyCount: numberValue(item.docs_only_count),
+      manualCount: numberValue(item.manual_count),
+      mockCount: numberValue(item.mock_count),
+      sandboxCount: numberValue(item.sandbox_count),
+      testedSuccessCount: numberValue(item.tested_success_count),
+      testedFailedCount: numberValue(item.tested_failed_count),
+      permissionRequiredCount: numberValue(item.permission_required_count),
+      unavailableCount: numberValue(item.unavailable_count),
+      notTestedCount: numberValue(item.not_tested_count),
+      latestTestedAt: item.latest_tested_at,
+      missingFirstPhaseCandidates: (item.missing_first_phase_candidates || []).map((candidate) => ({
+        capabilityId: candidate.capability_id,
+        platform: adaptPlatform(candidate.platform),
+        rawPlatform: candidate.platform,
+        capabilityKey: candidate.capability_key,
+        capabilityName: candidate.capability_name,
+        apiCategory: candidate.api_category,
+      })),
+    })),
+    attentionItems: (data.attention_items || []).map((item, index) => ({
+      id: item.code || `api-capability-attention-${index + 1}`,
+      code: item.code,
+      level: item.level || 'info',
+      platform: item.platform ? adaptPlatform(item.platform) : null,
+      rawPlatform: item.platform,
+      storeId: item.store_id,
+      count: numberValue(item.count),
+      message: item.message,
+    })),
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -538,6 +593,7 @@ export function adaptDashboardSummary(data = {}) {
     businessDate: data.business_date,
     businessDayStart: data.business_day_start,
     businessDayEnd: data.business_day_end,
+    apiCapabilitySummary: adaptApiCapabilitySummary(data.api_capability_summary),
   };
 
   const todos = pendingCustomers > 0
@@ -588,6 +644,7 @@ export function adaptAiDailyContext(data = {}) {
     orderSummary: data.order_summary || {},
     customerInquirySummary: data.customer_inquiry_summary || {},
     syncSummary: data.sync_summary || {},
+    apiCapabilityContext: adaptApiCapabilitySummary(data.api_capability_context),
     riskFlags: data.risk_flags || [],
     recommendedFocus: data.recommended_focus || [],
   };
@@ -619,6 +676,7 @@ export const adapters = {
   platformLogin: adaptPlatformLogin,
   apiCapability: adaptApiCapability,
   apiCapabilityResult: adaptApiCapabilityResult,
+  apiCapabilitySummary: adaptApiCapabilitySummary,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
