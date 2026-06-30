@@ -235,6 +235,7 @@ Phase 6B-1 adds backend records for API capability planning only:
 
 ```text
 GET    /api/v1/api-capabilities
+GET    /api/v1/api-capabilities/summary
 POST   /api/v1/api-capabilities
 GET    /api/v1/api-capabilities/{capability_id}
 PUT    /api/v1/api-capabilities/{capability_id}
@@ -255,6 +256,14 @@ Important limits:
 - A docs-only capability record does not mean the selected store credential has been validated.
 - A `tested_success` status is a record status only and must not be described as full sync support.
 - Responses do not include API secrets, tokens, or encrypted credential values.
+
+Phase 6B-3A adds API capability summaries:
+
+- `/api/v1/api-capabilities/summary` aggregates platform-level capability records and optional store-level result records.
+- `/api/v1/dashboard/summary` includes `api_capability_summary`.
+- `/api/v1/ai/daily-context` includes `api_capability_context`.
+- Summary timestamps remain UTC aware strings; Codex2 displays them as KST.
+- Summary records do not call Naver or Coupang, do not use real keys, do not refresh tokens, and do not produce real sync results.
 
 ## Data Models
 

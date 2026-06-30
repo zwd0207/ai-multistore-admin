@@ -36,6 +36,19 @@ def create_capability(payload: ApiCapabilityCheckCreate, db: Session = Depends(g
     return success_response(data=api_capability_service.create_capability(db, payload), message="created")
 
 
+@router.get("/api-capabilities/summary")
+def get_capability_summary(
+    store_id: int | None = Query(default=None),
+    platform: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return success_response(data=api_capability_service.get_api_capability_summary(
+        db,
+        store_id=store_id,
+        platform=platform,
+    ))
+
+
 @router.get("/api-capabilities/{capability_id}")
 def get_capability(capability_id: int, db: Session = Depends(get_db)) -> dict:
     return success_response(data=api_capability_service.get_capability(db, capability_id))

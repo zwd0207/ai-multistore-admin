@@ -13,6 +13,7 @@ from app.models.order import Order
 from app.models.product import Product
 from app.models.store import Store
 from app.models.sync_log import SyncLog
+from app.services.api_capability_service import get_api_capability_summary
 from app.services.store_service import ensure_store_exists, normalize_platform
 
 
@@ -347,6 +348,7 @@ def get_dashboard_summary(
         "open_customer_inquiries": _count_open_customer_inquiries(db, store_id=store_id, platform=platform),
         "recent_orders": get_recent_orders(db, store_id=store_id, platform=platform, limit=5),
         "risk_flags": build_risk_flags(db, store_id=store_id, platform=platform),
+        "api_capability_summary": get_api_capability_summary(db, store_id=store_id, platform=platform),
     }
 
 
@@ -402,6 +404,11 @@ def get_daily_context(
             "latest_sync_logs": sync_logs,
             "failed_count": sum(1 for log in sync_logs if log["status"] == "failed"),
         },
+        "api_capability_context": get_api_capability_summary(
+            db,
+            store_id=store_id,
+            platform=store.platform if store else None,
+        ),
         "risk_flags": risk_flags,
         "recommended_focus": focus,
     }

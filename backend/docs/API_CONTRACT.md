@@ -270,6 +270,7 @@ API capability records are platform-level docs-only or manual planning records. 
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
 | GET | `/api/v1/api-capabilities` | `platform`, `api_category`, `test_status`, `test_mode`, `first_phase_candidate`, `sales_source_type` | None | No | No |
+| GET | `/api/v1/api-capabilities/summary` | `store_id` optional, `platform` optional | None | Optional | No secret, token, password, or encrypted values |
 | POST | `/api/v1/api-capabilities` | None | Capability payload | No | No |
 | GET | `/api/v1/api-capabilities/{capability_id}` | None | None | No | No |
 | PUT | `/api/v1/api-capabilities/{capability_id}` | None | Partial capability payload | No | No |
@@ -323,6 +324,51 @@ real_readonly
 
 `real_readonly` is a future marker for platform-level capability planning only in this stage. There is no real readonly test endpoint in Phase 6B-1.
 
+Summary response:
+
+```json
+{
+  "semantic_notice": "docs-only/manual/mock/sandbox records do not mean real platform connection or real sync success. tested_success is a record status only, and real_readonly is reserved for a future explicit read-only test stage.",
+  "platform_summary": [
+    {
+      "platform": "naver",
+      "total_capabilities": 1,
+      "docs_only_count": 0,
+      "manual_count": 1,
+      "tested_success_count": 0,
+      "not_tested_count": 0,
+      "permission_required_count": 0,
+      "unavailable_count": 0,
+      "first_phase_candidate_count": 1,
+      "real_readonly_count": 0,
+      "last_checked_at": "2026-06-30T00:00:00+00:00"
+    }
+  ],
+  "store_result_summary": [
+    {
+      "store_id": 1,
+      "platform": "naver",
+      "total_results": 1,
+      "credential_bound_results": 1,
+      "docs_only_count": 0,
+      "manual_count": 1,
+      "mock_count": 0,
+      "sandbox_count": 0,
+      "tested_success_count": 0,
+      "tested_failed_count": 0,
+      "permission_required_count": 0,
+      "unavailable_count": 0,
+      "not_tested_count": 0,
+      "latest_tested_at": "2026-06-30T00:00:00+00:00",
+      "missing_first_phase_candidates": []
+    }
+  ],
+  "attention_items": []
+}
+```
+
+`store_result_summary` is an empty array when `store_id` is not provided. Summary timestamps remain UTC aware strings; frontends should display them in KST. Summary counts are local records only: `docs_only` / `manual` mean documentation or operator notes, `tested_success` is only a record status, and `real_readonly_count` is a future marker count. The summary endpoint does not call Naver or Coupang and does not execute sync.
+
 ## API Capability Test Results
 
 API capability test results are store and optional credential-level manual records. They can bind a store, an API credential, and a platform capability. This stage stores manual/docs/mock/sandbox notes only and does not decrypt API credentials.
@@ -360,6 +406,12 @@ Binding rules:
 - `real_readonly` test results are reserved for a future explicitly approved read-only API test endpoint.
 
 Common errors: `API_CAPABILITY_NOT_FOUND`, `API_CAPABILITY_RESULT_NOT_FOUND`, `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `CREDENTIAL_STORE_MISMATCH`, `CREDENTIAL_PLATFORM_MISMATCH`, `INVALID_API_CAPABILITY_FILTER`, `VALIDATION_ERROR`.
+
+## Dashboard and AI Context API Capability Summary
+
+`GET /api/v1/dashboard/summary` includes `api_capability_summary` using the same structure as `/api/v1/api-capabilities/summary`. Existing dashboard fields remain unchanged, including `business_timezone`, `business_date`, `business_day_start`, and `business_day_end`.
+
+`GET /api/v1/ai/daily-context` includes `api_capability_context` using the same structure. This context is intended to tell downstream AI features the current local capability record boundaries. It must not be interpreted as real platform connection status or real sync coverage.
 
 ## Sync Logs
 

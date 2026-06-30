@@ -135,6 +135,8 @@ Future integration notes:
 
 - Link official Naver/Coupang documentation references before any real API implementation.
 - Add explicit real read-only test endpoints only after approval.
+- API capability summaries aggregate this table by `platform`; `last_checked_at` is derived from `last_checked_at`, `doc_checked_at`, or `updated_at`.
+- Summary counts are planning records only. `tested_success` does not mean real platform connection, and `real_readonly_count` does not mean a real read-only test ran in the current stage.
 
 ## ApiCapabilityTestResult
 
@@ -173,6 +175,9 @@ Future integration notes:
 
 - Future real read-only tests should write a result record and a separate task/audit summary.
 - Failure records should preserve error code, permission reason, observed fields, and rate limit summary.
+- Store-level summaries aggregate this table by `store_id` and capability platform.
+- `missing_first_phase_candidates` is derived by comparing first-phase platform capabilities against the store's result records.
+- Summary responses do not include API secrets, tokens, passwords, encrypted values, or decrypted credential material.
 
 ## PlatformLoginCredential
 

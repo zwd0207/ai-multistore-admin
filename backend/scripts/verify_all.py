@@ -43,6 +43,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/dashboard/summary",
     "/api/v1/ai/daily-context",
     "/api/v1/api-capabilities",
+    "/api/v1/api-capabilities/summary",
     "/api/v1/api-capabilities/{capability_id}",
     "/api/v1/api-capability-results",
     "/api/v1/api-capability-results/{result_id}",
@@ -438,6 +439,72 @@ def verify_api_capabilities() -> None:
         assert reserved_real_readonly.status_code == 400, reserved_real_readonly.text
         assert reserved_real_readonly.json()["error_code"] == "REAL_READONLY_TEST_RESERVED"
 
+        summary = client.get("/api/v1/api-capabilities/summary")
+        assert summary.status_code == 200, summary.text
+        summary_data = summary.json()["data"]
+        assert "semantic_notice" in summary_data
+        assert "platform_summary" in summary_data
+        assert "store_result_summary" in summary_data
+        assert summary_data["store_result_summary"] == []
+        assert any(item["platform"] == "naver" for item in summary_data["platform_summary"])
+
+        naver_summary = client.get("/api/v1/api-capabilities/summary?platform=naver")
+        assert naver_summary.status_code == 200, naver_summary.text
+        naver_summary_data = naver_summary.json()["data"]
+        assert naver_summary_data["platform_summary"], naver_summary_data
+        assert all(item["platform"] == "naver" for item in naver_summary_data["platform_summary"])
+
+        store_summary = client.get(f"/api/v1/api-capabilities/summary?store_id={store['id']}")
+        assert store_summary.status_code == 200, store_summary.text
+        store_summary_data = store_summary.json()["data"]
+        assert any(item["store_id"] == store["id"] for item in store_summary_data["store_result_summary"])
+        naver_store_summary = next(
+            item for item in store_summary_data["store_result_summary"] if item["platform"] == "naver"
+        )
+        assert naver_store_summary["total_results"] >= 1
+        assert naver_store_summary["credential_bound_results"] >= 1
+        assert naver_store_summary["manual_count"] >= 1
+        assert isinstance(naver_store_summary["missing_first_phase_candidates"], list)
+
+        scoped_store_summary = client.get(f"/api/v1/api-capabilities/summary?store_id={store['id']}&platform=naver")
+        assert scoped_store_summary.status_code == 200, scoped_store_summary.text
+        assert all(
+            item["platform"] == "naver"
+            for item in scoped_store_summary.json()["data"]["store_result_summary"]
+        )
+
+        missing_store_summary = client.get("/api/v1/api-capabilities/summary?store_id=999999")
+        assert missing_store_summary.status_code == 404, missing_store_summary.text
+        assert missing_store_summary.json()["error_code"] == "STORE_NOT_FOUND"
+
+        dashboard = client.get(f"/api/v1/dashboard/summary?store_id={store['id']}")
+        assert dashboard.status_code == 200, dashboard.text
+        dashboard_data = dashboard.json()["data"]
+        assert "api_capability_summary" in dashboard_data
+        assert "business_timezone" in dashboard_data
+        assert dashboard_data["api_capability_summary"]["semantic_notice"] == summary_data["semantic_notice"]
+
+        context = client.get(f"/api/v1/ai/daily-context?store_id={store['id']}")
+        assert context.status_code == 200, context.text
+        context_data = context.json()["data"]
+        assert "api_capability_context" in context_data
+        assert "sales_summary" in context_data
+        assert context_data["api_capability_context"]["semantic_notice"] == summary_data["semantic_notice"]
+
+        combined_summary_text = str(summary.json()) + str(dashboard.json()) + str(context.json())
+        for forbidden in [
+            "phase-6b-access-key",
+            "phase-6b-secret-key",
+            "phase-6b-access-token",
+            "phase-6b-refresh-token",
+            "encrypted_access_key",
+            "encrypted_secret_key",
+            "encrypted_access_token",
+            "encrypted_refresh_token",
+            "password",
+        ]:
+            assert forbidden not in combined_summary_text, combined_summary_text
+
     print("api capabilities docs/manual base: ok")
 
 
@@ -523,6 +590,7 @@ def verify_kst_business_timezone() -> None:
         dashboard_data = dashboard.json()["data"]
         assert dashboard_data["business_timezone"] == "Asia/Seoul", dashboard_data
         assert "business_day_start" in dashboard_data and "business_day_end" in dashboard_data
+        assert "api_capability_summary" in dashboard_data
 
         context = client.get(f"/api/v1/ai/daily-context?store_id={store_id}")
         assert context.status_code == 200, context.text
@@ -530,6 +598,7 @@ def verify_kst_business_timezone() -> None:
         assert context_data["date"] == get_business_date().isoformat(), context_data
         assert context_data["business_timezone"] == "Asia/Seoul", context_data
         assert context_data["business_day_start"] == get_business_day_range(get_business_date())[0].isoformat()
+        assert "api_capability_context" in context_data
 
         converted = to_business_timezone(datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc))
         assert converted.date() == date(2026, 6, 30), converted
@@ -551,12 +620,14 @@ def verify_git_tracking() -> None:
         " M backend/README.md",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/config.py",
         " M backend/app/models/__init__.py",
         " M backend/app/models/api_credential.py",
         " M backend/app/models/store.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/services/stats_service.py",
+        " M backend/app/services/api_capability_service.py",
         " M backend/app/services/credential_service.py",
         " M backend/docs/",
         " M backend/scripts/verify_all.py",
