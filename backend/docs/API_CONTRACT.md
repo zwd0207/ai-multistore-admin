@@ -136,6 +136,7 @@ Common errors: `STORE_NOT_FOUND`, `STORE_NAME_EXISTS`, `VALIDATION_ERROR`.
 
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
+| GET | `/api/v1/api-credentials/readiness` | None | None | No | No secret, token, password, encrypted, or decrypted values |
 | POST | `/api/v1/credentials` | None | Credential payload | Body | Input only, never returned |
 | GET | `/api/v1/credentials` | `store_id` optional | None | Optional | No plaintext or encrypted values |
 | GET | `/api/v1/credentials/{credential_id}` | None | None | No | No plaintext or encrypted values |
@@ -197,6 +198,33 @@ Response example:
 ```
 
 `auth_status` is a local configuration or future test status only. This stage does not perform real Naver or Coupang API validation and does not refresh tokens.
+
+`GET /api/v1/api-credentials/readiness` reads only local environment variable presence. It returns platform status values such as `configured`, `missing`, and `disabled`, plus `real_api_test_enabled` and `real_api_write_enabled`. The endpoint does not decrypt database credentials, does not return access keys, secret keys, client secrets, tokens, passwords, or encrypted values, and does not call Naver or Coupang.
+
+Example readiness response:
+
+```json
+{
+  "success": true,
+  "message": "ok",
+  "data": {
+    "real_api_test_enabled": false,
+    "real_api_write_enabled": false,
+    "platforms": [
+      {
+        "platform": "coupang",
+        "credential_status": "configured",
+        "readiness_status": "disabled",
+        "fields": {
+          "vendor_id": "configured",
+          "access_key": "configured",
+          "secret_key": "configured"
+        }
+      }
+    ]
+  }
+}
+```
 
 Supported `auth_status` values:
 

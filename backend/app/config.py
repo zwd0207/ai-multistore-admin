@@ -16,6 +16,15 @@ class Settings(BaseSettings):
         "http://localhost:5174",
     ]
     credential_encryption_key: str | None = None
+    real_api_test_enabled: bool = False
+    real_api_write_enabled: bool = False
+    coupang_vendor_id: str | None = None
+    coupang_access_key: str | None = None
+    coupang_secret_key: str | None = None
+    naver_client_id: str | None = None
+    naver_client_secret: str | None = None
+    naver_access_token: str | None = None
+    naver_refresh_token: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

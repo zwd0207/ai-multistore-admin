@@ -27,6 +27,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/stores",
     "/api/v1/stores/{store_id}",
     "/api/v1/credentials",
+    "/api/v1/api-credentials/readiness",
     "/api/v1/credentials/{credential_id}",
     "/api/v1/platform-logins",
     "/api/v1/platform-logins/{login_id}",
@@ -240,6 +241,39 @@ def verify_api_credential_schema_and_security() -> None:
         assert "coupang-secret-key" not in str(coupang.json())
 
     print("api credential schema/security: ok")
+
+
+def verify_api_credential_readiness() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/api-credentials/readiness")
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["real_api_test_enabled"] is False
+        assert data["real_api_write_enabled"] is False
+        assert "semantic_notice" in data
+        assert {item["platform"] for item in data["platforms"]} == {"naver", "coupang"}
+        for platform in data["platforms"]:
+            assert platform["credential_status"] in {"configured", "missing"}
+            assert platform["readiness_status"] in {"configured", "missing", "disabled"}
+            assert platform["readiness_status"] == "disabled"
+            for status_value in platform["fields"].values():
+                assert status_value in {"configured", "missing"}
+        serialized = str(response.json()).lower()
+        forbidden = [
+            "phase-6b-secret-key",
+            "phase-6b-access-token",
+            "phase-6b-refresh-token",
+            "encrypted_access_key",
+            "encrypted_secret_key",
+            "encrypted_access_token",
+            "encrypted_refresh_token",
+        ]
+        assert not any(item in serialized for item in forbidden), serialized
+    print("api credential readiness: ok")
 
 
 def verify_api_capabilities() -> None:
@@ -634,9 +668,11 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_stage_1e.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
+        "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/schemas/api_capability.py",
         "?? backend/app/services/api_capability_service.py",
+        "?? backend/app/services/api_credential_readiness_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
         "?? backend/app/schemas/platform_login.py",
@@ -666,6 +702,7 @@ def main() -> None:
     verify_stage_scripts()
     verify_openapi()
     verify_api_credential_schema_and_security()
+    verify_api_credential_readiness()
     verify_api_capabilities()
     verify_kst_business_timezone()
     verify_git_tracking()

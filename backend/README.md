@@ -210,6 +210,7 @@ Credential endpoints use the same unified response format:
 
 ```text
 POST   /api/v1/credentials
+GET    /api/v1/api-credentials/readiness
 GET    /api/v1/credentials?store_id={store_id}
 GET    /api/v1/credentials/{credential_id}
 PUT    /api/v1/credentials/{credential_id}
@@ -217,6 +218,8 @@ DELETE /api/v1/credentials/{credential_id}
 ```
 
 Create and update requests accept `access_key` and `secret_key`, but the API never returns plaintext keys. Responses only include metadata such as `has_access_key` and `has_secret_key`.
+
+`GET /api/v1/api-credentials/readiness` reads only local `.env` variable presence and returns `configured`, `missing`, or `disabled` readiness metadata plus the real API test/write switches. It never returns access keys, secret keys, client secrets, tokens, encrypted values, or decrypted database credentials, and it does not call Naver or Coupang.
 
 The database stores only:
 

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     ai,
     api_capabilities,
+    api_credential_readiness,
     appeal_cases,
     credentials,
     customer_inquiries,
@@ -27,6 +28,7 @@ api_router.include_router(stats.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(ai.router)
 api_router.include_router(api_capabilities.router)
+api_router.include_router(api_credential_readiness.router)
 api_router.include_router(device_environments.router)
 api_router.include_router(email_accounts.router)
 api_router.include_router(important_emails.router)
