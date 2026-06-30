@@ -387,6 +387,55 @@ export function adaptPlatformLogin(item = {}) {
   };
 }
 
+export function adaptApiCapability(item = {}) {
+  return {
+    id: item.id,
+    platform: adaptPlatform(item.platform),
+    rawPlatform: item.platform,
+    capabilityKey: item.capability_key,
+    capabilityName: item.capability_name,
+    apiCategory: item.api_category,
+    endpointPath: item.endpoint_path,
+    method: item.method,
+    requiredCredentialType: item.required_credential_type,
+    requiredPermission: item.required_permission,
+    ordinaryStoreSupported: item.ordinary_store_supported,
+    testStatus: item.test_status,
+    testMode: item.test_mode,
+    requestParamsSummary: item.request_params_summary,
+    responseFieldsSummary: item.response_fields_summary,
+    errorCodesSummary: item.error_codes_summary,
+    dataUsefulness: item.data_usefulness,
+    firstPhaseCandidate: Boolean(item.first_phase_candidate),
+    salesSourceType: item.sales_source_type,
+    officialDocUrl: item.official_doc_url,
+    docCheckedAt: item.doc_checked_at,
+    notes: item.notes,
+    lastCheckedAt: item.last_checked_at,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export function adaptApiCapabilityResult(item = {}) {
+  return {
+    id: item.id,
+    storeId: item.store_id,
+    capabilityId: item.capability_id,
+    credentialId: item.credential_id,
+    testMode: item.test_mode,
+    testStatus: item.test_status,
+    httpStatus: item.http_status,
+    errorCode: item.error_code,
+    permissionResult: item.permission_result,
+    rateLimitSummary: item.rate_limit_summary,
+    responseFieldsObserved: item.response_fields_observed,
+    testedAt: item.tested_at,
+    notes: item.notes,
+    createdAt: item.created_at,
+  };
+}
+
 export function toBackendCredentialPayload(item = {}, storeId) {
   const credentialName = item.name || item.credentialName;
   const payload = { store_id: Number(item.storeId || storeId) };
@@ -418,6 +467,48 @@ export function toBackendPlatformLoginPayload(item = {}, storeId) {
   if ('loginStatus' in item || 'status' in item) payload.login_status = normalizeAccountStatusForBackend(item.loginStatus || item.status);
   if ('remark' in item) payload.remark = item.remark || null;
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}
+
+export function toBackendApiCapabilityPayload(item = {}) {
+  const payload = {};
+  if ('platform' in item) payload.platform = normalizeCredentialPlatformForBackend(item.platform);
+  if ('capabilityKey' in item) payload.capability_key = String(item.capabilityKey || '').trim();
+  if ('capabilityName' in item) payload.capability_name = String(item.capabilityName || '').trim();
+  if ('apiCategory' in item) payload.api_category = String(item.apiCategory || '').trim();
+  if ('endpointPath' in item) payload.endpoint_path = item.endpointPath ? String(item.endpointPath).trim() : null;
+  if ('method' in item) payload.method = item.method ? String(item.method).trim().toUpperCase() : null;
+  if ('requiredCredentialType' in item) payload.required_credential_type = item.requiredCredentialType ? String(item.requiredCredentialType).trim() : null;
+  if ('requiredPermission' in item) payload.required_permission = item.requiredPermission || null;
+  if ('ordinaryStoreSupported' in item) payload.ordinary_store_supported = item.ordinaryStoreSupported || 'unknown';
+  if ('testStatus' in item) payload.test_status = item.testStatus || 'not_tested';
+  if ('testMode' in item) payload.test_mode = item.testMode || 'docs_only';
+  if ('requestParamsSummary' in item) payload.request_params_summary = item.requestParamsSummary || null;
+  if ('responseFieldsSummary' in item) payload.response_fields_summary = item.responseFieldsSummary || null;
+  if ('errorCodesSummary' in item) payload.error_codes_summary = item.errorCodesSummary || null;
+  if ('dataUsefulness' in item) payload.data_usefulness = item.dataUsefulness || 'unknown';
+  if ('firstPhaseCandidate' in item) payload.first_phase_candidate = Boolean(item.firstPhaseCandidate);
+  if ('salesSourceType' in item) payload.sales_source_type = item.salesSourceType || 'not_applicable';
+  if ('officialDocUrl' in item) payload.official_doc_url = item.officialDocUrl ? String(item.officialDocUrl).trim() : null;
+  if ('docCheckedAt' in item) payload.doc_checked_at = item.docCheckedAt || null;
+  if ('notes' in item) payload.notes = item.notes || null;
+  if ('lastCheckedAt' in item) payload.last_checked_at = item.lastCheckedAt || null;
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}
+
+export function toBackendApiCapabilityResultPayload(item = {}, storeId) {
+  const payload = { store_id: Number(item.storeId || storeId) };
+  if ('capabilityId' in item) payload.capability_id = Number(item.capabilityId);
+  if ('credentialId' in item) payload.credential_id = item.credentialId ? Number(item.credentialId) : null;
+  if ('testMode' in item) payload.test_mode = item.testMode || 'manual';
+  if ('testStatus' in item) payload.test_status = item.testStatus || 'planned';
+  if ('httpStatus' in item) payload.http_status = item.httpStatus ? Number(item.httpStatus) : null;
+  if ('errorCode' in item) payload.error_code = item.errorCode ? String(item.errorCode).trim() : null;
+  if ('permissionResult' in item) payload.permission_result = item.permissionResult || null;
+  if ('rateLimitSummary' in item) payload.rate_limit_summary = item.rateLimitSummary || null;
+  if ('responseFieldsObserved' in item) payload.response_fields_observed = item.responseFieldsObserved || null;
+  if ('testedAt' in item) payload.tested_at = item.testedAt || null;
+  if ('notes' in item) payload.notes = item.notes || null;
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && !Number.isNaN(value)));
 }
 
 export function adaptDashboardSummary(data = {}) {
@@ -526,11 +617,15 @@ export const adapters = {
   appealCase: adaptAppealCase,
   credential: adaptCredential,
   platformLogin: adaptPlatformLogin,
+  apiCapability: adaptApiCapability,
+  apiCapabilityResult: adaptApiCapabilityResult,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
   toBackendCredentialPayload,
   toBackendPlatformLoginPayload,
+  toBackendApiCapabilityPayload,
+  toBackendApiCapabilityResultPayload,
   dashboardSummary: adaptDashboardSummary,
   aiDailyContext: adaptAiDailyContext,
   list: adaptList,

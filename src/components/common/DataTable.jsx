@@ -18,6 +18,8 @@ const TIME_COLUMN_KEYS = new Set([
   'lastReplyAt',
   'lastUsedAt',
   'lastLoginAt',
+  'docCheckedAt',
+  'testedAt',
   'deadline',
 ]);
 

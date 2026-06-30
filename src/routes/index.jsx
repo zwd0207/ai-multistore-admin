@@ -13,6 +13,7 @@ import Environment from '../pages/Environment';
 import Accounts from '../pages/Accounts';
 import Settings from '../pages/Settings';
 import Logs from '../pages/Logs';
+import ApiCapabilities from '../pages/ApiCapabilities';
 
 export default function AppRoutes() {
   return (
@@ -30,6 +31,7 @@ export default function AppRoutes() {
         <Route path="appeals" element={<Appeals />} />
         <Route path="environment" element={<Environment />} />
         <Route path="accounts" element={<Accounts />} />
+        <Route path="api-capabilities" element={<ApiCapabilities />} />
         <Route path="settings" element={<Settings />} />
         <Route path="logs" element={<Logs />} />
       </Route>

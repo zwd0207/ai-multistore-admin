@@ -71,6 +71,12 @@ export const backendApi = {
   getPlatformLogins: (params) => getData('/platform-logins', params),
   createPlatformLogin: (payload) => sendData('post', '/platform-logins', payload),
   updatePlatformLogin: (loginId, payload) => sendData('put', `/platform-logins/${loginId}`, payload),
+  getApiCapabilities: (params) => getData('/api-capabilities', params),
+  createApiCapability: (payload) => sendData('post', '/api-capabilities', payload),
+  updateApiCapability: (capabilityId, payload) => sendData('put', `/api-capabilities/${capabilityId}`, payload),
+  getApiCapabilityResults: (params) => getData('/api-capability-results', params),
+  createApiCapabilityResult: (payload) => sendData('post', '/api-capability-results', payload),
+  getApiCapabilityResult: (resultId) => getData(`/api-capability-results/${resultId}`),
 };
 
 export { getData, normalizeParams, sendData };

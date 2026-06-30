@@ -260,6 +260,33 @@ const sourceMethods = {
     const result = await backendApi.updatePlatformLogin(loginId, adapters.toBackendPlatformLoginPayload({ ...payload, loginStatus: 'inactive' }, store.id));
     return withStoreName([adapters.platformLogin(result)], stores)[0];
   },
+  getApiCapabilities: async (params) => {
+    if (!isBackendSource) return { data: [], items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 10 };
+    const result = await backendApi.getApiCapabilities(params);
+    return queryBackendRows(adapters.list(result, adapters.apiCapability).data, params);
+  },
+  createApiCapability: async (payload) => {
+    if (!isBackendSource) throw new Error('mock 模式不维护后端 API 能力矩阵，请切换 backend 模式查看/写入 Codex1 记录。');
+    return adapters.apiCapability(await backendApi.createApiCapability(adapters.toBackendApiCapabilityPayload(payload)));
+  },
+  updateApiCapability: async (capabilityId, payload) => {
+    if (!isBackendSource) throw new Error('mock 模式不维护后端 API 能力矩阵，请切换 backend 模式查看/写入 Codex1 记录。');
+    return adapters.apiCapability(await backendApi.updateApiCapability(capabilityId, adapters.toBackendApiCapabilityPayload(payload)));
+  },
+  getApiCapabilityResults: async (params) => {
+    if (!isBackendSource) return { data: [], items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 10 };
+    const result = await backendApi.getApiCapabilityResults(params);
+    return queryBackendRows(adapters.list(result, adapters.apiCapabilityResult).data, params);
+  },
+  createApiCapabilityResult: async (payload) => {
+    if (!isBackendSource) throw new Error('mock 模式不维护后端 API 能力矩阵，请切换 backend 模式查看/写入 Codex1 记录。');
+    const { store } = await resolveBackendStore(payload);
+    return adapters.apiCapabilityResult(await backendApi.createApiCapabilityResult(adapters.toBackendApiCapabilityResultPayload(payload, store.id)));
+  },
+  getApiCapabilityResult: async (resultId) => {
+    if (!isBackendSource) throw new Error('mock 模式不维护后端 API 能力矩阵，请切换 backend 模式查看/写入 Codex1 记录。');
+    return adapters.apiCapabilityResult(await backendApi.getApiCapabilityResult(resultId));
+  },
   getAiDailyContext: async (params) => {
     if (!isBackendSource) return null;
     return adapters.aiDailyContext(await backendApi.getAiDailyContext(params));

@@ -122,6 +122,19 @@ Credentials and email account pages show only configuration states and never sho
 
 Verification record: see `PHASE_5C_STORE_CONTEXT.md`.
 
+## Phase 6B-2 - API Capability Matrix Frontend
+
+Phase 6B-2 adds the `/api-capabilities` workspace page and sidebar entry `API 能力确认`.
+
+The page maintains two record types from Codex1:
+
+- Platform-level API capability definitions through `/api-capabilities`.
+- Current store-level manual/docs/mock/sandbox result records through `/api-capability-results`.
+
+This page is an API capability confirmation workbench, not a platform connection page. `docs_only` and `manual` records mean documentation review or operator-entered notes only. The frontend does not call Naver or Coupang APIs, does not use real keys, does not refresh tokens, and does not run real sync. Store-level result creation uses the current `StoreContext` selected store and only displays API Credential metadata such as platform, label, auth status, and `has_*` configuration states; secret, token, password, and encrypted values are never displayed.
+
+Time fields on the page use the shared KST display helpers from `src/utils/time.js`. Mock mode keeps the page reachable with an empty-state notice and does not pretend to maintain Codex1 API capability records.
+
 ## Phase 5D-1 - Store and Device Environment Writes
 
 Phase 5D-1 keeps `VITE_API_BASE_URL=http://127.0.0.1:8012/api/v1` and `VITE_DATA_SOURCE=backend`.

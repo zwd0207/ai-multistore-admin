@@ -15,6 +15,7 @@ const menuItems = [
   ['诉', '申诉管理', '/appeals'],
   ['境', '环境管理', '/environment'],
   ['账', '账号管理', '/accounts'],
+  ['API', 'API 能力确认', '/api-capabilities'],
   ['配', '系统设置', '/settings'],
   ['记', '操作日志', '/logs'],
 ];
