@@ -196,8 +196,6 @@ def get_api_capability_summary(
             summary["docs_only_count"] += 1
         if capability.test_mode == "manual":
             summary["manual_count"] += 1
-        if capability.test_mode == "real_readonly":
-            summary["real_readonly_count"] += 1
         if capability.test_status == "tested_success":
             summary["tested_success_count"] += 1
         if capability.test_status == "not_tested":
@@ -213,6 +211,19 @@ def get_api_capability_summary(
             "last_checked_at",
             _latest_datetime(capability.last_checked_at, capability.doc_checked_at, capability.updated_at),
         )
+
+    result_statement = select(ApiCapabilityTestResult).join(ApiCapabilityCheck).where(
+        ApiCapabilityTestResult.test_mode == "real_readonly",
+    )
+    if normalized_platform is not None:
+        result_statement = result_statement.where(ApiCapabilityCheck.platform == normalized_platform)
+    if store_id is not None:
+        result_statement = result_statement.where(ApiCapabilityTestResult.store_id == store_id)
+    real_readonly_results = db.scalars(result_statement).all()
+    for result in real_readonly_results:
+        summary = platform_summaries.setdefault(result.capability.platform, _new_platform_summary(result.capability.platform))
+        summary["real_readonly_count"] += 1
+        _update_latest_iso(summary, "last_checked_at", result.tested_at or result.created_at)
 
     store_result_summary: list[dict] = []
     attention_items: list[dict] = []

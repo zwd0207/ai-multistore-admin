@@ -247,89 +247,106 @@ def verify_api_credential_schema_and_security() -> None:
 def verify_api_credential_readiness() -> None:
     from fastapi.testclient import TestClient
 
+    import app.config as app_config
     from app.main import app
     from app.services import api_credential_readiness_service
 
+    original_test_enabled = os.environ.get("REAL_API_TEST_ENABLED")
+    original_write_enabled = os.environ.get("REAL_API_WRITE_ENABLED")
+    os.environ["REAL_API_TEST_ENABLED"] = "false"
+    os.environ["REAL_API_WRITE_ENABLED"] = "false"
+    app_config.get_settings.cache_clear()
     with TestClient(app) as client:
-        response = client.get("/api/v1/api-credentials/readiness")
-        assert response.status_code == 200, response.text
-        data = response.json()["data"]
-        assert data["real_api_test_enabled"] is False
-        assert data["real_api_write_enabled"] is False
-        assert "semantic_notice" in data
-        assert {item["platform"] for item in data["platforms"]} == {"naver", "coupang"}
-        for platform in data["platforms"]:
-            assert platform["credential_status"] in {"configured", "missing"}
-            assert platform["readiness_status"] in {"configured", "missing", "disabled"}
-            assert platform["readiness_status"] == "disabled"
-            for status_value in platform["fields"].values():
-                assert status_value in {"configured", "missing"}
-        serialized = str(response.json()).lower()
-        forbidden = [
-            "phase-6b-secret-key",
-            "phase-6b-access-token",
-            "phase-6b-refresh-token",
-            "coupang-secret-key",
-            "naver-client-secret",
-            "encrypted_access_key",
-            "encrypted_secret_key",
-            "encrypted_access_token",
-            "encrypted_refresh_token",
-        ]
-        assert not any(item in serialized for item in forbidden), serialized
-
-        original_client = api_credential_readiness_service.httpx.Client
-
-        class ForbiddenHttpClient:
-            def __init__(self, *args, **kwargs) -> None:
-                raise AssertionError("disabled smoke test must not create an HTTP client")
-
-        api_credential_readiness_service.httpx.Client = ForbiddenHttpClient
         try:
-            disabled = client.post("/api/v1/api-credentials/smoke-test", json={
-                "platform": "all",
-                "mode": "readonly",
-            })
-        finally:
-            api_credential_readiness_service.httpx.Client = original_client
-        assert disabled.status_code == 200, disabled.text
-        smoke_data = disabled.json()["data"]
-        assert smoke_data["real_api_test_enabled"] is False
-        assert smoke_data["real_api_write_enabled"] is False
-        assert smoke_data["mode"] == "readonly"
-        assert {item["platform"] for item in smoke_data["results"]} == {"naver", "coupang"}
-        allowed_result_keys = {
-            "platform",
-            "enabled",
-            "configured",
-            "http_status",
-            "token_test",
-            "seller_or_account_test",
-            "product_read_test",
-            "order_read_test",
-            "settlement_read_test",
-            "error_code",
-            "masked_message",
-            "tested_at",
-        }
-        for item in smoke_data["results"]:
-            assert set(item.keys()) == allowed_result_keys, item
-            assert item["enabled"] is False
-            assert item["configured"] is False
-            assert item["error_code"] == "real_api_test_disabled"
-            assert item["token_test"] == "skipped"
-            assert item["seller_or_account_test"] == "skipped"
-            assert item["product_read_test"] == "skipped"
-            assert item["order_read_test"] == "skipped"
-            assert item["settlement_read_test"] == "skipped"
-        smoke_serialized = str(disabled.json()).lower()
-        assert not any(item in smoke_serialized for item in forbidden), smoke_serialized
+            response = client.get("/api/v1/api-credentials/readiness")
+            assert response.status_code == 200, response.text
+            data = response.json()["data"]
+            assert data["real_api_test_enabled"] is False
+            assert data["real_api_write_enabled"] is False
+            assert "semantic_notice" in data
+            assert {item["platform"] for item in data["platforms"]} == {"naver", "coupang"}
+            for platform in data["platforms"]:
+                assert platform["credential_status"] in {"configured", "missing"}
+                assert platform["readiness_status"] in {"configured", "missing", "disabled"}
+                assert platform["readiness_status"] == "disabled"
+                for status_value in platform["fields"].values():
+                    assert status_value in {"configured", "missing"}
+            serialized = str(response.json()).lower()
+            forbidden = [
+                "phase-6b-secret-key",
+                "phase-6b-access-token",
+                "phase-6b-refresh-token",
+                "coupang-secret-key",
+                "naver-client-secret",
+                "encrypted_access_key",
+                "encrypted_secret_key",
+                "encrypted_access_token",
+                "encrypted_refresh_token",
+            ]
+            assert not any(item in serialized for item in forbidden), serialized
 
-        invalid_mode = client.post("/api/v1/api-credentials/smoke-test", json={
-            "platform": "naver",
-            "mode": "write",
-        })
-        assert invalid_mode.status_code == 422, invalid_mode.text
+            original_client = api_credential_readiness_service.httpx.Client
+
+            class ForbiddenHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    raise AssertionError("disabled smoke test must not create an HTTP client")
+
+            api_credential_readiness_service.httpx.Client = ForbiddenHttpClient
+            try:
+                disabled = client.post("/api/v1/api-credentials/smoke-test", json={
+                    "platform": "all",
+                    "mode": "readonly",
+                })
+            finally:
+                api_credential_readiness_service.httpx.Client = original_client
+            assert disabled.status_code == 200, disabled.text
+            smoke_data = disabled.json()["data"]
+            assert smoke_data["real_api_test_enabled"] is False
+            assert smoke_data["real_api_write_enabled"] is False
+            assert smoke_data["mode"] == "readonly"
+            assert {item["platform"] for item in smoke_data["results"]} == {"naver", "coupang"}
+            allowed_result_keys = {
+                "platform",
+                "enabled",
+                "configured",
+                "http_status",
+                "token_test",
+                "seller_or_account_test",
+                "product_read_test",
+                "order_read_test",
+                "settlement_read_test",
+                "error_code",
+                "masked_message",
+                "tested_at",
+            }
+            for item in smoke_data["results"]:
+                assert set(item.keys()) == allowed_result_keys, item
+                assert item["enabled"] is False
+                assert item["configured"] is False
+                assert item["error_code"] == "real_api_test_disabled"
+                assert item["token_test"] == "skipped"
+                assert item["seller_or_account_test"] == "skipped"
+                assert item["product_read_test"] == "skipped"
+                assert item["order_read_test"] == "skipped"
+                assert item["settlement_read_test"] == "skipped"
+            smoke_serialized = str(disabled.json()).lower()
+            assert not any(item in smoke_serialized for item in forbidden), smoke_serialized
+
+            invalid_mode = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "write",
+            })
+            assert invalid_mode.status_code == 422, invalid_mode.text
+        finally:
+            if original_test_enabled is None:
+                os.environ.pop("REAL_API_TEST_ENABLED", None)
+            else:
+                os.environ["REAL_API_TEST_ENABLED"] = original_test_enabled
+            if original_write_enabled is None:
+                os.environ.pop("REAL_API_WRITE_ENABLED", None)
+            else:
+                os.environ["REAL_API_WRITE_ENABLED"] = original_write_enabled
+            app_config.get_settings.cache_clear()
     print("api credential readiness: ok")
 
 

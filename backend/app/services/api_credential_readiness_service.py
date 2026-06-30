@@ -153,9 +153,14 @@ def run_api_credential_smoke_test(
 ) -> dict:
     settings = get_settings()
     selected_platforms = ["coupang", "naver"] if platform == "all" else [platform]
-    results = [_run_platform_smoke_test(settings, item) for item in selected_platforms]
+    capability_results: list[dict] = []
+    results = []
+    for item in selected_platforms:
+        platform_result, platform_capability_results = _run_platform_smoke_test(settings, item)
+        results.append(platform_result)
+        capability_results.extend(platform_capability_results)
     if db is not None and settings.real_api_test_enabled:
-        for result in results:
+        for result in capability_results:
             _record_real_readonly_result(db, result)
 
     return {
@@ -164,17 +169,18 @@ def run_api_credential_smoke_test(
         "real_api_test_enabled": bool(settings.real_api_test_enabled),
         "real_api_write_enabled": bool(settings.real_api_write_enabled),
         "results": results,
+        "capability_results": capability_results,
     }
 
 
-def _run_platform_smoke_test(settings, platform: str) -> dict:
+def _run_platform_smoke_test(settings, platform: str) -> tuple[dict, list[dict]]:
     result = _new_smoke_result(platform)
     if not settings.real_api_test_enabled:
-        return _mark_failed(result, "real_api_test_disabled", "REAL_API_TEST_ENABLED is false")
+        return _mark_failed(result, "real_api_test_disabled", "REAL_API_TEST_ENABLED is false"), [result]
 
     result["enabled"] = True
     if platform == "naver":
-        return _run_naver_smoke_test(settings, result)
+        return _run_naver_smoke_test(settings, result), [result]
     return _run_coupang_smoke_test(settings, result)
 
 
@@ -281,7 +287,7 @@ def _extract_channel_no(payload: object) -> str | None:
     return None
 
 
-def _run_coupang_smoke_test(settings, result: dict) -> dict:
+def _run_coupang_smoke_test(settings, result: dict) -> tuple[dict, list[dict]]:
     missing = [
         name
         for name, value in {
@@ -292,25 +298,25 @@ def _run_coupang_smoke_test(settings, result: dict) -> dict:
         if not _is_configured(value)
     ]
     if missing:
-        return _mark_failed(result, "missing_credentials", f"Missing required environment fields: {', '.join(missing)}")
+        _mark_failed(result, "missing_credentials", f"Missing required environment fields: {', '.join(missing)}")
+        return result, [result]
 
     result["configured"] = True
     result["token_test"] = "skipped"
+    capability_results = [result]
     try:
         now = get_utc_now()
-        path = f"/v2/providers/openapi/apis/api/v4/vendors/{settings.coupang_vendor_id}/ordersheets"
-        query = {
-            "createdAtFrom": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
-            "createdAtTo": now.strftime("%Y-%m-%d"),
-            "status": "ACCEPT",
-            "maxPerPage": "1",
-        }
-        query_string = urlencode(query)
-        response = _coupang_get(settings, path, query_string)
-        if _step_from_response(result, "order_read_test", response):
-            result["seller_or_account_test"] = "success"
-        result["product_read_test"] = "skipped"
-        result["settlement_read_test"] = "skipped"
+        order_record, order_step = _run_coupang_order_read(settings, now, result)
+        capability_results.append(order_record)
+        result["seller_or_account_test"] = order_step["seller_or_account_test"]
+        result["order_read_test"] = order_step["order_read_test"]
+        result["http_status"] = order_step["http_status"]
+        result["error_code"] = order_step["error_code"]
+        result["masked_message"] = result["masked_message"] or order_step["masked_message"]
+
+        capability_results.append(_run_coupang_product_read(settings, now, result))
+        capability_results.append(_run_coupang_sales_read(settings, now, result))
+        capability_results.append(_run_coupang_settlement_read(settings, now, result))
         if not result["masked_message"]:
             result["masked_message"] = "Readonly smoke test completed without returning raw API data."
     except httpx.HTTPError as exc:
@@ -318,11 +324,192 @@ def _run_coupang_smoke_test(settings, result: dict) -> dict:
         _mark_failed(result, "network_error", str(exc))
     except Exception as exc:
         _mark_failed(result, "smoke_test_failed", str(exc))
-    return result
+    return result, capability_results
+
+
+def _run_coupang_order_read(settings, now, platform_result: dict) -> tuple[dict, dict]:
+    result = _clone_smoke_result(platform_result, "order_read_test")
+    try:
+        response = _coupang_get(
+            settings,
+            f"/v2/providers/openapi/apis/api/v4/vendors/{settings.coupang_vendor_id}/ordersheets",
+            urlencode({
+                "createdAtFrom": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "createdAtTo": now.strftime("%Y-%m-%d"),
+                "status": "ACCEPT",
+                "maxPerPage": "1",
+            }),
+        )
+        _step_from_response(result, "order_read_test", response)
+        if result["order_read_test"] == "success":
+            result["seller_or_account_test"] = "success"
+        if not result["masked_message"]:
+            result["masked_message"] = "Readonly order smoke test completed without returning raw API data."
+    except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
+        _mark_failed(result, "network_error", str(exc))
+    return _build_capability_record(
+        platform="coupang",
+        capability_key="coupang.order_read",
+        capability_name="Coupang order read readonly test",
+        api_category="orders",
+        endpoint_path="/v2/providers/openapi/apis/api/v4/vendors/{vendorId}/ordersheets",
+        result=result,
+        test_step="order_read_test",
+        notes="Readonly order query only. No write operation was executed.",
+    ), result
+
+
+def _run_coupang_product_read(settings, now, platform_result: dict) -> dict:
+    result = _clone_smoke_result(platform_result, "product_read_test")
+    try:
+        response = _coupang_get(
+            settings,
+            "/v2/providers/seller_api/apis/api/v1/marketplace/seller-products",
+            urlencode({
+                "vendorId": settings.coupang_vendor_id,
+                "maxPerPage": "1",
+                "createdAt": now.strftime("%Y-%m-%d"),
+            }),
+        )
+        _step_from_response(result, "product_read_test", response)
+        if not result["masked_message"]:
+            result["masked_message"] = "Readonly product smoke test completed without returning raw API data."
+    except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
+        _mark_failed(result, "network_error", str(exc))
+    return _build_capability_record(
+        platform="coupang",
+        capability_key="coupang.product_read",
+        capability_name="Coupang product read readonly test",
+        api_category="products",
+        endpoint_path="/v2/providers/seller_api/apis/api/v1/marketplace/seller-products",
+        result=result,
+        test_step="product_read_test",
+        notes="Readonly product query only. No create/update/delete operation was executed.",
+    )
+
+
+def _run_coupang_sales_read(settings, now, platform_result: dict) -> dict:
+    result = _clone_smoke_result(platform_result, "settlement_read_test")
+    try:
+        response = _coupang_get(
+            settings,
+            "/v2/providers/openapi/apis/api/v1/revenue-history",
+            urlencode({
+                "vendorId": settings.coupang_vendor_id,
+                "recognitionDateFrom": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "recognitionDateTo": now.strftime("%Y-%m-%d"),
+                "maxPerPage": "1",
+            }),
+        )
+        _step_from_response(result, "settlement_read_test", response)
+        if not result["masked_message"]:
+            result["masked_message"] = "Readonly sales smoke test completed without returning raw API data."
+    except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
+        _mark_failed(result, "network_error", str(exc))
+    return _build_capability_record(
+        platform="coupang",
+        capability_key="coupang.sales_read",
+        capability_name="Coupang sales detail readonly test",
+        api_category="sales",
+        endpoint_path="/v2/providers/openapi/apis/api/v1/revenue-history",
+        result=result,
+        test_step="settlement_read_test",
+        notes="Readonly sales detail query only. No write operation was executed.",
+    )
+
+
+def _run_coupang_settlement_read(settings, now, platform_result: dict) -> dict:
+    result = _clone_smoke_result(platform_result, "settlement_read_test")
+    try:
+        response = _coupang_get(
+            settings,
+            "/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories",
+            urlencode({
+                "revenueRecognitionYearMonth": now.strftime("%Y-%m"),
+            }),
+        )
+        _step_from_response(result, "settlement_read_test", response)
+        if not result["masked_message"]:
+            result["masked_message"] = "Readonly settlement smoke test completed without returning raw API data."
+    except httpx.HTTPError as exc:
+        result["http_status"] = getattr(exc.response, "status_code", result.get("http_status"))
+        _mark_failed(result, "network_error", str(exc))
+    return _build_capability_record(
+        platform="coupang",
+        capability_key="coupang.settlement_read",
+        capability_name="Coupang settlement readonly test",
+        api_category="settlements",
+        endpoint_path="/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories",
+        result=result,
+        test_step="settlement_read_test",
+        notes="Readonly settlement query only. No write operation was executed.",
+    )
+
+
+def _clone_smoke_result(result: dict, step: str) -> dict:
+    cloned = dict(result)
+    for key in SMOKE_STEPS:
+        cloned[key] = result.get(key, "skipped")
+    cloned[step] = "skipped"
+    return cloned
+
+
+def _build_capability_record(
+    platform: str,
+    capability_key: str,
+    capability_name: str,
+    api_category: str,
+    endpoint_path: str,
+    result: dict,
+    test_step: str,
+    notes: str,
+) -> dict:
+    return {
+        "platform": platform,
+        "capability_key": capability_key,
+        "capability_name": capability_name,
+        "api_category": api_category,
+        "endpoint_path": endpoint_path,
+        "test_mode": "real_readonly",
+        "test_status": _step_status_from_result(result, test_step),
+        "http_status": result.get("http_status"),
+        "error_code": result.get("error_code"),
+        "permission_result": _permission_result(result),
+        "rate_limit_summary": None,
+        "response_fields_observed": _response_fields_observed(result),
+        "tested_at": result.get("tested_at") or get_utc_now().isoformat(),
+        "notes": notes,
+    }
+
+
+def _permission_result(result: dict) -> str:
+    if result.get("error_code") == "ip_not_allowed":
+        return "IP allowlist rejected the readonly request."
+    if result.get("error_code") == "auth_failed":
+        return "Authentication or permission rejected the readonly request."
+    return "Readonly smoke-test did not expose credential values or raw external response payloads."
+
+
+def _response_fields_observed(result: dict) -> str:
+    statuses = [f"{step}={result.get(step, 'skipped')}" for step in SMOKE_STEPS]
+    return "; ".join(statuses)
+
+
+def _step_status_from_result(result: dict, step: str) -> str:
+    if result.get("error_code") == "missing_credentials":
+        return "not_tested"
+    if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
+        return "permission_required"
+    if result.get("error_code"):
+        return "tested_failed"
+    return "tested_success" if result.get(step) == "success" else "tested_failed"
 
 
 def _record_real_readonly_result(db: Session, result: dict) -> None:
-    if not result.get("enabled") or not result.get("configured"):
+    if result.get("test_mode") != "real_readonly":
         return
 
     platform = result["platform"]
@@ -338,28 +525,28 @@ def _record_real_readonly_result(db: Session, result: dict) -> None:
         select(ApiCapabilityCheck)
         .where(
             ApiCapabilityCheck.platform == platform,
-            ApiCapabilityCheck.capability_key == "readonly.smoke_test",
+            ApiCapabilityCheck.capability_key == result["capability_key"],
         )
         .order_by(ApiCapabilityCheck.id.asc())
     ).first()
     if capability is None:
         capability = ApiCapabilityCheck(
             platform=platform,
-            capability_key="readonly.smoke_test",
-            capability_name="Readonly smoke-test",
-            api_category="auth",
-            endpoint_path="/api-credentials/smoke-test",
+            capability_key=result["capability_key"],
+            capability_name=result["capability_name"],
+            api_category=result["api_category"],
+            endpoint_path=result["endpoint_path"],
             method="POST",
             required_credential_type="local .env platform credentials",
             ordinary_store_supported="unknown",
-            test_status=_result_status(result),
+            test_status=result["test_status"],
             test_mode="real_readonly",
-            response_fields_summary="Only step statuses, error code, HTTP status, and tested_at are recorded.",
+            response_fields_summary=result["response_fields_observed"],
             error_codes_summary="real_api_test_disabled, missing_credentials, auth_failed, ip_not_allowed, readonly_request_failed, network_error",
             data_usefulness="medium",
             first_phase_candidate=False,
             sales_source_type="not_applicable",
-            notes="Local readonly smoke-test capability. It does not perform writes or return credential values.",
+            notes=result["notes"],
             last_checked_at=get_utc_now(),
         )
         db.add(capability)
@@ -375,44 +562,20 @@ def _record_real_readonly_result(db: Session, result: dict) -> None:
         store_id=store.id,
         credential_id=credential.id if credential is not None else None,
         capability_id=capability.id,
-        test_mode="real_readonly",
-        test_status=_result_status(result),
+        test_mode=result["test_mode"],
+        test_status=result["test_status"],
         http_status=result.get("http_status"),
         error_code=result.get("error_code"),
-        permission_result=_permission_result(result),
-        rate_limit_summary=None,
-        response_fields_observed=_response_fields_observed(result),
+        permission_result=result.get("permission_result"),
+        rate_limit_summary=result.get("rate_limit_summary"),
+        response_fields_observed=result.get("response_fields_observed"),
         tested_at=tested_at,
-        notes="Recorded from local readonly smoke-test. No write operation was executed and no credential value was stored.",
+        notes=result.get("notes"),
     )
     db.add(item)
     capability.test_status = item.test_status
     capability.last_checked_at = tested_at
     db.commit()
-
-
-def _result_status(result: dict) -> str:
-    if result.get("error_code") == "missing_credentials":
-        return "not_tested"
-    if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
-        return "permission_required"
-    if result.get("error_code"):
-        return "tested_failed"
-    failed_steps = [step for step in SMOKE_STEPS if result.get(step) == "failed"]
-    return "tested_failed" if failed_steps else "tested_success"
-
-
-def _permission_result(result: dict) -> str:
-    if result.get("error_code") == "ip_not_allowed":
-        return "IP allowlist rejected the readonly request."
-    if result.get("error_code") == "auth_failed":
-        return "Authentication or permission rejected the readonly request."
-    return "Readonly smoke-test did not expose credential values or raw external response payloads."
-
-
-def _response_fields_observed(result: dict) -> str:
-    statuses = [f"{step}={result.get(step, 'skipped')}" for step in SMOKE_STEPS]
-    return "; ".join(statuses)
 
 
 def _coupang_get(settings, path: str, query_string: str) -> httpx.Response:
