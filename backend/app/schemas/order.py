@@ -19,6 +19,8 @@ class OrderRead(BaseModel):
     order_status: str
     paid_at: datetime | None
     ordered_at: datetime
+    source_type: str
+    last_synced_at: datetime | None
     raw_data: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime

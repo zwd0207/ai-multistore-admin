@@ -39,3 +39,7 @@ def init_db() -> None:
     import app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    if settings.database_url.startswith("sqlite"):
+        from scripts.upgrade_sync_schema import upgrade as upgrade_sync_schema
+
+        upgrade_sync_schema(run_create_all=False)

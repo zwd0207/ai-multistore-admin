@@ -516,6 +516,8 @@ Product response item:
   "name": "ECCO 골프화 / 中文运营测试",
   "brand": "ECCO",
   "category": "스포츠화",
+  "source_type": "mock_sync",
+  "last_synced_at": "2026-07-01T00:00:00+00:00",
   "raw_data": {
     "中文": "运营测试",
     "한국어": "골프화"
@@ -534,7 +536,9 @@ Order response item:
   "buyer_name": "中文测试买家",
   "buyer_masked_phone": "010-****-1234",
   "product_name": "SK-II 神仙水测试商品",
-  "order_amount": "129000.00"
+  "order_amount": "129000.00",
+  "source_type": "mock_sync",
+  "last_synced_at": "2026-07-01T00:00:00+00:00"
 }
 ```
 
@@ -582,6 +586,33 @@ Response example:
 ```
 
 Common errors: `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `PLATFORM_NOT_SUPPORTED`, `ENCRYPTION_KEY_MISSING`.
+
+## Coupang Order Readonly Preview
+
+| Method | Path | Query | Body | store_id | Sensitive Fields |
+|---|---|---|---|---:|---|
+| POST | `/api/v1/sync/orders/coupang/preview` | None | Preview payload | Required in body | No plaintext credential, signature, header, or raw external response |
+
+Request body:
+
+```json
+{
+  "store_id": 1,
+  "start_date": "2026-06-30",
+  "end_date": "2026-07-01",
+  "max_pages": 3
+}
+```
+
+Preview rules:
+
+- `store_id` is required and only that store's Coupang credential is used.
+- The inclusive KST business-date window must be 3 days or less.
+- `max_pages` defaults to `1` and cannot exceed `3`.
+- Preview returns only dry-run metadata such as `would_create`, `would_update`, `sample_ids`, `page_count`, `next_cursor_exists`, and `source_type=real_coupang`.
+- Preview never writes into `orders`, never performs platform write operations, and never stores raw external responses, authorization headers, signatures, access keys, or secret keys.
+- `SyncLog.raw_summary`, if present, contains masked preview metadata only.
+- If `REAL_API_TEST_ENABLED=false`, the endpoint returns `REAL_API_TEST_DISABLED` and must not send any external request.
 
 ## Stats
 

@@ -38,6 +38,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/customer-inquiries",
     "/api/v1/sync/products/mock",
     "/api/v1/sync/orders/mock",
+    "/api/v1/sync/orders/coupang/preview",
     "/api/v1/sync/customer-inquiries/mock",
     "/api/v1/stats/sales",
     "/api/v1/stats/sales/by-platform",
@@ -94,6 +95,15 @@ EXPECTED_CREDENTIAL_COLUMNS = {
 EXPECTED_API_CAPABILITY_TABLES = {
     "api_capability_checks",
     "api_capability_test_results",
+}
+
+EXPECTED_SYNC_SCHEMA_COLUMNS = {
+    "orders": {"source_type", "last_synced_at"},
+    "products": {"source_type", "last_synced_at"},
+}
+
+EXPECTED_SYNC_TABLES = {
+    "sync_checkpoints",
 }
 
 FORBIDDEN_TIME_PATTERNS = {
@@ -616,6 +626,189 @@ def verify_api_capabilities() -> None:
     print("api capabilities docs/manual base: ok")
 
 
+def verify_sync_preview_schema_and_security() -> None:
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select, text
+    from urllib.parse import parse_qs
+
+    import httpx
+    import app.config as app_config
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models.order import Order
+    from app.models.sync_log import SyncLog
+    from app.services import sync_service
+    from scripts.upgrade_sync_schema import upgrade
+
+    upgrade()
+    upgrade()
+    with SessionLocal() as db:
+        tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
+        missing_tables = sorted(EXPECTED_SYNC_TABLES - tables)
+        assert not missing_tables, f"Missing sync tables: {missing_tables}"
+        for table_name, expected_columns in EXPECTED_SYNC_SCHEMA_COLUMNS.items():
+            columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table_name})")).all()}
+            missing_columns = sorted(expected_columns - columns)
+            assert not missing_columns, f"Missing {table_name} columns: {missing_columns}"
+
+    original_test_enabled = os.environ.get("REAL_API_TEST_ENABLED")
+    try:
+        suffix = uuid.uuid4().hex[:8]
+        with TestClient(app) as client:
+            store = client.post("/api/v1/stores", json={
+                "name": f"Phase 6C-6A Preview Store {suffix}",
+                "platform": "coupang",
+                "country": "KR",
+                "language": "ko-KR",
+                "status": "active",
+            })
+            assert store.status_code == 201, store.text
+            store_id = store.json()["data"]["id"]
+
+            credential = client.post("/api/v1/credentials", json={
+                "store_id": store_id,
+                "platform": "coupang",
+                "credential_name": "Phase 6C-6A Preview Credential",
+                "vendor_id": "phase-6c6a-vendor",
+                "access_key": "phase-6c6a-access-key",
+                "secret_key": "phase-6c6a-secret-key",
+                "market": "KR",
+                "auth_status": "configured",
+            })
+            assert credential.status_code == 201, credential.text
+            credential_text = str(credential.json()).lower()
+            for forbidden in [
+                "phase-6c6a-access-key",
+                "phase-6c6a-secret-key",
+                "authorization",
+                "signature",
+            ]:
+                assert forbidden not in credential_text, credential_text
+
+            os.environ["REAL_API_TEST_ENABLED"] = "false"
+            app_config.get_settings.cache_clear()
+            original_http_client = sync_service.httpx.Client
+
+            class ForbiddenHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    raise AssertionError("disabled preview must not create an HTTP client")
+
+            sync_service.httpx.Client = ForbiddenHttpClient
+            try:
+                disabled = client.post("/api/v1/sync/orders/coupang/preview", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-30",
+                    "end_date": "2026-06-30",
+                    "max_pages": 1,
+                })
+            finally:
+                sync_service.httpx.Client = original_http_client
+                app_config.get_settings.cache_clear()
+            assert disabled.status_code == 403, disabled.text
+            assert disabled.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled.text
+
+            with SessionLocal() as db:
+                db.add(Order(
+                    store_id=store_id,
+                    platform="coupang",
+                    external_order_id="preview-existing-001",
+                    buyer_name="Preview Buyer",
+                    buyer_masked_phone="010-****-0000",
+                    product_name="Existing Preview Order",
+                    quantity=1,
+                    order_amount=Decimal("1000.00"),
+                    currency="KRW",
+                    order_status="paid",
+                    paid_at=datetime(2026, 6, 30, 0, 0, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 6, 30, 0, 0, tzinfo=timezone.utc),
+                    source_type="mock_sync",
+                    last_synced_at=datetime(2026, 6, 30, 1, 0, tzinfo=timezone.utc),
+                    raw_data={"source": "verify_sync_preview_schema_and_security"},
+                ))
+                db.commit()
+
+            os.environ["REAL_API_TEST_ENABLED"] = "true"
+            app_config.get_settings.cache_clear()
+            original_get = sync_service._coupang_get_with_credential
+
+            def fake_coupang_get(credential, path, query_string):
+                query = parse_qs(query_string)
+                request = httpx.Request("GET", f"https://example.invalid{path}?{query_string}")
+                if query.get("nextToken") == ["token-page-2"]:
+                    return httpx.Response(
+                        200,
+                        request=request,
+                        json={"data": [{"orderId": "preview-order-002"}]},
+                    )
+                return httpx.Response(
+                    200,
+                    request=request,
+                    json={
+                        "data": [
+                            {"orderId": "preview-existing-001"},
+                            {"shipmentBoxId": "preview-order-001"},
+                        ],
+                        "nextToken": "token-page-2",
+                    },
+                )
+
+            sync_service._coupang_get_with_credential = fake_coupang_get
+            try:
+                preview = client.post("/api/v1/sync/orders/coupang/preview", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-30",
+                    "end_date": "2026-07-01",
+                    "max_pages": 3,
+                })
+            finally:
+                sync_service._coupang_get_with_credential = original_get
+
+            assert preview.status_code == 200, preview.text
+            preview_data = preview.json()["data"]
+            assert preview_data["store_id"] == store_id, preview_data
+            assert preview_data["platform"] == "coupang", preview_data
+            assert preview_data["source_type"] == "real_coupang", preview_data
+            assert preview_data["page_count"] == 2, preview_data
+            assert preview_data["next_cursor_exists"] is False, preview_data
+            assert preview_data["would_update"] == 1, preview_data
+            assert preview_data["would_create"] == 2, preview_data
+            assert set(preview_data["sample_ids"]) == {"preview-existing-001", "preview-order-001", "preview-order-002"}
+            assert preview_data["window_start_at"].startswith("2026-06-29T15:00:00+00:00"), preview_data
+            assert preview_data["window_end_at"].startswith("2026-07-01T15:00:00+00:00"), preview_data
+
+            with SessionLocal() as db:
+                latest_log = db.scalars(
+                    select(SyncLog)
+                    .where(
+                        SyncLog.store_id == store_id,
+                        SyncLog.sync_type == "orders_coupang_real_preview",
+                    )
+                    .order_by(SyncLog.id.desc())
+                ).first()
+                assert latest_log is not None
+                assert latest_log.status == "success", latest_log
+                assert latest_log.raw_summary is not None, latest_log
+                log_text = str(latest_log.raw_summary).lower()
+                for forbidden in [
+                    "phase-6c6a-access-key",
+                    "phase-6c6a-secret-key",
+                    "authorization",
+                    "signature",
+                    "token-page-2",
+                ]:
+                    assert forbidden not in log_text, log_text
+                store_orders = db.scalars(select(Order).where(Order.store_id == store_id)).all()
+                assert len(store_orders) == 1, store_orders
+    finally:
+        if original_test_enabled is None:
+            os.environ.pop("REAL_API_TEST_ENABLED", None)
+        else:
+            os.environ["REAL_API_TEST_ENABLED"] = original_test_enabled
+        app_config.get_settings.cache_clear()
+
+    print("sync preview schema/security: ok")
+
+
 def verify_kst_business_timezone() -> None:
     from fastapi.testclient import TestClient
 
@@ -730,15 +923,22 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/router.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
+        " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
+        " M backend/app/database.py",
         " M backend/app/models/__init__.py",
         " M backend/app/models/api_credential.py",
+        " M backend/app/models/order.py",
+        " M backend/app/models/product.py",
         " M backend/app/models/store.py",
         " M backend/app/schemas/credential.py",
+        " M backend/app/schemas/order.py",
+        " M backend/app/schemas/product.py",
         " M backend/app/services/stats_service.py",
         " M backend/app/services/api_capability_service.py",
         " M backend/app/services/api_credential_readiness_service.py",
         " M backend/app/services/credential_service.py",
+        " M backend/app/services/sync_service.py",
         " M backend/docs/",
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
@@ -747,8 +947,10 @@ def verify_git_tracking() -> None:
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
         "?? backend/app/models/api_capability.py",
+        "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
+        "?? backend/app/schemas/sync.py",
         "?? backend/app/services/api_capability_service.py",
         "?? backend/app/services/api_credential_readiness_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
@@ -757,6 +959,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/platform_login_service.py",
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
+        "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/verify_all.py",
     )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]
@@ -782,6 +985,7 @@ def main() -> None:
     verify_api_credential_schema_and_security()
     verify_api_credential_readiness()
     verify_api_capabilities()
+    verify_sync_preview_schema_and_security()
     verify_kst_business_timezone()
     verify_git_tracking()
     verify_docs_no_real_secrets()

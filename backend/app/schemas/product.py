@@ -18,6 +18,8 @@ class ProductRead(BaseModel):
     price: Decimal
     currency: str
     stock_quantity: int
+    source_type: str
+    last_synced_at: datetime | None
     raw_data: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime

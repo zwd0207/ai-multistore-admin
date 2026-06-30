@@ -45,6 +45,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    sync_checkpoints = relationship(
+        "SyncCheckpoint",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     products = relationship(
         "Product",
         back_populates="store",
