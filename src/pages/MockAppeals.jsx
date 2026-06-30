@@ -11,6 +11,7 @@ import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import Timeline from '../components/common/Timeline';
 import mockApi from '../services/mockApi';
+import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const statuses = ['자료 준비중', '제출 대기', '제출 완료', '심사중', '추가 자료 요청', '승인', '반려', '판매중지', '정산보류'];
@@ -266,7 +267,7 @@ export default function Appeals() {
                 <div className="detail-item"><span>当前处理状态</span><strong><StatusBadge value={detail.status} /></strong></div>
                 <div className="detail-item"><span>风险等级</span><strong><StatusBadge value={detail.riskLevel} /></strong></div>
                 <div className="detail-item"><span>涉及金额</span><strong>{formatWon(detail.amount)}</strong></div>
-                <div className="detail-item"><span>截止时间</span><strong>{detail.deadline}</strong></div>
+                <div className="detail-item"><span>截止时间</span><strong>{formatKstDateTimeWithLabel(detail.deadline)}</strong></div>
               </div>
             </section>
 

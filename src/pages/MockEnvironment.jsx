@@ -13,6 +13,7 @@ import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import mockApi from '../services/mockApi';
+import { getKstNowText } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const environmentTypes = ['Naver SmartStore 环境', 'Coupang Seller 环境', 'Gmarket/ESM 环境', '11街 Seller 环境', '옥션 Seller 环境', '申诉专用环境', '客服专用环境'];
@@ -143,7 +144,7 @@ export default function Environment() {
       ipRegion: form.ipRegion,
       browserType: form.browserType,
       cookieStatus: form.cookieStatus,
-      lastLoginAt: form.lastLoginAt || '2026-06-29 16:00',
+      lastLoginAt: form.lastLoginAt || getKstNowText(),
       status: form.status,
       riskLevel: form.riskLevel,
       remarks: form.remarks,

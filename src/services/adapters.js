@@ -436,11 +436,17 @@ export function adaptDashboardSummary(data = {}) {
     productTotal: numberValue(data.product_count),
     todayOrderCount: numberValue(data.order_count),
     todaySalesAmount: numberValue(data.total_sales_amount),
+    scopeOrderCount: numberValue(data.order_count),
+    scopeSalesAmount: numberValue(data.total_sales_amount),
     pendingCustomers,
     pendingAppeals: numberValue(data.open_appeal_cases),
     riskEnvironments: risks.filter((item) => /ENV|DEVICE|IP|LOGIN/i.test(item.id)).length,
     unreadImportantEmails: numberValue(data.unread_important_emails),
     currency: data.currency || 'KRW',
+    businessTimezone: data.business_timezone,
+    businessDate: data.business_date,
+    businessDayStart: data.business_day_start,
+    businessDayEnd: data.business_day_end,
   };
 
   const todos = pendingCustomers > 0
@@ -480,6 +486,9 @@ export function adaptDashboardSummary(data = {}) {
 export function adaptAiDailyContext(data = {}) {
   return {
     date: data.date,
+    businessTimezone: data.business_timezone,
+    businessDayStart: data.business_day_start,
+    businessDayEnd: data.business_day_end,
     scope: {
       storeId: data.scope?.store_id ?? null,
       platform: data.scope?.platform ? adaptPlatform(data.scope.platform) : null,

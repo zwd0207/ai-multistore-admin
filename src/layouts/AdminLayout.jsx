@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import StoreSelector from '../components/common/StoreSelector';
+import { BUSINESS_TIME_LABEL } from '../utils/time';
 
 const menuItems = [
   ['总', '总览', '/dashboard'],
@@ -44,6 +45,7 @@ export default function AdminLayout() {
           <div>
             <strong>AI 多店铺运营与环境管理系统</strong>
             <span className="environment-chip">演示环境</span>
+            <span className="environment-chip">时间显示：{BUSINESS_TIME_LABEL}</span>
             <StoreSelector />
           </div>
           <div className="topbar-actions">

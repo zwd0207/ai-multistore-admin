@@ -7,6 +7,7 @@ import Pagination from '../components/common/Pagination';
 import SummaryCard from '../components/common/SummaryCard';
 import StatusBadge from '../components/common/StatusBadge';
 import mockApi from '../services/mockApi';
+import { getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const stores = ['스마트스토어 뷰티샵', '韩国本土运动鞋店', 'Gmarket 럭셔리 골프관', '11街 韩系生活馆', 'K-Beauty 글로벌샵', '옥션 아웃도어 셀렉트', 'Coupang 키즈 패션랩'];
@@ -27,13 +28,16 @@ const columns = [
 ];
 
 export default function Sales() {
-  const [filters, setFilters] = useState({
-    startDate: '2026-06-23',
-    endDate: '2026-06-29',
+  const defaultFilters = {
+    startDate: getKstDateOffsetString(-7),
+    endDate: getKstTodayString(),
     platform: '',
     store: '',
     page: 1,
     pageSize: 6,
+  };
+  const [filters, setFilters] = useState({
+    ...defaultFilters,
   });
   const [draftFilters, setDraftFilters] = useState(filters);
   const [loading, setLoading] = useState(true);
@@ -85,7 +89,7 @@ export default function Sales() {
         </div>
         <div className="filter-actions">
           <button className="button ghost" onClick={() => {
-            const clean = { startDate: '2026-06-23', endDate: '2026-06-29', platform: '', store: '', page: 1, pageSize: 6 };
+            const clean = { ...defaultFilters };
             setDraftFilters(clean);
             setFilters(clean);
           }}>重置</button>

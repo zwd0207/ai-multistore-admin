@@ -1,4 +1,5 @@
 import StatusBadge from './StatusBadge';
+import { formatKstDateTimeWithLabel } from '../../utils/time';
 
 export default function Timeline({ items = [] }) {
   if (!items.length) {
@@ -16,7 +17,7 @@ export default function Timeline({ items = [] }) {
               {item.status && <StatusBadge value={item.status} />}
             </div>
             <p>{item.description}</p>
-            <time>{item.time}</time>
+            <time>{formatKstDateTimeWithLabel(item.time)}</time>
           </div>
         </div>
       ))}

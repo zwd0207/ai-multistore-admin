@@ -14,6 +14,7 @@ import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import mockApi from '../services/mockApi';
+import { formatKstDateTimeWithLabel, getKstNowText } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const deviceTypes = ['PC', 'Laptop', 'Mobile', 'Tablet', 'VPS', 'Proxy Environment'];
@@ -134,7 +135,7 @@ export default function Devices() {
       loginAccountCount: Number(form.loginAccountCount || 0),
       ipAddress: form.ipAddress,
       proxyRegion: form.proxyRegion,
-      lastLoginAt: form.lastLoginAt || '2026-06-29 16:00',
+      lastLoginAt: form.lastLoginAt || getKstNowText(),
       status: form.status,
       riskLevel: form.riskLevel,
       remarks: form.notes,
@@ -258,7 +259,7 @@ export default function Devices() {
                 { label: '绑定平台', value: detail.platform },
                 { label: '设备状态', value: <StatusBadge value={detail.status} /> },
                 { label: '风险等级', value: <StatusBadge value={detail.riskLevel} /> },
-                { label: '最近登录时间', value: detail.lastLoginAt },
+                { label: '最近登录时间', value: formatKstDateTimeWithLabel(detail.lastLoginAt) },
               ]} />
             </section>
 

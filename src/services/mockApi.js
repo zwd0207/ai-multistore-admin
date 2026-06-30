@@ -13,8 +13,9 @@ import {
   stores as storeSeed,
   systemSettings as systemSettingsSeed,
 } from '../data/mockData';
+import { getKstDateOffsetString, getKstNowText, getKstTodayString } from '../utils/time';
 
-const nowText = () => new Date().toLocaleString('zh-CN', { hour12: false });
+const nowText = () => getKstNowText();
 
 const database = {
   stores: structuredClone(storeSeed),
@@ -851,7 +852,7 @@ async function markLogRisk(id, payload = {}) {
 
 async function getDashboardSummary() {
   await delay();
-  const today = '2026-06-29';
+  const today = getKstTodayString();
   const todayOrders = database.orders.filter((item) => item.createdAt.startsWith(today));
   const todaySales = database.salesDaily.filter((item) => item.date === today);
   return {
@@ -899,7 +900,14 @@ async function getDashboardActivities() {
 }
 
 async function getDashboardSalesTrend() {
-  return getSalesTrend({ startDate: '2026-06-23', endDate: '2026-06-29' });
+  const dynamicTrend = await getSalesTrend({ startDate: getKstDateOffsetString(-6), endDate: getKstTodayString() });
+  if (dynamicTrend.length) return dynamicTrend;
+  const latestSeedDate = database.salesDaily.reduce((latest, item) => (item.date > latest ? item.date : latest), '');
+  if (!latestSeedDate) return [];
+  const latest = new Date(`${latestSeedDate}T00:00:00Z`);
+  latest.setUTCDate(latest.getUTCDate() - 6);
+  const fallbackStart = latest.toISOString().slice(0, 10);
+  return getSalesTrend({ startDate: fallbackStart, endDate: latestSeedDate });
 }
 
 async function getAppealDetail(id) {

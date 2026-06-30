@@ -188,6 +188,16 @@ Still excluded:
 - Real API credential validation.
 - AI model calls.
 
+## Phase 6B-0B - Frontend KST Time Display
+
+Phase 6B-0B keeps Codex1 unchanged and fixes Codex2 display semantics for business time:
+
+- Business dates and operational timestamps are displayed in `Asia/Seoul` / `KST`.
+- Browser or Windows local display timezone is not used as the business-time source.
+- Backend UTC timestamps are formatted for display only; payload values are not rewritten.
+- Dashboard shows the Korean business day returned by Codex1 and no longer labels backend range totals as today-only totals.
+- Mock-generated `today` and `now` values use the same KST utility as backend display paths.
+
 Details and validation notes: see `PHASE_6A_PLATFORM_LOGIN.md`.
 
 ## Phase 6A-3 - API Credential Structured Fields

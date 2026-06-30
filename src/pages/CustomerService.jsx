@@ -14,6 +14,7 @@ import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
+import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const statuses = ['문의 대기', '답변 완료', '처리중', '환불 요청', '교환 요청'];
@@ -212,7 +213,7 @@ export default function CustomerService() {
                   <article key={reply.id} className="reply-item">
                     <header>
                       <strong>{reply.author}</strong>
-                      <time>{reply.createdAt}</time>
+                      <time>{formatKstDateTimeWithLabel(reply.createdAt)}</time>
                     </header>
                     <p>{reply.content}</p>
                   </article>

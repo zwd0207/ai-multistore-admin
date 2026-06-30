@@ -13,6 +13,7 @@ import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import mockApi from '../services/mockApi';
+import { formatKstDateTimeWithLabel, getKstNowText } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
 const emailStatuses = ['정상', '확인 필요', '인증 필요', '수신 실패', '위험', '사용중지'];
@@ -119,7 +120,7 @@ export default function Emails() {
       platform: form.platform,
       store: form.store || '未绑定',
       purpose: form.purpose,
-      lastReceivedAt: form.lastReceivedAt || '2026-06-29 16:00',
+      lastReceivedAt: form.lastReceivedAt || getKstNowText(),
       status: form.status,
       riskLevel: form.riskLevel,
       remarks: form.remarks,
@@ -243,7 +244,7 @@ export default function Emails() {
                       </div>
                       <p>{mail.summary}</p>
                       <footer>
-                        <time>{mail.receivedAt}</time>
+                        <time>{formatKstDateTimeWithLabel(mail.receivedAt)}</time>
                         <div className="detail-toolbar">
                           {!mail.important && <button className="button ghost" onClick={() => markImportant(mail.id)}>标记重要</button>}
                           {mail.handledStatus !== '已处理' && <button className="button ghost" onClick={() => markHandled(mail.id)}>标记已处理</button>}

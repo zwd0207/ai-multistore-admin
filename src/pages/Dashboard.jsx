@@ -10,10 +10,17 @@ import TodoList from '../components/common/TodoList';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
+import {
+  BUSINESS_TIME_LABEL,
+  BUSINESS_TIME_ZONE,
+  formatKstDate,
+  formatKstDateTimeWithLabel,
+} from '../utils/time';
 
-const formatWon = (value) => `₩ ${Number(value || 0).toLocaleString()}`;
-const shortTime = (value) => String(value || '').slice(11, 16);
-const formatStructured = (value) => (Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : '暂无结构化数据');
+const formatWon = (value) => `KRW ${Number(value || 0).toLocaleString()}`;
+const formatStructured = (value) => (
+  Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : '暂无结构化数据'
+);
 
 export default function Dashboard() {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
@@ -39,10 +46,13 @@ export default function Dashboard() {
         productTotal: 0,
         todayOrderCount: 0,
         todaySalesAmount: 0,
+        scopeOrderCount: 0,
+        scopeSalesAmount: 0,
         pendingCustomers: 0,
         pendingAppeals: 0,
         riskEnvironments: 0,
         unreadImportantEmails: 0,
+        businessTimezone: BUSINESS_TIME_ZONE,
       });
       setRisks([]);
       setTodos([]);
@@ -84,7 +94,7 @@ export default function Dashboard() {
   if (error) {
     return (
       <>
-        <PageHeader title="运营总览" description="这里汇总核心运营、风险、待办和审计数据。" />
+        <PageHeader title="运营总览" description="汇总核心运营、风险、待办和审计数据。" />
         <article className="content-card empty-state">
           <h2>总览数据加载失败</h2>
           <p>{error}</p>
@@ -95,11 +105,14 @@ export default function Dashboard() {
 
   if (!summary) return <div className="table-state"><span className="spinner" />正在加载数据...</div>;
 
+  const businessDate = summary.businessDate || dailyContext?.date;
+  const orderMetricLabel = isBackendSource ? '当前范围订单数' : 'KST 今日订单数';
+  const salesMetricLabel = isBackendSource ? '当前范围销售额' : 'KST 今日销售额';
   const stats = [
     { label: '店铺总数', value: summary.storeTotal, detail: '已接入多平台店铺', tone: 'positive' },
     { label: '商品总数', value: summary.productTotal, detail: '当前店铺在售商品', tone: 'info' },
-    { label: '今日订单数', value: summary.todayOrderCount, detail: '当前店铺订单', tone: 'info' },
-    { label: '今日销售额', value: formatWon(summary.todaySalesAmount), detail: '按 KRW 汇总', tone: 'positive' },
+    { label: orderMetricLabel, value: summary.scopeOrderCount ?? summary.todayOrderCount, detail: 'KST business scope', tone: 'info' },
+    { label: salesMetricLabel, value: formatWon(summary.scopeSalesAmount ?? summary.todaySalesAmount), detail: 'KRW / KST scope', tone: 'positive' },
     { label: '待处理客服', value: summary.pendingCustomers, detail: '待回复客服咨询', tone: 'warning' },
     { label: '申诉中案件', value: summary.pendingAppeals, detail: '资料准备/审核中', tone: 'danger' },
     { label: '风险环境数量', value: summary.riskEnvironments, detail: '需要重点检查', tone: 'danger' },
@@ -109,14 +122,24 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title="运营总览" description="这里汇总核心运营、风险、待办和审计数据。" actions={<>{isBackendSource && <MockSyncPanel /> }<span className="period-chip">数据源：{DATA_SOURCE}</span></>} />
+      <PageHeader
+        title="运营总览"
+        description="汇总核心运营、风险、待办和审计数据。"
+        actions={(
+          <>
+            {isBackendSource && <MockSyncPanel />}
+            <span className="period-chip">数据源：{DATA_SOURCE}</span>
+            <span className="period-chip">韩国业务日：{businessDate ? formatKstDate(businessDate) : BUSINESS_TIME_LABEL}</span>
+          </>
+        )}
+      />
       <StatGrid items={stats} />
 
       <section className="panel-grid">
         <article className="content-card">
           <div className="card-title">
-            <div><h2>简易销售趋势</h2><p>复用销售模块近 7 天趋势数据</p></div>
-            <span className="period-chip">近 7 天</span>
+            <div><h2>简易销售趋势</h2><p>复用销售模块近 7 天趋势数据。</p></div>
+            <span className="period-chip">KST 近 7 天</span>
           </div>
           <div className="trend-bars">
             {trend.map((item) => (
@@ -132,7 +155,7 @@ export default function Dashboard() {
           </div>
         </article>
         <article className="content-card">
-          <div className="card-title"><div><h2>待办事项</h2><p>跨客服、申诉、订单、邮箱、环境的待处理事项</p></div></div>
+          <div className="card-title"><div><h2>待办事项</h2><p>跨客服、申诉、订单、邮箱、环境的待处理事项。</p></div></div>
           <TodoList items={todos} />
         </article>
       </section>
@@ -140,8 +163,15 @@ export default function Dashboard() {
       <section className="panel-grid">
         <RiskPanel title="风险提醒区域" items={risks} />
         <article className="content-card">
-          <div className="card-title"><div><h2>最近动态区域</h2><p>最近操作日志、申诉更新、客服回复和邮箱提醒</p></div></div>
-          <ActivityList items={(activities.logs || []).map((item) => ({ id: item.id, title: item.module, description: item.summary, status: item.status, time: shortTime(item.time) }))} />
+          <div className="card-title"><div><h2>最近动态区域</h2><p>最近操作日志、申诉更新、客服回复和邮箱提醒。</p></div></div>
+          <ActivityList items={(activities.logs || []).map((item) => ({
+            id: item.id,
+            title: item.module,
+            description: item.summary,
+            status: item.status,
+            time: formatKstDateTimeWithLabel(item.time),
+          }))}
+          />
         </article>
       </section>
 
@@ -153,11 +183,13 @@ export default function Dashboard() {
           {contextError ? <EmptyState title="Daily Context 加载失败" description={contextError} /> : dailyContext ? (
             <>
               <InfoGrid items={[
-                { label: '统计日期', value: dailyContext.date },
+                { label: '统计日期', value: formatKstDate(dailyContext.date) },
+                { label: '业务时区', value: dailyContext.businessTimezone || BUSINESS_TIME_ZONE },
                 { label: '店铺范围', value: dailyContext.scope.storeId || '全部店铺' },
                 { label: '平台范围', value: dailyContext.scope.platform || '全部平台' },
                 { label: '建议关注项', value: dailyContext.recommendedFocus.length },
-              ]} />
+              ]}
+              />
               <div className="panel-grid">
                 <div className="detail-section"><h3>销售与订单摘要</h3><pre>{formatStructured({ sales: dailyContext.salesSummary, orders: dailyContext.orderSummary })}</pre></div>
                 <div className="detail-section"><h3>客服与同步摘要</h3><pre>{formatStructured({ inquiries: dailyContext.customerInquirySummary, sync: dailyContext.syncSummary })}</pre></div>

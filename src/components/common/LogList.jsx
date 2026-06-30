@@ -1,4 +1,5 @@
 import StatusBadge from './StatusBadge';
+import { formatKstDateTimeWithLabel } from '../../utils/time';
 
 export default function LogList({ items = [], emptyText = '暂无记录' }) {
   if (!items.length) {
@@ -21,7 +22,7 @@ export default function LogList({ items = [], emptyText = '暂无记录' }) {
             {item.status && <StatusBadge value={item.status} />}
           </div>
           <p>{item.description || item.summary || '—'}</p>
-          <time>{item.time || item.receivedAt}</time>
+          <time>{formatKstDateTimeWithLabel(item.time || item.receivedAt)}</time>
         </article>
       ))}
     </div>

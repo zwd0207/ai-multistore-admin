@@ -13,6 +13,7 @@ import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import mockApi from '../services/mockApi';
+import { formatKstDateTimeWithLabel, getKstNowText } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션', 'ALL'];
 const accountTypes = ['店铺主账号', '店铺子账号', '客服账号', '运营账号', '申诉账号', '财务账号', '管理员账号'];
@@ -147,7 +148,7 @@ export default function Accounts() {
       email: form.email || '未绑定',
       device: form.device || '未绑定',
       environment: form.environment || '未绑定',
-      lastLoginAt: form.lastLoginAt || '2026-06-29 16:30',
+      lastLoginAt: form.lastLoginAt || getKstNowText(),
       status: form.status,
       riskLevel: form.riskLevel,
       permissionNote: form.permissionNote,
@@ -267,7 +268,7 @@ export default function Accounts() {
                 { label: '权限角色', value: detail.role },
                 { label: '账号状态', value: <StatusBadge value={detail.status} /> },
                 { label: '风险等级', value: <StatusBadge value={detail.riskLevel} /> },
-                { label: '最近登录时间', value: detail.lastLoginAt },
+                { label: '最近登录时间', value: formatKstDateTimeWithLabel(detail.lastLoginAt) },
               ]} />
             </section>
             <section className="detail-section">
