@@ -260,6 +260,14 @@ const sourceMethods = {
     const result = await backendApi.updatePlatformLogin(loginId, adapters.toBackendPlatformLoginPayload({ ...payload, loginStatus: 'inactive' }, store.id));
     return withStoreName([adapters.platformLogin(result)], stores)[0];
   },
+  getApiCredentialReadiness: async () => {
+    if (!isBackendSource) return adapters.apiCredentialReadiness();
+    return adapters.apiCredentialReadiness(await backendApi.getApiCredentialReadiness());
+  },
+  runApiCredentialSmokeTest: async () => {
+    if (!isBackendSource) return adapters.apiCredentialSmokeTest();
+    return adapters.apiCredentialSmokeTest(await backendApi.runApiCredentialSmokeTest({ platform: 'all', mode: 'readonly' }));
+  },
   getApiCapabilities: async (params) => {
     if (!isBackendSource) return { data: [], items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 10 };
     const result = await backendApi.getApiCapabilities(params);

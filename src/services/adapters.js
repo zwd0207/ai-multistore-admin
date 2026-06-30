@@ -566,6 +566,44 @@ export function adaptApiCapabilitySummary(data = {}) {
   };
 }
 
+export function adaptApiCredentialReadiness(data = {}) {
+  return {
+    semanticNotice: data.semantic_notice || '',
+    realApiTestEnabled: Boolean(data.real_api_test_enabled),
+    realApiWriteEnabled: Boolean(data.real_api_write_enabled),
+    platforms: (data.platforms || []).map((item) => ({
+      platform: adaptPlatform(item.platform),
+      rawPlatform: item.platform,
+      credentialStatus: item.credential_status || 'missing',
+      readinessStatus: item.readiness_status || 'disabled',
+      fields: item.fields || {},
+    })),
+  };
+}
+
+export function adaptApiCredentialSmokeTest(data = {}) {
+  return {
+    semanticNotice: data.semantic_notice || '',
+    mode: data.mode || 'readonly',
+    realApiTestEnabled: Boolean(data.real_api_test_enabled),
+    realApiWriteEnabled: Boolean(data.real_api_write_enabled),
+    results: (data.results || []).map((item) => ({
+      platform: adaptPlatform(item.platform),
+      rawPlatform: item.platform,
+      enabled: Boolean(item.enabled),
+      configured: Boolean(item.configured),
+      tokenTest: item.token_test || 'skipped',
+      sellerOrAccountTest: item.seller_or_account_test || 'skipped',
+      productReadTest: item.product_read_test || 'skipped',
+      orderReadTest: item.order_read_test || 'skipped',
+      settlementReadTest: item.settlement_read_test || 'skipped',
+      errorCode: item.error_code || null,
+      maskedMessage: item.masked_message || '',
+      testedAt: item.tested_at || null,
+    })),
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -677,6 +715,8 @@ export const adapters = {
   apiCapability: adaptApiCapability,
   apiCapabilityResult: adaptApiCapabilityResult,
   apiCapabilitySummary: adaptApiCapabilitySummary,
+  apiCredentialReadiness: adaptApiCredentialReadiness,
+  apiCredentialSmokeTest: adaptApiCredentialSmokeTest,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,

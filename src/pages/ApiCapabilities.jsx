@@ -23,6 +23,21 @@ const usefulnessOptions = ['high', 'medium', 'low', 'not_useful', 'unknown'];
 const salesSourceOptions = ['order-derived', 'platform-stat-api', 'settlement-api', 'manual', 'not_applicable'];
 const methodOptions = ['', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
+const emptyReadiness = {
+  semanticNotice: 'mock mode does not maintain Codex1 API credential readiness.',
+  realApiTestEnabled: false,
+  realApiWriteEnabled: false,
+  platforms: [],
+};
+
+const emptySmokeTest = {
+  semanticNotice: '',
+  mode: 'readonly',
+  realApiTestEnabled: false,
+  realApiWriteEnabled: false,
+  results: [],
+};
+
 const initialCapabilityForm = {
   platform: 'naver',
   capabilityKey: '',
@@ -116,12 +131,107 @@ function capabilityOptionLabel(item) {
 function credentialOptionLabel(item) {
   const identity = item.rawPlatform === 'coupang' ? item.vendorId : item.clientId;
   const keyState = [
-    item.hasAccessKey ? 'key' : null,
-    item.hasSecretKey ? 'secret' : null,
-    item.hasAccessToken ? 'access token' : null,
-    item.hasRefreshToken ? 'refresh token' : null,
+    item.hasAccessKey ? '凭证项 A 已配置' : null,
+    item.hasSecretKey ? '凭证项 B 已配置' : null,
+    item.hasAccessToken ? '授权项 A 已配置' : null,
+    item.hasRefreshToken ? '授权项 B 已配置' : null,
   ].filter(Boolean).join('/');
   return `${item.platform} · ${item.name || `Credential #${item.id}`} · ${identity || '无平台标识'} · ${item.authStatus || 'not_configured'} · ${keyState || '未配置密钥状态'}`;
+}
+
+function stateLabel(value) {
+  const labels = {
+    configured: 'configured',
+    missing: 'missing',
+    disabled: 'disabled',
+    success: 'success',
+    failed: 'failed',
+    skipped: 'skipped',
+  };
+  return labels[value] || value || '-';
+}
+
+function readinessFieldLabel(platform, index) {
+  const normalizedPlatform = String(platform || '').toLowerCase();
+  const labels = {
+    coupang: ['平台账号', '凭证项 A', '凭证项 B'],
+    naver: ['客户端标识', '客户端凭证', '接口地址'],
+  };
+  return labels[normalizedPlatform]?.[index] || `凭证项 ${index + 1}`;
+}
+
+function ReadinessPanel({
+  readiness,
+  smokeResult,
+  loading,
+  smokeLoading,
+  error,
+  onRefresh,
+  onSmokeTest,
+}) {
+  const data = readiness || emptyReadiness;
+  const smoke = smokeResult || emptySmokeTest;
+
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>API readiness / 只读检测</h2>
+          <p>只展示 Codex1 后端脱敏状态。docs-only / manual / readonly smoke-test 都不代表平台已完成接通或同步能力。</p>
+        </div>
+        <div className="page-actions">
+          <button className="button ghost" onClick={onRefresh} disabled={!isBackendSource || loading}>刷新 readiness</button>
+          <button className="button primary" onClick={onSmokeTest} disabled={!isBackendSource || smokeLoading}>只读检测</button>
+        </div>
+      </div>
+      {!isBackendSource ? (
+        <EmptyState title="mock 模式无 readiness 结果" description="mock 模式不维护 Codex1 API 凭证 readiness，也不伪造只读检测结果。" />
+      ) : error ? (
+        <EmptyState title="readiness 加载失败" description={error} />
+      ) : (
+        <>
+          <div className="form-info">
+            REAL_API_TEST_ENABLED={String(data.realApiTestEnabled)} / REAL_API_WRITE_ENABLED={String(data.realApiWriteEnabled)}。当前按钮只发送 mode=readonly；不会展示任何凭证原文、授权信息或外部原始返回。
+          </div>
+          <div className="panel-grid">
+            {(data.platforms || []).map((item) => (
+              <div className="detail-section" key={item.rawPlatform || item.platform}>
+                <h3>{item.platform}</h3>
+                <div className="detail-list">
+                  <div className="log-item">
+                    <div className="log-item-head">
+                      <strong>readiness</strong>
+                      <span className="period-chip">{stateLabel(item.readinessStatus)}</span>
+                    </div>
+                    <p>configured: {stateLabel(item.credentialStatus)}</p>
+                    <p>fields: {Object.entries(item.fields || {}).map(([, value], index) => `${readinessFieldLabel(item.rawPlatform, index)}:${stateLabel(value)}`).join(' / ') || '-'}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {smoke.results.length > 0 && (
+            <div className="detail-section">
+              <h3>readonly smoke-test 结果</h3>
+              <div className="detail-list">
+                {smoke.results.map((item) => (
+                  <div className="log-item" key={item.rawPlatform || item.platform}>
+                    <div className="log-item-head">
+                      <strong>{item.platform}</strong>
+                      <span className="period-chip">{item.errorCode || (item.enabled ? 'enabled' : 'disabled')}</span>
+                    </div>
+                    <p>授权步骤: {stateLabel(item.tokenTest)} / 账号读取: {stateLabel(item.sellerOrAccountTest)} / 商品读取: {stateLabel(item.productReadTest)} / 订单读取: {stateLabel(item.orderReadTest)} / 结算读取: {stateLabel(item.settlementReadTest)}</p>
+                    <p>{item.maskedMessage || '-'}</p>
+                    <small>{formatKstDateTimeWithLabel(item.testedAt)}</small>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 function enrichResults(rows, capabilities, credentials, selectedStoreId, stores = []) {
@@ -163,6 +273,11 @@ export default function ApiCapabilities() {
   const [resultFormError, setResultFormError] = useState('');
   const [credentials, setCredentials] = useState([]);
   const [credentialError, setCredentialError] = useState('');
+  const [readiness, setReadiness] = useState(emptyReadiness);
+  const [readinessLoading, setReadinessLoading] = useState(true);
+  const [readinessError, setReadinessError] = useState('');
+  const [smokeResult, setSmokeResult] = useState(emptySmokeTest);
+  const [smokeLoading, setSmokeLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const selectedStore = useMemo(
@@ -252,6 +367,40 @@ export default function ApiCapabilities() {
     }
   }, [capabilities.data, credentials, resultQuery, selectedStoreId, storeError, storeLoading, stores]);
 
+  const loadReadiness = useCallback(async () => {
+    if (!isBackendSource) {
+      setReadiness(emptyReadiness);
+      setReadinessError('');
+      setReadinessLoading(false);
+      return;
+    }
+    setReadinessLoading(true);
+    setReadinessError('');
+    try {
+      setReadiness(await dataProvider.getApiCredentialReadiness());
+    } catch (error) {
+      setReadiness(emptyReadiness);
+      setReadinessError(cleanError(error));
+    } finally {
+      setReadinessLoading(false);
+    }
+  }, []);
+
+  const runSmokeTest = async () => {
+    if (!isBackendSource || smokeLoading) return;
+    setSmokeLoading(true);
+    setReadinessError('');
+    try {
+      setSmokeResult(await dataProvider.runApiCredentialSmokeTest());
+    } catch (error) {
+      setSmokeResult(emptySmokeTest);
+      setReadinessError(cleanError(error));
+    } finally {
+      setSmokeLoading(false);
+    }
+  };
+
+  useEffect(() => { loadReadiness(); }, [loadReadiness]);
   useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
   useEffect(() => { loadCredentials(); }, [loadCredentials]);
   useEffect(() => { loadResults(); }, [loadResults]);
@@ -357,6 +506,16 @@ export default function ApiCapabilities() {
           {mockNotice && <span className="period-chip">{mockNotice}</span>}
         </div>
       </section>
+
+      <ReadinessPanel
+        readiness={readiness}
+        smokeResult={smokeResult}
+        loading={readinessLoading}
+        smokeLoading={smokeLoading}
+        error={readinessError}
+        onRefresh={loadReadiness}
+        onSmokeTest={runSmokeTest}
+      />
 
       <section className="content-card">
         <div className="section-heading">
