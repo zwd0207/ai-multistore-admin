@@ -750,14 +750,19 @@ def verify_api_credential_readiness() -> None:
             assert mapping_by_key["naver.product_read"]["docs_reference_version"] == "current/2.81.0"
             assert mapping_by_key["naver.product_read"]["endpoint_confirmed"] is True
             assert mapping_by_key["naver.product_read"]["request_params_confirmed"] == "partial"
+            assert mapping_by_key["naver.product_read"]["minimum_request_body_confirmed"] is True
+            assert mapping_by_key["naver.product_read"]["minimum_request_body_shape"] == "page_size_only"
+            assert mapping_by_key["naver.product_read"]["status_filter_field"] == "productStatusTypes"
+            assert mapping_by_key["naver.product_read"]["response_field_paths_confirmed"] == "partial"
             assert mapping_by_key["naver.product_read"]["grant_confirmed"] == "partial"
             assert mapping_by_key["naver.product_read"]["endpoint"] == "/v1/products/search"
             assert mapping_by_key["naver.product_read"]["method"] == "POST"
             assert mapping_by_key["naver.product_read"]["preview_endpoint_planned"] is True
+            assert mapping_by_key["naver.product_read"]["preview_endpoint_implemented"] is True
             assert mapping_by_key["naver.product_read"]["preferred_preview_strategy"] == "planned_naver_product_preview_endpoint"
-            assert mapping_by_key["naver.product_read"]["channel_no_required"] == "unknown"
+            assert mapping_by_key["naver.product_read"]["channel_no_required"] is False
             assert mapping_by_key["naver.product_read"]["safe_to_real_test"] is False
-            assert "Preview endpoint is not implemented" in mapping_by_key["naver.product_read"]["blocked_reason"]
+            assert "formal product sync remains blocked" in mapping_by_key["naver.product_read"]["blocked_reason"]
             assert mapping_by_key["naver.order_read"]["docs_reference_version"] == "current/2.81.0"
             assert mapping_by_key["naver.order_read"]["endpoint_confirmed"] == "partial"
             assert mapping_by_key["naver.order_read"]["endpoint"] == "/v1/pay-order/seller/product-orders/last-changed-statuses"
@@ -1522,6 +1527,7 @@ def verify_sync_preview_schema_and_security() -> None:
             original_http_client = sync_service.httpx.Client
             original_store_bound_token = api_credential_readiness_service._request_naver_token_from_context
             original_product_request_params_confirmed = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("request_params_confirmed")
+            original_product_minimum_request_body_confirmed = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("minimum_request_body_confirmed")
             original_product_safe_to_real_test = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("safe_to_real_test")
 
             class ForbiddenNaverPreviewHttpClient:
@@ -1571,6 +1577,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert naver_preview_data["sample_ids"] == [], naver_preview_data
                 assert naver_preview_data["field_observation"]["channel_no_configured"] is True, naver_preview_data
                 assert naver_preview_data["field_observation"]["request_params_confirmed"] is False, naver_preview_data
+                assert naver_preview_data["field_observation"]["minimum_request_body_confirmed"] is True, naver_preview_data
                 assert naver_preview_data["field_observation"]["safe_to_real_test"] is False, naver_preview_data
                 assert "商品读取暂未开放真实测试" in naver_preview_data["business_status_summary"], naver_preview_data
                 assert "No local product rows were written" in naver_preview_data["semantic_notice"], naver_preview_data
@@ -1629,6 +1636,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 os.environ["REAL_API_TEST_ENABLED"] = "true"
                 os.environ["REAL_API_WRITE_ENABLED"] = "false"
                 app_config.get_settings.cache_clear()
+                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["minimum_request_body_confirmed"] = False
                 docs_pending_preview = client.post("/api/v1/sync/products/naver/preview", json={
                     "store_id": naver_store_id,
                     "credential_id": naver_credential_id,
@@ -1644,6 +1652,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert docs_pending_data["error_code"] == "docs_pending", docs_pending_data
                 assert docs_pending_data["product_preview_called"] is False, docs_pending_data
                 assert docs_pending_data["field_observation"]["docs_pending"] is True, docs_pending_data
+                assert docs_pending_data["field_observation"]["minimum_request_body_confirmed"] is False, docs_pending_data
+                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["minimum_request_body_confirmed"] = True
 
                 class FakeNaverProductResponse:
                     def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
@@ -1677,21 +1687,34 @@ def verify_sync_preview_schema_and_security() -> None:
                         return FakeNaverProductResponse(200, {
                             "contents": [
                                 {
-                                    "productId": "NAVER-PRODUCT-ID-MUST-NOT-LEAK-1234567890",
-                                    "sellerProductId": "SELLER-PRODUCT-ID-MUST-NOT-LEAK-1234567890",
-                                    "productName": "must-not-leak-product-name",
-                                    "saleStatus": "SALE",
-                                    "price": 1000,
-                                    "stockQuantity": 3,
-                                    "detailHtml": "<p>must-not-leak-html</p>",
+                                    "originProductNo": "NAVER-ORIGIN-PRODUCT-NO-MUST-NOT-LEAK-1234567890",
+                                    "groupProductNo": "NAVER-GROUP-PRODUCT-NO-MUST-NOT-LEAK-1234567890",
+                                    "channelProducts": [
+                                        {
+                                            "channelProductNo": "NAVER-CHANNEL-PRODUCT-NO-MUST-NOT-LEAK-1234567890",
+                                            "sellerProductId": "SELLER-PRODUCT-ID-MUST-NOT-LEAK-1234567890",
+                                            "productName": "must-not-leak-product-name",
+                                            "statusType": "SALE",
+                                            "channelProductDisplayStatusType": "ON",
+                                            "salePrice": 1000,
+                                            "stockQuantity": 3,
+                                            "detailHtml": "<p>must-not-leak-html</p>",
+                                        }
+                                    ],
                                 }
                             ],
-                            "hasMore": False,
+                            "page": 1,
+                            "size": 1,
+                            "totalElements": 1,
+                            "totalPages": 1,
+                            "first": True,
+                            "last": True,
                         })
 
                 sync_service.httpx.Client = FakeNaverProductHttpClient
                 api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-product-token", 200)
-                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["request_params_confirmed"] = "confirmed"
+                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["request_params_confirmed"] = "partial"
+                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["minimum_request_body_confirmed"] = True
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["safe_to_real_test"] = False
 
                 with SessionLocal() as db:
@@ -1721,16 +1744,26 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_product_data["sample_ids"] and fake_product_data["sample_ids"][0].startswith("id-hash-"), fake_product_data
                 observed = fake_product_data["field_observation"]
                 assert observed["product_id_observed"] is True, observed
+                assert observed["origin_product_no_observed"] is True, observed
+                assert observed["group_product_no_observed"] is True, observed
+                assert observed["channel_products_observed"] is True, observed
+                assert observed["channel_product_id_observed"] is True, observed
                 assert observed["seller_product_id_observed"] is True, observed
                 assert observed["product_name_observed"] is True, observed
                 assert observed["sale_status_observed"] is True, observed
+                assert observed["display_status_observed"] is True, observed
                 assert observed["price_observed"] is True, observed
                 assert observed["stock_observed"] is True, observed
                 assert observed["raw_response_saved"] is False, observed
                 assert observed["products_written"] is False, observed
+                assert observed["request_body_shape"] == "page_size_only", observed
+                assert observed["product_status_filter_sent"] is False, observed
+                assert observed["channel_no_sent"] is False, observed
                 fake_product_text = str(fake_product_success.json()).lower()
                 for forbidden in [
-                    "naver-product-id-must-not-leak",
+                    "naver-origin-product-no-must-not-leak",
+                    "naver-group-product-no-must-not-leak",
+                    "naver-channel-product-no-must-not-leak",
                     "seller-product-id-must-not-leak",
                     "must-not-leak-product-name",
                     "must-not-leak-html",
@@ -1789,6 +1822,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["request_params_confirmed"] = original_product_request_params_confirmed
+                api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["minimum_request_body_confirmed"] = original_product_minimum_request_body_confirmed
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["safe_to_real_test"] = original_product_safe_to_real_test
                 os.environ["REAL_API_TEST_ENABLED"] = original_test_enabled or "false"
                 os.environ["REAL_API_WRITE_ENABLED"] = "false"

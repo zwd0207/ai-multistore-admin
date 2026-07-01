@@ -322,11 +322,13 @@ def preview_naver_products(
     capability_meta = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]
     field_observation.update({
         "request_params_confirmed": capability_meta.get("request_params_confirmed") == "confirmed",
+        "minimum_request_body_confirmed": bool(capability_meta.get("minimum_request_body_confirmed")),
         "safe_to_real_test": bool(capability_meta.get("safe_to_real_test")),
         "docs_reference_version": capability_meta.get("docs_reference_version"),
         "endpoint_confirmed": capability_meta.get("endpoint_confirmed"),
         "grant_confirmed": capability_meta.get("grant_confirmed"),
         "preview_endpoint_planned": capability_meta.get("preview_endpoint_planned", False),
+        "preview_endpoint_implemented": capability_meta.get("preview_endpoint_implemented", False),
     })
     if not real_preview:
         return _build_naver_product_guardrail_preview_result(
@@ -350,7 +352,7 @@ def preview_naver_products(
         seller_product_id=seller_product_id,
         field_observation=field_observation,
     )
-    if capability_meta.get("request_params_confirmed") != "confirmed":
+    if not capability_meta.get("minimum_request_body_confirmed"):
         return _build_naver_product_guardrail_preview_result(
             store_id=store_id,
             credential_id=credential.id,
@@ -364,6 +366,7 @@ def preview_naver_products(
                 "product_preview_called": False,
                 "http_status": None,
                 "docs_pending": True,
+                "minimum_request_body_confirmed": False,
             },
             error_code="docs_pending",
         )
@@ -1496,13 +1499,21 @@ def _build_naver_product_preview_field_observation(credential) -> dict:
         "product_preview_called": False,
         "http_status": None,
         "product_id_observed": False,
+        "origin_product_no_observed": False,
+        "group_product_no_observed": False,
+        "channel_products_observed": False,
+        "channel_product_id_observed": False,
         "seller_product_id_observed": False,
         "product_name_observed": False,
         "sale_status_observed": False,
+        "display_status_observed": False,
         "price_observed": False,
         "stock_observed": False,
         "raw_response_saved": False,
         "products_written": False,
+        "request_body_shape": "page_size_only",
+        "product_status_filter_sent": False,
+        "channel_no_sent": False,
     }
 
 
@@ -1623,6 +1634,9 @@ def _run_naver_product_real_micro_preview(
     try:
         access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
         field_observation["token_http_status"] = token_status
+        field_observation["request_body_shape"] = "page_size_only"
+        field_observation["product_status_filter_sent"] = False
+        field_observation["channel_no_sent"] = False
         headers = {"Authorization": f"Bearer {access_token}"}
         product_result = _request_naver_product_search(
             api_base=context["api_base"],
@@ -1717,7 +1731,7 @@ def _extract_naver_product_preview_ids(payload: object) -> list[str]:
     ids: list[str] = []
     if isinstance(payload, dict):
         for key, value in payload.items():
-            if key in {"productId", "originProductNo", "sellerProductId", "itemId"} and value:
+            if key in {"productId", "originProductNo", "channelProductNo", "sellerProductId", "itemId"} and value:
                 ids.append(str(value))
             else:
                 ids.extend(_extract_naver_product_preview_ids(value))
@@ -1735,14 +1749,22 @@ def _summarize_naver_product_preview_fields(payload: object) -> dict:
     field_names = _collect_json_field_names(payload)
     lower_names = [name.lower() for name in field_names]
     return {
-        "product_id_observed": any(name in {"productid", "originproductno", "itemid"} for name in lower_names),
+        "product_id_observed": any(name in {"productid", "originproductno", "channelproductno", "itemid"} for name in lower_names),
+        "origin_product_no_observed": "originproductno" in lower_names,
+        "group_product_no_observed": "groupproductno" in lower_names,
+        "channel_products_observed": "channelproducts" in lower_names,
+        "channel_product_id_observed": any(name in {"channelproductno", "channelproductid"} for name in lower_names),
         "seller_product_id_observed": any("sellerproductid" in name for name in lower_names),
         "product_name_observed": any("productname" in name or name == "name" for name in lower_names),
-        "sale_status_observed": any("salestatus" in name or "productstatus" in name or name == "status" for name in lower_names),
+        "sale_status_observed": any(name in {"statustype", "salestatus"} or "productstatus" in name or name == "status" for name in lower_names),
+        "display_status_observed": any("displaystatus" in name for name in lower_names),
         "price_observed": any("price" in name for name in lower_names),
         "stock_observed": any("stock" in name or "quantity" in name for name in lower_names),
         "raw_response_saved": False,
         "products_written": False,
+        "request_body_shape": "page_size_only",
+        "product_status_filter_sent": False,
+        "channel_no_sent": False,
     }
 
 
@@ -1751,6 +1773,8 @@ def _naver_product_preview_has_more(payload: object) -> bool:
         for key in ("hasMore", "hasNext", "more"):
             if isinstance(payload.get(key), bool):
                 return payload[key]
+        if isinstance(payload.get("last"), bool):
+            return not payload["last"]
     return False
 
 
