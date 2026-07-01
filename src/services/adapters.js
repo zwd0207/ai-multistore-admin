@@ -604,6 +604,47 @@ export function adaptApiCredentialSmokeTest(data = {}) {
   };
 }
 
+export function adaptCoupangOrderSyncResult(data = {}) {
+  const syncLog = data.sync_log || {};
+  const checkpoint = data.checkpoint || {};
+  return {
+    storeId: data.store_id,
+    platform: adaptPlatform(data.platform),
+    rawPlatform: data.platform,
+    syncType: data.sync_type,
+    sourceType: data.source_type,
+    writeScope: data.write_scope,
+    platformWrite: Boolean(data.platform_write),
+    realApiWriteEnabled: Boolean(data.real_api_write_enabled),
+    businessTimezone: data.business_timezone,
+    startDate: data.start_date,
+    endDate: data.end_date,
+    windowStartAt: data.window_start_at,
+    windowEndAt: data.window_end_at,
+    maxPages: numberValue(data.max_pages),
+    pageCount: numberValue(data.page_count),
+    nextCursorExists: Boolean(data.next_cursor_exists),
+    wouldCreate: numberValue(data.would_create),
+    wouldUpdate: numberValue(data.would_update),
+    createdCount: numberValue(data.created_count),
+    updatedCount: numberValue(data.updated_count),
+    skippedCount: numberValue(data.skipped_count),
+    sampleIds: data.sample_ids || [],
+    lastSyncedAt: data.last_synced_at,
+    syncLog: {
+      id: syncLog.id,
+      status: syncLog.status,
+      message: syncLog.message,
+    },
+    checkpoint: {
+      id: checkpoint.id,
+      lastSyncedAt: checkpoint.last_synced_at,
+      windowStartAt: checkpoint.window_start_at,
+      windowEndAt: checkpoint.window_end_at,
+    },
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -717,6 +758,7 @@ export const adapters = {
   apiCapabilitySummary: adaptApiCapabilitySummary,
   apiCredentialReadiness: adaptApiCredentialReadiness,
   apiCredentialSmokeTest: adaptApiCredentialSmokeTest,
+  coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,

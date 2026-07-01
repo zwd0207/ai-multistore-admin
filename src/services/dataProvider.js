@@ -153,6 +153,55 @@ const sourceMethods = {
     const { store } = await resolveBackendStore(payload);
     return backendApi.syncCustomerInquiriesMock({ storeId: store.id, platform: normalizeSyncPlatform(payload.platform) });
   },
+  previewCoupangOrders: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangOrderSyncResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        source_type: 'mock',
+        start_date: payload?.startDate,
+        end_date: payload?.endDate,
+        max_pages: payload?.maxPages,
+        page_count: 0,
+        next_cursor_exists: false,
+        would_create: 0,
+        would_update: 0,
+        sample_ids: [],
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangOrderSyncResult(await backendApi.previewCoupangOrders({
+      store_id: Number(store.id),
+      start_date: payload.startDate,
+      end_date: payload.endDate,
+      max_pages: Number(payload.maxPages || 1),
+    }));
+  },
+  syncCoupangOrders: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangOrderSyncResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        source_type: 'mock',
+        start_date: payload?.startDate,
+        end_date: payload?.endDate,
+        max_pages: payload?.maxPages,
+        page_count: 0,
+        next_cursor_exists: false,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        sample_ids: [],
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangOrderSyncResult(await backendApi.syncCoupangOrders({
+      store_id: Number(store.id),
+      start_date: payload.startDate,
+      end_date: payload.endDate,
+      max_pages: Number(payload.maxPages || 1),
+    }));
+  },
   getSyncLogs: async (params) => {
     if (!isBackendSource) return mockApi.getOperationLogs(params);
     const result = await backendApi.getSyncLogs(params);
