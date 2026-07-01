@@ -16,6 +16,7 @@ from app.clients.naver_client import NaverClient
 from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now
+from app.models.financial import PlatformSettlementDetail
 from app.models.order import Order
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
@@ -36,6 +37,8 @@ COUPANG_PRODUCT_SYNC_TYPE = "products_coupang_real"
 COUPANG_PRODUCT_CHECKPOINT_SYNC_TYPE = "products"
 COUPANG_SALES_PREVIEW_SYNC_TYPE = "sales_coupang_real_preview"
 COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
+COUPANG_SETTLEMENT_SYNC_TYPE = "settlements_coupang_real"
+COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
@@ -83,7 +86,7 @@ def _mask_sensitive_text(message: str | None) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|access[_-]?key|secret[_-]?key|authorization|signature)",
+        r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|access[_-]?key|secret[_-]?key|authorization|signature|bankAccountHolder|bankName|bankAccount)",
         "credential_field",
         text,
     )
@@ -633,6 +636,145 @@ def preview_coupang_settlements(
         raise ApiError(
             message="Coupang settlement preview failed",
             error_code="COUPANG_SETTLEMENT_PREVIEW_FAILED",
+            status_code=502,
+        ) from exc
+
+
+def sync_coupang_settlements(
+    db: Session,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict:
+    settings = get_settings()
+    if not settings.real_api_test_enabled:
+        raise ApiError(
+            message="Readonly real API settlement sync is disabled",
+            error_code="REAL_API_TEST_DISABLED",
+            status_code=403,
+        )
+
+    _ensure_coupang_store(db, store_id)
+    start_date, end_date = _resolve_financial_preview_date_range(start_date, end_date)
+    credential = credential_service.get_decrypted_credential_by_store_and_platform(db, store_id, "coupang")
+    _ensure_coupang_preview_credential(credential)
+    months = _settlement_months_between(start_date, end_date)
+
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="coupang",
+        sync_type=COUPANG_SETTLEMENT_SYNC_TYPE,
+        message="coupang readonly settlement sync started",
+        raw_summary={
+            "stage": "started",
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "write_scope": "local_platform_settlement_details_only",
+            "platform_write": False,
+            "months": months,
+            "date_window": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "business_timezone": str(get_business_timezone()),
+            },
+            "month_semantic_notice": "Settlement sync queries revenueRecognitionYearMonth=YYYY-MM. start_date/end_date only derive queried months and the response is not day-precisely truncated.",
+        },
+    )
+
+    try:
+        fetch_result = _fetch_coupang_settlement_months(credential=credential, months=months)
+        synced_at = get_utc_now()
+        settlement_items = [
+            payload
+            for item in fetch_result["items"]
+            if (payload := _to_coupang_settlement_payload(item, synced_at=synced_at)) is not None
+        ]
+        write_result = _upsert_coupang_settlement_details(db, store_id, settlement_items)
+        sample_ids = [item["external_settlement_id"] for item in settlement_items[:10]]
+        result = {
+            "store_id": store_id,
+            "platform": "coupang",
+            "sync_type": COUPANG_SETTLEMENT_SYNC_TYPE,
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "write_scope": "local_platform_settlement_details_only",
+            "platform_write": False,
+            "real_api_write_enabled": settings.real_api_write_enabled,
+            "business_timezone": str(get_business_timezone()),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "months": months,
+            "page_count": fetch_result["page_count"],
+            "next_cursor_exists": False,
+            "total_rows": len(fetch_result["items"]),
+            "created_count": write_result["created"],
+            "updated_count": write_result["updated"],
+            "unchanged_count": write_result["unchanged"],
+            "skipped_count": len(fetch_result["items"]) - len(settlement_items),
+            "sample_ids": sample_ids,
+            "per_month": fetch_result["per_month"],
+            "summary_totals": _build_financial_summary_totals(fetch_result["items"]),
+            "last_synced_at": synced_at.isoformat(),
+            "semantic_notice": "Settlement sync is readonly toward Coupang and writes only sanitized settlement details to the local database. It does not call Coupang write APIs.",
+            "month_semantic_notice": "Settlement sync queries revenueRecognitionYearMonth=YYYY-MM. start_date/end_date only derive queried months and the response is not day-precisely truncated.",
+            "count_semantic_notice": "updated_count means mapped business fields changed. Existing rows with identical mapped fields are counted as unchanged_count, even when last_synced_at is refreshed.",
+        }
+        checkpoint = _upsert_coupang_sync_checkpoint(
+            db,
+            store_id=store_id,
+            sync_type=COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE,
+            cursor_payload={
+                "months": months,
+                "date_window": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+                "total_rows": result["total_rows"],
+            },
+            synced_at=synced_at,
+            notes_payload={
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "last_success_at": synced_at.isoformat(),
+                "write_scope": "local_platform_settlement_details_only",
+                "platform_write": False,
+                "month_semantic_notice": result["month_semantic_notice"],
+            },
+            window_start_at=get_business_day_range(start_date)[0],
+            window_end_at=get_business_day_range(end_date)[1],
+        )
+        result["checkpoint"] = checkpoint
+        finished_log = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly settlement sync success",
+            raw_summary=_settlement_sync_summary_for_log(result),
+        )
+        result["sync_log"] = finished_log
+        return result
+    except ApiError as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly settlement sync failed",
+            error_detail=_mask_sensitive_text(exc.message),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": exc.error_code,
+            },
+        )
+        raise
+    except Exception as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly settlement sync failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": "COUPANG_SETTLEMENT_SYNC_FAILED",
+            },
+        )
+        raise ApiError(
+            message="Coupang settlement sync failed",
+            error_code="COUPANG_SETTLEMENT_SYNC_FAILED",
             status_code=502,
         ) from exc
 
@@ -1202,6 +1344,207 @@ def _fetch_coupang_settlement_month(
         status_code=502 if response.status_code >= 500 else response.status_code,
         detail={"http_status": response.status_code, "revenueRecognitionYearMonth": month},
     )
+
+
+def _to_coupang_settlement_payload(item: dict, synced_at: datetime) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    revenue_month = _bounded_text(
+        _extract_scalar_by_keys(item, ("revenueRecognitionYearMonth", "revenue_recognition_year_month")),
+        7,
+    )
+    if not revenue_month:
+        from_date = _extract_date_by_keys(item, ("revenueRecognitionDateFrom", "recognitionDateFrom"))
+        revenue_month = from_date.isoformat()[:7] if from_date else None
+    if not revenue_month:
+        return None
+
+    external_settlement_id = _resolve_settlement_external_id(item)
+    return {
+        "external_settlement_id": external_settlement_id,
+        "revenue_recognition_year_month": revenue_month,
+        "settlement_type": _bounded_text(_extract_scalar_by_keys(item, ("settlementType", "settlement_type")), 60),
+        "settlement_date": _extract_date_by_keys(item, ("settlementDate", "settlement_date")),
+        "revenue_recognition_date_from": _extract_date_by_keys(
+            item,
+            ("revenueRecognitionDateFrom", "revenue_recognition_date_from", "recognitionDateFrom"),
+        ),
+        "revenue_recognition_date_to": _extract_date_by_keys(
+            item,
+            ("revenueRecognitionDateTo", "revenue_recognition_date_to", "recognitionDateTo"),
+        ),
+        "currency": _extract_scalar_by_keys(item, ("currency", "currencyCode")) or "KRW",
+        "total_sale": _extract_krw_amount_by_keys(item, ("totalSale", "total_sale")),
+        "service_fee": _extract_krw_amount_by_keys(item, ("serviceFee", "service_fee")),
+        "settlement_target_amount": _extract_krw_amount_by_keys(item, ("settlementTargetAmount", "settlement_target_amount")),
+        "settlement_amount": _extract_krw_amount_by_keys(item, ("settlementAmount", "settlement_amount")),
+        "last_amount": _extract_krw_amount_by_keys(item, ("lastAmount", "last_amount")),
+        "pending_released_amount": _extract_krw_amount_by_keys(item, ("pendingReleasedAmount", "pending_released_amount")),
+        "dedicated_delivery_amount": _extract_krw_amount_by_keys(item, ("dedicatedDeliveryAmount", "dedicated_delivery_amount")),
+        "seller_service_fee": _extract_krw_amount_by_keys(item, ("sellerServiceFee", "seller_service_fee")),
+        "courantee_fee": _extract_krw_amount_by_keys(item, ("couranteeFee", "courantee_fee")),
+        "deduction_amount": _extract_krw_amount_by_keys(item, ("deductionAmount", "deduction_amount")),
+        "final_amount": _extract_krw_amount_by_keys(item, ("finalAmount", "final_amount")),
+        "observed_fields": _extract_allowed_observed_fields(item),
+        "last_synced_at": synced_at,
+    }
+
+
+def _resolve_settlement_external_id(item: dict) -> str:
+    stable_id = _extract_scalar_by_keys(
+        item,
+        (
+            "settlementId",
+            "settlementID",
+            "settlementNo",
+            "settlementNumber",
+            "settlementSequence",
+            "settlementSeq",
+            "paymentId",
+            "transactionId",
+        ),
+    )
+    if stable_id:
+        return _bounded_text(str(stable_id), 160) or str(stable_id)
+
+    stable_identity = {
+        "revenueRecognitionYearMonth": _extract_scalar_by_keys(item, ("revenueRecognitionYearMonth",)),
+        "settlementType": _extract_scalar_by_keys(item, ("settlementType",)),
+        "settlementDate": _extract_scalar_by_keys(item, ("settlementDate",)),
+        "revenueRecognitionDateFrom": _extract_scalar_by_keys(item, ("revenueRecognitionDateFrom",)),
+        "revenueRecognitionDateTo": _extract_scalar_by_keys(item, ("revenueRecognitionDateTo",)),
+        "vendorItemId": _extract_scalar_by_keys(item, ("vendorItemId",)),
+        "sellerProductId": _extract_scalar_by_keys(item, ("sellerProductId",)),
+        "orderId": _extract_scalar_by_keys(item, ("orderId",)),
+        "orderSheetId": _extract_scalar_by_keys(item, ("orderSheetId",)),
+    }
+    hash_payload = {key: value for key, value in stable_identity.items() if value not in {None, ""}}
+
+    has_core_stable_identity = all(
+        hash_payload.get(key)
+        for key in (
+            "revenueRecognitionYearMonth",
+            "settlementType",
+            "settlementDate",
+            "revenueRecognitionDateFrom",
+            "revenueRecognitionDateTo",
+        )
+    )
+    if not has_core_stable_identity:
+        for key in (
+            "totalSale",
+            "serviceFee",
+            "settlementTargetAmount",
+            "settlementAmount",
+            "lastAmount",
+            "pendingReleasedAmount",
+            "dedicatedDeliveryAmount",
+            "sellerServiceFee",
+            "couranteeFee",
+            "deductionAmount",
+            "finalAmount",
+        ):
+            value = _extract_scalar_by_keys(item, (key,))
+            if value not in {None, ""}:
+                hash_payload[key] = value
+
+    serialized = json.dumps(hash_payload, sort_keys=True, ensure_ascii=True, default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:24]
+    return f"coupang_settlement_v1:{digest}"
+
+
+def _extract_allowed_observed_fields(item: dict) -> list[str]:
+    fields: list[str] = []
+    for key, value in item.items():
+        normalized_key = str(key).replace("_", "").replace("-", "").lower()
+        if _is_forbidden_financial_sample_field(normalized_key):
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        fields.append(str(key))
+    return sorted(dict.fromkeys(fields))
+
+
+def _extract_krw_amount_by_keys(payload: object, keys: tuple[str, ...]) -> int | None:
+    amount = _extract_decimal_by_keys(payload, keys)
+    if amount is None:
+        return None
+    return int(amount)
+
+
+def _extract_date_by_keys(payload: object, keys: tuple[str, ...]) -> date | None:
+    value = _extract_scalar_by_keys(payload, keys)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return date.fromisoformat(text)
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _upsert_coupang_settlement_details(db: Session, store_id: int, items: list[dict]) -> dict:
+    created = 0
+    updated = 0
+    unchanged = 0
+    business_fields = (
+        "revenue_recognition_year_month",
+        "settlement_type",
+        "settlement_date",
+        "revenue_recognition_date_from",
+        "revenue_recognition_date_to",
+        "currency",
+        "total_sale",
+        "service_fee",
+        "settlement_target_amount",
+        "settlement_amount",
+        "last_amount",
+        "pending_released_amount",
+        "dedicated_delivery_amount",
+        "seller_service_fee",
+        "courantee_fee",
+        "deduction_amount",
+        "final_amount",
+        "observed_fields",
+    )
+    for item in items:
+        external_settlement_id = item["external_settlement_id"]
+        existing = db.scalar(
+            select(PlatformSettlementDetail).where(
+                PlatformSettlementDetail.store_id == store_id,
+                PlatformSettlementDetail.platform == "coupang",
+                PlatformSettlementDetail.external_settlement_id == external_settlement_id,
+            )
+        )
+        if existing is None:
+            db.add(PlatformSettlementDetail(
+                store_id=store_id,
+                platform="coupang",
+                source_type=COUPANG_FINANCIAL_SOURCE_TYPE,
+                **item,
+            ))
+            created += 1
+            continue
+
+        business_changed = False
+        for field in business_fields:
+            new_value = item.get(field)
+            if getattr(existing, field) != new_value:
+                setattr(existing, field, new_value)
+                business_changed = True
+        existing.source_type = COUPANG_FINANCIAL_SOURCE_TYPE
+        existing.last_synced_at = item["last_synced_at"]
+        if business_changed:
+            updated += 1
+        else:
+            unchanged += 1
+
+    db.commit()
+    return {"created": created, "updated": updated, "unchanged": unchanged}
 
 
 def _to_coupang_product_payload(item: dict, synced_at: datetime) -> dict | None:
@@ -2009,6 +2352,32 @@ def _financial_preview_summary_for_log(result: dict) -> dict:
         summary["per_month"] = result["per_month"]
         summary["month_semantic_notice"] = result["month_semantic_notice"]
     return summary
+
+
+def _settlement_sync_summary_for_log(result: dict) -> dict:
+    return {
+        "source_type": result["source_type"],
+        "sync_type": result["sync_type"],
+        "write_scope": result["write_scope"],
+        "platform_write": result["platform_write"],
+        "months": result["months"],
+        "date_window": {
+            "start_date": result["start_date"],
+            "end_date": result["end_date"],
+            "business_timezone": result["business_timezone"],
+        },
+        "total_rows": result["total_rows"],
+        "created_count": result["created_count"],
+        "updated_count": result["updated_count"],
+        "unchanged_count": result["unchanged_count"],
+        "skipped_count": result["skipped_count"],
+        "sample_ids": result["sample_ids"],
+        "summary_totals": result["summary_totals"],
+        "per_month": result["per_month"],
+        "semantic_notice": result["semantic_notice"],
+        "month_semantic_notice": result["month_semantic_notice"],
+        "count_semantic_notice": result["count_semantic_notice"],
+    }
 
 
 def _settlement_field_mapping_suggestion() -> dict:

@@ -83,6 +83,20 @@ def preview_coupang_settlements(
     return success_response(data=result, message="coupang readonly settlement preview completed")
 
 
+@router.post("/settlements/coupang")
+def sync_coupang_settlements(
+    payload: CoupangSettlementPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.sync_coupang_settlements(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    return success_response(data=result, message="coupang readonly settlement sync completed")
+
+
 @router.post("/orders/mock")
 def sync_orders_mock(
     store_id: int = Query(...),

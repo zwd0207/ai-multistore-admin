@@ -58,6 +58,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/sync/products/coupang",
     "/api/v1/sync/sales/coupang/preview",
     "/api/v1/sync/settlements/coupang/preview",
+    "/api/v1/sync/settlements/coupang",
     "/api/v1/sync/orders/mock",
     "/api/v1/sync/orders/coupang/preview",
     "/api/v1/sync/orders/coupang",
@@ -733,6 +734,7 @@ def verify_sync_preview_schema_and_security() -> None:
     from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
     from app.models.order import Order
     from app.models.product import Product
+    from app.models.sync_checkpoint import SyncCheckpoint
     from app.models.sync_log import SyncLog
     from app.services import sync_service
     from scripts.upgrade_sync_schema import upgrade
@@ -849,6 +851,11 @@ def verify_sync_preview_schema_and_security() -> None:
                     "start_date": "2026-06-29",
                     "end_date": "2026-06-30",
                 })
+                disabled_settlement_sync = client.post("/api/v1/sync/settlements/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-06-30",
+                })
             finally:
                 sync_service.httpx.Client = original_http_client
                 app_config.get_settings.cache_clear()
@@ -860,6 +867,8 @@ def verify_sync_preview_schema_and_security() -> None:
             assert disabled_sales.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_sales.text
             assert disabled_settlement.status_code == 403, disabled_settlement.text
             assert disabled_settlement.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_settlement.text
+            assert disabled_settlement_sync.status_code == 403, disabled_settlement_sync.text
+            assert disabled_settlement_sync.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_settlement_sync.text
 
             with SessionLocal() as db:
                 db.add(Order(
@@ -1151,6 +1160,16 @@ def verify_sync_preview_schema_and_security() -> None:
                     "start_date": "2026-06-29",
                     "end_date": "2026-07-01",
                 })
+                settlement_sync_first = client.post("/api/v1/sync/settlements/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-07-01",
+                })
+                settlement_sync_second = client.post("/api/v1/sync/settlements/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-07-01",
+                })
             finally:
                 sync_service._coupang_get_with_credential = original_get
 
@@ -1178,7 +1197,58 @@ def verify_sync_preview_schema_and_security() -> None:
             for forbidden in ["bankaccountholder", "bankname", "bankaccount", "masked holder", "masked bank", "***1234", "token", "must-not-be-saved"]:
                 assert forbidden not in settlement_sample_text, settlement_sample_text
 
+            assert settlement_sync_first.status_code == 200, settlement_sync_first.text
+            first_sync_data = settlement_sync_first.json()["data"]
+            assert first_sync_data["sync_type"] == "settlements_coupang_real", first_sync_data
+            assert first_sync_data["write_scope"] == "local_platform_settlement_details_only", first_sync_data
+            assert first_sync_data["platform_write"] is False, first_sync_data
+            assert first_sync_data["created_count"] == 2, first_sync_data
+            assert first_sync_data["updated_count"] == 0, first_sync_data
+            assert first_sync_data["unchanged_count"] == 0, first_sync_data
+            assert first_sync_data["skipped_count"] == 0, first_sync_data
+            assert first_sync_data["months"] == ["2026-06", "2026-07"], first_sync_data
+            assert first_sync_data["month_semantic_notice"], first_sync_data
+            assert first_sync_data["count_semantic_notice"], first_sync_data
+
+            assert settlement_sync_second.status_code == 200, settlement_sync_second.text
+            second_sync_data = settlement_sync_second.json()["data"]
+            assert second_sync_data["created_count"] == 0, second_sync_data
+            assert second_sync_data["updated_count"] == 0, second_sync_data
+            assert second_sync_data["unchanged_count"] == 2, second_sync_data
+            assert second_sync_data["skipped_count"] == 0, second_sync_data
+
             with SessionLocal() as db:
+                settlement_rows = db.scalars(
+                    select(PlatformSettlementDetail)
+                    .where(
+                        PlatformSettlementDetail.store_id == store_id,
+                        PlatformSettlementDetail.platform == "coupang",
+                    )
+                    .order_by(PlatformSettlementDetail.external_settlement_id)
+                ).all()
+                assert len(settlement_rows) == 2, settlement_rows
+                assert {row.external_settlement_id for row in settlement_rows} == {"settlement-2026-06", "settlement-2026-07"}
+                assert {row.source_type for row in settlement_rows} == {"real_coupang"}
+                assert all(row.last_synced_at is not None for row in settlement_rows)
+                assert all(row.settlement_amount == 7000 for row in settlement_rows)
+                observed_text = str([row.observed_fields for row in settlement_rows]).lower()
+                for forbidden in ["bankaccountholder", "bankname", "bankaccount", "token"]:
+                    assert forbidden not in observed_text, observed_text
+
+                settlement_checkpoint = db.scalars(
+                    select(SyncCheckpoint)
+                    .where(
+                        SyncCheckpoint.store_id == store_id,
+                        SyncCheckpoint.platform == "coupang",
+                        SyncCheckpoint.sync_type == "settlements",
+                    )
+                ).first()
+                assert settlement_checkpoint is not None
+                checkpoint_text = f"{settlement_checkpoint.cursor_value} {settlement_checkpoint.notes}".lower()
+                assert "2026-06" in checkpoint_text and "2026-07" in checkpoint_text, checkpoint_text
+                for forbidden in ["bankaccountholder", "bankname", "bankaccount", "token", "authorization", "signature"]:
+                    assert forbidden not in checkpoint_text, checkpoint_text
+
                 latest_sales_log = db.scalars(
                     select(SyncLog)
                     .where(
@@ -1199,7 +1269,21 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert latest_sales_log.status == "success", latest_sales_log
                 assert latest_settlement_log is not None
                 assert latest_settlement_log.status == "success", latest_settlement_log
-                combined_financial_log_text = f"{latest_sales_log.raw_summary} {latest_settlement_log.raw_summary}".lower()
+                latest_settlement_sync_log = db.scalars(
+                    select(SyncLog)
+                    .where(
+                        SyncLog.store_id == store_id,
+                        SyncLog.sync_type == "settlements_coupang_real",
+                    )
+                    .order_by(SyncLog.id.desc())
+                ).first()
+                assert latest_settlement_sync_log is not None
+                assert latest_settlement_sync_log.status == "success", latest_settlement_sync_log
+                combined_financial_log_text = (
+                    f"{latest_sales_log.raw_summary} {latest_sales_log.message} {latest_sales_log.error_detail} "
+                    f"{latest_settlement_log.raw_summary} {latest_settlement_log.message} {latest_settlement_log.error_detail} "
+                    f"{latest_settlement_sync_log.raw_summary} {latest_settlement_sync_log.message} {latest_settlement_sync_log.error_detail}"
+                ).lower()
                 for forbidden in [
                     "phase-6c6a-access-key",
                     "phase-6c6a-secret-key",
