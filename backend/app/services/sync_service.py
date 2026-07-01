@@ -1665,6 +1665,7 @@ def _run_naver_product_real_micro_preview(
         payload = product_result["payload"]
         sample_ids = [_mask_external_identifier(item) for item in _extract_naver_product_preview_ids(payload)[:1]]
         field_observation.update(_summarize_naver_product_preview_fields(payload))
+        mapping_summary = _summarize_naver_product_mapping(payload)
         preview_status = "success" if sample_ids else "success_empty"
         return _build_naver_product_preview_result(
             store_id=store_id,
@@ -1679,6 +1680,7 @@ def _run_naver_product_real_micro_preview(
             field_observation=field_observation,
             sample_ids=sample_ids,
             has_more=_naver_product_preview_has_more(payload),
+            mapping_summary=mapping_summary,
         )
     except ApiError:
         raise
@@ -1768,6 +1770,138 @@ def _summarize_naver_product_preview_fields(payload: object) -> dict:
     }
 
 
+def _summarize_naver_product_mapping(payload: object | None) -> dict:
+    field_names = _safe_naver_product_observed_field_names(payload)
+    lower_names = {name.lower() for name in field_names}
+    channel_summary = _summarize_naver_channel_products(payload)
+    observed = {
+        "origin_product_no": "originproductno" in lower_names,
+        "channel_product_id": any(name in {"channelproductno", "channelproductid"} for name in lower_names),
+        "product_name": any(name in {"productname", "name"} for name in lower_names),
+        "sale_status": any(name in {"statustype", "salestatus", "status"} or "productstatus" in name for name in lower_names),
+        "display_status": any("displaystatus" in name for name in lower_names),
+        "price": any("price" in name for name in lower_names),
+        "stock": any("stock" in name or "quantity" in name for name in lower_names),
+    }
+    missing = [name for name, present in observed.items() if not present]
+    return {
+        "product_field_mapping_summary": _build_naver_product_field_mapping_summary(channel_summary),
+        "observed_field_names": field_names,
+        "missing_field_names": missing,
+        "mapping_readiness": {
+            "ready_for_preview": True,
+            "ready_for_local_sync": False,
+            "local_sync_blocked_reason": "field_mapping_and_multi_channel_rules_pending",
+        },
+        "channel_products_summary": channel_summary,
+    }
+
+
+def _build_naver_product_field_mapping_summary(channel_summary: dict) -> dict:
+    return {
+        "external_product_id": {
+            "source_priority": ["contents[].channelProducts[].channelProductNo", "contents[].originProductNo"],
+            "target": "products.external_product_id",
+            "rule": "Prefer channelProductNo only when a single channel product is observed; do not auto-select when multiple channelProducts exist.",
+        },
+        "platform_origin_product_no": {
+            "source": "contents[].originProductNo",
+            "target": "products.raw_data.platform_origin_product_no",
+            "storage": "sanitized_metadata_only",
+        },
+        "platform_channel_product_id": {
+            "source": "contents[].channelProducts[].channelProductNo",
+            "target": "products.raw_data.platform_channel_product_id",
+            "storage": "sanitized_metadata_only",
+        },
+        "name": {
+            "source": "contents[].channelProducts[].productName",
+            "target": "products.name",
+            "max_length": 300,
+        },
+        "status": {
+            "source": "contents[].channelProducts[].statusType",
+            "target": "products.status",
+            "normalization": "platform_status_candidate",
+        },
+        "display_status": {
+            "source": "contents[].channelProducts[].channelProductDisplayStatusType",
+            "target": "products.raw_data.display_status",
+            "storage": "sanitized_metadata_only",
+        },
+        "price": {
+            "source_priority": ["salePrice", "discountPrice", "price"],
+            "target": "products.price",
+            "normalization": "Decimal",
+            "currency": "KRW",
+        },
+        "stock_quantity": {
+            "source_priority": ["stockQuantity", "quantity", "inventory"],
+            "target": "products.stock_quantity",
+            "normalization": "int",
+        },
+        "source_type": {
+            "preview": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+            "future_sync": "naver_real_sync",
+        },
+        "multi_channel_rule": {
+            "multiple_observed": bool(channel_summary.get("multiple_observed")),
+            "local_sync_allowed": False,
+            "rule": "Preview counts multiple channelProducts but does not expand them or write multiple products.",
+        },
+    }
+
+
+def _safe_naver_product_observed_field_names(payload: object | None) -> list[str]:
+    forbidden_fragments = (
+        "html",
+        "image",
+        "detail",
+        "token",
+        "authorization",
+        "header",
+        "signature",
+        "secret",
+        "clientsecret",
+        "channelno",
+        "channel_no",
+    )
+    allowed: list[str] = []
+    for name in _collect_json_field_names(payload):
+        normalized = name.replace("_", "").replace("-", "").lower()
+        if any(fragment in normalized for fragment in forbidden_fragments):
+            if normalized not in {"channelproductno", "channelproductid"}:
+                continue
+        allowed.append(name[:80])
+        if len(allowed) >= 40:
+            break
+    return sorted(dict.fromkeys(allowed))
+
+
+def _summarize_naver_channel_products(payload: object | None) -> dict:
+    counts: list[int] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key == "channelProducts" and isinstance(value, list):
+                counts.append(len(value))
+            elif isinstance(value, (dict, list)):
+                nested = _summarize_naver_channel_products(value)
+                counts.extend(nested.get("counts_by_content", []))
+    elif isinstance(payload, list):
+        for item in payload:
+            nested = _summarize_naver_channel_products(item)
+            counts.extend(nested.get("counts_by_content", []))
+    total = sum(counts)
+    return {
+        "observed": bool(counts),
+        "count": total,
+        "multiple_observed": any(count > 1 for count in counts) or total > 1,
+        "counts_by_content": counts[:10],
+        "raw_payload_expanded": False,
+        "products_written": False,
+    }
+
+
 def _naver_product_preview_has_more(payload: object) -> bool:
     if isinstance(payload, dict):
         for key in ("hasMore", "hasNext", "more"):
@@ -1776,6 +1910,20 @@ def _naver_product_preview_has_more(payload: object) -> bool:
         if isinstance(payload.get("last"), bool):
             return not payload["last"]
     return False
+
+
+def _extend_naver_product_mapping_business_summary(preview_status: str) -> list[str]:
+    summary = list(_build_naver_product_preview_business_status_summary(preview_status))
+    if preview_status == "success":
+        for message in [
+            "商品只读微量预览成功",
+            "已观察到商品名称、状态、价格、库存等关键字段",
+            "本阶段未写入本地商品数据",
+            "正式商品同步仍需完成字段映射与入库规则确认",
+        ]:
+            if message not in summary:
+                summary.append(message)
+    return summary
 
 
 def _build_naver_product_preview_result(
@@ -1794,7 +1942,9 @@ def _build_naver_product_preview_result(
     has_more: bool,
     keyword_configured: bool = False,
     seller_product_id_configured: bool = False,
+    mapping_summary: dict | None = None,
 ) -> dict:
+    safe_mapping_summary = mapping_summary or _summarize_naver_product_mapping(None)
     return {
         "store_id": store_id,
         "credential_id": credential_id,
@@ -1817,7 +1967,12 @@ def _build_naver_product_preview_result(
         "would_update": 0,
         "sample_ids": sample_ids,
         "field_observation": field_observation,
-        "business_status_summary": _build_naver_product_preview_business_status_summary(preview_status),
+        "product_field_mapping_summary": safe_mapping_summary["product_field_mapping_summary"],
+        "observed_field_names": safe_mapping_summary["observed_field_names"],
+        "missing_field_names": safe_mapping_summary["missing_field_names"],
+        "mapping_readiness": safe_mapping_summary["mapping_readiness"],
+        "channel_products_summary": safe_mapping_summary["channel_products_summary"],
+        "business_status_summary": _extend_naver_product_mapping_business_summary(preview_status),
         "semantic_notice": "Readonly preview scaffold only. No local product rows were written.",
     }
 

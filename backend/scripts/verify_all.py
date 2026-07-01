@@ -1742,6 +1742,27 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_product_data["product_preview_called"] is True, fake_product_data
                 assert fake_product_data["http_status"] == 200, fake_product_data
                 assert fake_product_data["sample_ids"] and fake_product_data["sample_ids"][0].startswith("id-hash-"), fake_product_data
+                mapping = fake_product_data["product_field_mapping_summary"]
+                assert mapping["external_product_id"]["target"] == "products.external_product_id", mapping
+                assert mapping["external_product_id"]["source_priority"][0] == "contents[].channelProducts[].channelProductNo", mapping
+                assert mapping["platform_origin_product_no"]["target"] == "products.raw_data.platform_origin_product_no", mapping
+                assert mapping["platform_channel_product_id"]["target"] == "products.raw_data.platform_channel_product_id", mapping
+                assert mapping["name"]["target"] == "products.name", mapping
+                assert mapping["status"]["target"] == "products.status", mapping
+                assert mapping["display_status"]["target"] == "products.raw_data.display_status", mapping
+                assert mapping["price"]["currency"] == "KRW", mapping
+                assert mapping["stock_quantity"]["normalization"] == "int", mapping
+                assert mapping["source_type"]["preview"] == "naver_product_preview", mapping
+                assert mapping["source_type"]["future_sync"] == "naver_real_sync", mapping
+                assert fake_product_data["mapping_readiness"]["ready_for_preview"] is True, fake_product_data
+                assert fake_product_data["mapping_readiness"]["ready_for_local_sync"] is False, fake_product_data
+                assert fake_product_data["channel_products_summary"]["observed"] is True, fake_product_data
+                assert fake_product_data["channel_products_summary"]["count"] == 1, fake_product_data
+                assert fake_product_data["channel_products_summary"]["multiple_observed"] is False, fake_product_data
+                assert fake_product_data["channel_products_summary"]["raw_payload_expanded"] is False, fake_product_data
+                assert fake_product_data["missing_field_names"] == [], fake_product_data
+                assert "channelProductNo" in fake_product_data["observed_field_names"], fake_product_data
+                assert "detailHtml" not in fake_product_data["observed_field_names"], fake_product_data
                 observed = fake_product_data["field_observation"]
                 assert observed["product_id_observed"] is True, observed
                 assert observed["origin_product_no_observed"] is True, observed
@@ -1767,6 +1788,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     "seller-product-id-must-not-leak",
                     "must-not-leak-product-name",
                     "must-not-leak-html",
+                    "detailhtml",
                     "fake-product-token",
                     "authorization",
                     "headers",
@@ -1791,6 +1813,105 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_empty_data["preview_status"] == "success_empty", fake_empty_data
                 assert fake_empty_data["sample_ids"] == [], fake_empty_data
                 assert fake_empty_data["field_observation"]["raw_response_saved"] is False, fake_empty_data
+                assert fake_empty_data["mapping_readiness"]["ready_for_preview"] is True, fake_empty_data
+                assert fake_empty_data["mapping_readiness"]["ready_for_local_sync"] is False, fake_empty_data
+                assert fake_empty_data["channel_products_summary"]["observed"] is False, fake_empty_data
+                assert "price" in fake_empty_data["missing_field_names"], fake_empty_data
+                assert "stock" in fake_empty_data["missing_field_names"], fake_empty_data
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "MULTI-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "MULTI-CHANNEL-1-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-multi-name-1",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1000,
+                                        "stockQuantity": 3,
+                                        "imageUrl": "must-not-leak-image",
+                                    },
+                                    {
+                                        "channelProductNo": "MULTI-CHANNEL-2-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-multi-name-2",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2000,
+                                        "stockQuantity": 4,
+                                    },
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_multi = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_multi.status_code == 200, fake_product_multi.text
+                fake_multi_data = fake_product_multi.json()["data"]
+                assert fake_multi_data["preview_status"] == "success", fake_multi_data
+                assert fake_multi_data["channel_products_summary"]["count"] == 2, fake_multi_data
+                assert fake_multi_data["channel_products_summary"]["multiple_observed"] is True, fake_multi_data
+                assert fake_multi_data["product_field_mapping_summary"]["multi_channel_rule"]["local_sync_allowed"] is False, fake_multi_data
+                assert fake_multi_data["mapping_readiness"]["ready_for_local_sync"] is False, fake_multi_data
+                assert "imageUrl" not in fake_multi_data["observed_field_names"], fake_multi_data
+                fake_multi_text = str(fake_product_multi.json()).lower()
+                for forbidden in [
+                    "multi-origin-must-not-leak",
+                    "multi-channel-1-must-not-leak",
+                    "multi-channel-2-must-not-leak",
+                    "must-not-leak-multi-name",
+                    "must-not-leak-image",
+                    "imageurl",
+                ]:
+                    assert forbidden not in fake_multi_text, fake_multi_text
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "MISSING-PRICE-STOCK-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "MISSING-CHANNEL-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-missing-price-stock",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_missing = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_missing.status_code == 200, fake_product_missing.text
+                fake_missing_data = fake_product_missing.json()["data"]
+                assert "price" in fake_missing_data["missing_field_names"], fake_missing_data
+                assert "stock" in fake_missing_data["missing_field_names"], fake_missing_data
+                fake_missing_text = str(fake_product_missing.json()).lower()
+                for forbidden in [
+                    "missing-price-stock-must-not-leak",
+                    "missing-channel-must-not-leak",
+                    "must-not-leak-missing-price-stock",
+                ]:
+                    assert forbidden not in fake_missing_text, fake_missing_text
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(403, {"message": "ip whitelist blocked"}, text="ip whitelist blocked")
