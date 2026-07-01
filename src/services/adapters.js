@@ -715,6 +715,7 @@ export function adaptApiCapabilitySummary(data = {}) {
 }
 
 export function adaptApiCredentialReadiness(data = {}) {
+  const storeBound = data.store_bound_readiness || null;
   return {
     semanticNotice: data.semantic_notice || '',
     realApiTestEnabled: Boolean(data.real_api_test_enabled),
@@ -726,6 +727,25 @@ export function adaptApiCredentialReadiness(data = {}) {
       readinessStatus: item.readiness_status || 'disabled',
       fields: item.fields || {},
     })),
+    storeBoundReadiness: storeBound ? {
+      storeId: storeBound.store_id,
+      platform: adaptPlatform(storeBound.platform),
+      rawPlatform: storeBound.platform,
+      credentialId: storeBound.credential_id,
+      credentialName: storeBound.credential_name,
+      configured: Boolean(storeBound.configured),
+      clientIdConfigured: Boolean(storeBound.client_id_configured),
+      secretKeyConfigured: Boolean(storeBound.secret_key_configured),
+      secretKeyDecryptable: Boolean(storeBound.secret_key_decryptable),
+      apiBase: storeBound.api_base,
+      channelNoConfigured: Boolean(storeBound.channel_no_configured),
+      accessTokenStatus: storeBound.access_token_status || 'missing',
+      refreshTokenConfigured: Boolean(storeBound.refresh_token_configured),
+      tokenExpiresAt: storeBound.token_expires_at,
+      authStatus: storeBound.auth_status,
+      missingFields: storeBound.missing_fields || [],
+      warnings: storeBound.warnings || [],
+    } : null,
   };
 }
 
@@ -740,6 +760,18 @@ export function adaptApiCredentialSmokeTest(data = {}) {
       rawPlatform: item.platform,
       enabled: Boolean(item.enabled),
       configured: Boolean(item.configured),
+      storeId: item.store_id,
+      credentialId: item.credential_id,
+      pathKind: item.path_kind,
+      capabilityScope: item.capability_scope,
+      grantTypeUsed: item.grant_type_used,
+      sellerAccountIdConfigured: Boolean(item.seller_account_id_configured),
+      channelNoSource: item.channel_no_source,
+      channelNoObserved: Boolean(item.channel_no_observed),
+      channelNoConfigured: Boolean(item.channel_no_configured),
+      channelNoPersisted: Boolean(item.channel_no_persisted),
+      multipleChannelsObserved: Boolean(item.multiple_channels_observed),
+      businessStatusSummary: item.business_status_summary || {},
       tokenTest: item.token_test || 'skipped',
       sellerOrAccountTest: item.seller_or_account_test || 'skipped',
       productReadTest: item.product_read_test || 'skipped',

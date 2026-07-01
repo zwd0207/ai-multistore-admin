@@ -99,8 +99,54 @@ function buildRecordForm(record) {
   };
 }
 
+function CredentialBusinessStatus({ selectedStoreId, readiness }) {
+  const storeBound = readiness?.storeBoundReadiness;
+  const platform = String(storeBound?.rawPlatform || storeBound?.platform || '').toLowerCase();
+  if (!selectedStoreId) return null;
+
+  const title = platform === 'naver' ? 'Naver 凭证状态' : platform === 'coupang' ? 'Coupang 凭证状态' : 'API 凭证状态';
+  const items = platform === 'naver'
+    ? [
+      { label: 'Client ID', value: storeBound?.clientIdConfigured ? '已配置' : '未配置' },
+      { label: 'Client Secret', value: storeBound?.secretKeyConfigured && storeBound?.secretKeyDecryptable ? '已配置' : '未配置完整' },
+      { label: '店铺频道编号', value: storeBound?.channelNoConfigured ? '已识别' : '暂未识别' },
+      { label: '下一步', value: storeBound?.channelNoConfigured ? '可进入商品/订单前置设计' : '先完成店铺频道信息读取检测' },
+    ]
+    : [
+      { label: '平台连接', value: '请在平台能力页查看最近检测状态' },
+      { label: '商品/订单', value: 'Coupang 读取与同步入口已按阶段开放' },
+      { label: '销售/结算', value: '销售与结算口径在销售页和 Dashboard 分区展示' },
+      { label: '下一步', value: '按业务页面核对商品、订单、销售与结算数据' },
+    ];
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>{title}</h2>
+          <p>只展示配置状态和下一步建议，不显示密钥、token、Authorization、签名或 raw response。</p>
+        </div>
+      </div>
+      <div className="business-capability-grid compact">
+        {items.map((item) => (
+          <article className="business-capability-card info" key={item.label}>
+            <div className="business-capability-head">
+              <strong>{item.label}</strong>
+              <span>{item.value}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function BackendCredentialPage({ embedded = false }) {
-  const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const {
+    selectedStoreId,
+    loading: storeLoading,
+    error: storeError,
+  } = useStoreContext();
   const [query, setQuery] = useState({
     keyword: '',
     status: '',
@@ -123,6 +169,7 @@ export default function BackendCredentialPage({ embedded = false }) {
   const [errors, setErrors] = useState({});
   const [saveError, setSaveError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [readiness, setReadiness] = useState(null);
 
   const canWrite = Boolean(selectedStoreId) && !storeLoading && !storeError;
   const isNaverForm = String(form.platform || '').toLowerCase() === 'naver';
@@ -159,6 +206,22 @@ export default function BackendCredentialPage({ embedded = false }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!selectedStoreId || storeLoading || storeError) {
+      setReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId })
+      .then((result) => {
+        if (!cancelled) setReadiness(result);
+      })
+      .catch(() => {
+        if (!cancelled) setReadiness(null);
+      });
+    return () => { cancelled = true; };
+  }, [selectedStoreId, storeError, storeLoading]);
 
   const resetSensitiveInputs = (nextForm = form) => ({
     ...nextForm,
@@ -292,6 +355,9 @@ export default function BackendCredentialPage({ embedded = false }) {
           )}
         />
       )}
+
+      <CredentialBusinessStatus selectedStoreId={selectedStoreId} readiness={readiness} />
+
       <section className="content-card">
         {embedded && (
           <div className="section-heading">

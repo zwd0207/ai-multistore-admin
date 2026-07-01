@@ -19,7 +19,7 @@ function queryBackendRows(rows, params = {}) {
     const expected = comparable(keyword);
     filtered = filtered.filter((item) => Object.values(item).some((value) => comparable(value).includes(expected)));
   }
-  if (status) filtered = filtered.filter((item) => comparable(item.status) === comparable(status));
+  if (status) filtered = filtered.filter((item) => comparable(item.status || item.testStatus) === comparable(status));
   if (platform) filtered = filtered.filter((item) => comparable(item.platform) === comparable(platform));
   if (params.priority) filtered = filtered.filter((item) => comparable(item.priority) === comparable(params.priority));
 
@@ -115,6 +115,57 @@ function withMockFinancialSummary(summary = {}) {
         finalAmountNotice: 'finalAmount is not profit and is not withdrawable balance.',
         zeroDataNotice: 'Zero rows only mean local persisted data is currently empty.',
       },
+    },
+  };
+}
+
+const mockApiCapabilities = [
+  { id: 9101, platform: 'Naver', rawPlatform: 'naver', capabilityKey: 'naver.token_auth', capabilityName: '平台授权检测', apiCategory: 'auth', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9102, platform: 'Naver', rawPlatform: 'naver', capabilityKey: 'naver.seller_account_read', capabilityName: '卖家账号信息读取', apiCategory: 'seller', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9103, platform: 'Naver', rawPlatform: 'naver', capabilityKey: 'naver.seller_channels_read', capabilityName: '店铺频道信息读取', apiCategory: 'seller', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9104, platform: 'Naver', rawPlatform: 'naver', capabilityKey: 'naver.product_read', capabilityName: '商品读取', apiCategory: 'products', testStatus: 'not_tested', testMode: 'docs_only' },
+  { id: 9105, platform: 'Naver', rawPlatform: 'naver', capabilityKey: 'naver.order_read', capabilityName: '订单读取', apiCategory: 'orders', testStatus: 'not_tested', testMode: 'docs_only' },
+  { id: 9201, platform: 'Coupang', rawPlatform: 'coupang', capabilityKey: 'coupang.product_read', capabilityName: '商品读取/同步', apiCategory: 'products', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9202, platform: 'Coupang', rawPlatform: 'coupang', capabilityKey: 'coupang.order_read', capabilityName: '订单读取/同步', apiCategory: 'orders', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9203, platform: 'Coupang', rawPlatform: 'coupang', capabilityKey: 'coupang.sales_read', capabilityName: '销售明细', apiCategory: 'sales', testStatus: 'tested_success', testMode: 'real_readonly' },
+  { id: 9204, platform: 'Coupang', rawPlatform: 'coupang', capabilityKey: 'coupang.settlement_read', capabilityName: '结算明细', apiCategory: 'settlements', testStatus: 'tested_success', testMode: 'real_readonly' },
+];
+
+function mockApiCapabilityResults(storeId) {
+  const testedAt = '2026-07-01T13:35:04+00:00';
+  return [
+    { id: 9301, storeId, capabilityId: 9101, credentialId: 7, testMode: 'real_readonly', testStatus: 'tested_success', httpStatus: 200, responseFieldsObserved: 'token_test=success; capability_scope=token_auth; path_kind=store_bound', testedAt },
+    { id: 9302, storeId, capabilityId: 9102, credentialId: 7, testMode: 'real_readonly', testStatus: 'tested_success', httpStatus: 200, responseFieldsObserved: 'seller_or_account_test=success; capability_scope=seller_account; path_kind=store_bound', testedAt },
+    { id: 9303, storeId, capabilityId: 9103, credentialId: 7, testMode: 'real_readonly', testStatus: 'tested_success', httpStatus: 200, responseFieldsObserved: 'seller_or_account_test=success; capability_scope=seller_channels; path_kind=store_bound; channel_no_source=seller_channels; channel_no_configured=True; channel_no_persisted=True', testedAt },
+  ];
+}
+
+function mockApiCredentialReadiness(params = {}) {
+  return {
+    semantic_notice: 'Mock mode shows seller-facing example states only.',
+    real_api_test_enabled: false,
+    real_api_write_enabled: false,
+    platforms: [
+      { platform: 'naver', credential_status: 'configured', readiness_status: 'configured', fields: { client_id: 'configured', secret_key: 'configured', api_base: 'configured' } },
+      { platform: 'coupang', credential_status: 'configured', readiness_status: 'configured', fields: { vendor_id: 'configured', access_key: 'configured', secret_key: 'configured' } },
+    ],
+    store_bound_readiness: {
+      store_id: params?.storeId || params?.store_id || 8,
+      platform: 'naver',
+      credential_id: 7,
+      credential_name: 'Mock Naver credential',
+      configured: true,
+      client_id_configured: true,
+      secret_key_configured: true,
+      secret_key_decryptable: true,
+      api_base: 'https://api.commerce.naver.com/external',
+      channel_no_configured: true,
+      access_token_status: 'missing',
+      refresh_token_configured: false,
+      token_expires_at: null,
+      auth_status: 'configured',
+      missing_fields: [],
+      warnings: ['access_token_missing'],
     },
   };
 }
@@ -464,16 +515,16 @@ const sourceMethods = {
     const result = await backendApi.updatePlatformLogin(loginId, adapters.toBackendPlatformLoginPayload({ ...payload, loginStatus: 'inactive' }, store.id));
     return withStoreName([adapters.platformLogin(result)], stores)[0];
   },
-  getApiCredentialReadiness: async () => {
-    if (!isBackendSource) return adapters.apiCredentialReadiness();
-    return adapters.apiCredentialReadiness(await backendApi.getApiCredentialReadiness());
+  getApiCredentialReadiness: async (params) => {
+    if (!isBackendSource) return adapters.apiCredentialReadiness(mockApiCredentialReadiness(params));
+    return adapters.apiCredentialReadiness(await backendApi.getApiCredentialReadiness(params));
   },
   runApiCredentialSmokeTest: async () => {
     if (!isBackendSource) return adapters.apiCredentialSmokeTest();
     return adapters.apiCredentialSmokeTest(await backendApi.runApiCredentialSmokeTest({ platform: 'all', mode: 'readonly' }));
   },
   getApiCapabilities: async (params) => {
-    if (!isBackendSource) return { data: [], items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 10 };
+    if (!isBackendSource) return queryBackendRows(mockApiCapabilities, params);
     const result = await backendApi.getApiCapabilities(params);
     return queryBackendRows(adapters.list(result, adapters.apiCapability).data, params);
   },
@@ -486,7 +537,7 @@ const sourceMethods = {
     return adapters.apiCapability(await backendApi.updateApiCapability(capabilityId, adapters.toBackendApiCapabilityPayload(payload)));
   },
   getApiCapabilityResults: async (params) => {
-    if (!isBackendSource) return { data: [], items: [], total: 0, page: params?.page ?? 1, pageSize: params?.pageSize ?? 10 };
+    if (!isBackendSource) return queryBackendRows(mockApiCapabilityResults(params?.storeId || params?.store_id), params);
     const result = await backendApi.getApiCapabilityResults(params);
     return queryBackendRows(adapters.list(result, adapters.apiCapabilityResult).data, params);
   },

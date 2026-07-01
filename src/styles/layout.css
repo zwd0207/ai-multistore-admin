@@ -28,4 +28,18 @@
 .financial-boundary-item { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: white; }
 .financial-boundary-item strong { display: block; margin-bottom: 6px; font-size: 13px; }
 .financial-boundary-item p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-@media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list { grid-template-columns: 1fr; } }
+.business-capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.business-capability-grid.compact { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.business-capability-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: white; min-height: 132px; display: flex; flex-direction: column; gap: 10px; }
+.business-capability-card.success { border-color: #b8e2d2; background: #f3fbf7; }
+.business-capability-card.warning { border-color: #ead8a9; background: #fffbef; }
+.business-capability-card.danger { border-color: #efc2c5; background: #fff6f6; }
+.business-capability-card.muted { background: #f8fafc; }
+.business-capability-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.business-capability-head strong { font-size: 14px; line-height: 1.35; }
+.business-capability-head span { flex: 0 0 auto; color: #24476f; background: #eef4fb; border: 1px solid #dbe7f4; border-radius: 999px; padding: 4px 8px; font-size: 12px; max-width: 150px; text-align: right; }
+.business-capability-card p { margin: 0; color: #405066; font-size: 13px; line-height: 1.55; }
+.business-capability-card small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.developer-details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.developer-details summary { cursor: pointer; color: #516173; }
+@media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list, .business-capability-grid, .business-capability-grid.compact { grid-template-columns: 1fr; } }

@@ -12,6 +12,10 @@ import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
 import {
+  buildPlatformBusinessStatus,
+  businessCapabilityTitle,
+} from '../utils/capabilityStatusMapper';
+import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
   formatKstDate,
@@ -302,9 +306,56 @@ function ApiCapabilitySummarySection({ summary, source = 'dashboard', onOpenMatr
   );
 }
 
+function PlatformBusinessStatusSection({
+  selectedStore,
+  capabilities,
+  results,
+  readiness,
+  financialSummary,
+}) {
+  const platform = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase();
+  const cards = buildPlatformBusinessStatus({
+    platform,
+    capabilities,
+    results,
+    readiness,
+    financialSummary,
+  });
+  if (!cards.length) return null;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>{businessCapabilityTitle(platform)}</h2>
+          <p>把后端检测记录转成卖家能直接判断的运营状态。</p>
+        </div>
+        <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
+      </div>
+      <div className="business-capability-grid">
+        {cards.map((card) => (
+          <article className={`business-capability-card ${card.tone || 'info'}`} key={card.key}>
+            <div className="business-capability-head">
+              <strong>{card.title}</strong>
+              <span>{card.statusLabel}</span>
+            </div>
+            <p>{card.reason}</p>
+            <small>{card.nextAction}</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const {
+    selectedStoreId,
+    selectedStore,
+    loading: storeLoading,
+    error: storeError,
+  } = useStoreContext();
   const { versions } = useSyncRefresh();
   const [summary, setSummary] = useState(null);
   const [risks, setRisks] = useState([]);
@@ -314,6 +365,7 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [dailyContext, setDailyContext] = useState(null);
   const [contextError, setContextError] = useState('');
+  const [platformStatusData, setPlatformStatusData] = useState({ capabilities: [], results: [], readiness: null });
 
   useEffect(() => {
     if (isBackendSource && storeLoading) return;
@@ -360,6 +412,33 @@ export default function Dashboard() {
         setTrend(trendData);
       })
       .catch((requestError) => setError(requestError.message || 'Failed to load dashboard data.'));
+  }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
+
+  useEffect(() => {
+    if (storeLoading || storeError || !selectedStoreId) {
+      setPlatformStatusData({ capabilities: [], results: [], readiness: null });
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      dataProvider.getApiCapabilities({ page: 1, pageSize: 100 }),
+      dataProvider.getApiCapabilityResults({ storeId: selectedStoreId, page: 1, pageSize: 100 }),
+      dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId }),
+    ])
+      .then(([capabilityResponse, resultResponse, readiness]) => {
+        if (cancelled) return;
+        const capabilities = capabilityResponse.data || capabilityResponse.items || [];
+        const capabilityMap = new Map(capabilities.map((item) => [String(item.id), item]));
+        const results = (resultResponse.data || resultResponse.items || []).map((item) => ({
+          ...item,
+          capabilityKey: capabilityMap.get(String(item.capabilityId))?.capabilityKey,
+        }));
+        setPlatformStatusData({ capabilities, results, readiness });
+      })
+      .catch(() => {
+        if (!cancelled) setPlatformStatusData({ capabilities: [], results: [], readiness: null });
+      });
+    return () => { cancelled = true; };
   }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
 
   useEffect(() => {
@@ -422,6 +501,14 @@ export default function Dashboard() {
       <StatGrid items={stats} />
 
       <FinancialSummarySection financialSummary={summary.financialSummary} />
+
+      <PlatformBusinessStatusSection
+        selectedStore={selectedStore}
+        capabilities={platformStatusData.capabilities}
+        results={platformStatusData.results}
+        readiness={platformStatusData.readiness}
+        financialSummary={summary.financialSummary}
+      />
 
       <ApiCapabilitySummarySection
         summary={dashboardCapabilitySummary}

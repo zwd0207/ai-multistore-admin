@@ -8,9 +8,14 @@ import Modal from '../components/common/Modal';
 import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
-import StatusBadge from '../components/common/StatusBadge';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
+import {
+  buildPlatformBusinessStatus,
+  businessCapabilityTitle,
+  CAPABILITY_LABELS,
+  statusLabel as businessStatusLabel,
+} from '../utils/capabilityStatusMapper';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const platformOptions = ['naver', 'coupang'];
@@ -78,36 +83,33 @@ const initialResultForm = {
 
 const capabilityColumns = [
   { key: 'platform', title: '平台' },
-  { key: 'capabilityKey', title: '能力 Key', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.capabilityName}</small></div> },
-  { key: 'apiCategory', title: '类别' },
-  { key: 'endpointPath', title: '接口路径' },
-  { key: 'method', title: '方法' },
-  { key: 'testStatus', title: '记录状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'testMode', title: '记录模式' },
-  { key: 'salesSourceType', title: '销售额来源' },
+  {
+    key: 'capabilityName',
+    title: '业务能力',
+    render: (value, row) => (
+      <div>
+        <strong>{CAPABILITY_LABELS[row.capabilityKey] || value || '未命名能力'}</strong>
+        <small className="cell-subtitle">{row.capabilityName || row.apiCategory}</small>
+      </div>
+    ),
+  },
+  { key: 'apiCategory', title: '业务模块' },
+  { key: 'testStatus', title: '当前状态', render: (value) => businessStatusLabel(value) },
+  { key: 'testMode', title: '确认方式', render: (value) => modeLabel(value) },
+  { key: 'salesSourceType', title: '销售口径来源' },
   { key: 'officialDocUrl', title: '官方文档', render: (value) => (value ? <a href={value} target="_blank" rel="noreferrer">文档链接</a> : '-') },
   { key: 'notes', title: '备注' },
-  { key: 'docCheckedAt', title: '文档确认时间' },
   { key: 'lastCheckedAt', title: '最近确认时间' },
-  { key: 'updatedAt', title: '更新时间' },
 ];
 
 const resultColumns = [
   { key: 'storeLabel', title: '当前店铺' },
   { key: 'credentialLabel', title: 'API 凭证（脱敏）' },
-  { key: 'capabilityLabel', title: '能力记录' },
-  { key: 'capabilityPlatform', title: '能力平台' },
-  { key: 'capabilityCategory', title: '能力类别' },
-  { key: 'testMode', title: '记录模式' },
-  { key: 'testStatus', title: '记录状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'httpStatus', title: 'HTTP 状态' },
-  { key: 'errorCode', title: '错误码' },
-  { key: 'permissionResult', title: '权限结果' },
-  { key: 'rateLimitSummary', title: '限流摘要' },
-  { key: 'responseFieldsObserved', title: '响应字段观察摘要' },
+  { key: 'capabilityLabel', title: '业务能力' },
+  { key: 'businessStatus', title: '业务状态' },
+  { key: 'nextAdvice', title: '下一步建议' },
   { key: 'testedAt', title: '记录时间' },
   { key: 'notes', title: '备注' },
-  { key: 'createdAt', title: '创建时间' },
 ];
 
 function cleanError(error) {
@@ -120,12 +122,23 @@ function toDatetimeLocalValue(value) {
 }
 
 function statusLabel(value) {
-  if (value === 'tested_success') return '人工记录：测试通过（非真实接入）';
-  return value;
+  if (value === 'tested_success') return '已通过检测';
+  return businessStatusLabel(value);
+}
+
+function modeLabel(value) {
+  const labels = {
+    docs_only: '文档确认',
+    manual: '人工记录',
+    real_readonly: '真实只读检测',
+    mock: '演示记录',
+    sandbox: '沙盒记录',
+  };
+  return labels[value] || value || '-';
 }
 
 function capabilityOptionLabel(item) {
-  return `${item.platform} · ${item.capabilityKey} · ${item.capabilityName || item.apiCategory}`;
+  return `${item.platform} · ${CAPABILITY_LABELS[item.capabilityKey] || item.capabilityName || item.apiCategory}`;
 }
 
 function credentialOptionLabel(item) {
@@ -141,14 +154,97 @@ function credentialOptionLabel(item) {
 
 function stateLabel(value) {
   const labels = {
-    configured: 'configured',
-    missing: 'missing',
-    disabled: 'disabled',
-    success: 'success',
-    failed: 'failed',
-    skipped: 'skipped',
+    configured: '已配置',
+    missing: '未配置',
+    disabled: '未启用',
+    success: '成功',
+    failed: '失败',
+    skipped: '已跳过',
   };
   return labels[value] || value || '-';
+}
+
+function nextAdviceForResult(row, capability) {
+  if (row.errorCode === 'auth_failed' || row.errorCode === 'token_auth_failed') {
+    return '请检查 API 凭证或平台权限。';
+  }
+  if (row.errorCode === 'credential_not_ready') {
+    return '请先补齐凭证配置。';
+  }
+  if (row.testStatus === 'tested_success') {
+    const key = capability?.capabilityKey || '';
+    if (key.includes('seller_channels')) return '频道读取已通过，后续可作为商品/订单同步前置条件。';
+    if (key.includes('seller_account')) return '账号读取已通过，可继续确认频道状态。';
+    if (key.includes('token_auth')) return '平台授权已通过，可继续账号与频道读取检测。';
+    return '该能力已通过检测，请按业务页面继续核对数据。';
+  }
+  if (row.testStatus === 'not_tested') return '暂未开放或尚未检测，请按阶段推进。';
+  return '请查看状态说明后再决定下一步处理。';
+}
+
+function CapabilityBusinessCards({
+  platform, capabilities, results, readiness,
+}) {
+  const cards = buildPlatformBusinessStatus({
+    platform,
+    capabilities,
+    results,
+    readiness,
+  });
+
+  if (!cards.length) {
+    return (
+      <EmptyState
+        title="暂无平台能力状态"
+        description="当前店铺暂未匹配到 Naver / Coupang 能力状态。"
+      />
+    );
+  }
+
+  return (
+    <div className="business-capability-grid">
+      {cards.map((card) => (
+        <article className={`business-capability-card ${card.tone || 'info'}`} key={card.key}>
+          <div className="business-capability-head">
+            <strong>{card.title}</strong>
+            <span>{card.statusLabel}</span>
+          </div>
+          <p>{card.reason}</p>
+          <small>{card.nextAction}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function PlatformBusinessStatusSection({
+  selectedStore,
+  capabilities,
+  results,
+  readiness,
+}) {
+  const platform = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase();
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>{businessCapabilityTitle(platform)}</h2>
+          <p>面向卖家的业务状态：当前功能能不能用、为什么不能用、下一步做什么。</p>
+        </div>
+        <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
+      </div>
+      <CapabilityBusinessCards
+        platform={platform}
+        capabilities={capabilities}
+        results={results}
+        readiness={readiness}
+      />
+      <details className="developer-details">
+        <summary>开发详情</summary>
+        <p>技术字段仅用于排查：store_id、credential_id、http_status、capability_scope、path_kind、capability_result_id。</p>
+      </details>
+    </section>
+  );
 }
 
 function readinessFieldLabel(platform, index) {
@@ -164,10 +260,8 @@ function ReadinessPanel({
   readiness,
   smokeResult,
   loading,
-  smokeLoading,
   error,
   onRefresh,
-  onSmokeTest,
 }) {
   const data = readiness || emptyReadiness;
   const smoke = smokeResult || emptySmokeTest;
@@ -181,7 +275,6 @@ function ReadinessPanel({
         </div>
         <div className="page-actions">
           <button className="button ghost" onClick={onRefresh} disabled={!isBackendSource || loading}>刷新 readiness</button>
-          <button className="button primary" onClick={onSmokeTest} disabled={!isBackendSource || smokeLoading}>只读检测</button>
         </div>
       </div>
       {!isBackendSource ? (
@@ -246,8 +339,11 @@ function enrichResults(rows, capabilities, credentials, selectedStoreId, stores 
       storeLabel: store?.name || `Store #${row.storeId || selectedStoreId}`,
       credentialLabel: credential ? credentialOptionLabel(credential) : '未绑定凭证',
       capabilityLabel: capability ? capabilityOptionLabel(capability) : `Capability #${row.capabilityId}`,
+      capabilityKey: capability?.capabilityKey,
       capabilityPlatform: capability?.platform || '-',
       capabilityCategory: capability?.apiCategory || '-',
+      businessStatus: businessStatusLabel(row.testStatus, row.errorCode),
+      nextAdvice: nextAdviceForResult(row, capability),
     };
   });
 }
@@ -276,8 +372,7 @@ export default function ApiCapabilities() {
   const [readiness, setReadiness] = useState(emptyReadiness);
   const [readinessLoading, setReadinessLoading] = useState(true);
   const [readinessError, setReadinessError] = useState('');
-  const [smokeResult, setSmokeResult] = useState(emptySmokeTest);
-  const [smokeLoading, setSmokeLoading] = useState(false);
+  const [smokeResult] = useState(emptySmokeTest);
   const [submitting, setSubmitting] = useState(false);
 
   const selectedStore = useMemo(
@@ -337,7 +432,7 @@ export default function ApiCapabilities() {
 
   const loadResults = useCallback(async (credentialRows = credentials) => {
     if (storeLoading) return;
-    if (!isBackendSource || storeError || !selectedStoreId) {
+    if (storeError || !selectedStoreId) {
       setResults({ data: [], total: 0, page: resultQuery.page, pageSize: resultQuery.pageSize });
       setResultError(storeError || '');
       setResultLoading(false);
@@ -368,7 +463,7 @@ export default function ApiCapabilities() {
   }, [capabilities.data, credentials, resultQuery, selectedStoreId, storeError, storeLoading, stores]);
 
   const loadReadiness = useCallback(async () => {
-    if (!isBackendSource) {
+    if (!selectedStoreId) {
       setReadiness(emptyReadiness);
       setReadinessError('');
       setReadinessLoading(false);
@@ -377,28 +472,14 @@ export default function ApiCapabilities() {
     setReadinessLoading(true);
     setReadinessError('');
     try {
-      setReadiness(await dataProvider.getApiCredentialReadiness());
+      setReadiness(await dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId }));
     } catch (error) {
       setReadiness(emptyReadiness);
       setReadinessError(cleanError(error));
     } finally {
       setReadinessLoading(false);
     }
-  }, []);
-
-  const runSmokeTest = async () => {
-    if (!isBackendSource || smokeLoading) return;
-    setSmokeLoading(true);
-    setReadinessError('');
-    try {
-      setSmokeResult(await dataProvider.runApiCredentialSmokeTest());
-    } catch (error) {
-      setSmokeResult(emptySmokeTest);
-      setReadinessError(cleanError(error));
-    } finally {
-      setSmokeLoading(false);
-    }
-  };
+  }, [selectedStoreId]);
 
   useEffect(() => { loadReadiness(); }, [loadReadiness]);
   useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
@@ -507,14 +588,19 @@ export default function ApiCapabilities() {
         </div>
       </section>
 
+      <PlatformBusinessStatusSection
+        selectedStore={selectedStore}
+        capabilities={capabilities.data || []}
+        results={results.data || []}
+        readiness={readiness}
+      />
+
       <ReadinessPanel
         readiness={readiness}
         smokeResult={smokeResult}
         loading={readinessLoading}
-        smokeLoading={smokeLoading}
         error={readinessError}
         onRefresh={loadReadiness}
-        onSmokeTest={runSmokeTest}
       />
 
       <section className="content-card">
@@ -537,7 +623,7 @@ export default function ApiCapabilities() {
             setCapabilityDraft(clean);
             setCapabilityQuery(clean);
           }}
-          placeholder="搜索能力 Key、名称、路径或备注"
+          placeholder="搜索业务能力、名称、路径或备注"
         >
           <select value={capabilityDraft.platform} onChange={(event) => setCapabilityDraft({ ...capabilityDraft, platform: event.target.value })}>
             <option value="">全部平台</option>
@@ -553,7 +639,7 @@ export default function ApiCapabilities() {
           </select>
           <select value={capabilityDraft.testMode} onChange={(event) => setCapabilityDraft({ ...capabilityDraft, testMode: event.target.value })}>
             <option value="">全部模式</option>
-            {capabilityModeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            {capabilityModeOptions.map((item) => <option key={item} value={item}>{modeLabel(item)}</option>)}
           </select>
           <select value={capabilityDraft.firstPhaseCandidate} onChange={(event) => setCapabilityDraft({ ...capabilityDraft, firstPhaseCandidate: event.target.value })}>
             <option value="">首阶段候选</option>
@@ -617,7 +703,7 @@ export default function ApiCapabilities() {
               </select>
               <select value={resultQuery.testMode} onChange={(event) => setResultQuery({ ...resultQuery, testMode: event.target.value, page: 1 })}>
                 <option value="">全部模式</option>
-                {resultModeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                {resultModeOptions.map((item) => <option key={item} value={item}>{modeLabel(item)}</option>)}
               </select>
             </SearchBar>
             <DataTable columns={resultColumns} rows={results.data || []} loading={resultLoading || storeLoading} />
@@ -649,7 +735,7 @@ export default function ApiCapabilities() {
           <FormField label="凭证类型"><input value={capabilityForm.requiredCredentialType} onChange={(event) => setCapabilityForm({ ...capabilityForm, requiredCredentialType: event.target.value })} /></FormField>
           <FormField label="普通店铺支持"><select value={capabilityForm.ordinaryStoreSupported} onChange={(event) => setCapabilityForm({ ...capabilityForm, ordinaryStoreSupported: event.target.value })}>{supportedOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></FormField>
           <FormField label="记录状态"><select value={capabilityForm.testStatus} onChange={(event) => setCapabilityForm({ ...capabilityForm, testStatus: event.target.value })}>{statusOptions.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}</select></FormField>
-          <FormField label="记录模式"><select value={capabilityForm.testMode} onChange={(event) => setCapabilityForm({ ...capabilityForm, testMode: event.target.value })}>{capabilityModeOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></FormField>
+          <FormField label="记录模式"><select value={capabilityForm.testMode} onChange={(event) => setCapabilityForm({ ...capabilityForm, testMode: event.target.value })}>{capabilityModeOptions.map((item) => <option key={item} value={item}>{modeLabel(item)}</option>)}</select></FormField>
           <FormField label="数据价值"><select value={capabilityForm.dataUsefulness} onChange={(event) => setCapabilityForm({ ...capabilityForm, dataUsefulness: event.target.value })}>{usefulnessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></FormField>
           <FormField label="销售额来源"><select value={capabilityForm.salesSourceType} onChange={(event) => setCapabilityForm({ ...capabilityForm, salesSourceType: event.target.value })}>{salesSourceOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></FormField>
           <FormField label="官方文档 URL"><input value={capabilityForm.officialDocUrl} onChange={(event) => setCapabilityForm({ ...capabilityForm, officialDocUrl: event.target.value })} /></FormField>
@@ -688,7 +774,7 @@ export default function ApiCapabilities() {
               {matchingCredentials.map((item) => <option key={item.id} value={item.id}>{credentialOptionLabel(item)}</option>)}
             </select>
           </FormField>
-          <FormField label="记录模式"><select value={resultForm.testMode} onChange={(event) => setResultForm({ ...resultForm, testMode: event.target.value })}>{resultModeOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></FormField>
+          <FormField label="记录模式"><select value={resultForm.testMode} onChange={(event) => setResultForm({ ...resultForm, testMode: event.target.value })}>{resultModeOptions.map((item) => <option key={item} value={item}>{modeLabel(item)}</option>)}</select></FormField>
           <FormField label="记录状态"><select value={resultForm.testStatus} onChange={(event) => setResultForm({ ...resultForm, testStatus: event.target.value })}>{statusOptions.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}</select></FormField>
           <FormField label="HTTP 状态"><input type="number" min="100" max="599" value={resultForm.httpStatus} onChange={(event) => setResultForm({ ...resultForm, httpStatus: event.target.value })} /></FormField>
           <FormField label="错误码"><input value={resultForm.errorCode} onChange={(event) => setResultForm({ ...resultForm, errorCode: event.target.value })} /></FormField>
