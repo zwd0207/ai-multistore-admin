@@ -1782,8 +1782,26 @@ def verify_sync_preview_schema_and_security() -> None:
                     })
 
                 def post(self, url: str, headers=None, json=None):
+                    assert url.endswith("/v1/pay-order/seller/product-orders/query"), url
+                    assert json == {"productOrderIds": ["PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890"]}, json
                     FakeNaverOrderHttpClient.detail_called = True
-                    raise AssertionError("Fix1 order feed diagnostics must not call detail query")
+                    return FakeNaverOrderResponse(200, {
+                        "data": [
+                            {
+                                "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
+                                "orderId": "ORDER-ID-MUST-NOT-LEAK-1234567890",
+                                "orderStatus": "PAYED",
+                                "paymentStatus": "PAYED",
+                                "deliveryStatus": "READY",
+                                "productName": "safe-field-presence-only",
+                                "buyerName": "must-not-leak-buyer",
+                                "receiverName": "must-not-leak-receiver",
+                                "receiverTelNo1": "010-1111-2222",
+                                "receiverAddress": "must-not-leak-address",
+                                "paymentDetail": {"raw": "must-not-leak-payment"},
+                            }
+                        ]
+                    })
 
             sync_service.httpx.Client = FakeNaverOrderHttpClient
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-order-token", 200)
@@ -1812,14 +1830,17 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert feed_data["field_observation"]["raw_response_saved"] is False, feed_data
                 assert feed_data["field_observation"]["orders_written"] is False, feed_data
                 assert len(feed_data["field_observation"]["feed_attempts"]) == 1, feed_data
-                attempt_a = feed_data["field_observation"]["feed_attempts"][0]
-                assert attempt_a["attempt"] == "attempt_a", attempt_a
-                assert attempt_a["feed_request_param_keys"] == ["lastChangedFrom", "limitCount", "lastChangedTo"], attempt_a
-                assert attempt_a["datetime_format_shape"] == "offset_seconds", attempt_a
-                assert attempt_a["last_changed_from_present"] is True, attempt_a
-                assert attempt_a["last_changed_to_present"] is True, attempt_a
-                assert attempt_a["limit_count_present"] is True, attempt_a
-                assert attempt_a["query_encoded_plus_safely"] is True, attempt_a
+                feed_attempt = feed_data["field_observation"]["feed_attempts"][0]
+                assert feed_attempt["attempt"] == "fixed_attempt_b", feed_attempt
+                assert feed_attempt["feed_request_param_keys"] == ["lastChangedFrom", "limitCount"], feed_attempt
+                assert feed_attempt["datetime_format_shape"] == "offset_milliseconds", feed_attempt
+                assert feed_attempt["last_changed_from_present"] is True, feed_attempt
+                assert feed_attempt["last_changed_to_present"] is False, feed_attempt
+                assert feed_attempt["limit_count_present"] is True, feed_attempt
+                assert feed_attempt["query_encoded_plus_safely"] is True, feed_attempt
+                assert FakeNaverOrderHttpClient.calls[0]["lastChangedFrom"].endswith("+09:00"), FakeNaverOrderHttpClient.calls
+                assert "." in FakeNaverOrderHttpClient.calls[0]["lastChangedFrom"], FakeNaverOrderHttpClient.calls
+                assert "lastChangedTo" not in FakeNaverOrderHttpClient.calls[0], FakeNaverOrderHttpClient.calls
                 assert feed_data["sample_ids"] and feed_data["sample_ids"][0].startswith("id-hash-"), feed_data
                 feed_text = str(feed_preview.json()).lower()
                 for forbidden in [
@@ -1855,33 +1876,46 @@ def verify_sync_preview_schema_and_security() -> None:
                 detail_data = detail_preview.json()["data"]
                 assert detail_data["preview_status"] == "success", detail_data
                 assert detail_data["field_observation"]["feed_called"] is True, detail_data
-                assert detail_data["field_observation"]["detail_called"] is False, detail_data
-                assert detail_data["field_observation"]["detail_limit"] == 0, detail_data
-                assert detail_data["field_observation"]["detail_skipped_reason"] == "feed_parameter_diagnostics_phase", detail_data
+                assert detail_data["field_observation"]["detail_called"] is True, detail_data
+                assert detail_data["field_observation"]["detail_limit"] == 1, detail_data
+                assert detail_data["field_observation"]["detail_http_status"] == 200, detail_data
+                detail_observed = detail_data["field_observation"]["detail_fields_observed"]
+                assert detail_observed["detail_record_observed"] is True, detail_observed
+                assert detail_observed["order_status_observed"] is True, detail_observed
+                assert detail_observed["payment_status_observed"] is True, detail_observed
+                assert detail_observed["delivery_status_observed"] is True, detail_observed
+                assert detail_observed["product_name_observed"] is True, detail_observed
+                assert detail_observed["buyer_info_present"] is True, detail_observed
+                assert detail_observed["receiver_info_present"] is True, detail_observed
+                assert detail_observed["privacy_fields_suppressed"] is True, detail_observed
+                assert detail_observed["raw_response_saved"] is False, detail_observed
+                assert detail_observed["orders_written"] is False, detail_observed
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
-                assert FakeNaverOrderHttpClient.detail_called is False, detail_data
+                assert FakeNaverOrderHttpClient.detail_called is True, detail_data
                 detail_text = str(detail_preview.json()).lower()
                 for forbidden in [
                     "product-order-id-must-not-leak",
                     "order-id-must-not-leak",
                     "must-not-leak-buyer",
+                    "must-not-leak-receiver",
+                    "010-1111-2222",
                     "must-not-leak-address",
+                    "must-not-leak-payment",
                     "fake-order-token",
                     "authorization",
+                    "buyername",
+                    "receivername",
+                    "receiveraddress",
+                    "paymentdetail",
                 ]:
                     assert forbidden not in detail_text, detail_text
 
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = [
-                    FakeNaverOrderResponse(400, {
-                        "errorCode": "INVALID_PARAMETER",
-                        "message": "Invalid lastChangedTo productOrderId=PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
-                        "errors": [{"field": "lastChangedTo", "rejectedValue": "must-not-leak-query-value"}],
-                    }),
                     FakeNaverOrderResponse(200, {"data": {"lastChangeStatuses": [], "hasMore": False}}),
                 ]
                 FakeNaverOrderHttpClient.detail_called = False
-                simplified_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                empty_detail_preview = client.post("/api/v1/sync/orders/naver/preview", json={
                     "store_id": 8,
                     "credential_id": 7,
                     "start_datetime": "2026-07-01T00:00:00+09:00",
@@ -1890,27 +1924,19 @@ def verify_sync_preview_schema_and_security() -> None:
                     "page": 1,
                     "size": 1,
                     "real_preview": True,
-                    "include_detail": False,
+                    "include_detail": True,
                 })
-                assert simplified_preview.status_code == 200, simplified_preview.text
-                simplified_data = simplified_preview.json()["data"]
-                assert simplified_data["preview_status"] == "success_empty", simplified_data
-                assert simplified_data["field_observation"]["detail_called"] is False, simplified_data
-                assert len(simplified_data["field_observation"]["feed_attempts"]) == 2, simplified_data
-                simplified_attempt_a = simplified_data["field_observation"]["feed_attempts"][0]
-                simplified_attempt_b = simplified_data["field_observation"]["feed_attempts"][1]
-                assert simplified_attempt_a["http_status"] == 400, simplified_attempt_a
-                assert simplified_attempt_a["naver_error_code"] == "INVALID_PARAMETER", simplified_attempt_a
-                assert simplified_attempt_a["naver_error_fields"] == ["lastChangedTo"], simplified_attempt_a
-                assert "PRODUCT-ORDER-ID-MUST-NOT-LEAK" not in str(simplified_attempt_a), simplified_attempt_a
-                assert "must-not-leak-query-value" not in str(simplified_attempt_a), simplified_attempt_a
-                assert simplified_attempt_b["attempt"] == "attempt_b", simplified_attempt_b
-                assert simplified_attempt_b["feed_request_param_keys"] == ["lastChangedFrom", "limitCount"], simplified_attempt_b
-                assert simplified_attempt_b["datetime_format_shape"] == "offset_milliseconds", simplified_attempt_b
-                assert simplified_attempt_b["last_changed_to_present"] is False, simplified_attempt_b
-                assert FakeNaverOrderHttpClient.calls[1]["lastChangedFrom"].endswith("+09:00"), FakeNaverOrderHttpClient.calls
-                assert "." in FakeNaverOrderHttpClient.calls[1]["lastChangedFrom"], FakeNaverOrderHttpClient.calls
-                simplified_text = str(simplified_preview.json()).lower()
+                assert empty_detail_preview.status_code == 200, empty_detail_preview.text
+                empty_detail_data = empty_detail_preview.json()["data"]
+                assert empty_detail_data["preview_status"] == "success_empty", empty_detail_data
+                assert empty_detail_data["field_observation"]["detail_called"] is False, empty_detail_data
+                assert empty_detail_data["field_observation"]["detail_skipped_reason"] == "no_changed_orders", empty_detail_data
+                assert FakeNaverOrderHttpClient.detail_called is False, empty_detail_data
+                assert len(empty_detail_data["field_observation"]["feed_attempts"]) == 1, empty_detail_data
+                empty_attempt = empty_detail_data["field_observation"]["feed_attempts"][0]
+                assert empty_attempt["attempt"] == "fixed_attempt_b", empty_attempt
+                assert empty_attempt["feed_request_param_keys"] == ["lastChangedFrom", "limitCount"], empty_attempt
+                simplified_text = str(empty_detail_preview.json()).lower()
                 for forbidden in [
                     "product-order-id-must-not-leak",
                     "must-not-leak-query-value",
@@ -1923,11 +1949,6 @@ def verify_sync_preview_schema_and_security() -> None:
 
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = [
-                    FakeNaverOrderResponse(400, {
-                        "errorCode": "INVALID_PARAMETER",
-                        "message": "Invalid date parameter",
-                        "errors": [{"field": "lastChangedTo"}],
-                    }),
                     FakeNaverOrderResponse(400, {
                         "errorCode": "INVALID_PARAMETER",
                         "message": "Invalid lastChangedFrom format",
@@ -1951,7 +1972,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert failed_data["error_code"] == "readonly_request_failed", failed_data
                 assert failed_data["field_observation"]["http_status"] == 400, failed_data
                 assert failed_data["field_observation"]["detail_called"] is False, failed_data
-                assert len(failed_data["field_observation"]["feed_attempts"]) == 2, failed_data
+                assert len(failed_data["field_observation"]["feed_attempts"]) == 1, failed_data
+                assert failed_data["field_observation"]["feed_attempts"][0]["attempt"] == "fixed_attempt_b", failed_data
                 failed_text = str(failed_preview.json()).lower()
                 for forbidden in [
                     "lastchangedfrom=",

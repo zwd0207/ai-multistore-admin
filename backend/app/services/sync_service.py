@@ -1622,38 +1622,20 @@ def _run_naver_order_real_micro_preview(
         field_observation["token_http_status"] = token_status
         headers = {"Authorization": f"Bearer {access_token}"}
         field_observation["feed_called"] = True
-        feed_attempts: list[dict] = []
-        first_attempt = _request_naver_order_last_changed_feed(
+        feed_result = _request_naver_order_last_changed_feed(
             api_base=context["api_base"],
             headers=headers,
             start_kst=start_kst,
             end_kst=end_kst,
             size=size,
-            attempt="attempt_a",
-            include_last_changed_to=True,
-            datetime_format_shape="offset_seconds",
+            attempt="fixed_attempt_b",
+            include_last_changed_to=False,
+            datetime_format_shape="offset_milliseconds",
         )
-        feed_attempts.append(first_attempt["diagnostics"])
-        feed_result = first_attempt
-        if not first_attempt["success"] and first_attempt.get("http_status") == 400:
-            second_attempt = _request_naver_order_last_changed_feed(
-                api_base=context["api_base"],
-                headers=headers,
-                start_kst=start_kst,
-                end_kst=end_kst,
-                size=size,
-                attempt="attempt_b",
-                include_last_changed_to=False,
-                datetime_format_shape="offset_milliseconds",
-            )
-            feed_attempts.append(second_attempt["diagnostics"])
-            feed_result = second_attempt
-        field_observation["feed_attempts"] = feed_attempts
+        field_observation["feed_attempts"] = [feed_result["diagnostics"]]
         field_observation["feed_http_status"] = feed_result.get("http_status")
         field_observation["detail_called"] = False
         field_observation["detail_limit"] = 0
-        if include_detail:
-            field_observation["detail_skipped_reason"] = "feed_parameter_diagnostics_phase"
         if not feed_result["success"]:
             status_code = feed_result.get("http_status")
             error_code = feed_result.get("error_code") or "readonly_request_failed"
@@ -1679,6 +1661,7 @@ def _run_naver_order_real_micro_preview(
         product_order_ids = _extract_naver_product_order_ids(feed_payload)
         sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:1]]
         if not product_order_ids:
+            field_observation["detail_skipped_reason"] = "no_changed_orders" if include_detail else "detail_not_requested"
             return _build_naver_order_preview_result(
                 store_id=store_id,
                 credential_id=credential.id,
@@ -1697,6 +1680,39 @@ def _run_naver_order_real_micro_preview(
                 would_create=0,
                 would_update=0,
             )
+        if include_detail:
+            field_observation["detail_called"] = True
+            field_observation["detail_limit"] = 1
+            detail_result = _request_naver_order_detail_query(
+                api_base=context["api_base"],
+                headers=headers,
+                product_order_id=product_order_ids[0],
+            )
+            field_observation["detail_http_status"] = detail_result["http_status"]
+            if not detail_result["success"]:
+                error_code = detail_result.get("error_code") or "readonly_request_failed"
+                field_observation["detail_error"] = detail_result["diagnostics"]
+                return _build_naver_order_preview_result(
+                    store_id=store_id,
+                    credential_id=credential.id,
+                    start_datetime=start_kst.isoformat(),
+                    end_datetime=end_kst.isoformat(),
+                    page=page,
+                    size=size,
+                    order_status=order_status,
+                    guardrail_status="allowed",
+                    preview_status="failed",
+                    test_status="preview_failed",
+                    error_code=error_code,
+                    field_observation={**field_observation, "http_status": detail_result.get("http_status")},
+                    sample_ids=sample_ids,
+                    has_more=_naver_order_feed_has_more(feed_payload),
+                    would_create=0,
+                    would_update=0,
+                )
+            field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
+        else:
+            field_observation["detail_skipped_reason"] = "detail_not_requested"
         return _build_naver_order_preview_result(
             store_id=store_id,
             credential_id=credential.id,
@@ -1913,15 +1929,32 @@ def _request_naver_order_detail_query(
     api_base: str,
     headers: dict[str, str],
     product_order_id: str,
-) -> tuple[dict, int]:
+) -> dict:
+    diagnostics = {
+        "detail_limit": 1,
+        "body_field_keys": ["productOrderIds"],
+    }
     with httpx.Client(timeout=10.0) as client:
         response = client.post(
             f"{api_base}/v1/pay-order/seller/product-orders/query",
             headers=headers,
             json={"productOrderIds": [product_order_id]},
         )
-    response.raise_for_status()
-    return response.json(), response.status_code
+    diagnostics["http_status"] = response.status_code
+    if response.status_code >= 400:
+        diagnostics.update(_extract_naver_error_diagnostics(response))
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": _naver_readonly_error_code(response),
+            "diagnostics": diagnostics,
+        }
+    return {
+        "success": True,
+        "http_status": response.status_code,
+        "payload": response.json(),
+        "diagnostics": diagnostics,
+    }
 
 
 def _extract_naver_product_order_ids(payload: object) -> list[str]:
@@ -1958,12 +1991,54 @@ def _mask_external_identifier(value: str) -> str:
 
 
 def _summarize_naver_order_detail_fields(payload: object) -> dict:
-    text = json.dumps(payload, ensure_ascii=False).lower() if payload is not None else ""
-    forbidden_tokens = ("buyer", "receiver", "address", "phone", "tel", "delivery", "payment")
+    field_names = _collect_json_field_names(payload)
+    lower_names = [name.lower() for name in field_names]
+    safe_field_names = [
+        name
+        for name in field_names
+        if not any(token in name.lower() for token in ("buyer", "receiver", "address", "phone", "tel", "delivery", "payment"))
+    ][:30]
     return {
-        "detail_payload_present": bool(payload),
-        "privacy_like_fields_detected": any(token in text for token in forbidden_tokens),
+        "detail_record_observed": _json_payload_has_record(payload),
+        "observed_field_names": safe_field_names,
+        "order_status_observed": any("orderstatus" in name or name == "status" for name in lower_names),
+        "payment_status_observed": any("paymentstatus" in name or "paystatus" in name for name in lower_names),
+        "delivery_status_observed": any("deliverystatus" in name or "deliverycompany" in name for name in lower_names),
+        "product_name_observed": any("productname" in name or "itemname" in name for name in lower_names),
+        "buyer_info_present": any("buyer" in name for name in lower_names),
+        "receiver_info_present": any("receiver" in name or "recipient" in name for name in lower_names),
+        "privacy_fields_suppressed": True,
+        "raw_response_saved": False,
+        "orders_written": False,
     }
+
+
+def _collect_json_field_names(payload: object) -> list[str]:
+    names: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            sanitized = re.sub(r"[^A-Za-z0-9_.-]", "", str(key))[:80]
+            if sanitized:
+                names.append(sanitized)
+            names.extend(_collect_json_field_names(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            names.extend(_collect_json_field_names(item))
+    unique: list[str] = []
+    for name in names:
+        if name not in unique:
+            unique.append(name)
+    return unique
+
+
+def _json_payload_has_record(payload: object) -> bool:
+    if isinstance(payload, dict):
+        if any(isinstance(value, dict) for value in payload.values()):
+            return True
+        return any(isinstance(value, list) and bool(value) for value in payload.values())
+    if isinstance(payload, list):
+        return bool(payload)
+    return payload is not None
 
 
 def _naver_readonly_error_code(response: httpx.Response) -> str:
