@@ -36,6 +36,7 @@ const columns = [
   { key: 'price', title: '售价', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
   { key: 'stock', title: '库存' },
   { key: 'status', title: '销售状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'sourceType', title: '来源', render: (value) => value || '-' },
   { key: 'updatedAt', title: '最近同步' },
 ];
 
@@ -268,29 +269,37 @@ function NaverProductPreviewStatusPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>Naver 商品读取状态</h2>
-          <p>面向 SmartStore 商品数据接入的阶段状态，当前不执行真实商品请求。</p>
+          <p>单条商品写库微测已完成；当前仅完成 1 条 Naver 商品本地写库微测，后续批量同步需单独确认。</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
       <div className="business-capability-grid">
-        <article className="business-capability-card warning">
+        <article className="business-capability-card success">
           <div className="business-capability-head">
             <strong>商品读取</strong>
-            <span>{status.statusLabel}</span>
+            <span>{status.productRead.statusLabel}</span>
           </div>
-          <p>{status.reason}</p>
-          <small>{status.nextAction}</small>
+          <p>{status.productRead.reason}</p>
+          <small>{status.productRead.nextAction}</small>
         </article>
-        <article className="business-capability-card muted">
+        <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>商品同步</strong>
-            <span>未开放</span>
+            <strong>本地写库</strong>
+            <span>{status.localSync.statusLabel}</span>
           </div>
-          <p>当前不会写入本地 products，也不会保存 Naver 商品原始响应。</p>
-          <small>完成商品只读微量 preview 评审后，再单独开放本地同步。</small>
+          <p>{status.localSync.reason}</p>
+          <small>{status.localSync.nextAction}</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>批量同步</strong>
+            <span>{status.batchSync.statusLabel}</span>
+          </div>
+          <p>{status.batchSync.reason}</p>
+          <small>{status.batchSync.nextAction}</small>
         </article>
       </div>
-      <p className="mock-sync-note">页面不会展示平台密钥、临时授权凭证、请求签名、原始响应或完整店铺频道编号。</p>
+      <p className="mock-sync-note">已写入 1 条本地商品；正式批量同步未开放；本次未保存平台原始响应。页面不会展示 raw_data 原文、完整平台商品编号、平台密钥、临时授权凭证、请求签名或完整店铺频道编号。</p>
     </section>
   );
 }

@@ -37,9 +37,21 @@ const CAPABILITY_LABELS = {
 const NaverProtectedMessage = '为避免误触真实业务数据，商品/订单接口当前仍处于保护状态，暂未开放正式同步。';
 
 const NAVER_PRODUCT_PREVIEW_STATUS = {
-  statusLabel: '保护中，暂未开放真实测试',
-  reason: '商品 preview 接口已准备，但真实商品读取仍处于保护状态；当前不会写入本地商品数据。',
-  nextAction: '等待后端开放商品只读微量 preview 后，再进入本地同步设计。',
+  statusLabel: '单条微测通过',
+  reason: 'Naver 商品只读 preview 已完成，且已完成 1 条本地商品写库微测；这只代表最小链路通过。',
+  nextAction: '继续保持小流量审查，批量同步必须单独确认后再开放。',
+};
+
+const NAVER_PRODUCT_LOCAL_SYNC_STATUS = {
+  statusLabel: '已完成 1 条微测',
+  reason: '本地 products 已写入 1 条 Naver 商品微测记录，本次未保存平台原始响应。',
+  nextAction: '保留回滚预案；后续批量同步需要单独评审字段映射、跳过规则和审计策略。',
+};
+
+const NAVER_PRODUCT_BATCH_SYNC_STATUS = {
+  statusLabel: '未开放',
+  reason: '当前仅完成 1 条 Naver 商品本地写库微测，不能视为正式批量商品同步可用。',
+  nextAction: '正式批量同步需进入后续阶段并由运营/开发单独确认。',
 };
 
 const NAVER_ORDER_PREVIEW_STATUS = {
@@ -219,11 +231,29 @@ function buildNaverCards({ capabilities, results, readiness }) {
     }),
     resultCard({
       key: 'naver.product_read',
-      status: 'guardrail_blocked',
+      status: 'preview_success',
       statusLabel: NAVER_PRODUCT_PREVIEW_STATUS.statusLabel,
-      tone: 'warning',
+      tone: 'success',
       reason: NAVER_PRODUCT_PREVIEW_STATUS.reason,
       nextAction: NAVER_PRODUCT_PREVIEW_STATUS.nextAction,
+    }),
+    resultCard({
+      key: 'naver.product_local_sync',
+      title: '本地写库',
+      status: 'preview_success',
+      statusLabel: NAVER_PRODUCT_LOCAL_SYNC_STATUS.statusLabel,
+      tone: 'success',
+      reason: NAVER_PRODUCT_LOCAL_SYNC_STATUS.reason,
+      nextAction: NAVER_PRODUCT_LOCAL_SYNC_STATUS.nextAction,
+    }),
+    resultCard({
+      key: 'naver.product_batch_sync',
+      title: '批量同步',
+      status: 'guardrail_blocked',
+      statusLabel: NAVER_PRODUCT_BATCH_SYNC_STATUS.statusLabel,
+      tone: 'warning',
+      reason: NAVER_PRODUCT_BATCH_SYNC_STATUS.reason,
+      nextAction: NAVER_PRODUCT_BATCH_SYNC_STATUS.nextAction,
     }),
     resultCard({
       key: 'naver.order_read',
@@ -319,7 +349,11 @@ export function statusLabel(value, errorCode) {
 }
 
 export function getNaverProductPreviewStatus() {
-  return NAVER_PRODUCT_PREVIEW_STATUS;
+  return {
+    productRead: NAVER_PRODUCT_PREVIEW_STATUS,
+    localSync: NAVER_PRODUCT_LOCAL_SYNC_STATUS,
+    batchSync: NAVER_PRODUCT_BATCH_SYNC_STATUS,
+  };
 }
 
 export function getNaverOrderPreviewStatus() {

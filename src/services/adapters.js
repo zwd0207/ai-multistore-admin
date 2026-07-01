@@ -246,18 +246,22 @@ export function toBackendStorePayload(item = {}) {
 }
 
 export function adaptProduct(item = {}) {
+  const rawPlatform = normalizePlatformForBackend(item.platform);
+  const displayExternalId = rawPlatform === 'naver' && item.external_product_id ? '平台商品编号已脱敏' : item.external_product_id;
   return {
     id: item.id,
     storeId: item.store_id,
     platform: adaptPlatform(item.platform),
-    externalId: item.external_product_id,
-    sku: item.sku || item.external_product_id,
+    rawPlatform,
+    externalId: displayExternalId,
+    sku: rawPlatform === 'naver' ? displayExternalId : item.sku || displayExternalId,
     name: item.name,
     brand: item.brand,
     category: item.category,
     price: numberValue(item.price),
     currency: item.currency,
     stock: item.stock_quantity,
+    sourceType: item.source_type,
     rawStatus: item.status,
     status: adaptStatus(item.status, { active: '판매중', review: '심사중', suspended: '판매중지' }),
     store: item.store_name || `店铺 #${item.store_id}`,
