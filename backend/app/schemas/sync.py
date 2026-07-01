@@ -34,6 +34,7 @@ class NaverProductPreviewRequest(BaseModel):
     status: str | None = Field(default="ALL")
     keyword: str | None = Field(default=None, max_length=120)
     seller_product_id: str | None = Field(default=None, max_length=120)
+    real_preview: bool = False
 
 
 class NaverOrderPreviewRequest(BaseModel):

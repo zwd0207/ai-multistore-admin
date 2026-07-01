@@ -310,6 +310,7 @@ def preview_naver_products(
     status: str | None = "ALL",
     keyword: str | None = None,
     seller_product_id: str | None = None,
+    real_preview: bool = False,
 ) -> dict:
     normalized_status = _resolve_naver_product_preview_status(status)
     credential = _ensure_naver_product_preview_credential(
@@ -327,7 +328,7 @@ def preview_naver_products(
         "grant_confirmed": capability_meta.get("grant_confirmed"),
         "preview_endpoint_planned": capability_meta.get("preview_endpoint_planned", False),
     })
-    if not capability_meta.get("safe_to_real_test"):
+    if not real_preview:
         return _build_naver_product_guardrail_preview_result(
             store_id=store_id,
             credential_id=credential.id,
@@ -337,13 +338,43 @@ def preview_naver_products(
             keyword_configured=bool(keyword and keyword.strip()),
             seller_product_id_configured=bool(seller_product_id and seller_product_id.strip()),
             field_observation=field_observation,
+            error_code="guardrail_blocked",
         )
 
-    raise ApiError(
-        message="Naver product preview real request is not implemented",
-        error_code="naver_api_not_implemented",
-        status_code=501,
-        detail={"store_id": store_id, "credential_id": credential.id},
+    _ensure_naver_product_real_preview_allowed(
+        store_id=store_id,
+        credential_id=credential.id,
+        page=page,
+        size=size,
+        keyword=keyword,
+        seller_product_id=seller_product_id,
+        field_observation=field_observation,
+    )
+    if capability_meta.get("request_params_confirmed") != "confirmed":
+        return _build_naver_product_guardrail_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            page=page,
+            size=size,
+            status=normalized_status,
+            keyword_configured=bool(keyword and keyword.strip()),
+            seller_product_id_configured=bool(seller_product_id and seller_product_id.strip()),
+            field_observation={
+                **field_observation,
+                "product_preview_called": False,
+                "http_status": None,
+                "docs_pending": True,
+            },
+            error_code="docs_pending",
+        )
+
+    return _run_naver_product_real_micro_preview(
+        credential=credential,
+        store_id=store_id,
+        page=page,
+        size=size,
+        status=normalized_status,
+        field_observation=field_observation,
     )
 
 
@@ -1454,6 +1485,315 @@ def _build_naver_product_guardrail_preview_result(
         "sample_ids": [],
         "field_observation": field_observation,
         "business_status_summary": _build_naver_product_preview_business_status_summary(),
+        "semantic_notice": "Readonly preview scaffold only. No local product rows were written.",
+    }
+
+
+def _build_naver_product_preview_field_observation(credential) -> dict:
+    return {
+        "channel_no_configured": _naver_channel_no_configured(credential.extra_config),
+        "credential_decryptable": True,
+        "product_preview_called": False,
+        "http_status": None,
+        "product_id_observed": False,
+        "seller_product_id_observed": False,
+        "product_name_observed": False,
+        "sale_status_observed": False,
+        "price_observed": False,
+        "stock_observed": False,
+        "raw_response_saved": False,
+        "products_written": False,
+    }
+
+
+def _build_naver_product_preview_business_status_summary(preview_status: str = "blocked") -> list[str]:
+    if preview_status == "success":
+        return [
+            "商品只读微量预览已完成",
+            "本次未写入本地商品数据",
+            "本次未保存商品原始响应",
+            "正式商品同步仍未开放",
+        ]
+    if preview_status == "success_empty":
+        return [
+            "当前暂无商品数据",
+            "本次未写入本地商品数据",
+            "本次未保存商品原始响应",
+            "正式商品同步仍未开放",
+        ]
+    if preview_status == "failed":
+        return [
+            "商品预览失败",
+            "本次未写入本地商品数据",
+            "本次未保存商品原始响应",
+            "请检查 Naver API 权限、IP 白名单或请求参数确认状态",
+        ]
+    return [
+        "商品读取暂未开放真实测试",
+        "当前系统已完成 Naver 账号与频道前置检测",
+        "为避免误触真实业务数据，商品接口仍处于保护状态",
+        "后续需要完成商品 preview 小流量真实测试后，才可进入本地同步",
+    ]
+
+
+def _ensure_naver_product_real_preview_allowed(
+    *,
+    store_id: int,
+    credential_id: int,
+    page: int,
+    size: int,
+    keyword: str | None,
+    seller_product_id: str | None,
+    field_observation: dict,
+) -> None:
+    settings = get_settings()
+    if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
+        raise ApiError(
+            message="Naver product real micro preview is guardrail blocked",
+            error_code="guardrail_blocked",
+            status_code=400,
+            detail={
+                "store_id": store_id,
+                "credential_id": credential_id,
+                "real_api_test_enabled": bool(settings.real_api_test_enabled),
+                "real_api_write_enabled": bool(settings.real_api_write_enabled),
+            },
+        )
+    if page != 1 or size != 1:
+        raise ApiError(
+            message="Naver product real micro preview only allows page=1 and size=1",
+            error_code="guardrail_blocked",
+            status_code=400,
+            detail={"page": page, "size": size},
+        )
+    if keyword or seller_product_id:
+        raise ApiError(
+            message="Naver product real micro preview does not accept keyword or seller_product_id yet",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if not field_observation.get("channel_no_configured"):
+        raise ApiError(
+            message="Naver product real micro preview requires configured channel_no",
+            error_code="channel_no_missing",
+            status_code=400,
+        )
+
+
+def _build_naver_product_guardrail_preview_result(
+    *,
+    store_id: int,
+    credential_id: int,
+    page: int,
+    size: int,
+    status: str,
+    keyword_configured: bool,
+    seller_product_id_configured: bool,
+    field_observation: dict,
+    error_code: str = "guardrail_blocked",
+) -> dict:
+    return _build_naver_product_preview_result(
+        store_id=store_id,
+        credential_id=credential_id,
+        page=page,
+        size=size,
+        status=status,
+        guardrail_status="blocked",
+        preview_status="blocked",
+        test_status="not_tested",
+        error_code=error_code,
+        field_observation=field_observation,
+        sample_ids=[],
+        has_more=False,
+        keyword_configured=keyword_configured,
+        seller_product_id_configured=seller_product_id_configured,
+    )
+
+
+def _run_naver_product_real_micro_preview(
+    *,
+    credential,
+    store_id: int,
+    page: int,
+    size: int,
+    status: str,
+    field_observation: dict,
+) -> dict:
+    context = _build_naver_token_context_from_credential(credential)
+    try:
+        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        field_observation["token_http_status"] = token_status
+        headers = {"Authorization": f"Bearer {access_token}"}
+        product_result = _request_naver_product_search(
+            api_base=context["api_base"],
+            headers=headers,
+            page=page,
+            size=size,
+        )
+        field_observation["product_preview_called"] = True
+        field_observation["http_status"] = product_result.get("http_status")
+        if not product_result["success"]:
+            error_code = product_result.get("error_code") or "readonly_request_failed"
+            return _build_naver_product_preview_result(
+                store_id=store_id,
+                credential_id=credential.id,
+                page=page,
+                size=size,
+                status=status,
+                guardrail_status="allowed",
+                preview_status="failed",
+                test_status="preview_failed",
+                error_code=error_code,
+                field_observation=field_observation,
+                sample_ids=[],
+                has_more=False,
+            )
+        payload = product_result["payload"]
+        sample_ids = [_mask_external_identifier(item) for item in _extract_naver_product_preview_ids(payload)[:1]]
+        field_observation.update(_summarize_naver_product_preview_fields(payload))
+        preview_status = "success" if sample_ids else "success_empty"
+        return _build_naver_product_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            page=page,
+            size=size,
+            status=status,
+            guardrail_status="allowed",
+            preview_status=preview_status,
+            test_status="preview_success",
+            error_code=None,
+            field_observation=field_observation,
+            sample_ids=sample_ids,
+            has_more=_naver_product_preview_has_more(payload),
+        )
+    except ApiError:
+        raise
+    except Exception as exc:
+        http_status = getattr(exc, "http_status", None)
+        error_code = "auth_failed" if str(exc) == "token_auth_failed" else "readonly_request_failed"
+        return _build_naver_product_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            page=page,
+            size=size,
+            status=status,
+            guardrail_status="allowed",
+            preview_status="failed",
+            test_status="preview_failed",
+            error_code=error_code,
+            field_observation={**field_observation, "http_status": http_status},
+            sample_ids=[],
+            has_more=False,
+        )
+
+
+def _request_naver_product_search(
+    *,
+    api_base: str,
+    headers: dict[str, str],
+    page: int,
+    size: int,
+) -> dict:
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(
+            f"{api_base}/v1/products/search",
+            headers=headers,
+            json={"page": page, "size": size},
+        )
+    if response.status_code >= 400:
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": _naver_readonly_error_code(response),
+        }
+    return {
+        "success": True,
+        "http_status": response.status_code,
+        "payload": response.json(),
+    }
+
+
+def _extract_naver_product_preview_ids(payload: object) -> list[str]:
+    ids: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in {"productId", "originProductNo", "sellerProductId", "itemId"} and value:
+                ids.append(str(value))
+            else:
+                ids.extend(_extract_naver_product_preview_ids(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            ids.extend(_extract_naver_product_preview_ids(item))
+    unique: list[str] = []
+    for value in ids:
+        if value not in unique:
+            unique.append(value)
+    return unique
+
+
+def _summarize_naver_product_preview_fields(payload: object) -> dict:
+    field_names = _collect_json_field_names(payload)
+    lower_names = [name.lower() for name in field_names]
+    return {
+        "product_id_observed": any(name in {"productid", "originproductno", "itemid"} for name in lower_names),
+        "seller_product_id_observed": any("sellerproductid" in name for name in lower_names),
+        "product_name_observed": any("productname" in name or name == "name" for name in lower_names),
+        "sale_status_observed": any("salestatus" in name or "productstatus" in name or name == "status" for name in lower_names),
+        "price_observed": any("price" in name for name in lower_names),
+        "stock_observed": any("stock" in name or "quantity" in name for name in lower_names),
+        "raw_response_saved": False,
+        "products_written": False,
+    }
+
+
+def _naver_product_preview_has_more(payload: object) -> bool:
+    if isinstance(payload, dict):
+        for key in ("hasMore", "hasNext", "more"):
+            if isinstance(payload.get(key), bool):
+                return payload[key]
+    return False
+
+
+def _build_naver_product_preview_result(
+    *,
+    store_id: int,
+    credential_id: int,
+    page: int,
+    size: int,
+    status: str,
+    guardrail_status: str,
+    preview_status: str,
+    test_status: str,
+    error_code: str | None,
+    field_observation: dict,
+    sample_ids: list[str],
+    has_more: bool,
+    keyword_configured: bool = False,
+    seller_product_id_configured: bool = False,
+) -> dict:
+    return {
+        "store_id": store_id,
+        "credential_id": credential_id,
+        "platform": "naver",
+        "preview_type": "products",
+        "source_type": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+        "guardrail_status": guardrail_status,
+        "preview_status": preview_status,
+        "test_status": test_status,
+        "error_code": error_code,
+        "product_preview_called": bool(field_observation.get("product_preview_called")),
+        "http_status": field_observation.get("http_status"),
+        "page": page,
+        "size": size,
+        "status_filter": status,
+        "keyword_configured": keyword_configured,
+        "seller_product_id_configured": seller_product_id_configured,
+        "has_more": has_more,
+        "would_create": 0,
+        "would_update": 0,
+        "sample_ids": sample_ids,
+        "field_observation": field_observation,
+        "business_status_summary": _build_naver_product_preview_business_status_summary(preview_status),
         "semantic_notice": "Readonly preview scaffold only. No local product rows were written.",
     }
 
