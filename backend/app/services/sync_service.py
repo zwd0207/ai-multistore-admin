@@ -3,7 +3,7 @@ import hmac
 import json
 import re
 from collections.abc import Callable
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
@@ -34,13 +34,24 @@ COUPANG_ORDER_CHECKPOINT_SYNC_TYPE = "orders"
 COUPANG_PRODUCT_PREVIEW_SYNC_TYPE = "products_coupang_real_preview"
 COUPANG_PRODUCT_SYNC_TYPE = "products_coupang_real"
 COUPANG_PRODUCT_CHECKPOINT_SYNC_TYPE = "products"
+COUPANG_SALES_PREVIEW_SYNC_TYPE = "sales_coupang_real_preview"
+COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
+COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
 COUPANG_ORDER_PREVIEW_MAX_DAYS = 3
+COUPANG_FINANCIAL_PREVIEW_MAX_DAYS = 7
 COUPANG_ORDER_PREVIEW_MAX_PAGES = 3
 COUPANG_ORDER_PREVIEW_PAGE_SIZE = 50
 COUPANG_PRODUCT_MAX_PAGES = 3
 COUPANG_PRODUCT_PAGE_SIZE = 50
+COUPANG_FINANCIAL_MAX_PAGES = 3
+COUPANG_FINANCIAL_PAGE_SIZE = 50
+COUPANG_SETTLEMENT_FORBIDDEN_FIELDS = {
+    "bankaccountholder",
+    "bankname",
+    "bankaccount",
+}
 COUPANG_PRODUCT_STATUSES = (
     "IN_REVIEW",
     "SAVED",
@@ -410,6 +421,218 @@ def sync_coupang_products(
         raise ApiError(
             message="Coupang readonly product sync failed",
             error_code="COUPANG_PRODUCT_SYNC_FAILED",
+            status_code=502,
+        ) from exc
+
+
+def preview_coupang_sales(
+    db: Session,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    max_pages: int = 1,
+) -> dict:
+    settings = get_settings()
+    if not settings.real_api_test_enabled:
+        raise ApiError(
+            message="Readonly real API sales preview is disabled",
+            error_code="REAL_API_TEST_DISABLED",
+            status_code=403,
+        )
+
+    _ensure_coupang_store(db, store_id)
+    start_date, end_date = _resolve_sales_preview_date_range(start_date, end_date)
+    _ensure_financial_page_limit(max_pages)
+    credential = credential_service.get_decrypted_credential_by_store_and_platform(db, store_id, "coupang")
+    _ensure_coupang_preview_credential(credential)
+
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="coupang",
+        sync_type=COUPANG_SALES_PREVIEW_SYNC_TYPE,
+        message="coupang sales preview started",
+        raw_summary={
+            "stage": "started",
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "date_window": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "business_timezone": str(get_business_timezone()),
+            },
+            "max_pages": max_pages,
+            "system_phase_limit_days": COUPANG_FINANCIAL_PREVIEW_MAX_DAYS,
+        },
+    )
+
+    try:
+        fetch_result = _fetch_coupang_sales_pages(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=max_pages,
+        )
+        sample_rows = [_sanitize_financial_sample_row(item) for item in fetch_result["items"][:10]]
+        sample_ids = [_resolve_financial_row_id(item) for item in fetch_result["items"][:10]]
+        result = {
+            "store_id": store_id,
+            "platform": "coupang",
+            "sync_type": COUPANG_SALES_PREVIEW_SYNC_TYPE,
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "business_timezone": str(get_business_timezone()),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "window_start_at": _utc_isoformat(get_business_day_range(start_date)[0]),
+            "window_end_at": _utc_isoformat(get_business_day_range(end_date)[1]),
+            "max_pages": max_pages,
+            "page_count": fetch_result["page_count"],
+            "next_cursor_exists": fetch_result["next_cursor_exists"],
+            "total_rows": len(fetch_result["items"]),
+            "sample_ids": sample_ids,
+            "sample_rows": sample_rows,
+            "summary_totals": _build_financial_summary_totals(fetch_result["items"]),
+            "semantic_notice": "Sales preview is readonly and writes only a sanitized SyncLog. It does not write a sales table or call Coupang write APIs.",
+            "date_availability_notice": "Sales preview only allows completed historical KST dates before the current business date. The 7-day window is this system phase limit, not Coupang's official maximum.",
+        }
+        finished_log = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang sales preview success",
+            raw_summary=_financial_preview_summary_for_log(result),
+        )
+        result["sync_log"] = finished_log
+        return result
+    except ApiError as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang sales preview failed",
+            error_detail=_mask_sensitive_text(exc.message),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": exc.error_code,
+            },
+        )
+        raise
+    except Exception as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang sales preview failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": "COUPANG_SALES_PREVIEW_FAILED",
+            },
+        )
+        raise ApiError(
+            message="Coupang sales preview failed",
+            error_code="COUPANG_SALES_PREVIEW_FAILED",
+            status_code=502,
+        ) from exc
+
+
+def preview_coupang_settlements(
+    db: Session,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict:
+    settings = get_settings()
+    if not settings.real_api_test_enabled:
+        raise ApiError(
+            message="Readonly real API settlement preview is disabled",
+            error_code="REAL_API_TEST_DISABLED",
+            status_code=403,
+        )
+
+    _ensure_coupang_store(db, store_id)
+    start_date, end_date = _resolve_financial_preview_date_range(start_date, end_date)
+    credential = credential_service.get_decrypted_credential_by_store_and_platform(db, store_id, "coupang")
+    _ensure_coupang_preview_credential(credential)
+    months = _settlement_months_between(start_date, end_date)
+
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="coupang",
+        sync_type=COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE,
+        message="coupang settlement preview started",
+        raw_summary={
+            "stage": "started",
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "months": months,
+            "date_window": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "business_timezone": str(get_business_timezone()),
+            },
+            "month_semantic_notice": "Settlement preview queries revenueRecognitionYearMonth=YYYY-MM. The date window is used only to derive months and does not mean day-precise truncation.",
+        },
+    )
+
+    try:
+        fetch_result = _fetch_coupang_settlement_months(credential=credential, months=months)
+        sample_rows = [_sanitize_financial_sample_row(item, settlement=True) for item in fetch_result["items"][:10]]
+        sample_ids = [_resolve_financial_row_id(item) for item in fetch_result["items"][:10]]
+        result = {
+            "store_id": store_id,
+            "platform": "coupang",
+            "sync_type": COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE,
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "business_timezone": str(get_business_timezone()),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "months": months,
+            "page_count": fetch_result["page_count"],
+            "next_cursor_exists": False,
+            "total_rows": len(fetch_result["items"]),
+            "sample_ids": sample_ids,
+            "sample_rows": sample_rows,
+            "per_month": fetch_result["per_month"],
+            "summary_totals": _build_financial_summary_totals(fetch_result["items"]),
+            "semantic_notice": "Settlement preview is readonly and writes only a sanitized SyncLog. It does not write a settlement table or call Coupang write APIs.",
+            "month_semantic_notice": "Settlement preview queries revenueRecognitionYearMonth=YYYY-MM. start_date/end_date only derive queried months and the response is not day-precisely truncated.",
+            "field_mapping_suggestion": _settlement_field_mapping_suggestion(),
+        }
+        finished_log = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang settlement preview success",
+            raw_summary=_financial_preview_summary_for_log(result),
+        )
+        result["sync_log"] = finished_log
+        return result
+    except ApiError as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang settlement preview failed",
+            error_detail=_mask_sensitive_text(exc.message),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": exc.error_code,
+            },
+        )
+        raise
+    except Exception as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang settlement preview failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": "COUPANG_SETTLEMENT_PREVIEW_FAILED",
+            },
+        )
+        raise ApiError(
+            message="Coupang settlement preview failed",
+            error_code="COUPANG_SETTLEMENT_PREVIEW_FAILED",
             status_code=502,
         ) from exc
 
@@ -842,6 +1065,145 @@ def _fetch_coupang_product_page(
     )
 
 
+def _fetch_coupang_sales_pages(
+    credential: DecryptedCredential,
+    start_date: date,
+    end_date: date,
+    max_pages: int,
+) -> dict:
+    unique_items: list[dict] = []
+    seen_ids: set[str] = set()
+    next_token: str | None = ""
+    page_count = 0
+
+    while page_count < max_pages:
+        payload = _fetch_coupang_sales_page(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            token=next_token or "",
+        )
+        for item in _extract_preview_items(payload):
+            item_id = _resolve_financial_row_id(item)
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            unique_items.append(item)
+        page_count += 1
+        next_token = _extract_next_token(payload)
+        if not next_token:
+            break
+
+    return {
+        "items": unique_items,
+        "page_count": page_count,
+        "next_cursor_exists": bool(next_token),
+    }
+
+
+def _fetch_coupang_sales_page(
+    credential: DecryptedCredential,
+    start_date: date,
+    end_date: date,
+    token: str = "",
+) -> dict:
+    assert credential.vendor_id is not None
+    path = "/v2/providers/openapi/apis/api/v1/revenue-history"
+    params = {
+        "vendorId": credential.vendor_id,
+        "recognitionDateFrom": start_date.isoformat(),
+        "recognitionDateTo": end_date.isoformat(),
+        "token": token,
+        "maxPerPage": str(COUPANG_FINANCIAL_PAGE_SIZE),
+    }
+    response = _coupang_get_with_credential(credential, path, urlencode(params))
+    if 200 <= response.status_code < 300:
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ApiError(
+                message="Coupang sales preview returned a non-JSON payload",
+                error_code="COUPANG_SALES_INVALID_RESPONSE",
+                status_code=502,
+            ) from exc
+
+    if response.status_code in {401, 403}:
+        error_code = "auth_failed"
+        message = f"Coupang sales preview request failed with HTTP {response.status_code}"
+    elif response.status_code == 400:
+        error_code = "SALES_DATE_NOT_AVAILABLE"
+        message = "Coupang sales date may not be available yet. Sales preview can require completed historical recognition dates."
+    elif response.status_code == 429:
+        error_code = "rate_limited"
+        message = "Coupang sales preview request was rate limited"
+    else:
+        error_code = "readonly_request_failed"
+        message = f"Coupang sales preview request failed with HTTP {response.status_code}"
+    raise ApiError(
+        message=message,
+        error_code=error_code,
+        status_code=502 if response.status_code >= 500 else response.status_code,
+        detail={
+            "http_status": response.status_code,
+            "date_availability_notice": "Sales confirmation dates may only be queryable after Coupang completes historical recognition.",
+        },
+    )
+
+
+def _fetch_coupang_settlement_months(
+    credential: DecryptedCredential,
+    months: list[str],
+) -> dict:
+    items: list[dict] = []
+    per_month: list[dict] = []
+    for month in months:
+        payload = _fetch_coupang_settlement_month(credential=credential, month=month)
+        month_items = _extract_preview_items(payload)
+        items.extend(month_items)
+        per_month.append({
+            "revenue_recognition_year_month": month,
+            "item_count": len(month_items),
+            "sample_ids": [_resolve_financial_row_id(item) for item in month_items[:10]],
+        })
+    return {
+        "items": items,
+        "per_month": per_month,
+        "page_count": len(months),
+    }
+
+
+def _fetch_coupang_settlement_month(
+    credential: DecryptedCredential,
+    month: str,
+) -> dict:
+    path = "/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories"
+    response = _coupang_get_with_credential(credential, path, urlencode({
+        "revenueRecognitionYearMonth": month,
+    }))
+    if 200 <= response.status_code < 300:
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ApiError(
+                message="Coupang settlement preview returned a non-JSON payload",
+                error_code="COUPANG_SETTLEMENT_INVALID_RESPONSE",
+                status_code=502,
+            ) from exc
+
+    if response.status_code in {401, 403}:
+        error_code = "auth_failed"
+    elif response.status_code == 429:
+        error_code = "rate_limited"
+    else:
+        error_code = "readonly_request_failed"
+    raise ApiError(
+        message=f"Coupang settlement preview request failed with HTTP {response.status_code}",
+        error_code=error_code,
+        status_code=502 if response.status_code >= 500 else response.status_code,
+        detail={"http_status": response.status_code, "revenueRecognitionYearMonth": month},
+    )
+
+
 def _to_coupang_product_payload(item: dict, synced_at: datetime) -> dict | None:
     external_product_id = _resolve_product_id(item)
     if not external_product_id:
@@ -976,6 +1338,10 @@ def _extract_int_by_keys(payload: object, keys: tuple[str, ...]) -> int | None:
 
 def _extract_decimal_by_keys(payload: object, keys: tuple[str, ...]) -> Decimal | None:
     value = _extract_scalar_by_keys(payload, keys)
+    return _to_decimal(value)
+
+
+def _to_decimal(value: object) -> Decimal | None:
     if value is None:
         return None
     try:
@@ -1100,6 +1466,101 @@ def _utc_isoformat(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _resolve_financial_preview_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    if start_date is None and end_date is None:
+        target = get_business_date()
+        start_date = target
+        end_date = target
+    elif start_date is None:
+        start_date = end_date
+    elif end_date is None:
+        end_date = start_date
+
+    assert start_date is not None
+    assert end_date is not None
+    _ensure_financial_date_window(start_date, end_date)
+    return start_date, end_date
+
+
+def _resolve_sales_preview_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    current_business_date = get_business_date()
+    if start_date is None and end_date is None:
+        target = current_business_date - timedelta(days=1)
+        start_date = target
+        end_date = target
+    elif start_date is None:
+        start_date = end_date
+    elif end_date is None:
+        end_date = start_date
+
+    assert start_date is not None
+    assert end_date is not None
+    _ensure_financial_date_window(start_date, end_date)
+    if end_date >= current_business_date:
+        raise ApiError(
+            message="Sales preview only allows completed historical KST dates before the current business date",
+            error_code="SALES_DATE_NOT_AVAILABLE",
+            status_code=400,
+            detail={
+                "end_date": end_date.isoformat(),
+                "current_business_date": current_business_date.isoformat(),
+                "date_availability_notice": "Sales confirmation dates may only be queryable after Coupang completes historical recognition.",
+            },
+        )
+    return start_date, end_date
+
+
+def _ensure_financial_date_window(start_date: date, end_date: date) -> None:
+    if start_date > end_date:
+        raise ApiError(
+            message="start_date must be less than or equal to end_date",
+            error_code="INVALID_SYNC_PREVIEW_WINDOW",
+            status_code=400,
+            detail={"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        )
+    day_span = (end_date - start_date).days + 1
+    if day_span > COUPANG_FINANCIAL_PREVIEW_MAX_DAYS:
+        raise ApiError(
+            message="Financial preview date window must be 7 KST days or less for this system phase",
+            error_code="INVALID_SYNC_PREVIEW_WINDOW",
+            status_code=400,
+            detail={
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "max_days": COUPANG_FINANCIAL_PREVIEW_MAX_DAYS,
+                "limit_type": "system_phase_limit",
+                "official_limit": "not asserted by Codex1 in this phase",
+            },
+        )
+
+
+def _ensure_financial_page_limit(max_pages: int) -> None:
+    if max_pages < 1 or max_pages > COUPANG_FINANCIAL_MAX_PAGES:
+        raise ApiError(
+            message="max_pages must be between 1 and 3 for this system phase",
+            error_code="INVALID_SYNC_WINDOW",
+            status_code=400,
+            detail={
+                "max_pages": max_pages,
+                "allowed_max_pages": COUPANG_FINANCIAL_MAX_PAGES,
+                "limit_type": "system_phase_limit",
+            },
+        )
+
+
+def _settlement_months_between(start_date: date, end_date: date) -> list[str]:
+    months: list[str] = []
+    cursor = date(start_date.year, start_date.month, 1)
+    end_month = date(end_date.year, end_date.month, 1)
+    while cursor <= end_month:
+        months.append(cursor.strftime("%Y-%m"))
+        if cursor.month == 12:
+            cursor = date(cursor.year + 1, 1, 1)
+        else:
+            cursor = date(cursor.year, cursor.month + 1, 1)
+    return months
 
 
 def _resolve_preview_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
@@ -1294,6 +1755,148 @@ def _extract_scalar_by_keys(payload: object, keys: tuple[str, ...]) -> str | Non
     return None
 
 
+def _resolve_financial_row_id(item: dict) -> str:
+    value = _extract_scalar_by_keys(
+        item,
+        (
+            "revenueId",
+            "settlementId",
+            "orderId",
+            "orderSheetId",
+            "shipmentBoxId",
+            "vendorItemId",
+            "sellerProductId",
+        ),
+    )
+    if value:
+        return _bounded_text(value, 120) or value
+
+    serialized = json.dumps(item, sort_keys=True, ensure_ascii=True, default=str)
+    digest = hashlib.md5(serialized.encode("utf-8")).hexdigest()[:12]
+    date_value = _extract_scalar_by_keys(
+        item,
+        (
+            "recognitionDate",
+            "revenueRecognitionDate",
+            "revenueRecognitionYearMonth",
+        ),
+    )
+    if date_value:
+        return _bounded_text(f"{date_value}-{digest}", 120) or f"{date_value}-{digest}"
+    return f"financial-preview-hash-{digest}"
+
+
+def _sanitize_financial_sample_row(item: dict, settlement: bool = False) -> dict:
+    if not isinstance(item, dict):
+        return {"value": _bounded_text(str(item), 120)}
+
+    result: dict[str, str | int | float | bool | None] = {}
+    allowed_exact = {
+        "orderId",
+        "orderSheetId",
+        "shipmentBoxId",
+        "vendorItemId",
+        "sellerProductId",
+        "productId",
+        "recognitionDate",
+        "revenueRecognitionDate",
+        "revenueRecognitionYearMonth",
+        "settlementDate",
+        "saleType",
+        "salesType",
+        "settlementType",
+        "status",
+        "statusName",
+    }
+    allowed_fragments = (
+        "amount",
+        "price",
+        "sales",
+        "sale",
+        "revenue",
+        "settlement",
+        "commission",
+        "fee",
+        "tax",
+        "date",
+        "month",
+        "type",
+        "status",
+        "orderid",
+        "ordersheetid",
+        "shipmentboxid",
+        "productid",
+        "itemid",
+    )
+
+    for key, value in item.items():
+        normalized_key = str(key).replace("_", "").replace("-", "").lower()
+        if _is_forbidden_financial_sample_field(normalized_key):
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        if key not in allowed_exact and not any(fragment in normalized_key for fragment in allowed_fragments):
+            continue
+        if value is None or isinstance(value, (int, float, bool)):
+            result[key] = value
+        else:
+            result[key] = _bounded_text(str(value), 120)
+        if len(result) >= 30:
+            break
+
+    if settlement:
+        for key in list(result.keys()):
+            normalized_key = str(key).replace("_", "").replace("-", "").lower()
+            if normalized_key in COUPANG_SETTLEMENT_FORBIDDEN_FIELDS:
+                result.pop(key, None)
+    return result
+
+
+def _is_forbidden_financial_sample_field(normalized_key: str) -> bool:
+    forbidden_fragments = (
+        "accesskey",
+        "secretkey",
+        "authorization",
+        "signature",
+        "token",
+        "clientsecret",
+        "bankaccountholder",
+        "bankname",
+        "bankaccount",
+    )
+    return any(fragment in normalized_key for fragment in forbidden_fragments)
+
+
+def _build_financial_summary_totals(items: list[dict]) -> dict:
+    totals: dict[str, Decimal] = {}
+    monetary_fragments = ("amount", "price", "sale", "sales", "revenue", "settlement", "commission", "fee", "tax")
+    non_monetary_fragments = ("date", "month", "status", "type", "id", "count", "no", "number")
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key, value in item.items():
+            normalized_key = str(key).replace("_", "").replace("-", "").lower()
+            if _is_forbidden_financial_sample_field(normalized_key):
+                continue
+            if not any(fragment in normalized_key for fragment in monetary_fragments):
+                continue
+            if any(fragment in normalized_key for fragment in non_monetary_fragments):
+                continue
+            amount = _to_decimal(value)
+            if amount is None:
+                continue
+            totals[key] = totals.get(key, Decimal("0")) + amount
+            if len(totals) >= 20:
+                break
+
+    return {key: _decimal_to_plain_string(value) for key, value in totals.items()}
+
+
+def _decimal_to_plain_string(value: Decimal) -> str:
+    return format(value, "f")
+
+
 def _find_existing_order_ids(
     db: Session,
     store_id: int,
@@ -1377,4 +1980,58 @@ def _product_sync_summary_for_log(result: dict) -> dict:
         "next_cursor_exists": result["next_cursor_exists"],
         "sample_ids": result["sample_ids"],
         "per_status": result["per_status"],
+    }
+
+
+def _financial_preview_summary_for_log(result: dict) -> dict:
+    summary = {
+        "source_type": result["source_type"],
+        "sync_type": result["sync_type"],
+        "total_rows": result["total_rows"],
+        "sample_ids": result["sample_ids"],
+        "sample_rows": result["sample_rows"],
+        "summary_totals": result["summary_totals"],
+        "semantic_notice": result["semantic_notice"],
+    }
+    if "start_date" in result:
+        summary["date_window"] = {
+            "start_date": result["start_date"],
+            "end_date": result["end_date"],
+            "business_timezone": result["business_timezone"],
+        }
+    if "max_pages" in result:
+        summary["max_pages"] = result["max_pages"]
+        summary["page_count"] = result["page_count"]
+        summary["next_cursor_exists"] = result["next_cursor_exists"]
+        summary["system_phase_limit_days"] = COUPANG_FINANCIAL_PREVIEW_MAX_DAYS
+    if "months" in result:
+        summary["months"] = result["months"]
+        summary["per_month"] = result["per_month"]
+        summary["month_semantic_notice"] = result["month_semantic_notice"]
+    return summary
+
+
+def _settlement_field_mapping_suggestion() -> dict:
+    return {
+        "suggested_table": "settlements or platform_financial_records",
+        "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+        "dedupe_keys": ["store_id", "platform", "revenueRecognitionYearMonth", "settlementId or generated external_id"],
+        "candidate_fields": [
+            "store_id",
+            "platform",
+            "source_type",
+            "external_settlement_id",
+            "revenue_recognition_year_month",
+            "settlement_date",
+            "settlement_type",
+            "sales_amount",
+            "commission_amount",
+            "fee_amount",
+            "tax_amount",
+            "settlement_amount",
+            "currency",
+            "last_synced_at",
+        ],
+        "excluded_fields": ["bankAccountHolder", "bankName", "bankAccount"],
+        "note": "This phase previews field shape only and does not create or write a settlement table.",
     }

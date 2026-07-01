@@ -3,7 +3,13 @@ from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
 from app.database import get_db
-from app.schemas.sync import CoupangOrderPreviewRequest, CoupangOrderSyncRequest, CoupangProductSyncRequest
+from app.schemas.sync import (
+    CoupangOrderPreviewRequest,
+    CoupangOrderSyncRequest,
+    CoupangProductSyncRequest,
+    CoupangSalesPreviewRequest,
+    CoupangSettlementPreviewRequest,
+)
 from app.services import sync_service
 
 
@@ -46,6 +52,35 @@ def sync_coupang_products(
         max_pages=payload.max_pages,
     )
     return success_response(data=result, message="coupang readonly product sync completed")
+
+
+@router.post("/sales/coupang/preview")
+def preview_coupang_sales(
+    payload: CoupangSalesPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.preview_coupang_sales(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        max_pages=payload.max_pages,
+    )
+    return success_response(data=result, message="coupang readonly sales preview completed")
+
+
+@router.post("/settlements/coupang/preview")
+def preview_coupang_settlements(
+    payload: CoupangSettlementPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.preview_coupang_settlements(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    return success_response(data=result, message="coupang readonly settlement preview completed")
 
 
 @router.post("/orders/mock")
