@@ -230,7 +230,7 @@ Naver Commerce API documentation is tracked against the current / 2.81.0 documen
 
 | Planned API | Current status | Naver reference route | Preview strategy |
 |---|---|---|---|
-| `POST /api/v1/sync/products/naver/preview` | Not implemented; `safe_to_real_test=false` | `POST /v1/products/search` | Dedicated readonly product preview after request parameters are verified |
+| `POST /api/v1/sync/products/naver/preview` | Scaffold endpoint exists; real request not open; `safe_to_real_test=false` | `POST /v1/products/search` | Returns `guardrail_blocked` before token/HTTP until request parameters are verified |
 | `POST /api/v1/sync/orders/naver/preview` | Not implemented; `safe_to_real_test=false` | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then query details by `productOrderId` |
 
 The older direct order draft route `GET /v1/pay-order/seller/product-orders` is treated as `deprecated_or_unconfirmed` and must not be used for real readonly testing. Product and order preview, when implemented later, must be preview-only:
@@ -242,6 +242,41 @@ No raw response persistence
 No client secret, token, Authorization header, signature, request header, or full channel_no output
 Sanitized counts/samples only
 ```
+
+`POST /api/v1/sync/products/naver/preview` currently returns HTTP 200 with a blocked scaffold payload so the frontend can show business status without treating product read as available:
+
+```json
+{
+  "store_id": 8,
+  "credential_id": 7,
+  "platform": "naver",
+  "preview_type": "products",
+  "source_type": "naver_product_preview",
+  "guardrail_status": "blocked",
+  "test_status": "not_tested",
+  "error_code": "guardrail_blocked",
+  "page": 1,
+  "size": 20,
+  "has_more": false,
+  "would_create": 0,
+  "would_update": 0,
+  "sample_ids": [],
+  "field_observation": {
+    "channel_no_configured": true,
+    "request_params_confirmed": false,
+    "safe_to_real_test": false
+  },
+  "business_status_summary": [
+    "商品读取暂未开放真实测试",
+    "当前系统已完成 Naver 账号与频道前置检测",
+    "为避免误触真实业务数据，商品接口仍处于保护状态",
+    "后续需要完成商品 preview 小流量真实测试后，才可进入本地同步"
+  ],
+  "semantic_notice": "Readonly preview scaffold only. No local product rows were written."
+}
+```
+
+For the blocked scaffold path, the service does not create a Naver HTTP client, does not request a token, does not call `POST /v1/products/search`, does not write `products`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`. Credential decryption only means the local encrypted secret is readable; it does not mean product API access is available.
 
 Current frontend-facing business wording should remain conservative:
 

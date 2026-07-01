@@ -26,6 +26,16 @@ class CoupangProductSyncRequest(BaseModel):
     max_pages: int = Field(default=1, ge=1, le=3)
 
 
+class NaverProductPreviewRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    credential_id: int | None = Field(default=None, ge=1)
+    page: int = Field(default=1, ge=1)
+    size: int = Field(default=20, ge=1, le=50)
+    status: str | None = Field(default="ALL")
+    keyword: str | None = Field(default=None, max_length=120)
+    seller_product_id: str | None = Field(default=None, max_length=120)
+
+
 class CoupangSalesPreviewRequest(BaseModel):
     store_id: int = Field(..., ge=1)
     start_date: date | None = None

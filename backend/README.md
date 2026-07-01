@@ -233,6 +233,8 @@ POST /api/v1/sync/products/naver/preview
 POST /api/v1/sync/orders/naver/preview
 ```
 
+The Naver product preview route now exists as a scaffold, but the real product request is not open. `POST /api/v1/sync/products/naver/preview` returns `guardrail_status=blocked`, `test_status=not_tested`, and `error_code=guardrail_blocked` before token exchange or external HTTP. It does not create a Naver HTTP client, does not call `POST /v1/products/search`, does not write `products`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`. Credential decryptability only proves the local encrypted secret can be read; it does not prove Naver product API access.
+
 The planned product preview route is based on `POST /v1/products/search`. The planned order preview route should read `GET /v1/pay-order/seller/product-orders/last-changed-statuses` first, then query details with `POST /v1/pay-order/seller/product-orders/query`. The older direct `GET /v1/pay-order/seller/product-orders` draft is treated as deprecated or unconfirmed and must not be called. Until a later preview stage explicitly opens these routes, product/order capability results stay `guardrail_blocked`, `not_tested`, and `safe_to_real_test=false`.
 
 Future Naver preview endpoints must remain preview-only: no writes to `products` or `orders`, no raw response persistence, no token persistence, and no output of client secrets, tokens, authorization headers, request signatures, request headers, or full `channel_no` values.

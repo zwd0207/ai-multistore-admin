@@ -9,6 +9,7 @@ from app.schemas.sync import (
     CoupangProductSyncRequest,
     CoupangSalesPreviewRequest,
     CoupangSettlementPreviewRequest,
+    NaverProductPreviewRequest,
 )
 from app.services import sync_service
 
@@ -52,6 +53,24 @@ def sync_coupang_products(
         max_pages=payload.max_pages,
     )
     return success_response(data=result, message="coupang readonly product sync completed")
+
+
+@router.post("/products/naver/preview")
+def preview_naver_products(
+    payload: NaverProductPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.preview_naver_products(
+        db,
+        store_id=payload.store_id,
+        credential_id=payload.credential_id,
+        page=payload.page,
+        size=payload.size,
+        status=payload.status,
+        keyword=payload.keyword,
+        seller_product_id=payload.seller_product_id,
+    )
+    return success_response(data=result, message="naver product preview scaffold completed")
 
 
 @router.post("/sales/coupang/preview")

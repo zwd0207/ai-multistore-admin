@@ -17,10 +17,13 @@ from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
+from app.models.api_credential import ApiCredential
 from app.models.order import Order
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.schemas.credential import DecryptedCredential
+from app.services import api_credential_readiness_service
+from app.services.encryption import decrypt_value
 from app.services import credential_service, customer_inquiry_service, order_service, product_service, sync_log_service
 from app.services.store_service import ensure_store_exists, normalize_platform
 
@@ -41,6 +44,7 @@ COUPANG_SALES_CHECKPOINT_SYNC_TYPE = "sales"
 COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
 COUPANG_SETTLEMENT_SYNC_TYPE = "settlements_coupang_real"
 COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
+NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
@@ -294,6 +298,52 @@ def preview_coupang_products(
             error_code="COUPANG_PRODUCT_PREVIEW_FAILED",
             status_code=502,
         ) from exc
+
+
+def preview_naver_products(
+    db: Session,
+    store_id: int,
+    credential_id: int | None = None,
+    page: int = 1,
+    size: int = 20,
+    status: str | None = "ALL",
+    keyword: str | None = None,
+    seller_product_id: str | None = None,
+) -> dict:
+    normalized_status = _resolve_naver_product_preview_status(status)
+    credential = _ensure_naver_product_preview_credential(
+        db,
+        store_id=store_id,
+        credential_id=credential_id,
+    )
+    field_observation = _build_naver_product_preview_field_observation(credential)
+    capability_meta = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]
+    field_observation.update({
+        "request_params_confirmed": capability_meta.get("request_params_confirmed") == "confirmed",
+        "safe_to_real_test": bool(capability_meta.get("safe_to_real_test")),
+        "docs_reference_version": capability_meta.get("docs_reference_version"),
+        "endpoint_confirmed": capability_meta.get("endpoint_confirmed"),
+        "grant_confirmed": capability_meta.get("grant_confirmed"),
+        "preview_endpoint_planned": capability_meta.get("preview_endpoint_planned", False),
+    })
+    if not capability_meta.get("safe_to_real_test"):
+        return _build_naver_product_guardrail_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            page=page,
+            size=size,
+            status=normalized_status,
+            keyword_configured=bool(keyword and keyword.strip()),
+            seller_product_id_configured=bool(seller_product_id and seller_product_id.strip()),
+            field_observation=field_observation,
+        )
+
+    raise ApiError(
+        message="Naver product preview real request is not implemented",
+        error_code="naver_api_not_implemented",
+        status_code=501,
+        detail={"store_id": store_id, "credential_id": credential.id},
+    )
 
 
 def sync_coupang_products(
@@ -1199,6 +1249,177 @@ def _ensure_coupang_store(db: Session, store_id: int) -> None:
             status_code=400,
             detail={"store_id": store_id, "store_platform": store.platform},
         )
+
+
+def _ensure_naver_product_preview_credential(db: Session, store_id: int, credential_id: int | None):
+    store = ensure_store_exists(db, store_id)
+    if normalize_platform(store.platform) != "naver":
+        raise ApiError(
+            message="Naver product preview requires a Naver store",
+            error_code="STORE_PLATFORM_MISMATCH",
+            status_code=400,
+            detail={"store_id": store_id, "store_platform": store.platform, "expected_platform": "naver"},
+        )
+
+    if credential_id is None:
+        credential = db.scalars(
+            select(ApiCredential)
+            .where(
+                ApiCredential.store_id == store_id,
+                ApiCredential.platform == "naver",
+                ApiCredential.status == "active",
+            )
+            .order_by(ApiCredential.id.desc())
+        ).first()
+    else:
+        credential = db.get(ApiCredential, credential_id)
+        if credential is not None and credential.store_id != store_id:
+            raise ApiError(
+                message="Credential does not belong to the selected store",
+                error_code="credential_not_ready",
+                status_code=400,
+                detail={"store_id": store_id, "credential_id": credential_id},
+            )
+
+    if credential is None or credential.platform != "naver" or credential.status != "active":
+        raise ApiError(
+            message="Active Naver credential is required for product preview scaffold",
+            error_code="credential_not_ready",
+            status_code=400,
+            detail={"store_id": store_id, "credential_id": credential_id},
+        )
+    if not credential.client_id:
+        raise ApiError(
+            message="Naver client_id is required for product preview scaffold",
+            error_code="credential_not_ready",
+            status_code=400,
+            detail={"store_id": store_id, "credential_id": credential.id},
+        )
+    if not credential.encrypted_secret_key:
+        raise ApiError(
+            message="Naver client secret is required for product preview scaffold",
+            error_code="credential_not_ready",
+            status_code=400,
+            detail={"store_id": store_id, "credential_id": credential.id},
+        )
+    try:
+        secret_key = decrypt_value(credential.encrypted_secret_key)
+    except ApiError as exc:
+        if exc.error_code == "CREDENTIAL_DECRYPT_FAILED":
+            raise ApiError(
+                message="Naver credential secret could not be decrypted for product preview scaffold",
+                error_code="credential_decrypt_failed",
+                status_code=400,
+                detail={"store_id": store_id, "credential_id": credential.id},
+            ) from exc
+        raise
+    if not secret_key:
+        raise ApiError(
+            message="Naver client secret is required for product preview scaffold",
+            error_code="credential_not_ready",
+            status_code=400,
+            detail={"store_id": store_id, "credential_id": credential.id},
+        )
+    return credential
+
+
+def _resolve_naver_product_preview_status(status: str | None) -> str:
+    if status is None:
+        return "ALL"
+    normalized = status.strip().upper()
+    if normalized == "ALL":
+        return "ALL"
+    raise ApiError(
+        message="Naver product preview status is not supported in this scaffold phase",
+        error_code="unsupported_status_filter",
+        status_code=400,
+        detail={"status": status, "allowed_statuses": ["ALL"]},
+    )
+
+
+def _naver_channel_no_configured(extra_config: dict | None) -> bool:
+    if not isinstance(extra_config, dict):
+        return False
+    channel_no = extra_config.get("channel_no")
+    return isinstance(channel_no, str) and bool(channel_no.strip())
+
+
+def _build_naver_product_preview_field_observation(credential) -> dict:
+    return {
+        "channel_no_configured": _naver_channel_no_configured(credential.extra_config),
+        "credential_decryptable": True,
+    }
+
+
+def _build_naver_product_preview_business_status_summary() -> list[str]:
+    return [
+        "商品读取暂未开放真实测试",
+        "当前系统已完成 Naver 账号与频道前置检测",
+        "为避免误触真实业务数据，商品接口仍处于保护状态",
+        "后续需要完成商品 preview 小流量真实测试后，才可进入本地同步",
+    ]
+
+
+def _build_naver_product_guardrail_preview_result(
+    *,
+    store_id: int,
+    credential_id: int,
+    page: int,
+    size: int,
+    status: str,
+    keyword_configured: bool,
+    seller_product_id_configured: bool,
+    field_observation: dict,
+) -> dict:
+    return {
+        "store_id": store_id,
+        "credential_id": credential_id,
+        "platform": "naver",
+        "preview_type": "products",
+        "source_type": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+        "guardrail_status": "blocked",
+        "test_status": "not_tested",
+        "error_code": "guardrail_blocked",
+        "page": page,
+        "size": size,
+        "status_filter": status,
+        "keyword_configured": keyword_configured,
+        "seller_product_id_configured": seller_product_id_configured,
+        "has_more": False,
+        "would_create": 0,
+        "would_update": 0,
+        "sample_ids": [],
+        "field_observation": field_observation,
+        "business_status_summary": _build_naver_product_preview_business_status_summary(),
+        "semantic_notice": "Readonly preview scaffold only. No local product rows were written.",
+    }
+
+
+def _build_naver_product_fake_preview_summary(
+    db: Session,
+    store_id: int,
+    items: list[dict],
+    page: int = 1,
+    size: int = 20,
+    has_more: bool = False,
+) -> dict:
+    unique_product_ids = [_resolve_product_id(item) for item in items if _resolve_product_id(item)]
+    existing_ids = _find_existing_product_ids(db, store_id=store_id, platform="naver", external_product_ids=unique_product_ids)
+    return {
+        "platform": "naver",
+        "preview_type": "products",
+        "source_type": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+        "page": page,
+        "size": size,
+        "has_more": bool(has_more),
+        "would_create": sum(1 for product_id in unique_product_ids if product_id not in existing_ids),
+        "would_update": sum(1 for product_id in unique_product_ids if product_id in existing_ids),
+        "sample_ids": unique_product_ids[:10],
+        "field_observation": {
+            "raw_payload_saved": False,
+            "fake_summary_only": True,
+        },
+    }
 
 
 def _fetch_coupang_order_pages(
