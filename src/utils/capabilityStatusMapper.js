@@ -63,13 +63,21 @@ export function parseObservedFields(text = '') {
 }
 
 function latestResultForKey(results = [], capabilities = [], capabilityKey) {
+  const scopeAliases = {
+    'naver.token_auth': 'token_auth',
+    'naver.seller_account_read': 'seller_account',
+    'naver.seller_channels_read': 'seller_channels',
+  };
+  const expectedScope = scopeAliases[capabilityKey];
   const capabilityIds = new Set(
     capabilities
       .filter((item) => item.capabilityKey === capabilityKey)
       .map((item) => String(item.id)),
   );
   const matches = results.filter((item) => (
-    item.capabilityKey === capabilityKey || capabilityIds.has(String(item.capabilityId))
+    item.capabilityKey === capabilityKey
+    || capabilityIds.has(String(item.capabilityId))
+    || (expectedScope && parseObservedFields(item.responseFieldsObserved || '').capability_scope === expectedScope)
   ));
   return matches.sort((a, b) => new Date(b.testedAt || b.createdAt || 0) - new Date(a.testedAt || a.createdAt || 0))[0] || null;
 }

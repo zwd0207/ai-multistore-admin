@@ -472,14 +472,17 @@ export default function ApiCapabilities() {
     setReadinessLoading(true);
     setReadinessError('');
     try {
-      setReadiness(await dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId }));
+      const readinessParams = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver'
+        ? { storeId: selectedStoreId }
+        : undefined;
+      setReadiness(await dataProvider.getApiCredentialReadiness(readinessParams));
     } catch (error) {
       setReadiness(emptyReadiness);
       setReadinessError(cleanError(error));
     } finally {
       setReadinessLoading(false);
     }
-  }, [selectedStoreId]);
+  }, [selectedStore, selectedStoreId]);
 
   useEffect(() => { loadReadiness(); }, [loadReadiness]);
   useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
