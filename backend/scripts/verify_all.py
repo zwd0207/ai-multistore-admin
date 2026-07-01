@@ -128,6 +128,79 @@ EXPECTED_SYNC_TABLES = {
     "sync_checkpoints",
 }
 
+EXPECTED_FINANCIAL_SCHEMA_COLUMNS = {
+    "platform_sales_details": {
+        "id",
+        "store_id",
+        "platform",
+        "source_type",
+        "external_sales_id",
+        "recognition_date",
+        "order_id",
+        "order_sheet_id",
+        "shipment_box_id",
+        "product_id",
+        "vendor_item_id",
+        "sale_type",
+        "status",
+        "currency",
+        "sale_amount",
+        "total_sale",
+        "discount_amount",
+        "refund_amount",
+        "commission_amount",
+        "fee_amount",
+        "settlement_target_amount",
+        "settlement_amount",
+        "observed_fields",
+        "last_synced_at",
+        "created_at",
+        "updated_at",
+    },
+    "platform_settlement_details": {
+        "id",
+        "store_id",
+        "platform",
+        "source_type",
+        "external_settlement_id",
+        "revenue_recognition_year_month",
+        "settlement_type",
+        "settlement_date",
+        "revenue_recognition_date_from",
+        "revenue_recognition_date_to",
+        "currency",
+        "total_sale",
+        "service_fee",
+        "settlement_target_amount",
+        "settlement_amount",
+        "last_amount",
+        "pending_released_amount",
+        "dedicated_delivery_amount",
+        "seller_service_fee",
+        "courantee_fee",
+        "deduction_amount",
+        "final_amount",
+        "observed_fields",
+        "last_synced_at",
+        "created_at",
+        "updated_at",
+    },
+}
+
+FORBIDDEN_FINANCIAL_COLUMNS = {
+    "bankAccountHolder",
+    "bankName",
+    "bankAccount",
+    "access_key",
+    "secret_key",
+    "header",
+    "signature",
+    "token",
+    "authorization",
+    "raw_data",
+    "raw_response",
+}
+
 FORBIDDEN_TIME_PATTERNS = {
     "datetime.utcnow(": "use app.core.timezone.get_utc_now()",
     "date.today(": "use app.core.timezone.get_business_date() for business dates",
@@ -657,6 +730,7 @@ def verify_sync_preview_schema_and_security() -> None:
     import app.config as app_config
     from app.database import SessionLocal
     from app.main import app
+    from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
     from app.models.order import Order
     from app.models.product import Product
     from app.models.sync_log import SyncLog
@@ -667,12 +741,47 @@ def verify_sync_preview_schema_and_security() -> None:
     upgrade()
     with SessionLocal() as db:
         tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
-        missing_tables = sorted(EXPECTED_SYNC_TABLES - tables)
+        missing_tables = sorted((EXPECTED_SYNC_TABLES | set(EXPECTED_FINANCIAL_SCHEMA_COLUMNS)) - tables)
         assert not missing_tables, f"Missing sync tables: {missing_tables}"
         for table_name, expected_columns in EXPECTED_SYNC_SCHEMA_COLUMNS.items():
             columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table_name})")).all()}
             missing_columns = sorted(expected_columns - columns)
             assert not missing_columns, f"Missing {table_name} columns: {missing_columns}"
+        for table_name, expected_columns in EXPECTED_FINANCIAL_SCHEMA_COLUMNS.items():
+            table_info = db.execute(text(f"PRAGMA table_info({table_name})")).all()
+            columns = {row[1] for row in table_info}
+            missing_columns = sorted(expected_columns - columns)
+            assert not missing_columns, f"Missing {table_name} columns: {missing_columns}"
+            forbidden_columns = sorted({column.lower() for column in columns} & {item.lower() for item in FORBIDDEN_FINANCIAL_COLUMNS})
+            assert not forbidden_columns, f"Forbidden {table_name} columns: {forbidden_columns}"
+            integer_amount_columns = {
+                row[1]: row[2].upper()
+                for row in table_info
+                if row[1].endswith("_amount") or row[1] in {"total_sale", "service_fee", "courantee_fee"}
+            }
+            assert integer_amount_columns, f"Missing integer amount columns for {table_name}"
+            assert all(column_type == "BIGINT" for column_type in integer_amount_columns.values()), integer_amount_columns
+
+            index_rows = db.execute(text(f"PRAGMA index_list({table_name})")).all()
+            index_names = {row[1] for row in index_rows}
+            unique_indexes = {row[1] for row in index_rows if row[2]}
+            if table_name == "platform_sales_details":
+                assert "sqlite_autoindex_platform_sales_details_1" in unique_indexes or "uq_platform_sales_external_id" in unique_indexes, unique_indexes
+                assert "ix_platform_sales_store_platform_date" in index_names, index_names
+            if table_name == "platform_settlement_details":
+                assert "sqlite_autoindex_platform_settlement_details_1" in unique_indexes or "uq_platform_settlement_external_id" in unique_indexes, unique_indexes
+                assert "ix_platform_settlement_store_platform_month" in index_names, index_names
+                assert "ix_platform_settlement_store_platform_date" in index_names, index_names
+
+        PlatformSalesDetail(observed_fields=["revenueId", "saleAmount"])
+        PlatformSettlementDetail(observed_fields=["settlementId", "settlementAmount"])
+        for model in (PlatformSalesDetail, PlatformSettlementDetail):
+            try:
+                model(observed_fields=["bankName"])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"{model.__name__} accepted forbidden observed_fields")
 
     original_test_enabled = os.environ.get("REAL_API_TEST_ENABLED")
     try:
@@ -1251,10 +1360,12 @@ def verify_git_tracking() -> None:
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
         " M backend/scripts/verify_stage_1e.py",
+        " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
         "?? backend/app/models/api_capability.py",
+        "?? backend/app/models/financial.py",
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",

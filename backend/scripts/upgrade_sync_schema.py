@@ -20,6 +20,11 @@ PRODUCT_COLUMNS = {
     "last_synced_at": "DATETIME",
 }
 
+FINANCIAL_TABLES = {
+    "platform_sales_details",
+    "platform_settlement_details",
+}
+
 
 def resolve_sqlite_path(database_url: str) -> Path:
     if not database_url.startswith("sqlite:///"):
@@ -61,24 +66,37 @@ def add_missing_columns(
 def upgrade(*, run_create_all: bool = True) -> dict[str, list[str]]:
     import app.models  # noqa: F401
 
-    if run_create_all:
-        Base.metadata.create_all(bind=engine)
-
     settings = get_settings()
     if not settings.database_url.startswith("sqlite:///"):
-        return {"orders": [], "products": [], "tables": []}
+        if run_create_all:
+            Base.metadata.create_all(bind=engine)
+        return {"orders": [], "products": [], "tables": [], "financial_tables": []}
 
     database_path = resolve_sqlite_path(settings.database_url)
     connection = sqlite3.connect(database_path)
     try:
         existing_tables = get_existing_tables(connection)
+    finally:
+        connection.close()
+
+    if run_create_all:
+        Base.metadata.create_all(bind=engine)
+
+    connection = sqlite3.connect(database_path)
+    try:
         orders_added = add_missing_columns(connection, "orders", ORDER_COLUMNS)
         products_added = add_missing_columns(connection, "products", PRODUCT_COLUMNS)
         connection.commit()
+        current_tables = get_existing_tables(connection)
+        financial_tables_added = sorted(FINANCIAL_TABLES - existing_tables)
+        financial_tables_missing = sorted(FINANCIAL_TABLES - current_tables)
+        if financial_tables_missing:
+            raise RuntimeError(f"Financial tables were not created: {financial_tables_missing}")
         return {
             "orders": orders_added,
             "products": products_added,
             "tables": ["sync_checkpoints"] if "sync_checkpoints" not in existing_tables else [],
+            "financial_tables": financial_tables_added,
         }
     finally:
         connection.close()
@@ -91,7 +109,8 @@ def main() -> None:
             "sync schema upgraded: "
             f"orders({', '.join(added['orders']) or 'no new columns'}), "
             f"products({', '.join(added['products']) or 'no new columns'}), "
-            f"tables({', '.join(added['tables']) or 'none'})"
+            f"tables({', '.join(added['tables']) or 'none'}), "
+            f"financial_tables({', '.join(added['financial_tables']) or 'none'})"
         )
     else:
         print("sync schema already up to date")

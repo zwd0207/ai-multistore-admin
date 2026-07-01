@@ -6,6 +6,7 @@ from app.models.appeal_case import AppealCase
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.device_environment import DeviceEnvironment
 from app.models.email_account import EmailAccount
+from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.important_email import ImportantEmail
 from app.models.order import Order
 from app.models.platform_login_credential import PlatformLoginCredential
@@ -22,6 +23,8 @@ __all__ = [
     "CustomerInquiry",
     "DeviceEnvironment",
     "EmailAccount",
+    "PlatformSalesDetail",
+    "PlatformSettlementDetail",
     "ImportantEmail",
     "Order",
     "PlatformLoginCredential",
