@@ -27,6 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
+NAVER_CLIENT_ID = "mock-naver-client-id"
 NAVER_ACCESS_KEY = "mock-naver-access-token"
 NAVER_SECRET_KEY = "mock-naver-secret-token"
 COUPANG_ACCESS_KEY = "mock-coupang-access-token"
@@ -82,6 +83,7 @@ def create_store_and_credentials(client: TestClient) -> int:
                 "store_id": store_id,
                 "platform": "naver",
                 "credential_name": "1D Naver mock credential",
+                "client_id": NAVER_CLIENT_ID,
                 "access_key": NAVER_ACCESS_KEY,
                 "secret_key": NAVER_SECRET_KEY,
                 "extra_config": {"用途": "mock 同步", "한국어": "테스트"},

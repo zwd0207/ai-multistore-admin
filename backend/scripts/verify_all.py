@@ -274,6 +274,7 @@ def verify_api_credential_schema_and_security() -> None:
 
     from app.database import SessionLocal
     from app.main import app
+    from app.services import credential_service
     from scripts.upgrade_api_credentials_schema import upgrade
 
     upgrade()
@@ -297,29 +298,23 @@ def verify_api_credential_schema_and_security() -> None:
             "platform": "naver",
             "credential_name": "Phase 6A-3 Naver credential",
             "client_id": "naver-client-id",
-            "access_key": "legacy-access-key",
             "secret_key": "naver-client-secret",
-            "access_token": "naver-access-token",
-            "refresh_token": "naver-refresh-token",
-            "token_expires_at": "2026-12-31T00:00:00+00:00",
             "market": "KR",
             "auth_status": "configured",
             "api_remark": "local config only",
         })
         assert created.status_code == 201, created.text
         data = created.json()["data"]
-        assert data["has_access_key"] is True
+        assert data["has_access_key"] is False
         assert data["has_secret_key"] is True
-        assert data["has_access_token"] is True
-        assert data["has_refresh_token"] is True
+        assert data["has_access_token"] is False
+        assert data["has_refresh_token"] is False
         assert data["client_id"] == "naver-client-id"
         assert data["auth_status"] == "configured"
+        assert data["extra_config"]["api_base"] == "https://api.commerce.naver.com/external"
         serialized = str(created.json())
         forbidden = [
-            "legacy-access-key",
             "naver-client-secret",
-            "naver-access-token",
-            "naver-refresh-token",
             "encrypted_access_token",
             "encrypted_refresh_token",
         ]
@@ -328,15 +323,48 @@ def verify_api_credential_schema_and_security() -> None:
         updated = client.put(f"/api/v1/credentials/{data['id']}", json={
             "credential_name": "Phase 6A-3 Naver credential updated",
             "auth_status": "needs_test",
+            "access_token": "naver-access-token",
+            "refresh_token": "naver-refresh-token",
+            "token_expires_at": "2026-12-31T00:00:00+00:00",
         })
         assert updated.status_code == 200, updated.text
         update_data = updated.json()["data"]
         assert update_data["has_access_token"] is True
         assert update_data["has_refresh_token"] is True
         assert update_data["auth_status"] == "needs_test"
+        assert "naver-access-token" not in str(updated.json())
+        assert "naver-refresh-token" not in str(updated.json())
+
+        with SessionLocal() as db:
+            decrypted = credential_service.get_decrypted_credential_for_internal_use(db, data["id"])
+            assert decrypted.access_key is None
+            assert decrypted.secret_key == "naver-client-secret"
+            assert decrypted.access_token == "naver-access-token"
+            assert decrypted.refresh_token == "naver-refresh-token"
+
+        coupang_store = client.post("/api/v1/stores", json={
+            "name": f"Phase 6A-3 Coupang Verify Store {suffix}",
+            "platform": "coupang",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        })
+        assert coupang_store.status_code == 201, coupang_store.text
+        coupang_store_id = coupang_store.json()["data"]["id"]
+
+        coupang_missing_access = client.post("/api/v1/credentials", json={
+            "store_id": coupang_store_id,
+            "platform": "coupang",
+            "credential_name": "Phase 6A-3 Invalid Coupang credential",
+            "vendor_id": "coupang-vendor-id",
+            "secret_key": "coupang-secret-key",
+            "market": "KR",
+            "auth_status": "configured",
+        })
+        assert coupang_missing_access.status_code == 422, coupang_missing_access.text
 
         coupang = client.post("/api/v1/credentials", json={
-            "store_id": store["id"],
+            "store_id": coupang_store_id,
             "platform": "coupang",
             "credential_name": "Phase 6A-3 Coupang credential",
             "vendor_id": "coupang-vendor-id",
@@ -372,6 +400,9 @@ def verify_api_credential_readiness() -> None:
             assert data["real_api_test_enabled"] is False
             assert data["real_api_write_enabled"] is False
             assert "semantic_notice" in data
+            assert "env_fallback_notice" in data
+            assert "store_bound_readiness_notice" in data
+            assert data["store_bound_readiness"] is None
             assert {item["platform"] for item in data["platforms"]} == {"naver", "coupang"}
             for platform in data["platforms"]:
                 assert platform["credential_status"] in {"configured", "missing"}
@@ -392,6 +423,55 @@ def verify_api_credential_readiness() -> None:
                 "encrypted_refresh_token",
             ]
             assert not any(item in serialized for item in forbidden), serialized
+
+            suffix = uuid.uuid4().hex[:8]
+            naver_store = client.post("/api/v1/stores", json={
+                "name": f"Phase 6D-2 Readiness Store {suffix}",
+                "platform": "naver",
+                "country": "KR",
+                "language": "ko-KR",
+                "status": "active",
+            })
+            assert naver_store.status_code == 201, naver_store.text
+            store_id = naver_store.json()["data"]["id"]
+
+            naver_credential = client.post("/api/v1/credentials", json={
+                "store_id": store_id,
+                "platform": "naver",
+                "credential_name": "Phase 6D-2 Naver readiness credential",
+                "client_id": "phase-6d2-client-id",
+                "secret_key": "phase-6d2-client-secret",
+                "extra_config": {},
+                "auth_status": "configured",
+                "status": "active",
+            })
+            assert naver_credential.status_code == 201, naver_credential.text
+            credential_data = naver_credential.json()["data"]
+            assert credential_data["has_access_key"] is False
+            assert credential_data["has_secret_key"] is True
+            assert credential_data["has_access_token"] is False
+            assert credential_data["has_refresh_token"] is False
+
+            store_readiness = client.get(f"/api/v1/api-credentials/readiness?store_id={store_id}")
+            assert store_readiness.status_code == 200, store_readiness.text
+            store_readiness_data = store_readiness.json()["data"]["store_bound_readiness"]
+            assert store_readiness_data["store_id"] == store_id, store_readiness_data
+            assert store_readiness_data["platform"] == "naver", store_readiness_data
+            assert store_readiness_data["credential_id"] == credential_data["id"], store_readiness_data
+            assert store_readiness_data["credential_name"] == "Phase 6D-2 Naver readiness credential", store_readiness_data
+            assert store_readiness_data["configured"] is True, store_readiness_data
+            assert store_readiness_data["client_id_configured"] is True, store_readiness_data
+            assert store_readiness_data["secret_key_configured"] is True, store_readiness_data
+            assert store_readiness_data["secret_key_decryptable"] is True, store_readiness_data
+            assert store_readiness_data["api_base"] == "https://api.commerce.naver.com/external", store_readiness_data
+            assert store_readiness_data["channel_no_configured"] is False, store_readiness_data
+            assert store_readiness_data["access_token_status"] == "missing", store_readiness_data
+            assert store_readiness_data["refresh_token_configured"] is False, store_readiness_data
+            assert store_readiness_data["auth_status"] == "configured", store_readiness_data
+            assert store_readiness_data["missing_fields"] == [], store_readiness_data
+            assert "channel_no_optional_missing" in store_readiness_data["warnings"], store_readiness_data
+            assert "access_token_missing" in store_readiness_data["warnings"], store_readiness_data
+            assert "phase-6d2-client-secret" not in str(store_readiness.json()).lower()
 
             original_client = api_credential_readiness_service.httpx.Client
 
@@ -1663,6 +1743,8 @@ def verify_git_tracking() -> None:
         " M backend/docs/",
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
+        " M backend/scripts/verify_stage_1c.py",
+        " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",

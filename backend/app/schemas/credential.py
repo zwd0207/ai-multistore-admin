@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CredentialCreate(BaseModel):
@@ -10,8 +10,8 @@ class CredentialCreate(BaseModel):
     credential_name: str = Field(..., min_length=1, max_length=120)
     vendor_id: str | None = Field(default=None, max_length=120)
     client_id: str | None = Field(default=None, max_length=120)
-    access_key: str = Field(..., min_length=1)
-    secret_key: str = Field(..., min_length=1)
+    access_key: str | None = Field(default=None, min_length=1)
+    secret_key: str | None = Field(default=None, min_length=1)
     access_token: str | None = Field(default=None, min_length=1)
     refresh_token: str | None = Field(default=None, min_length=1)
     token_expires_at: datetime | None = None
@@ -58,6 +58,20 @@ class CredentialCreate(BaseModel):
         if normalized not in {"not_configured", "configured", "needs_test", "test_failed", "test_passed"}:
             raise ValueError("auth_status must be not_configured, configured, needs_test, test_failed, or test_passed")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_platform_specific_fields(self) -> "CredentialCreate":
+        if self.platform == "coupang":
+            if not self.access_key:
+                raise ValueError("access_key is required for coupang credentials")
+            if not self.secret_key:
+                raise ValueError("secret_key is required for coupang credentials")
+        if self.platform == "naver":
+            if not self.client_id:
+                raise ValueError("client_id is required for naver credentials")
+            if not self.secret_key:
+                raise ValueError("secret_key is required for naver credentials")
+        return self
 
 
 class CredentialUpdate(BaseModel):

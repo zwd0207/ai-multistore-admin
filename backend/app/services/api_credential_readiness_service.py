@@ -11,11 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
 from app.models.api_credential import ApiCredential
 from app.models.store import Store
+from app.services.encryption import decrypt_value
 
+NAVER_DEFAULT_API_BASE = "https://api.commerce.naver.com/external"
 
 SMOKE_STEPS = [
     "token_test",
@@ -28,6 +31,14 @@ READINESS_NOTICE = (
     "Readiness only reports whether local environment variables are present. "
     "It does not return credential values, decrypt database credentials, call Naver or Coupang, "
     "refresh tokens, or execute sync."
+)
+STORE_BOUND_READINESS_NOTICE = (
+    "Store-bound readiness is a local database and decryptability check only. "
+    "It does not call Naver, fetch tokens, refresh tokens, or prove remote authorization."
+)
+ENV_FALLBACK_NOTICE = (
+    "Environment readiness is kept as a smoke-test fallback for local debugging. "
+    "It is not the final multi-store credential solution."
 )
 SMOKE_NOTICE = (
     "Smoke tests are readonly only. They never return credential values or raw signed requests, "
@@ -51,6 +62,174 @@ def _readiness_status(credential_status: str, real_api_test_enabled: bool) -> st
     if not real_api_test_enabled:
         return "disabled"
     return credential_status
+
+
+def _naver_api_base_from_extra_config(extra_config: dict | None) -> str:
+    if isinstance(extra_config, dict):
+        api_base = extra_config.get("api_base")
+        if isinstance(api_base, str) and api_base.strip():
+            return api_base.strip()
+    return NAVER_DEFAULT_API_BASE
+
+
+def _naver_channel_no_from_extra_config(extra_config: dict | None) -> str | None:
+    if not isinstance(extra_config, dict):
+        return None
+    channel_no = extra_config.get("channel_no")
+    if isinstance(channel_no, str) and channel_no.strip():
+        return channel_no.strip()
+    return None
+
+
+def _safe_decrypt(value: str | None) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    try:
+        return decrypt_value(value), True
+    except ApiError as exc:
+        if exc.error_code == "CREDENTIAL_DECRYPT_FAILED":
+            return None, False
+        raise
+
+
+def _get_active_store_credential(db: Session, store_id: int, platform: str) -> ApiCredential | None:
+    return db.scalar(
+        select(ApiCredential)
+        .where(
+            ApiCredential.store_id == store_id,
+            ApiCredential.platform == platform,
+            ApiCredential.status == "active",
+        )
+        .order_by(ApiCredential.id.desc())
+    )
+
+
+def _derive_access_token_status(
+    credential: ApiCredential,
+    warnings: list[str],
+) -> str:
+    if not credential.encrypted_access_token:
+        return "missing"
+
+    access_token, decryptable = _safe_decrypt(credential.encrypted_access_token)
+    if not decryptable:
+        warnings.append("access_token_decrypt_failed")
+        return "decrypt_failed"
+    if not _is_configured(access_token):
+        return "missing"
+
+    if credential.token_expires_at is None:
+        return "present"
+    token_expires_at = credential.token_expires_at
+    if token_expires_at.tzinfo is None:
+        token_expires_at = token_expires_at.replace(tzinfo=get_utc_now().tzinfo)
+    if token_expires_at <= get_utc_now():
+        return "expired"
+    return "valid_like"
+
+
+def _build_naver_store_bound_readiness(db: Session, store_id: int) -> dict:
+    store = db.get(Store, store_id)
+    if store is None:
+        raise ApiError(
+            message="Store not found",
+            error_code="STORE_NOT_FOUND",
+            status_code=404,
+            detail={"store_id": store_id},
+        )
+    if store.platform != "naver":
+        raise ApiError(
+            message="Selected store is not a Naver store",
+            error_code="STORE_PLATFORM_MISMATCH",
+            status_code=400,
+            detail={"store_id": store_id, "platform": store.platform, "expected_platform": "naver"},
+        )
+
+    credential = _get_active_store_credential(db, store_id, "naver")
+    warnings: list[str] = []
+    missing_fields: list[str] = []
+    api_base = NAVER_DEFAULT_API_BASE
+    channel_no_configured = False
+    access_token_status = "missing"
+    refresh_token_configured = False
+    token_expires_at = None
+    auth_status = "not_configured"
+    client_id_configured = False
+    secret_key_configured = False
+    secret_key_decryptable = False
+
+    if credential is None:
+        missing_fields.append("active_naver_credential")
+        warnings.extend(["env_readiness_is_fallback_only", "channel_no_optional_missing", "access_token_missing"])
+        return {
+            "store_id": store.id,
+            "platform": store.platform,
+            "credential_id": None,
+            "credential_name": None,
+            "configured": False,
+            "client_id_configured": False,
+            "secret_key_configured": False,
+            "secret_key_decryptable": False,
+            "api_base": api_base,
+            "channel_no_configured": False,
+            "access_token_status": "missing",
+            "refresh_token_configured": False,
+            "token_expires_at": None,
+            "auth_status": auth_status,
+            "missing_fields": missing_fields,
+            "warnings": warnings,
+        }
+
+    api_base = _naver_api_base_from_extra_config(credential.extra_config)
+    explicit_api_base = (
+        isinstance(credential.extra_config, dict)
+        and isinstance(credential.extra_config.get("api_base"), str)
+        and bool(credential.extra_config.get("api_base").strip())
+    )
+    channel_no_configured = bool(_naver_channel_no_from_extra_config(credential.extra_config))
+    client_id_configured = _is_configured(credential.client_id)
+    secret_key_configured = bool(credential.encrypted_secret_key)
+    _, secret_key_decryptable = _safe_decrypt(credential.encrypted_secret_key)
+    access_token_status = _derive_access_token_status(credential, warnings)
+    refresh_token_configured = bool(credential.encrypted_refresh_token)
+    token_expires_at = credential.token_expires_at
+    auth_status = credential.auth_status
+
+    if not client_id_configured:
+        missing_fields.append("client_id")
+    if not secret_key_configured:
+        missing_fields.append("secret_key")
+    if secret_key_configured and not secret_key_decryptable:
+        warnings.append("secret_key_decrypt_failed")
+    if not explicit_api_base:
+        warnings.append("api_base_defaulted")
+    if not channel_no_configured:
+        warnings.append("channel_no_optional_missing")
+    if access_token_status == "missing":
+        warnings.append("access_token_missing")
+    elif access_token_status == "expired":
+        warnings.append("access_token_expired")
+
+    configured = client_id_configured and secret_key_configured and secret_key_decryptable and bool(api_base)
+
+    return {
+        "store_id": store.id,
+        "platform": store.platform,
+        "credential_id": credential.id,
+        "credential_name": credential.credential_name,
+        "configured": configured,
+        "client_id_configured": client_id_configured,
+        "secret_key_configured": secret_key_configured,
+        "secret_key_decryptable": secret_key_decryptable,
+        "api_base": api_base,
+        "channel_no_configured": channel_no_configured,
+        "access_token_status": access_token_status,
+        "refresh_token_configured": refresh_token_configured,
+        "token_expires_at": token_expires_at,
+        "auth_status": auth_status,
+        "missing_fields": missing_fields,
+        "warnings": warnings,
+    }
 
 
 def _new_smoke_result(platform: str) -> dict:
@@ -107,7 +286,10 @@ def _step_from_response(result: dict, step: str, response: httpx.Response) -> bo
     return False
 
 
-def get_api_credential_readiness() -> dict:
+def get_api_credential_readiness(
+    db: Session | None = None,
+    store_id: int | None = None,
+) -> dict:
     settings = get_settings()
     real_api_test_enabled = bool(settings.real_api_test_enabled)
 
@@ -127,6 +309,8 @@ def get_api_credential_readiness() -> dict:
 
     return {
         "semantic_notice": READINESS_NOTICE,
+        "env_fallback_notice": ENV_FALLBACK_NOTICE,
+        "store_bound_readiness_notice": STORE_BOUND_READINESS_NOTICE,
         "real_api_test_enabled": real_api_test_enabled,
         "real_api_write_enabled": bool(settings.real_api_write_enabled),
         "platforms": [
@@ -143,6 +327,7 @@ def get_api_credential_readiness() -> dict:
                 "fields": naver_fields,
             },
         ],
+        "store_bound_readiness": _build_naver_store_bound_readiness(db, store_id) if db is not None and store_id is not None else None,
     }
 
 

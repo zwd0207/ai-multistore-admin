@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
@@ -14,8 +14,11 @@ router = APIRouter(prefix="/api-credentials", tags=["api-credentials"])
 
 
 @router.get("/readiness")
-def read_api_credential_readiness() -> dict:
-    return success_response(data=get_api_credential_readiness())
+def read_api_credential_readiness(
+    store_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return success_response(data=get_api_credential_readiness(db=db, store_id=store_id))
 
 
 @router.post("/smoke-test")

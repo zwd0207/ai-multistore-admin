@@ -7,6 +7,8 @@ from app.schemas.credential import CredentialCreate, CredentialUpdate, Decrypted
 from app.services.encryption import decrypt_value, encrypt_value
 from app.services.store_service import ensure_store_exists
 
+NAVER_DEFAULT_API_BASE = "https://api.commerce.naver.com/external"
+
 
 def _serialize_credential(credential: ApiCredential) -> dict:
     return {
@@ -32,8 +34,87 @@ def _serialize_credential(credential: ApiCredential) -> dict:
     }
 
 
+def _normalize_naver_extra_config(
+    extra_config: dict | None,
+    existing_extra_config: dict | None = None,
+) -> dict:
+    merged: dict = dict(existing_extra_config or {})
+    if extra_config:
+        merged.update(extra_config)
+
+    api_base = merged.get("api_base")
+    if isinstance(api_base, str) and api_base.strip():
+        merged["api_base"] = api_base.strip()
+    else:
+        merged["api_base"] = NAVER_DEFAULT_API_BASE
+
+    channel_no = merged.get("channel_no")
+    if isinstance(channel_no, str):
+        channel_no = channel_no.strip()
+        if channel_no:
+            merged["channel_no"] = channel_no
+        else:
+            merged.pop("channel_no", None)
+
+    return merged
+
+
+def _normalize_extra_config(
+    platform: str,
+    extra_config: dict | None,
+    existing_extra_config: dict | None = None,
+) -> dict | None:
+    if platform == "naver":
+        return _normalize_naver_extra_config(extra_config, existing_extra_config=existing_extra_config)
+    return extra_config
+
+
+def _validate_platform_specific_credential_fields(
+    *,
+    platform: str,
+    client_id: str | None,
+    access_key_present: bool,
+    secret_key_present: bool,
+) -> None:
+    if platform == "coupang":
+        missing_fields: list[str] = []
+        if not access_key_present:
+            missing_fields.append("access_key")
+        if not secret_key_present:
+            missing_fields.append("secret_key")
+        if missing_fields:
+            raise ApiError(
+                message="Coupang credentials require access_key and secret_key",
+                error_code="INVALID_CREDENTIAL_FIELDS",
+                status_code=400,
+                detail={"platform": platform, "missing_fields": missing_fields},
+            )
+        return
+
+    if platform == "naver":
+        missing_fields: list[str] = []
+        if not client_id:
+            missing_fields.append("client_id")
+        if not secret_key_present:
+            missing_fields.append("secret_key")
+        if missing_fields:
+            raise ApiError(
+                message="Naver credentials require client_id and secret_key",
+                error_code="INVALID_CREDENTIAL_FIELDS",
+                status_code=400,
+                detail={"platform": platform, "missing_fields": missing_fields},
+            )
+
+
 def create_credential(db: Session, payload: CredentialCreate) -> dict:
     ensure_store_exists(db, payload.store_id)
+    extra_config = _normalize_extra_config(payload.platform, payload.extra_config)
+    _validate_platform_specific_credential_fields(
+        platform=payload.platform,
+        client_id=payload.client_id,
+        access_key_present=bool(payload.access_key),
+        secret_key_present=bool(payload.secret_key),
+    )
     credential = ApiCredential(
         store_id=payload.store_id,
         platform=payload.platform,
@@ -49,7 +130,7 @@ def create_credential(db: Session, payload: CredentialCreate) -> dict:
         auth_status=payload.auth_status,
         last_tested_at=payload.last_tested_at,
         api_remark=payload.api_remark,
-        extra_config=payload.extra_config,
+        extra_config=extra_config,
         status=payload.status,
     )
     db.add(credential)
@@ -94,6 +175,25 @@ def _get_credential_model(db: Session, credential_id: int) -> ApiCredential:
 def update_credential(db: Session, credential_id: int, payload: CredentialUpdate) -> dict:
     credential = _get_credential_model(db, credential_id)
     updates = payload.model_dump(exclude_unset=True)
+    target_platform = updates.get("platform") or credential.platform
+    target_client_id = updates["client_id"] if "client_id" in updates else credential.client_id
+    target_access_key_present = (
+        bool(updates.get("access_key"))
+        if "access_key" in updates
+        else bool(credential.encrypted_access_key)
+    )
+    target_secret_key_present = (
+        bool(updates.get("secret_key"))
+        if "secret_key" in updates
+        else bool(credential.encrypted_secret_key)
+    )
+
+    _validate_platform_specific_credential_fields(
+        platform=target_platform,
+        client_id=target_client_id,
+        access_key_present=target_access_key_present,
+        secret_key_present=target_secret_key_present,
+    )
 
     if "store_id" in updates and updates["store_id"] is not None:
         ensure_store_exists(db, updates["store_id"])
@@ -125,7 +225,16 @@ def update_credential(db: Session, credential_id: int, payload: CredentialUpdate
     if "api_remark" in updates:
         credential.api_remark = updates["api_remark"] or None
     if "extra_config" in updates:
-        credential.extra_config = updates["extra_config"]
+        credential.extra_config = _normalize_extra_config(
+            target_platform,
+            updates["extra_config"],
+            existing_extra_config=credential.extra_config,
+        )
+    elif target_platform == "naver":
+        credential.extra_config = _normalize_extra_config(
+            target_platform,
+            credential.extra_config,
+        )
     if "status" in updates and updates["status"] is not None:
         credential.status = updates["status"]
 
