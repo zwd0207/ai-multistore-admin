@@ -3,7 +3,8 @@ import hmac
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, time, timezone
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 import httpx
@@ -16,6 +17,7 @@ from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now
 from app.models.order import Order
+from app.models.sync_checkpoint import SyncCheckpoint
 from app.schemas.credential import DecryptedCredential
 from app.services import credential_service, customer_inquiry_service, order_service, product_service, sync_log_service
 from app.services.store_service import ensure_store_exists, normalize_platform
@@ -26,6 +28,8 @@ CLIENTS = {
     "coupang": CoupangClient,
 }
 COUPANG_ORDER_PREVIEW_SYNC_TYPE = "orders_coupang_real_preview"
+COUPANG_ORDER_SYNC_TYPE = "orders_coupang_real"
+COUPANG_ORDER_CHECKPOINT_SYNC_TYPE = "orders"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_ORDER_PREVIEW_MAX_DAYS = 3
 COUPANG_ORDER_PREVIEW_MAX_PAGES = 3
@@ -226,28 +230,15 @@ def preview_coupang_orders(
     )
 
     try:
-        unique_order_ids: list[str] = []
-        seen_ids: set[str] = set()
-        next_token: str | None = None
-        page_count = 0
-
-        while page_count < max_pages:
-            payload = _fetch_coupang_order_preview_page(
-                credential=credential,
-                start_date=start_date,
-                end_date=end_date,
-                next_token=next_token,
-            )
-            page_ids = _extract_order_ids_from_preview_payload(payload)
-            for order_id in page_ids:
-                if order_id in seen_ids:
-                    continue
-                seen_ids.add(order_id)
-                unique_order_ids.append(order_id)
-            page_count += 1
-            next_token = _extract_next_token(payload)
-            if not next_token:
-                break
+        page_result = _fetch_coupang_order_pages(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=max_pages,
+        )
+        unique_order_ids = [_resolve_preview_order_id(item) for item in page_result["items"]]
+        page_count = page_result["page_count"]
+        next_token = page_result["next_token"]
 
         existing_ids = _find_existing_order_ids(db, store_id=store_id, platform="coupang", external_order_ids=unique_order_ids)
         result = {
@@ -305,6 +296,337 @@ def preview_coupang_orders(
             error_code="COUPANG_ORDER_PREVIEW_FAILED",
             status_code=502,
         ) from exc
+
+
+def sync_coupang_orders(
+    db: Session,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    max_pages: int = 1,
+) -> dict:
+    settings = get_settings()
+    if not settings.real_api_test_enabled:
+        raise ApiError(
+            message="Readonly real API sync is disabled",
+            error_code="REAL_API_TEST_DISABLED",
+            status_code=403,
+        )
+
+    _ensure_coupang_store(db, store_id)
+    start_date, end_date = _resolve_preview_date_range(start_date, end_date)
+    if max_pages < 1 or max_pages > COUPANG_ORDER_PREVIEW_MAX_PAGES:
+        raise ApiError(
+            message="max_pages must be between 1 and 3",
+            error_code="INVALID_SYNC_WINDOW",
+            status_code=400,
+            detail={"max_pages": max_pages, "allowed_max_pages": COUPANG_ORDER_PREVIEW_MAX_PAGES},
+        )
+
+    credential = credential_service.get_decrypted_credential_by_store_and_platform(db, store_id, "coupang")
+    _ensure_coupang_preview_credential(credential)
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="coupang",
+        sync_type=COUPANG_ORDER_SYNC_TYPE,
+        message="coupang readonly order sync started",
+        raw_summary={
+            "stage": "started",
+            "source_type": COUPANG_ORDER_SOURCE_TYPE,
+            "write_scope": "local_orders_only",
+            "platform_write": False,
+            "window": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+            "max_pages": max_pages,
+        },
+    )
+
+    try:
+        page_result = _fetch_coupang_order_pages(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=max_pages,
+        )
+        synced_at = get_utc_now()
+        order_items = [
+            _to_coupang_order_payload(item, synced_at=synced_at)
+            for item in page_result["items"]
+        ]
+        write_result = order_service.upsert_orders(db, store_id, "coupang", order_items)
+        sample_ids = [item["external_order_id"] for item in order_items[:10]]
+        result = {
+            "store_id": store_id,
+            "platform": "coupang",
+            "sync_type": COUPANG_ORDER_SYNC_TYPE,
+            "source_type": COUPANG_ORDER_SOURCE_TYPE,
+            "write_scope": "local_orders_only",
+            "platform_write": False,
+            "real_api_write_enabled": settings.real_api_write_enabled,
+            "business_timezone": get_business_timezone().key,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "window_start_at": get_business_day_range(start_date)[0].isoformat(),
+            "window_end_at": get_business_day_range(end_date)[1].isoformat(),
+            "max_pages": max_pages,
+            "page_count": page_result["page_count"],
+            "next_cursor_exists": bool(page_result["next_token"]),
+            "created_count": write_result["created"],
+            "updated_count": write_result["updated"],
+            "skipped_count": 0,
+            "sample_ids": sample_ids,
+            "last_synced_at": synced_at.isoformat(),
+        }
+        checkpoint = _upsert_coupang_order_checkpoint(
+            db,
+            store_id=store_id,
+            start_date=start_date,
+            end_date=end_date,
+            next_cursor_exists=bool(page_result["next_token"]),
+            synced_at=synced_at,
+        )
+        result["checkpoint"] = checkpoint
+        finished_log = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly order sync success",
+            raw_summary=_order_sync_summary_for_log(result),
+        )
+        result["sync_log"] = finished_log
+        return result
+    except ApiError as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly order sync failed",
+            error_detail=_mask_sensitive_text(exc.message),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_ORDER_SOURCE_TYPE,
+                "error_code": exc.error_code,
+            },
+        )
+        raise
+    except Exception as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly order sync failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_ORDER_SOURCE_TYPE,
+                "error_code": "COUPANG_ORDER_SYNC_FAILED",
+            },
+        )
+        raise ApiError(
+            message="Coupang readonly order sync failed",
+            error_code="COUPANG_ORDER_SYNC_FAILED",
+            status_code=502,
+        ) from exc
+
+
+def _ensure_coupang_store(db: Session, store_id: int) -> None:
+    store = ensure_store_exists(db, store_id)
+    if normalize_platform(store.platform) != "coupang":
+        raise ApiError(
+            message="Coupang order sync requires a Coupang store",
+            error_code="STORE_PLATFORM_MISMATCH",
+            status_code=400,
+            detail={"store_id": store_id, "store_platform": store.platform},
+        )
+
+
+def _fetch_coupang_order_pages(
+    credential: DecryptedCredential,
+    start_date: date,
+    end_date: date,
+    max_pages: int,
+) -> dict:
+    unique_items: list[dict] = []
+    seen_ids: set[str] = set()
+    next_token: str | None = None
+    page_count = 0
+
+    while page_count < max_pages:
+        payload = _fetch_coupang_order_preview_page(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            next_token=next_token,
+        )
+        for item in _extract_preview_items(payload):
+            order_id = _resolve_preview_order_id(item)
+            if order_id in seen_ids:
+                continue
+            seen_ids.add(order_id)
+            unique_items.append(item)
+        page_count += 1
+        next_token = _extract_next_token(payload)
+        if not next_token:
+            break
+
+    return {
+        "items": unique_items,
+        "page_count": page_count,
+        "next_token": next_token,
+    }
+
+
+def _to_coupang_order_payload(item: dict, synced_at: datetime) -> dict:
+    external_order_id = _resolve_preview_order_id(item)
+    ordered_at = _extract_datetime_by_keys(
+        item,
+        ("orderedAt", "orderDate", "createdAt", "paidAt", "paymentDate", "orderedDate"),
+    ) or synced_at
+    paid_at = _extract_datetime_by_keys(item, ("paidAt", "paymentDate", "paidDate"))
+
+    return {
+        "external_order_id": external_order_id,
+        "buyer_name": _extract_scalar_by_keys(item, ("buyerName", "ordererName", "receiverName")),
+        "buyer_masked_phone": _mask_phone(_extract_scalar_by_keys(item, ("buyerPhone", "ordererPhone", "receiverPhone", "ordererSafeNumber", "receiverSafeNumber"))),
+        "product_name": _extract_scalar_by_keys(
+            item,
+            ("sellerProductName", "productName", "vendorItemName", "itemName", "orderItemName"),
+        )
+        or f"Coupang order {external_order_id}",
+        "quantity": _extract_int_by_keys(item, ("quantity", "shippingCount", "orderCount", "count")) or 1,
+        "order_amount": _extract_decimal_by_keys(
+            item,
+            ("orderAmount", "paidAmount", "paymentAmount", "totalPrice", "orderPrice", "salesPrice"),
+        )
+        or Decimal("0"),
+        "currency": _extract_scalar_by_keys(item, ("currency", "currencyCode")) or "KRW",
+        "order_status": _extract_scalar_by_keys(item, ("orderStatus", "status", "shipmentStatus")) or "unknown",
+        "paid_at": paid_at,
+        "ordered_at": ordered_at,
+        "source_type": COUPANG_ORDER_SOURCE_TYPE,
+        "last_synced_at": synced_at,
+        "raw_data": None,
+    }
+
+
+def _extract_int_by_keys(payload: object, keys: tuple[str, ...]) -> int | None:
+    value = _extract_scalar_by_keys(payload, keys)
+    if value is None:
+        return None
+    try:
+        return int(str(value).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _extract_decimal_by_keys(payload: object, keys: tuple[str, ...]) -> Decimal | None:
+    value = _extract_scalar_by_keys(payload, keys)
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _extract_datetime_by_keys(payload: object, keys: tuple[str, ...]) -> datetime | None:
+    value = _extract_scalar_by_keys(payload, keys)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            parsed = datetime.combine(date.fromisoformat(text), time.min)
+        else:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=get_business_timezone())
+    return parsed.astimezone(timezone.utc)
+
+
+def _mask_phone(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    if len(digits) <= 4:
+        return "****"
+    return f"****{digits[-4:]}"
+
+
+def _upsert_coupang_order_checkpoint(
+    db: Session,
+    store_id: int,
+    start_date: date,
+    end_date: date,
+    next_cursor_exists: bool,
+    synced_at: datetime,
+) -> dict:
+    checkpoint = db.scalar(
+        select(SyncCheckpoint).where(
+            SyncCheckpoint.store_id == store_id,
+            SyncCheckpoint.platform == "coupang",
+            SyncCheckpoint.sync_type == COUPANG_ORDER_CHECKPOINT_SYNC_TYPE,
+        )
+    )
+    window_start_at, window_end_at = get_business_day_range(start_date)[0], get_business_day_range(end_date)[1]
+    cursor_value = json.dumps(
+        {
+            "last_window": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+            "next_cursor_exists": next_cursor_exists,
+        },
+        ensure_ascii=True,
+    )
+    notes = json.dumps(
+        {
+            "source_type": COUPANG_ORDER_SOURCE_TYPE,
+            "last_success_at": synced_at.isoformat(),
+            "write_scope": "local_orders_only",
+        },
+        ensure_ascii=True,
+    )
+
+    if checkpoint is None:
+        checkpoint = SyncCheckpoint(
+            store_id=store_id,
+            platform="coupang",
+            sync_type=COUPANG_ORDER_CHECKPOINT_SYNC_TYPE,
+            cursor_value=cursor_value,
+            window_start_at=window_start_at,
+            window_end_at=window_end_at,
+            last_synced_at=synced_at,
+            notes=notes,
+        )
+        db.add(checkpoint)
+    else:
+        checkpoint.cursor_value = cursor_value
+        checkpoint.window_start_at = window_start_at
+        checkpoint.window_end_at = window_end_at
+        checkpoint.last_synced_at = synced_at
+        checkpoint.notes = notes
+
+    db.commit()
+    db.refresh(checkpoint)
+    return {
+        "id": checkpoint.id,
+        "store_id": checkpoint.store_id,
+        "platform": checkpoint.platform,
+        "sync_type": checkpoint.sync_type,
+        "cursor_value": checkpoint.cursor_value,
+        "window_start_at": _utc_isoformat(checkpoint.window_start_at),
+        "window_end_at": _utc_isoformat(checkpoint.window_end_at),
+        "last_synced_at": _utc_isoformat(checkpoint.last_synced_at),
+        "notes": checkpoint.notes,
+    }
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _resolve_preview_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
@@ -526,6 +848,25 @@ def _preview_summary_for_log(result: dict) -> dict:
         "would_update": result["would_update"],
         "sample_ids": result["sample_ids"],
         "window": {
+            "start_date": result["start_date"],
+            "end_date": result["end_date"],
+            "business_timezone": result["business_timezone"],
+        },
+    }
+
+
+def _order_sync_summary_for_log(result: dict) -> dict:
+    return {
+        "source_type": result["source_type"],
+        "write_scope": result["write_scope"],
+        "platform_write": result["platform_write"],
+        "created_count": result["created_count"],
+        "updated_count": result["updated_count"],
+        "skipped_count": result["skipped_count"],
+        "page_count": result["page_count"],
+        "next_cursor_exists": result["next_cursor_exists"],
+        "sample_ids": result["sample_ids"],
+        "date_window": {
             "start_date": result["start_date"],
             "end_date": result["end_date"],
             "business_timezone": result["business_timezone"],

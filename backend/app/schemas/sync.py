@@ -14,3 +14,7 @@ class CoupangOrderPreviewRequest(BaseModel):
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be less than or equal to end_date")
         return self
+
+
+class CoupangOrderSyncRequest(CoupangOrderPreviewRequest):
+    pass

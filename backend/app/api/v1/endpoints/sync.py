@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
 from app.database import get_db
-from app.schemas.sync import CoupangOrderPreviewRequest
+from app.schemas.sync import CoupangOrderPreviewRequest, CoupangOrderSyncRequest
 from app.services import sync_service
 
 
@@ -43,6 +43,21 @@ def preview_coupang_orders(
         max_pages=payload.max_pages,
     )
     return success_response(data=result, message="coupang readonly preview completed")
+
+
+@router.post("/orders/coupang")
+def sync_coupang_orders(
+    payload: CoupangOrderSyncRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.sync_coupang_orders(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        max_pages=payload.max_pages,
+    )
+    return success_response(data=result, message="coupang readonly order sync completed")
 
 
 @router.post("/customer-inquiries/mock")
