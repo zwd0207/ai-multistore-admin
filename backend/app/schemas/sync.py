@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -34,6 +34,24 @@ class NaverProductPreviewRequest(BaseModel):
     status: str | None = Field(default="ALL")
     keyword: str | None = Field(default=None, max_length=120)
     seller_product_id: str | None = Field(default=None, max_length=120)
+
+
+class NaverOrderPreviewRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    credential_id: int | None = Field(default=None, ge=1)
+    start_datetime: datetime
+    end_datetime: datetime
+    order_status: str | None = Field(default="ALL")
+    page: int = Field(default=1, ge=1, le=1)
+    size: int = Field(default=1, ge=1, le=1)
+    real_preview: bool = False
+    include_detail: bool = False
+
+    @model_validator(mode="after")
+    def validate_datetime_range(self) -> "NaverOrderPreviewRequest":
+        if self.end_datetime <= self.start_datetime:
+            raise ValueError("end_datetime must be greater than start_datetime")
+        return self
 
 
 class CoupangSalesPreviewRequest(BaseModel):

@@ -231,7 +231,7 @@ Naver Commerce API documentation is tracked against the current / 2.81.0 documen
 | Planned API | Current status | Naver reference route | Preview strategy |
 |---|---|---|---|
 | `POST /api/v1/sync/products/naver/preview` | Scaffold endpoint exists; real request not open; `safe_to_real_test=false` | `POST /v1/products/search` | Returns `guardrail_blocked` before token/HTTP until request parameters are verified |
-| `POST /api/v1/sync/orders/naver/preview` | Not implemented; `safe_to_real_test=false` | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then query details by `productOrderId` |
+| `POST /api/v1/sync/orders/naver/preview` | Scaffold endpoint exists; default blocked; real micro preview requires explicit gate | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then optionally query one detail by `productOrderId` |
 
 The older direct order draft route `GET /v1/pay-order/seller/product-orders` is treated as `deprecated_or_unconfirmed` and must not be used for real readonly testing. Product and order preview, when implemented later, must be preview-only:
 
@@ -277,6 +277,10 @@ Sanitized counts/samples only
 ```
 
 For the blocked scaffold path, the service does not create a Naver HTTP client, does not request a token, does not call `POST /v1/products/search`, does not write `products`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`. Credential decryption only means the local encrypted secret is readable; it does not mean product API access is available.
+
+`POST /api/v1/sync/orders/naver/preview` is a readonly micro preview scaffold. The default `real_preview=false` returns `guardrail_status=blocked` before token/HTTP. `real_preview=true` is allowed only for the approved local Naver store/credential, with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, `page=1`, `size=1`, KST window <= 1 day, and `order_status` null/ALL. It still does not mean Naver order sync is open, and `naver.order_read.safe_to_real_test` remains false.
+
+The real micro preview first calls the last-changed feed. Detail lookup is a second step and only runs when `include_detail=true` and the feed produced a `productOrderId`; it queries at most one ID. The response returns only masked sample IDs and field observations. It never returns full order IDs, full productOrderIds, buyer/receiver names, phone numbers, addresses, delivery detail, payment raw payload, raw response bodies, tokens, authorization headers, signatures, or full channel numbers. It does not write `orders`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`.
 
 Current frontend-facing business wording should remain conservative:
 

@@ -64,6 +64,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/sync/settlements/coupang",
     "/api/v1/sync/orders/mock",
     "/api/v1/sync/orders/coupang/preview",
+    "/api/v1/sync/orders/naver/preview",
     "/api/v1/sync/orders/coupang",
     "/api/v1/sync/customer-inquiries/mock",
     "/api/v1/stats/sales",
@@ -1374,7 +1375,7 @@ def verify_sync_preview_schema_and_security() -> None:
     from app.models.product import Product
     from app.models.sync_checkpoint import SyncCheckpoint
     from app.models.sync_log import SyncLog
-    from app.services import sync_service
+    from app.services import api_credential_readiness_service, sync_service
     from scripts.upgrade_sync_schema import upgrade
 
     upgrade()
@@ -1618,6 +1619,246 @@ def verify_sync_preview_schema_and_security() -> None:
                         assert forbidden not in fake_summary_text, fake_summary_text
             finally:
                 sync_service.httpx.Client = original_http_client
+
+            missing_order_store_id = client.post("/api/v1/sync/orders/naver/preview", json={
+                "credential_id": naver_credential_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-01T01:00:00+09:00",
+            })
+            assert missing_order_store_id.status_code == 422, missing_order_store_id.text
+
+            naver_order_platform_mismatch = client.post("/api/v1/sync/orders/naver/preview", json={
+                "store_id": store_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-01T01:00:00+09:00",
+            })
+            assert naver_order_platform_mismatch.status_code == 400, naver_order_platform_mismatch.text
+            assert naver_order_platform_mismatch.json()["error_code"] == "STORE_PLATFORM_MISMATCH", naver_order_platform_mismatch.text
+
+            naver_order_credential_mismatch = client.post("/api/v1/sync/orders/naver/preview", json={
+                "store_id": naver_store_id,
+                "credential_id": other_naver_credential_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-01T01:00:00+09:00",
+            })
+            assert naver_order_credential_mismatch.status_code == 400, naver_order_credential_mismatch.text
+            assert naver_order_credential_mismatch.json()["error_code"] == "credential_not_ready", naver_order_credential_mismatch.text
+
+            naver_order_unsupported_status = client.post("/api/v1/sync/orders/naver/preview", json={
+                "store_id": naver_store_id,
+                "credential_id": naver_credential_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-01T01:00:00+09:00",
+                "order_status": "PAYED",
+            })
+            assert naver_order_unsupported_status.status_code == 400, naver_order_unsupported_status.text
+            assert naver_order_unsupported_status.json()["error_code"] == "unsupported_status_filter", naver_order_unsupported_status.text
+
+            naver_order_long_window = client.post("/api/v1/sync/orders/naver/preview", json={
+                "store_id": naver_store_id,
+                "credential_id": naver_credential_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-02T00:00:01+09:00",
+                "real_preview": True,
+            })
+            assert naver_order_long_window.status_code == 400, naver_order_long_window.text
+            assert naver_order_long_window.json()["error_code"] == "date_range_invalid", naver_order_long_window.text
+
+            naver_order_size_too_large = client.post("/api/v1/sync/orders/naver/preview", json={
+                "store_id": naver_store_id,
+                "credential_id": naver_credential_id,
+                "start_datetime": "2026-07-01T00:00:00+09:00",
+                "end_datetime": "2026-07-01T01:00:00+09:00",
+                "size": 2,
+                "real_preview": True,
+            })
+            assert naver_order_size_too_large.status_code == 422, naver_order_size_too_large.text
+
+            original_store_bound_token = api_credential_readiness_service._request_naver_token_from_context
+            original_http_client = sync_service.httpx.Client
+
+            class ForbiddenNaverOrderHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    raise AssertionError("blocked Naver order preview must not create an HTTP client")
+
+            sync_service.httpx.Client = ForbiddenNaverOrderHttpClient
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                AssertionError("blocked Naver order preview must not request token")
+            )
+            try:
+                with SessionLocal() as db:
+                    before_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_order_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
+                    before_order_cap_success = len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all())
+                blocked_order_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                })
+                assert blocked_order_preview.status_code == 200, blocked_order_preview.text
+                blocked_order_data = blocked_order_preview.json()["data"]
+                assert blocked_order_data["platform"] == "naver", blocked_order_data
+                assert blocked_order_data["preview_type"] == "orders", blocked_order_data
+                assert blocked_order_data["source_type"] == "naver_order_preview", blocked_order_data
+                assert blocked_order_data["guardrail_status"] == "blocked", blocked_order_data
+                assert blocked_order_data["preview_status"] == "blocked", blocked_order_data
+                assert blocked_order_data["test_status"] == "not_tested", blocked_order_data
+                assert blocked_order_data["error_code"] == "guardrail_blocked", blocked_order_data
+                assert blocked_order_data["field_observation"]["feed_called"] is False, blocked_order_data
+                assert blocked_order_data["field_observation"]["detail_called"] is False, blocked_order_data
+                assert blocked_order_data["field_observation"]["orders_written"] is False, blocked_order_data
+                with SessionLocal() as db:
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_order_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_order_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_order_cap_success
+            finally:
+                sync_service.httpx.Client = original_http_client
+                api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
+
+            os.environ["REAL_API_TEST_ENABLED"] = "true"
+            os.environ["REAL_API_WRITE_ENABLED"] = "false"
+            app_config.get_settings.cache_clear()
+
+            class FakeNaverOrderResponse:
+                def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
+                    self.status_code = status_code
+                    self._payload = payload or {}
+                    self.text = text
+
+                def json(self) -> dict:
+                    return self._payload
+
+                def raise_for_status(self) -> None:
+                    if self.status_code >= 400:
+                        request = httpx.Request("GET", "https://example.invalid")
+                        response = httpx.Response(self.status_code, request=request, text=self.text)
+                        raise httpx.HTTPStatusError("failed", request=request, response=response)
+
+            class FakeNaverOrderHttpClient:
+                detail_called = False
+                feed_called = False
+
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    assert url.endswith("/v1/pay-order/seller/product-orders/last-changed-statuses"), url
+                    assert params["limitCount"] == 1, params
+                    FakeNaverOrderHttpClient.feed_called = True
+                    return FakeNaverOrderResponse(200, {
+                        "data": {
+                            "lastChangeStatuses": [
+                                {
+                                    "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
+                                    "orderId": "ORDER-ID-MUST-NOT-LEAK-1234567890",
+                                    "buyerName": "must-not-leak-buyer",
+                                    "receiverName": "must-not-leak-receiver",
+                                    "receiverTelNo1": "010-1111-2222",
+                                    "receiverAddress": "must-not-leak-address",
+                                }
+                            ],
+                            "hasMore": False,
+                        }
+                    })
+
+                def post(self, url: str, headers=None, json=None):
+                    assert url.endswith("/v1/pay-order/seller/product-orders/query"), url
+                    assert json == {"productOrderIds": ["PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890"]}, json
+                    FakeNaverOrderHttpClient.detail_called = True
+                    return FakeNaverOrderResponse(200, {
+                        "data": [
+                            {
+                                "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
+                                "buyerName": "must-not-leak-buyer",
+                                "receiverAddress": "must-not-leak-address",
+                                "paymentDetail": {"raw": "must-not-leak-payment"},
+                            }
+                        ]
+                    })
+
+            sync_service.httpx.Client = FakeNaverOrderHttpClient
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-order-token", 200)
+            try:
+                feed_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": False,
+                })
+                assert feed_preview.status_code == 200, feed_preview.text
+                feed_data = feed_preview.json()["data"]
+                assert feed_data["preview_status"] == "success", feed_data
+                assert feed_data["test_status"] == "preview_success", feed_data
+                assert feed_data["guardrail_status"] == "allowed", feed_data
+                assert feed_data["field_observation"]["feed_called"] is True, feed_data
+                assert feed_data["field_observation"]["detail_called"] is False, feed_data
+                assert feed_data["field_observation"]["raw_response_saved"] is False, feed_data
+                assert feed_data["field_observation"]["orders_written"] is False, feed_data
+                assert feed_data["sample_ids"] and feed_data["sample_ids"][0].startswith("id-hash-"), feed_data
+                feed_text = str(feed_preview.json()).lower()
+                for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "order-id-must-not-leak",
+                    "must-not-leak-buyer",
+                    "must-not-leak-receiver",
+                    "010-1111-2222",
+                    "must-not-leak-address",
+                    "fake-order-token",
+                    "authorization",
+                ]:
+                    assert forbidden not in feed_text, feed_text
+
+                detail_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                })
+                assert detail_preview.status_code == 200, detail_preview.text
+                detail_data = detail_preview.json()["data"]
+                assert detail_data["preview_status"] == "success", detail_data
+                assert detail_data["field_observation"]["feed_called"] is True, detail_data
+                assert detail_data["field_observation"]["detail_called"] is True, detail_data
+                assert detail_data["field_observation"]["detail_limit"] == 1, detail_data
+                assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
+                detail_text = str(detail_preview.json()).lower()
+                for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "order-id-must-not-leak",
+                    "must-not-leak-buyer",
+                    "must-not-leak-address",
+                    "must-not-leak-payment",
+                    "fake-order-token",
+                    "authorization",
+                ]:
+                    assert forbidden not in detail_text, detail_text
+            finally:
+                sync_service.httpx.Client = original_http_client
+                api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
+                os.environ["REAL_API_TEST_ENABLED"] = original_test_enabled or "false"
+                os.environ["REAL_API_WRITE_ENABLED"] = "false"
+                app_config.get_settings.cache_clear()
 
             credential = client.post("/api/v1/credentials", json={
                 "store_id": store_id,

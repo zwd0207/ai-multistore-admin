@@ -45,6 +45,7 @@ COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
 COUPANG_SETTLEMENT_SYNC_TYPE = "settlements_coupang_real"
 COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
 NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
+NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
@@ -1109,7 +1110,69 @@ def preview_coupang_orders(
             message="Coupang order preview failed",
             error_code="COUPANG_ORDER_PREVIEW_FAILED",
             status_code=502,
-        ) from exc
+    ) from exc
+
+
+def preview_naver_orders(
+    db: Session,
+    store_id: int,
+    credential_id: int | None,
+    start_datetime: datetime,
+    end_datetime: datetime,
+    order_status: str | None = "ALL",
+    page: int = 1,
+    size: int = 1,
+    real_preview: bool = False,
+    include_detail: bool = False,
+) -> dict:
+    normalized_status = _resolve_naver_order_preview_status(order_status)
+    start_kst, end_kst = _resolve_naver_order_preview_window(start_datetime, end_datetime)
+    credential = _ensure_naver_product_preview_credential(
+        db,
+        store_id=store_id,
+        credential_id=credential_id,
+    )
+    field_observation = _build_naver_order_preview_field_observation(credential)
+    if not real_preview:
+        return _build_naver_order_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            start_datetime=start_kst.isoformat(),
+            end_datetime=end_kst.isoformat(),
+            page=page,
+            size=size,
+            order_status=normalized_status,
+            guardrail_status="blocked",
+            preview_status="blocked",
+            test_status="not_tested",
+            error_code="guardrail_blocked",
+            field_observation=field_observation,
+            sample_ids=[],
+            has_more=False,
+            would_create=0,
+            would_update=0,
+        )
+
+    _ensure_naver_order_real_preview_allowed(
+        store_id=store_id,
+        credential_id=credential.id,
+        page=page,
+        size=size,
+        start_kst=start_kst,
+        end_kst=end_kst,
+        field_observation=field_observation,
+    )
+    return _run_naver_order_real_micro_preview(
+        credential=credential,
+        store_id=store_id,
+        start_kst=start_kst,
+        end_kst=end_kst,
+        order_status=normalized_status,
+        page=page,
+        size=size,
+        include_detail=include_detail,
+        field_observation=field_observation,
+    )
 
 
 def sync_coupang_orders(
@@ -1419,6 +1482,409 @@ def _build_naver_product_fake_preview_summary(
             "raw_payload_saved": False,
             "fake_summary_only": True,
         },
+    }
+
+
+def _resolve_naver_order_preview_status(order_status: str | None) -> str:
+    if order_status is None:
+        return "ALL"
+    normalized = order_status.strip().upper()
+    if normalized == "ALL":
+        return "ALL"
+    raise ApiError(
+        message="Naver order preview status is not supported in this micro preview phase",
+        error_code="unsupported_status_filter",
+        status_code=400,
+        detail={"order_status": order_status, "allowed_statuses": ["ALL"]},
+    )
+
+
+def _resolve_naver_order_preview_window(start_datetime: datetime, end_datetime: datetime) -> tuple[datetime, datetime]:
+    business_tz = get_business_timezone()
+    if start_datetime.tzinfo is None:
+        start_kst = start_datetime.replace(tzinfo=business_tz)
+    else:
+        start_kst = start_datetime.astimezone(business_tz)
+    if end_datetime.tzinfo is None:
+        end_kst = end_datetime.replace(tzinfo=business_tz)
+    else:
+        end_kst = end_datetime.astimezone(business_tz)
+    if end_kst <= start_kst:
+        raise ApiError(
+            message="Naver order preview end_datetime must be greater than start_datetime",
+            error_code="date_range_invalid",
+            status_code=400,
+        )
+    if end_kst - start_kst > timedelta(days=1):
+        raise ApiError(
+            message="Naver order micro preview window must be 1 KST day or less",
+            error_code="date_range_invalid",
+            status_code=400,
+            detail={
+                "start_datetime": start_kst.isoformat(),
+                "end_datetime": end_kst.isoformat(),
+                "max_window": "P1D",
+            },
+        )
+    return start_kst, end_kst
+
+
+def _build_naver_order_preview_field_observation(credential) -> dict:
+    return {
+        "channel_no_configured": _naver_channel_no_configured(credential.extra_config),
+        "preferred_preview_strategy": "last_changed_feed_then_detail_query",
+        "feed_called": False,
+        "detail_called": False,
+        "detail_limit": 0,
+        "raw_response_saved": False,
+        "orders_written": False,
+        "safe_to_real_test": False,
+    }
+
+
+def _ensure_naver_order_real_preview_allowed(
+    *,
+    store_id: int,
+    credential_id: int,
+    page: int,
+    size: int,
+    start_kst: datetime,
+    end_kst: datetime,
+    field_observation: dict,
+) -> None:
+    settings = get_settings()
+    if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
+        raise ApiError(
+            message="Naver order real micro preview is guardrail blocked",
+            error_code="guardrail_blocked",
+            status_code=400,
+            detail={
+                "store_id": store_id,
+                "credential_id": credential_id,
+                "real_api_test_enabled": bool(settings.real_api_test_enabled),
+                "real_api_write_enabled": bool(settings.real_api_write_enabled),
+            },
+        )
+    if page != 1 or size != 1:
+        raise ApiError(
+            message="Naver order real micro preview only allows page=1 and size=1",
+            error_code="guardrail_blocked",
+            status_code=400,
+            detail={"page": page, "size": size},
+        )
+    if end_kst - start_kst > timedelta(days=1):
+        raise ApiError(
+            message="Naver order micro preview window must be 1 KST day or less",
+            error_code="date_range_invalid",
+            status_code=400,
+        )
+    if not field_observation.get("channel_no_configured"):
+        raise ApiError(
+            message="Naver order micro preview requires configured channel_no",
+            error_code="channel_no_missing",
+            status_code=400,
+        )
+
+
+def _build_naver_token_context_from_credential(credential) -> dict:
+    secret_key = decrypt_value(credential.encrypted_secret_key)
+    extra_config = credential.extra_config if isinstance(credential.extra_config, dict) else {}
+    api_base = extra_config.get("api_base") or api_credential_readiness_service.NAVER_DEFAULT_API_BASE
+    grant_type = extra_config.get("grant_type")
+    grant_type_used = grant_type.strip().upper() if isinstance(grant_type, str) and grant_type.strip().upper() in {"SELF", "SELLER"} else "SELF"
+    seller_account_id = extra_config.get("seller_account_id")
+    return {
+        "store_id": credential.store_id,
+        "credential_id": credential.id,
+        "client_id": credential.client_id,
+        "secret_key": secret_key,
+        "api_base": str(api_base).rstrip("/"),
+        "grant_type_used": grant_type_used,
+        "seller_account_id": seller_account_id if isinstance(seller_account_id, str) and seller_account_id.strip() else None,
+    }
+
+
+def _run_naver_order_real_micro_preview(
+    *,
+    credential,
+    store_id: int,
+    start_kst: datetime,
+    end_kst: datetime,
+    order_status: str,
+    page: int,
+    size: int,
+    include_detail: bool,
+    field_observation: dict,
+) -> dict:
+    context = _build_naver_token_context_from_credential(credential)
+    try:
+        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        field_observation["token_http_status"] = token_status
+        headers = {"Authorization": f"Bearer {access_token}"}
+        field_observation["feed_called"] = True
+        feed_payload, feed_status = _request_naver_order_last_changed_feed(
+            api_base=context["api_base"],
+            headers=headers,
+            start_kst=start_kst,
+            end_kst=end_kst,
+            size=size,
+        )
+        field_observation["feed_http_status"] = feed_status
+        product_order_ids = _extract_naver_product_order_ids(feed_payload)
+        sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:1]]
+        if not product_order_ids:
+            return _build_naver_order_preview_result(
+                store_id=store_id,
+                credential_id=credential.id,
+                start_datetime=start_kst.isoformat(),
+                end_datetime=end_kst.isoformat(),
+                page=page,
+                size=size,
+                order_status=order_status,
+                guardrail_status="allowed",
+                preview_status="success_empty",
+                test_status="preview_success",
+                error_code=None,
+                field_observation=field_observation,
+                sample_ids=[],
+                has_more=_naver_order_feed_has_more(feed_payload),
+                would_create=0,
+                would_update=0,
+            )
+        if include_detail:
+            field_observation["detail_called"] = True
+            field_observation["detail_limit"] = 1
+            detail_payload, detail_status = _request_naver_order_detail_query(
+                api_base=context["api_base"],
+                headers=headers,
+                product_order_id=product_order_ids[0],
+            )
+            field_observation["detail_http_status"] = detail_status
+            field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_payload)
+        return _build_naver_order_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            start_datetime=start_kst.isoformat(),
+            end_datetime=end_kst.isoformat(),
+            page=page,
+            size=size,
+            order_status=order_status,
+            guardrail_status="allowed",
+            preview_status="success",
+            test_status="preview_success",
+            error_code=None,
+            field_observation=field_observation,
+            sample_ids=sample_ids,
+            has_more=_naver_order_feed_has_more(feed_payload),
+            would_create=0,
+            would_update=0,
+        )
+    except ApiError:
+        raise
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        error_code = _naver_readonly_error_code(exc.response)
+        return _build_naver_order_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            start_datetime=start_kst.isoformat(),
+            end_datetime=end_kst.isoformat(),
+            page=page,
+            size=size,
+            order_status=order_status,
+            guardrail_status="allowed",
+            preview_status="failed",
+            test_status="preview_failed",
+            error_code=error_code,
+            field_observation={**field_observation, "http_status": status_code},
+            sample_ids=[],
+            has_more=False,
+            would_create=0,
+            would_update=0,
+        )
+    except Exception as exc:
+        http_status = getattr(exc, "http_status", None)
+        error_code = "auth_failed" if str(exc) == "token_auth_failed" else "readonly_request_failed"
+        return _build_naver_order_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            start_datetime=start_kst.isoformat(),
+            end_datetime=end_kst.isoformat(),
+            page=page,
+            size=size,
+            order_status=order_status,
+            guardrail_status="allowed",
+            preview_status="failed",
+            test_status="preview_failed",
+            error_code=error_code,
+            field_observation={**field_observation, "http_status": http_status},
+            sample_ids=[],
+            has_more=False,
+            would_create=0,
+            would_update=0,
+        )
+
+
+def _request_naver_order_last_changed_feed(
+    *,
+    api_base: str,
+    headers: dict[str, str],
+    start_kst: datetime,
+    end_kst: datetime,
+    size: int,
+) -> tuple[dict, int]:
+    params = {
+        "lastChangedFrom": start_kst.isoformat(),
+        "lastChangedTo": end_kst.isoformat(),
+        "limitCount": size,
+    }
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(
+            f"{api_base}/v1/pay-order/seller/product-orders/last-changed-statuses",
+            headers=headers,
+            params=params,
+        )
+    response.raise_for_status()
+    return response.json(), response.status_code
+
+
+def _request_naver_order_detail_query(
+    *,
+    api_base: str,
+    headers: dict[str, str],
+    product_order_id: str,
+) -> tuple[dict, int]:
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(
+            f"{api_base}/v1/pay-order/seller/product-orders/query",
+            headers=headers,
+            json={"productOrderIds": [product_order_id]},
+        )
+    response.raise_for_status()
+    return response.json(), response.status_code
+
+
+def _extract_naver_product_order_ids(payload: object) -> list[str]:
+    ids: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in {"productOrderId", "productOrderNo"} and value:
+                ids.append(str(value))
+            else:
+                ids.extend(_extract_naver_product_order_ids(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            ids.extend(_extract_naver_product_order_ids(item))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in ids:
+        if value not in seen:
+            seen.add(value)
+            unique.append(value)
+    return unique
+
+
+def _naver_order_feed_has_more(payload: object) -> bool:
+    if isinstance(payload, dict):
+        for key in ("hasMore", "hasNext", "more"):
+            if isinstance(payload.get(key), bool):
+                return payload[key]
+    return False
+
+
+def _mask_external_identifier(value: str) -> str:
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
+    return f"id-hash-{digest}"
+
+
+def _summarize_naver_order_detail_fields(payload: object) -> dict:
+    text = json.dumps(payload, ensure_ascii=False).lower() if payload is not None else ""
+    forbidden_tokens = ("buyer", "receiver", "address", "phone", "tel", "delivery", "payment")
+    return {
+        "detail_payload_present": bool(payload),
+        "privacy_like_fields_detected": any(token in text for token in forbidden_tokens),
+    }
+
+
+def _naver_readonly_error_code(response: httpx.Response) -> str:
+    text = (response.text or "").lower()
+    if response.status_code in {401, 403} and any(token in text for token in ["ip", "whitelist", "white list", "allowed"]):
+        return "ip_not_allowed"
+    if response.status_code in {401, 403}:
+        return "auth_failed"
+    return "readonly_request_failed"
+
+
+def _build_naver_order_preview_business_status_summary(preview_status: str) -> list[str]:
+    if preview_status == "success_empty":
+        return [
+            "本时间窗口暂无订单变更",
+            "本次未写入本地订单数据",
+            "本次未保存订单原始响应",
+            "正式订单同步仍未开放",
+        ]
+    if preview_status == "success":
+        return [
+            "订单读取已完成微量只读预览",
+            "本次未写入本地订单数据",
+            "本次未保存订单原始响应",
+            "正式订单同步仍未开放",
+        ]
+    if preview_status == "failed":
+        return [
+            "订单微量只读预览失败",
+            "本次未写入本地订单数据",
+            "本次未保存订单原始响应",
+            "请检查 Naver API 权限、IP 白名单或时间窗口",
+        ]
+    return [
+        "订单读取暂未开放真实测试",
+        "默认不会请求 Naver 订单接口",
+        "正式订单同步仍未开放",
+    ]
+
+
+def _build_naver_order_preview_result(
+    *,
+    store_id: int,
+    credential_id: int,
+    start_datetime: str,
+    end_datetime: str,
+    page: int,
+    size: int,
+    order_status: str,
+    guardrail_status: str,
+    preview_status: str,
+    test_status: str,
+    error_code: str | None,
+    field_observation: dict,
+    sample_ids: list[str],
+    has_more: bool,
+    would_create: int,
+    would_update: int,
+) -> dict:
+    return {
+        "store_id": store_id,
+        "credential_id": credential_id,
+        "platform": "naver",
+        "preview_type": "orders",
+        "source_type": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        "guardrail_status": guardrail_status,
+        "preview_status": preview_status,
+        "test_status": test_status,
+        "error_code": error_code,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "order_status": order_status,
+        "page": page,
+        "size": size,
+        "has_more": has_more,
+        "would_create": would_create,
+        "would_update": would_update,
+        "sample_ids": sample_ids,
+        "field_observation": field_observation,
+        "business_status_summary": _build_naver_order_preview_business_status_summary(preview_status),
+        "semantic_notice": "Readonly micro preview only. No local order rows were written.",
     }
 
 

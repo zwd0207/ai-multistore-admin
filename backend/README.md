@@ -237,6 +237,8 @@ The Naver product preview route now exists as a scaffold, but the real product r
 
 The planned product preview route is based on `POST /v1/products/search`. The planned order preview route should read `GET /v1/pay-order/seller/product-orders/last-changed-statuses` first, then query details with `POST /v1/pay-order/seller/product-orders/query`. The older direct `GET /v1/pay-order/seller/product-orders` draft is treated as deprecated or unconfirmed and must not be called. Until a later preview stage explicitly opens these routes, product/order capability results stay `guardrail_blocked`, `not_tested`, and `safe_to_real_test=false`.
 
+The Naver order preview route now exists as a micro readonly scaffold. `POST /api/v1/sync/orders/naver/preview` defaults to `real_preview=false` and returns blocked before token or HTTP. `real_preview=true` is restricted to the approved local store/credential, `page=1`, `size=1`, a KST window of one day or less, and `REAL_API_WRITE_ENABLED=false`. It may call only the last-changed feed, and optionally one detail query when `include_detail=true` and the feed returned a productOrderId. It never writes `orders`, never writes `SyncLog`, never writes `ApiCapabilityTestResult tested_success`, never stores tokens/raw responses, and never returns full order IDs, productOrderIds, buyer/receiver names, phones, addresses, delivery details, payment raw payloads, authorization headers, signatures, or full `channel_no`.
+
 Future Naver preview endpoints must remain preview-only: no writes to `products` or `orders`, no raw response persistence, no token persistence, and no output of client secrets, tokens, authorization headers, request signatures, request headers, or full `channel_no` values.
 
 The database stores only:
