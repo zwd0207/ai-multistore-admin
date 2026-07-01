@@ -30,4 +30,6 @@ def run_readonly_smoke_test(
         db=db,
         platform=payload.platform,
         mode=payload.mode,
+        store_id=payload.store_id,
+        credential_id=payload.credential_id,
     ))

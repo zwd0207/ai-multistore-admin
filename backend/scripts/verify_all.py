@@ -382,9 +382,12 @@ def verify_api_credential_schema_and_security() -> None:
 
 def verify_api_credential_readiness() -> None:
     from fastapi.testclient import TestClient
+    from sqlalchemy import select
 
     import app.config as app_config
+    from app.database import SessionLocal
     from app.main import app
+    from app.models.api_capability import ApiCapabilityTestResult
     from app.services import api_credential_readiness_service
 
     original_test_enabled = os.environ.get("REAL_API_TEST_ENABLED")
@@ -497,12 +500,16 @@ def verify_api_credential_readiness() -> None:
                 "platform",
                 "enabled",
                 "configured",
+                "test_mode",
                 "http_status",
                 "token_test",
                 "seller_or_account_test",
                 "product_read_test",
                 "order_read_test",
+                "sales_read_test",
                 "settlement_read_test",
+                "customer_inquiry_read_test",
+                "shipping_delivery_read_test",
                 "error_code",
                 "masked_message",
                 "tested_at",
@@ -512,13 +519,239 @@ def verify_api_credential_readiness() -> None:
                 assert item["enabled"] is False
                 assert item["configured"] is False
                 assert item["error_code"] == "real_api_test_disabled"
+                assert item["test_mode"] == "readonly"
                 assert item["token_test"] == "skipped"
                 assert item["seller_or_account_test"] == "skipped"
                 assert item["product_read_test"] == "skipped"
                 assert item["order_read_test"] == "skipped"
+                assert item["sales_read_test"] == "skipped"
                 assert item["settlement_read_test"] == "skipped"
+                assert item["customer_inquiry_read_test"] == "skipped"
+                assert item["shipping_delivery_read_test"] == "skipped"
             smoke_serialized = str(disabled.json()).lower()
             assert not any(item in smoke_serialized for item in forbidden), smoke_serialized
+
+            with SessionLocal() as db:
+                before_disabled_count = len(db.scalars(
+                    select(ApiCapabilityTestResult).where(ApiCapabilityTestResult.test_mode == "real_readonly")
+                ).all())
+
+            api_credential_readiness_service.httpx.Client = ForbiddenHttpClient
+            disabled_store_bound = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+            })
+            api_credential_readiness_service.httpx.Client = original_client
+            assert disabled_store_bound.status_code == 200, disabled_store_bound.text
+            disabled_store_data = disabled_store_bound.json()["data"]["results"][0]
+            assert disabled_store_data["platform"] == "naver", disabled_store_data
+            assert disabled_store_data["store_id"] == store_id, disabled_store_data
+            assert disabled_store_data["credential_id"] == credential_data["id"], disabled_store_data
+            assert disabled_store_data["path_kind"] == "store_bound", disabled_store_data
+            assert disabled_store_data["test_mode"] == "disabled", disabled_store_data
+            assert disabled_store_data["error_code"] == "real_api_test_disabled", disabled_store_data
+            assert disabled_store_data["capability_result_ids"] == {}, disabled_store_data
+
+            with SessionLocal() as db:
+                after_disabled_count = len(db.scalars(
+                    select(ApiCapabilityTestResult).where(ApiCapabilityTestResult.test_mode == "real_readonly")
+                ).all())
+            assert before_disabled_count == after_disabled_count
+
+            original_env_client_id = os.environ.get("NAVER_CLIENT_ID")
+            original_env_client_secret = os.environ.get("NAVER_CLIENT_SECRET")
+            original_env_api_base = os.environ.get("NAVER_API_BASE")
+            os.environ["REAL_API_TEST_ENABLED"] = "true"
+            os.environ["NAVER_CLIENT_ID"] = "env-fallback-client-id"
+            os.environ["NAVER_CLIENT_SECRET"] = "env-fallback-client-secret"
+            os.environ["NAVER_API_BASE"] = "https://api.commerce.naver.com/external"
+            app_config.get_settings.cache_clear()
+
+            original_request_naver_token = api_credential_readiness_service._request_naver_token
+            original_store_bound_token = api_credential_readiness_service._request_naver_token_from_context
+            original_seller_confirmed = api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED
+            original_product_confirmed = api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED
+            original_order_confirmed = api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED
+
+            class FakeResponse:
+                def __init__(self, status_code: int, payload: dict | None = None) -> None:
+                    self.status_code = status_code
+                    self._payload = payload or {}
+                    self.text = ""
+
+                def json(self) -> dict:
+                    return self._payload
+
+                def raise_for_status(self) -> None:
+                    if self.status_code >= 400:
+                        raise RuntimeError(f"http_{self.status_code}")
+
+            class FakeHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    if url.endswith("/v1/seller/account"):
+                        return FakeResponse(200, {"channelNo": "123456"})
+                    if url.endswith("/v1/products/search"):
+                        return FakeResponse(200, {"items": [{"id": "product-1"}]})
+                    if url.endswith("/v1/pay-order/seller/product-orders"):
+                        return FakeResponse(200, {"data": [{"id": "order-1"}]})
+                    raise AssertionError(f"unexpected GET url: {url}")
+
+                def post(self, url: str, data=None):
+                    raise AssertionError(f"unexpected POST url: {url}")
+
+            api_credential_readiness_service._request_naver_token = lambda settings: ("fake-env-token", 200)
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
+            api_credential_readiness_service.httpx.Client = FakeHttpClient
+            api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED = True
+            api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED = True
+            api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED = True
+
+            with SessionLocal() as db:
+                before_env_fallback_count = len(db.scalars(
+                    select(ApiCapabilityTestResult).where(ApiCapabilityTestResult.test_mode == "real_readonly")
+                ).all())
+
+            env_fallback = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+            })
+            assert env_fallback.status_code == 200, env_fallback.text
+            env_fallback_data = env_fallback.json()["data"]["results"][0]
+            assert env_fallback_data["path_kind"] == "env_fallback", env_fallback_data
+            assert env_fallback_data["token_test"] == "success", env_fallback_data
+            assert env_fallback_data["seller_or_account_test"] == "success", env_fallback_data
+            assert env_fallback_data["product_read_test"] == "success", env_fallback_data
+            assert env_fallback_data["order_read_test"] == "success", env_fallback_data
+            assert env_fallback_data["channel_no_source"] == "seller_account", env_fallback_data
+
+            with SessionLocal() as db:
+                after_env_fallback_count = len(db.scalars(
+                    select(ApiCapabilityTestResult).where(ApiCapabilityTestResult.test_mode == "real_readonly")
+                ).all())
+            assert before_env_fallback_count == after_env_fallback_count
+
+            store_bound = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+            })
+            assert store_bound.status_code == 200, store_bound.text
+            store_bound_payload = store_bound.json()["data"]
+            store_bound_result = store_bound_payload["results"][0]
+            assert store_bound_result["platform"] == "naver", store_bound_result
+            assert store_bound_result["store_id"] == store_id, store_bound_result
+            assert store_bound_result["credential_id"] == credential_data["id"], store_bound_result
+            assert store_bound_result["path_kind"] == "store_bound", store_bound_result
+            assert store_bound_result["test_mode"] == "real_readonly", store_bound_result
+            assert store_bound_result["grant_type_used"] == "SELF", store_bound_result
+            assert store_bound_result["seller_account_id_configured"] is False, store_bound_result
+            assert store_bound_result["token_test"] == "success", store_bound_result
+            assert store_bound_result["seller_or_account_test"] == "success", store_bound_result
+            assert store_bound_result["product_read_test"] == "success", store_bound_result
+            assert store_bound_result["order_read_test"] == "success", store_bound_result
+            assert store_bound_result["sales_read_test"] == "skipped", store_bound_result
+            assert store_bound_result["settlement_read_test"] == "skipped", store_bound_result
+            assert store_bound_result["customer_inquiry_read_test"] == "skipped", store_bound_result
+            assert store_bound_result["shipping_delivery_read_test"] == "skipped", store_bound_result
+            assert store_bound_result["channel_no_source"] == "seller_account", store_bound_result
+            assert store_bound_result["capability_result_ids"], store_bound_result
+            assert "fake-store-token" not in str(store_bound.json()).lower(), store_bound.text
+
+            with SessionLocal() as db:
+                bound_results = db.scalars(
+                    select(ApiCapabilityTestResult)
+                    .where(
+                        ApiCapabilityTestResult.store_id == store_id,
+                        ApiCapabilityTestResult.credential_id == credential_data["id"],
+                        ApiCapabilityTestResult.test_mode == "real_readonly",
+                    )
+                    .order_by(ApiCapabilityTestResult.id.asc())
+                ).all()
+            assert bound_results, "store-bound smoke test should persist capability results"
+            observed_text = " ".join((item.response_fields_observed or "") for item in bound_results).lower()
+            for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret", "channelno", "account_id"]:
+                assert forbidden_item not in observed_text, observed_text
+
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(RuntimeError("token_auth_failed"))
+            token_failed = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+            })
+            assert token_failed.status_code == 200, token_failed.text
+            token_failed_result = token_failed.json()["data"]["results"][0]
+            assert token_failed_result["error_code"] == "token_auth_failed", token_failed_result
+            assert token_failed_result["token_test"] == "failed", token_failed_result
+            token_failed_serialized = str(token_failed.json()).lower()
+            for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret"]:
+                assert forbidden_item not in token_failed_serialized, token_failed_serialized
+
+            broken_credential = client.post("/api/v1/credentials", json={
+                "store_id": store_id,
+                "platform": "naver",
+                "credential_name": "Phase 6D-3 Broken decrypt credential",
+                "client_id": "phase-6d3-broken-client-id",
+                "secret_key": "phase-6d3-broken-secret",
+                "auth_status": "configured",
+                "status": "active",
+            })
+            assert broken_credential.status_code == 201, broken_credential.text
+            broken_credential_id = broken_credential.json()["data"]["id"]
+            with SessionLocal() as db:
+                broken_model = db.get(api_credential_readiness_service.ApiCredential, broken_credential_id)
+                broken_model.encrypted_secret_key = "not-a-valid-fernet-payload"
+                db.commit()
+
+            class ForbiddenDecryptHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    raise AssertionError("decrypt failure must not create an HTTP client")
+
+            api_credential_readiness_service.httpx.Client = ForbiddenDecryptHttpClient
+            decrypt_failed = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": broken_credential_id,
+            })
+            assert decrypt_failed.status_code == 200, decrypt_failed.text
+            decrypt_failed_result = decrypt_failed.json()["data"]["results"][0]
+            assert decrypt_failed_result["error_code"] == "credential_decrypt_failed", decrypt_failed_result
+            assert decrypt_failed_result["capability_result_ids"], decrypt_failed_result
+
+            api_credential_readiness_service.httpx.Client = original_client
+            api_credential_readiness_service._request_naver_token = original_request_naver_token
+            api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
+            api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED = original_seller_confirmed
+            api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED = original_product_confirmed
+            api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED = original_order_confirmed
+
+            if original_env_client_id is None:
+                os.environ.pop("NAVER_CLIENT_ID", None)
+            else:
+                os.environ["NAVER_CLIENT_ID"] = original_env_client_id
+            if original_env_client_secret is None:
+                os.environ.pop("NAVER_CLIENT_SECRET", None)
+            else:
+                os.environ["NAVER_CLIENT_SECRET"] = original_env_client_secret
+            if original_env_api_base is None:
+                os.environ.pop("NAVER_API_BASE", None)
+            else:
+                os.environ["NAVER_API_BASE"] = original_env_api_base
+            os.environ["REAL_API_TEST_ENABLED"] = "false"
+            app_config.get_settings.cache_clear()
 
             invalid_mode = client.post("/api/v1/api-credentials/smoke-test", json={
                 "platform": "naver",
@@ -1731,6 +1964,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/order.py",
         " M backend/app/models/product.py",
         " M backend/app/models/store.py",
+        " M backend/app/schemas/api_credential_readiness.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",
         " M backend/app/schemas/product.py",

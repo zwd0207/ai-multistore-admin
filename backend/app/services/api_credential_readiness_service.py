@@ -19,13 +19,20 @@ from app.models.store import Store
 from app.services.encryption import decrypt_value
 
 NAVER_DEFAULT_API_BASE = "https://api.commerce.naver.com/external"
+NAVER_SUPPORTED_GRANT_TYPES = {"SELF", "SELLER"}
+NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED = True
+NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED = False
+NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED = False
 
 SMOKE_STEPS = [
     "token_test",
     "seller_or_account_test",
     "product_read_test",
     "order_read_test",
+    "sales_read_test",
     "settlement_read_test",
+    "customer_inquiry_read_test",
+    "shipping_delivery_read_test",
 ]
 READINESS_NOTICE = (
     "Readiness only reports whether local environment variables are present. "
@@ -81,6 +88,26 @@ def _naver_channel_no_from_extra_config(extra_config: dict | None) -> str | None
     return None
 
 
+def _naver_grant_type_from_extra_config(extra_config: dict | None) -> str:
+    if not isinstance(extra_config, dict):
+        return "SELF"
+    raw = extra_config.get("grant_type")
+    if isinstance(raw, str):
+        normalized = raw.strip().upper()
+        if normalized in NAVER_SUPPORTED_GRANT_TYPES:
+            return normalized
+    return "SELF"
+
+
+def _naver_seller_account_id_from_extra_config(extra_config: dict | None) -> str | None:
+    if not isinstance(extra_config, dict):
+        return None
+    value = extra_config.get("seller_account_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _safe_decrypt(value: str | None) -> tuple[str | None, bool]:
     if value is None:
         return None, False
@@ -102,6 +129,40 @@ def _get_active_store_credential(db: Session, store_id: int, platform: str) -> A
         )
         .order_by(ApiCredential.id.desc())
     )
+
+
+def _get_store_bound_credential(
+    db: Session,
+    store_id: int,
+    credential_id: int | None,
+    platform: str,
+) -> ApiCredential | None:
+    if credential_id is None:
+        return _get_active_store_credential(db, store_id, platform)
+
+    credential = db.get(ApiCredential, credential_id)
+    if credential is None:
+        raise ApiError(
+            message="Credential not found",
+            error_code="CREDENTIAL_NOT_FOUND",
+            status_code=404,
+            detail={"credential_id": credential_id, "store_id": store_id, "platform": platform},
+        )
+    if credential.store_id != store_id:
+        raise ApiError(
+            message="Credential does not belong to the selected store",
+            error_code="CREDENTIAL_STORE_MISMATCH",
+            status_code=400,
+            detail={"credential_id": credential_id, "store_id": store_id},
+        )
+    if credential.platform != platform:
+        raise ApiError(
+            message="Credential platform does not match the selected store platform",
+            error_code="CREDENTIAL_PLATFORM_MISMATCH",
+            status_code=400,
+            detail={"credential_id": credential_id, "platform": credential.platform, "expected_platform": platform},
+        )
+    return credential if credential.status == "active" else None
 
 
 def _derive_access_token_status(
@@ -237,6 +298,7 @@ def _new_smoke_result(platform: str) -> dict:
         "platform": platform,
         "enabled": False,
         "configured": False,
+        "test_mode": "readonly",
         "http_status": None,
         "error_code": None,
         "masked_message": "",
@@ -244,6 +306,34 @@ def _new_smoke_result(platform: str) -> dict:
     }
     for step in SMOKE_STEPS:
         result[step] = "skipped"
+    return result
+
+
+def _new_naver_store_bound_result(store_id: int, credential_id: int | None = None) -> dict:
+    result = _new_smoke_result("naver")
+    result.update({
+        "store_id": store_id,
+        "credential_id": credential_id,
+        "path_kind": "store_bound",
+        "grant_type_used": "SELF",
+        "seller_account_id_configured": False,
+        "channel_no_source": "not_attempted",
+        "capability_result_ids": {},
+    })
+    return result
+
+
+def _new_naver_env_fallback_result() -> dict:
+    result = _new_smoke_result("naver")
+    result.update({
+        "store_id": None,
+        "credential_id": None,
+        "path_kind": "env_fallback",
+        "grant_type_used": "SELF",
+        "seller_account_id_configured": False,
+        "channel_no_source": "not_attempted",
+        "capability_result_ids": {},
+    })
     return result
 
 
@@ -284,6 +374,109 @@ def _step_from_response(result: dict, step: str, response: httpx.Response) -> bo
     else:
         _mark_failed(result, "readonly_request_failed", f"{step} failed with HTTP {response.status_code}")
     return False
+
+
+def _load_naver_smoke_context(
+    db: Session,
+    store_id: int,
+    credential_id: int | None,
+) -> tuple[dict | None, dict]:
+    result = _new_naver_store_bound_result(store_id=store_id, credential_id=credential_id)
+    store = db.get(Store, store_id)
+    if store is None:
+        raise ApiError(
+            message="Store not found",
+            error_code="STORE_NOT_FOUND",
+            status_code=404,
+            detail={"store_id": store_id},
+        )
+    if store.platform != "naver":
+        raise ApiError(
+            message="Selected store is not a Naver store",
+            error_code="STORE_PLATFORM_MISMATCH",
+            status_code=400,
+            detail={"store_id": store_id, "platform": store.platform, "expected_platform": "naver"},
+        )
+
+    credential = _get_store_bound_credential(db, store_id, credential_id, "naver")
+    if credential is None:
+        result["credential_id"] = credential_id
+        result["test_mode"] = "real_readonly"
+        return None, _mark_failed(result, "credential_not_ready", "Active Naver credential is required for a store-bound smoke test")
+
+    result["credential_id"] = credential.id
+    result["grant_type_used"] = _naver_grant_type_from_extra_config(credential.extra_config)
+    result["seller_account_id_configured"] = bool(_naver_seller_account_id_from_extra_config(credential.extra_config))
+
+    api_base = _naver_api_base_from_extra_config(credential.extra_config)
+    client_id = credential.client_id.strip() if _is_configured(credential.client_id) else None
+    secret_key, secret_key_decryptable = _safe_decrypt(credential.encrypted_secret_key)
+    access_token, access_token_decryptable = _safe_decrypt(credential.encrypted_access_token)
+    refresh_token, refresh_token_decryptable = _safe_decrypt(credential.encrypted_refresh_token)
+
+    if not client_id:
+        result["test_mode"] = "real_readonly"
+        return None, _mark_failed(result, "credential_not_ready", "Naver client_id is not configured for the selected store")
+    if credential.encrypted_secret_key and not secret_key_decryptable:
+        result["test_mode"] = "real_readonly"
+        return None, _mark_failed(result, "credential_decrypt_failed", "Naver secret_key could not be decrypted for the selected store")
+    if not _is_configured(secret_key):
+        result["test_mode"] = "real_readonly"
+        return None, _mark_failed(result, "credential_not_ready", "Naver secret_key is not configured for the selected store")
+    if result["grant_type_used"] == "SELLER" and not result["seller_account_id_configured"]:
+        result["test_mode"] = "real_readonly"
+        return None, _mark_failed(result, "seller_account_id_missing", "SELLER grant requires a configured seller account id")
+
+    result["configured"] = True
+    result["test_mode"] = "real_readonly"
+    context = {
+        "store_id": store.id,
+        "credential_id": credential.id,
+        "credential_name": credential.credential_name,
+        "client_id": client_id,
+        "secret_key": secret_key,
+        "access_token": access_token if access_token_decryptable else None,
+        "refresh_token": refresh_token if refresh_token_decryptable else None,
+        "api_base": api_base.rstrip("/"),
+        "grant_type_used": result["grant_type_used"],
+        "seller_account_id": _naver_seller_account_id_from_extra_config(credential.extra_config),
+        "seller_account_id_configured": result["seller_account_id_configured"],
+        "channel_no": _naver_channel_no_from_extra_config(credential.extra_config),
+        "channel_no_source": "credential_extra_config" if _naver_channel_no_from_extra_config(credential.extra_config) else "missing",
+    }
+    return context, result
+
+
+def _request_naver_token_from_context(context: dict) -> tuple[str, int]:
+    import bcrypt
+
+    timestamp = str(int(time.time() * 1000))
+    raw = f"{context['client_id']}_{timestamp}".encode("utf-8")
+    secret = context["secret_key"].encode("utf-8")
+    signed = bcrypt.hashpw(raw, secret)
+    client_secret_sign = base64.b64encode(signed).decode("utf-8")
+    payload = {
+        "client_id": context["client_id"],
+        "timestamp": timestamp,
+        "client_secret_sign": client_secret_sign,
+        "grant_type": "client_credentials",
+        "type": context["grant_type_used"],
+    }
+    if context["grant_type_used"] == "SELLER" and context.get("seller_account_id"):
+        payload["account_id"] = context["seller_account_id"]
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(f"{context['api_base']}/v1/oauth2/token", data=payload)
+    if response.status_code in {401, 403}:
+        error = RuntimeError("token_auth_failed")
+        error.http_status = response.status_code
+        raise error
+    response.raise_for_status()
+    token = response.json().get("access_token")
+    if not token:
+        error = RuntimeError("token_auth_failed")
+        error.http_status = response.status_code
+        raise error
+    return token, response.status_code
 
 
 def get_api_credential_readiness(
@@ -335,8 +528,40 @@ def run_api_credential_smoke_test(
     db: Session | None = None,
     platform: str = "all",
     mode: str = "readonly",
+    store_id: int | None = None,
+    credential_id: int | None = None,
 ) -> dict:
     settings = get_settings()
+    if platform == "naver" and store_id is not None:
+        if db is None:
+            raise ApiError(
+                message="Database session is required for store-bound Naver smoke tests",
+                error_code="DB_SESSION_REQUIRED",
+                status_code=500,
+            )
+        result, capability_results = _run_naver_store_bound_smoke_test(
+            db=db,
+            settings=settings,
+            store_id=store_id,
+            credential_id=credential_id,
+        )
+        if (
+            db is not None
+            and result.get("test_mode") == "real_readonly"
+            and result.get("store_id") is not None
+            and result.get("credential_id") is not None
+            and result.get("error_code") != "real_api_test_disabled"
+        ):
+            result["capability_result_ids"] = _persist_real_readonly_capability_results(db, capability_results)
+        return {
+            "semantic_notice": SMOKE_NOTICE,
+            "mode": mode,
+            "real_api_test_enabled": bool(settings.real_api_test_enabled),
+            "real_api_write_enabled": bool(settings.real_api_write_enabled),
+            "results": [result],
+            "capability_results": capability_results,
+        }
+
     selected_platforms = ["coupang", "naver"] if platform == "all" else [platform]
     capability_results: list[dict] = []
     results = []
@@ -346,7 +571,8 @@ def run_api_credential_smoke_test(
         capability_results.extend(platform_capability_results)
     if db is not None and settings.real_api_test_enabled:
         for result in capability_results:
-            _record_real_readonly_result(db, result)
+            if result.get("store_id") is not None and result.get("credential_id") is not None:
+                _persist_real_readonly_capability_results(db, [result])
 
     return {
         "semantic_notice": SMOKE_NOTICE,
@@ -365,11 +591,13 @@ def _run_platform_smoke_test(settings, platform: str) -> tuple[dict, list[dict]]
 
     result["enabled"] = True
     if platform == "naver":
-        return _run_naver_smoke_test(settings, result), [result]
+        return _run_naver_env_fallback_smoke_test(settings)
     return _run_coupang_smoke_test(settings, result)
 
 
-def _run_naver_smoke_test(settings, result: dict) -> dict:
+def _run_naver_env_fallback_smoke_test(settings) -> tuple[dict, list[dict]]:
+    result = _new_naver_env_fallback_result()
+    result["enabled"] = True
     missing = [
         name
         for name, value in {
@@ -380,9 +608,10 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
         if not _is_configured(value)
     ]
     if missing:
-        return _mark_failed(result, "missing_credentials", f"Missing required environment fields: {', '.join(missing)}")
+        return _mark_failed(result, "missing_credentials", f"Missing required environment fields: {', '.join(missing)}"), []
 
     result["configured"] = True
+    result["grant_type_used"] = "SELF"
     try:
         access_token, token_status = _request_naver_token(settings)
         result["http_status"] = token_status
@@ -398,6 +627,11 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
             product_params = {"page": 1, "size": 1}
             if channel_no:
                 product_params["channelNo"] = channel_no
+                result["channel_no_source"] = "seller_account"
+            elif settings.naver_channel_no:
+                result["channel_no_source"] = "env_fallback"
+            else:
+                result["channel_no_source"] = "missing"
             product_response = client.get(f"{base}/v1/products/search", headers=headers, params=product_params)
             _step_from_response(result, "product_read_test", product_response)
 
@@ -410,9 +644,12 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
             }
             order_response = client.get(f"{base}/v1/pay-order/seller/product-orders", headers=headers, params=order_params)
             _step_from_response(result, "order_read_test", order_response)
+            result["sales_read_test"] = "skipped"
             result["settlement_read_test"] = "skipped"
+            result["customer_inquiry_read_test"] = "skipped"
+            result["shipping_delivery_read_test"] = "skipped"
             if not result["masked_message"]:
-                result["masked_message"] = "Readonly smoke test completed without returning raw API data."
+                result["masked_message"] = "Readonly env fallback smoke test completed without returning raw API data."
     except ImportError:
         result["token_test"] = "failed"
         _mark_failed(result, "dependency_missing", "bcrypt dependency is required for Naver client_secret_sign")
@@ -422,38 +659,264 @@ def _run_naver_smoke_test(settings, result: dict) -> dict:
     except Exception as exc:
         result["http_status"] = getattr(exc, "http_status", result.get("http_status"))
         _mark_failed(result, "smoke_test_failed", str(exc))
-    return result
+    return result, []
+
+
+def _run_naver_store_bound_smoke_test(
+    db: Session,
+    settings,
+    store_id: int,
+    credential_id: int | None,
+) -> tuple[dict, list[dict]]:
+    if not settings.real_api_test_enabled:
+        result = _new_naver_store_bound_result(store_id=store_id, credential_id=credential_id)
+        store = db.get(Store, store_id)
+        if store is not None and store.platform == "naver":
+            credential = _get_store_bound_credential(db, store_id, credential_id, "naver")
+            if credential is not None:
+                result["credential_id"] = credential.id
+                result["configured"] = True
+                result["grant_type_used"] = _naver_grant_type_from_extra_config(credential.extra_config)
+                result["seller_account_id_configured"] = bool(_naver_seller_account_id_from_extra_config(credential.extra_config))
+                result["channel_no_source"] = "credential_extra_config" if _naver_channel_no_from_extra_config(credential.extra_config) else "missing"
+        result["test_mode"] = "disabled"
+        result["enabled"] = False
+        return _mark_failed(result, "real_api_test_disabled", "REAL_API_TEST_ENABLED is false"), []
+
+    context, result = _load_naver_smoke_context(db, store_id, credential_id)
+    capability_results: list[dict] = []
+
+    result["enabled"] = True
+    if context is None:
+        capability_results.append(_build_capability_record(
+            platform="naver",
+            capability_key="naver.token_auth",
+            capability_name="Naver token auth readonly test",
+            api_category="auth",
+            endpoint_path="/v1/oauth2/token",
+            result=result,
+            test_step="token_test",
+            notes="Store-bound readonly smoke test failed before token exchange.",
+        ) | {"store_id": store_id, "credential_id": result.get("credential_id")})
+        return result, capability_results
+
+    try:
+        access_token, token_status = _request_naver_token_from_context(context)
+        result["http_status"] = token_status
+        result["token_test"] = "success"
+        capability_results.append(_build_capability_record(
+            platform="naver",
+            capability_key="naver.token_auth",
+            capability_name="Naver token auth readonly test",
+            api_category="auth",
+            endpoint_path="/v1/oauth2/token",
+            result=result,
+            test_step="token_test",
+            notes=f"Store-bound readonly token exchange using {context['grant_type_used']} grant.",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        seller_record = _run_naver_seller_account_read(context, result, headers)
+        capability_results.append(seller_record)
+        if result["seller_or_account_test"] != "success":
+            capability_results.extend(_build_naver_docs_pending_capability_records(context, result))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly smoke test stopped after seller/account failure without returning raw API data."
+            return result, capability_results
+
+        product_record = _run_naver_product_read(context, result, headers)
+        capability_results.append(product_record)
+
+        order_record = _run_naver_order_read(context, result, headers)
+        capability_results.append(order_record)
+    except ImportError:
+        result["token_test"] = "failed"
+        _mark_failed(result, "dependency_missing", "bcrypt dependency is required for Naver client_secret_sign")
+        capability_results.append(_build_capability_record(
+            platform="naver",
+            capability_key="naver.token_auth",
+            capability_name="Naver token auth readonly test",
+            api_category="auth",
+            endpoint_path="/v1/oauth2/token",
+            result=result,
+            test_step="token_test",
+            notes="Store-bound readonly token exchange requires bcrypt.",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+    except Exception as exc:
+        result["http_status"] = getattr(exc, "http_status", result.get("http_status"))
+        if str(exc) == "token_auth_failed":
+            result["token_test"] = "failed"
+            _mark_failed(result, "token_auth_failed", "Naver readonly token exchange failed")
+            capability_results.append(_build_capability_record(
+                platform="naver",
+                capability_key="naver.token_auth",
+                capability_name="Naver token auth readonly test",
+                api_category="auth",
+                endpoint_path="/v1/oauth2/token",
+                result=result,
+                test_step="token_test",
+                notes="Store-bound readonly token exchange failed.",
+            ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+        elif result.get("error_code") is None:
+            _mark_failed(result, "readonly_request_failed", str(exc))
+
+    capability_results.extend(_build_naver_docs_pending_capability_records(context, result))
+    if not result["masked_message"]:
+        result["masked_message"] = "Store-bound readonly smoke test completed without returning raw API data."
+    return result, capability_results
 
 
 def _request_naver_token(settings) -> tuple[str, int]:
-    import bcrypt
-
-    timestamp = str(int(time.time() * 1000))
-    raw = f"{settings.naver_client_id}_{timestamp}".encode("utf-8")
-    secret = settings.naver_client_secret.encode("utf-8")
-    signed = bcrypt.hashpw(raw, secret)
-    client_secret_sign = base64.b64encode(signed).decode("utf-8")
-    base = settings.naver_api_base.rstrip("/")
-    payload = {
+    context = {
         "client_id": settings.naver_client_id,
-        "timestamp": timestamp,
-        "client_secret_sign": client_secret_sign,
-        "grant_type": "client_credentials",
-        "type": "SELF",
+        "secret_key": settings.naver_client_secret,
+        "api_base": settings.naver_api_base.rstrip("/"),
+        "grant_type_used": "SELF",
+        "seller_account_id": None,
+    }
+    return _request_naver_token_from_context(context)
+
+
+def _run_naver_seller_account_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
+    if not NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED:
+        result["seller_or_account_test"] = "skipped"
+        if result.get("error_code") is None:
+            result["error_code"] = "naver_api_not_implemented"
+        return _build_capability_record(
+            platform="naver",
+            capability_key="naver.seller_account_read",
+            capability_name="Naver seller/account readonly test",
+            api_category="seller",
+            endpoint_path="/v1/seller/account",
+            result=result,
+            test_step="seller_or_account_test",
+            notes="Seller/account readonly endpoint is not confirmed for real store-bound execution yet.",
+            forced_test_status="not_tested",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(f"{context['api_base']}/v1/seller/account", headers=headers)
+    _step_from_response(result, "seller_or_account_test", response)
+    if result["seller_or_account_test"] == "success":
+        channel_no = _extract_channel_no(response.json())
+        if channel_no:
+            result["channel_no_source"] = "seller_account"
+        elif context.get("channel_no"):
+            result["channel_no_source"] = "credential_extra_config"
+        else:
+            result["channel_no_source"] = "missing"
+
+    return _build_capability_record(
+        platform="naver",
+        capability_key="naver.seller_account_read",
+        capability_name="Naver seller/account readonly test",
+        api_category="seller",
+        endpoint_path="/v1/seller/account",
+        result=result,
+        test_step="seller_or_account_test",
+        notes="Readonly seller/account query only. No write operation was executed.",
+    ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+
+def _run_naver_product_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
+    if not NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED:
+        result["product_read_test"] = "skipped"
+        if result.get("error_code") is None:
+            result["error_code"] = "naver_api_not_implemented"
+        return _build_capability_record(
+            platform="naver",
+            capability_key="naver.product_read",
+            capability_name="Naver product readonly test",
+            api_category="products",
+            endpoint_path="/v1/products/search",
+            result=result,
+            test_step="product_read_test",
+            notes="Product readonly endpoint is not confirmed for real store-bound execution yet.",
+            forced_test_status="not_tested",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+    params = {"page": 1, "size": 1}
+    channel_no = context.get("channel_no")
+    if channel_no:
+        params["channelNo"] = channel_no
+        result["channel_no_source"] = result.get("channel_no_source") or "credential_extra_config"
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(f"{context['api_base']}/v1/products/search", headers=headers, params=params)
+    _step_from_response(result, "product_read_test", response)
+    return _build_capability_record(
+        platform="naver",
+        capability_key="naver.product_read",
+        capability_name="Naver product readonly test",
+        api_category="products",
+        endpoint_path="/v1/products/search",
+        result=result,
+        test_step="product_read_test",
+        notes="Readonly product query only. No write operation was executed.",
+    ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+
+def _run_naver_order_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
+    if not NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED:
+        result["order_read_test"] = "skipped"
+        if result.get("error_code") is None:
+            result["error_code"] = "naver_api_not_implemented"
+        return _build_capability_record(
+            platform="naver",
+            capability_key="naver.order_read",
+            capability_name="Naver order readonly test",
+            api_category="orders",
+            endpoint_path="/v1/pay-order/seller/product-orders",
+            result=result,
+            test_step="order_read_test",
+            notes="Order readonly endpoint is not confirmed for real store-bound execution yet.",
+            forced_test_status="not_tested",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+    now = get_utc_now()
+    params = {
+        "from": (now - timedelta(days=1)).date().isoformat(),
+        "to": now.date().isoformat(),
+        "page": 1,
+        "size": 1,
     }
     with httpx.Client(timeout=10.0) as client:
-        response = client.post(f"{base}/v1/oauth2/token", data=payload)
-    if response.status_code in {401, 403}:
-        error = RuntimeError("auth_failed")
-        error.http_status = response.status_code
-        raise error
-    response.raise_for_status()
-    token = response.json().get("access_token")
-    if not token:
-        error = RuntimeError("auth_failed")
-        error.http_status = response.status_code
-        raise error
-    return token, response.status_code
+        response = client.get(f"{context['api_base']}/v1/pay-order/seller/product-orders", headers=headers, params=params)
+    _step_from_response(result, "order_read_test", response)
+    return _build_capability_record(
+        platform="naver",
+        capability_key="naver.order_read",
+        capability_name="Naver order readonly test",
+        api_category="orders",
+        endpoint_path="/v1/pay-order/seller/product-orders",
+        result=result,
+        test_step="order_read_test",
+        notes="Readonly order query only. No write operation was executed.",
+    ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+
+def _build_naver_docs_pending_capability_records(context: dict, result: dict) -> list[dict]:
+    for step in ("sales_read_test", "settlement_read_test", "customer_inquiry_read_test", "shipping_delivery_read_test"):
+        result[step] = "skipped"
+    docs_pending = [
+        ("naver.sales_read", "Naver sales readonly test", "sales", None, "sales_read_test"),
+        ("naver.settlement_read", "Naver settlement readonly test", "settlements", None, "settlement_read_test"),
+        ("naver.customer_inquiry_read", "Naver customer inquiry readonly test", "inquiries", None, "customer_inquiry_read_test"),
+        ("naver.shipping_delivery_read", "Naver shipping/delivery readonly test", "logistics", None, "shipping_delivery_read_test"),
+    ]
+    records: list[dict] = []
+    for capability_key, capability_name, api_category, endpoint_path, step in docs_pending:
+        records.append(_build_capability_record(
+            platform="naver",
+            capability_key=capability_key,
+            capability_name=capability_name,
+            api_category=api_category,
+            endpoint_path=endpoint_path,
+            result=result,
+            test_step=step,
+            notes="Docs pending. This readonly capability is not implemented in the store-bound smoke test yet.",
+            forced_test_status="not_tested",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+    return records
 
 
 def _extract_channel_no(payload: object) -> str | None:
@@ -576,7 +1039,7 @@ def _run_coupang_product_read(settings, now, platform_result: dict) -> dict:
 
 
 def _run_coupang_sales_read(settings, now, platform_result: dict) -> dict:
-    result = _clone_smoke_result(platform_result, "settlement_read_test")
+    result = _clone_smoke_result(platform_result, "sales_read_test")
     try:
         response = _coupang_get(
             settings,
@@ -589,7 +1052,7 @@ def _run_coupang_sales_read(settings, now, platform_result: dict) -> dict:
                 "maxPerPage": "1",
             }),
         )
-        _step_from_response(result, "settlement_read_test", response)
+        _step_from_response(result, "sales_read_test", response)
         if not result["masked_message"]:
             result["masked_message"] = "Readonly sales smoke test completed without returning raw API data."
     except httpx.HTTPError as exc:
@@ -602,7 +1065,7 @@ def _run_coupang_sales_read(settings, now, platform_result: dict) -> dict:
         api_category="sales",
         endpoint_path="/v2/providers/openapi/apis/api/v1/revenue-history",
         result=result,
-        test_step="settlement_read_test",
+        test_step="sales_read_test",
         notes="Readonly sales detail query only. No write operation was executed.",
     )
 
@@ -652,6 +1115,7 @@ def _build_capability_record(
     result: dict,
     test_step: str,
     notes: str,
+    forced_test_status: str | None = None,
 ) -> dict:
     return {
         "platform": platform,
@@ -660,7 +1124,7 @@ def _build_capability_record(
         "api_category": api_category,
         "endpoint_path": endpoint_path,
         "test_mode": "real_readonly",
-        "test_status": _step_status_from_result(result, test_step),
+        "test_status": forced_test_status or _step_status_from_result(result, test_step),
         "http_status": result.get("http_status"),
         "error_code": result.get("error_code"),
         "permission_result": _permission_result(result),
@@ -676,6 +1140,8 @@ def _permission_result(result: dict) -> str:
         return "IP allowlist rejected the readonly request."
     if result.get("error_code") == "auth_failed":
         return "Authentication or permission rejected the readonly request."
+    if result.get("error_code") == "token_auth_failed":
+        return "Token exchange was rejected by the readonly authentication path."
     return "Readonly smoke-test did not expose credential values or raw external response payloads."
 
 
@@ -685,83 +1151,86 @@ def _response_fields_observed(result: dict) -> str:
 
 
 def _step_status_from_result(result: dict, step: str) -> str:
-    if result.get("error_code") == "missing_credentials":
+    if result.get("error_code") in {"missing_credentials", "naver_api_not_implemented", "seller_account_id_missing"}:
         return "not_tested"
     if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
         return "permission_required"
     if result.get("error_code"):
         return "tested_failed"
-    return "tested_success" if result.get(step) == "success" else "tested_failed"
+    if result.get(step) == "success":
+        return "tested_success"
+    if result.get(step) == "skipped":
+        return "not_tested"
+    return "tested_failed"
 
 
-def _record_real_readonly_result(db: Session, result: dict) -> None:
-    if result.get("test_mode") != "real_readonly":
-        return
+def _persist_real_readonly_capability_results(db: Session, results: list[dict]) -> dict[str, int]:
+    persisted: dict[str, int] = {}
+    if not results:
+        return persisted
 
-    platform = result["platform"]
-    store = db.scalars(
-        select(Store)
-        .where(Store.platform == platform)
-        .order_by(Store.id.asc())
-    ).first()
-    if store is None:
-        return
-
-    capability = db.scalars(
-        select(ApiCapabilityCheck)
-        .where(
-            ApiCapabilityCheck.platform == platform,
-            ApiCapabilityCheck.capability_key == result["capability_key"],
-        )
-        .order_by(ApiCapabilityCheck.id.asc())
-    ).first()
-    if capability is None:
-        capability = ApiCapabilityCheck(
-            platform=platform,
-            capability_key=result["capability_key"],
-            capability_name=result["capability_name"],
-            api_category=result["api_category"],
-            endpoint_path=result["endpoint_path"],
-            method="POST",
-            required_credential_type="local .env platform credentials",
-            ordinary_store_supported="unknown",
-            test_status=result["test_status"],
-            test_mode="real_readonly",
-            response_fields_summary=result["response_fields_observed"],
-            error_codes_summary="real_api_test_disabled, missing_credentials, auth_failed, ip_not_allowed, readonly_request_failed, network_error",
-            data_usefulness="medium",
-            first_phase_candidate=False,
-            sales_source_type="not_applicable",
-            notes=result["notes"],
-            last_checked_at=get_utc_now(),
-        )
-        db.add(capability)
-        db.flush()
-
-    credential = db.scalars(
-        select(ApiCredential)
-        .where(ApiCredential.store_id == store.id, ApiCredential.platform == platform)
-        .order_by(ApiCredential.id.asc())
-    ).first()
     tested_at = get_utc_now()
-    item = ApiCapabilityTestResult(
-        store_id=store.id,
-        credential_id=credential.id if credential is not None else None,
-        capability_id=capability.id,
-        test_mode=result["test_mode"],
-        test_status=result["test_status"],
-        http_status=result.get("http_status"),
-        error_code=result.get("error_code"),
-        permission_result=result.get("permission_result"),
-        rate_limit_summary=result.get("rate_limit_summary"),
-        response_fields_observed=result.get("response_fields_observed"),
-        tested_at=tested_at,
-        notes=result.get("notes"),
-    )
-    db.add(item)
-    capability.test_status = item.test_status
-    capability.last_checked_at = tested_at
+    for result in results:
+        if result.get("test_mode") != "real_readonly":
+            continue
+        store_id = result.get("store_id")
+        credential_id = result.get("credential_id")
+        if store_id is None or credential_id is None:
+            continue
+
+        capability = db.scalars(
+            select(ApiCapabilityCheck)
+            .where(
+                ApiCapabilityCheck.platform == result["platform"],
+                ApiCapabilityCheck.capability_key == result["capability_key"],
+            )
+            .order_by(ApiCapabilityCheck.id.asc())
+        ).first()
+        if capability is None:
+            capability = ApiCapabilityCheck(
+                platform=result["platform"],
+                capability_key=result["capability_key"],
+                capability_name=result["capability_name"],
+                api_category=result["api_category"],
+                endpoint_path=result["endpoint_path"],
+                method="POST",
+                required_credential_type="store-bound encrypted API credential",
+                ordinary_store_supported="unknown",
+                test_status=result["test_status"],
+                test_mode="real_readonly",
+                response_fields_summary=result["response_fields_observed"],
+                error_codes_summary="real_api_test_disabled, credential_not_ready, credential_decrypt_failed, dependency_missing, token_auth_failed, auth_failed, ip_not_allowed, readonly_request_failed, naver_api_not_implemented, seller_account_id_missing",
+                data_usefulness="medium",
+                first_phase_candidate=False,
+                sales_source_type="not_applicable",
+                notes=result["notes"],
+                last_checked_at=tested_at,
+            )
+            db.add(capability)
+            db.flush()
+
+        item = ApiCapabilityTestResult(
+            store_id=store_id,
+            credential_id=credential_id,
+            capability_id=capability.id,
+            test_mode=result["test_mode"],
+            test_status=result["test_status"],
+            http_status=result.get("http_status"),
+            error_code=result.get("error_code"),
+            permission_result=result.get("permission_result"),
+            rate_limit_summary=result.get("rate_limit_summary"),
+            response_fields_observed=result.get("response_fields_observed"),
+            tested_at=tested_at,
+            notes=result.get("notes"),
+        )
+        db.add(item)
+        db.flush()
+        capability.test_status = item.test_status
+        capability.last_checked_at = tested_at
+        persisted[result["capability_key"]] = item.id
+
     db.commit()
+    return persisted
 
 
 def _coupang_get(settings, path: str, query_string: str) -> httpx.Response:
