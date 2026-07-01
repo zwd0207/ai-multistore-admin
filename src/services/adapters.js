@@ -55,6 +55,91 @@ function sanitizeFieldMappingSuggestion(data = {}) {
   );
 }
 
+function adaptFinancialSourceBoundaries(data = {}) {
+  return {
+    orderSalesScope: data.order_sales_scope || '',
+    platformSalesDetailScope: data.platform_sales_detail_scope || '',
+    settlementScope: data.settlement_scope || '',
+    settlementMonthGranularityNotice: data.settlement_month_granularity_notice || '',
+    finalAmountNotice: data.final_amount_notice || '',
+    zeroDataNotice: data.zero_data_notice || '',
+  };
+}
+
+function adaptFinancialSummary(data = {}) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Object.keys(data).length) {
+    return {
+      available: false,
+      orderSalesSummary: {
+        scope: 'order_amount_from_orders',
+        totalOrders: 0,
+        totalOrderSalesAmount: 0,
+        currency: 'KRW',
+        latestOrderedAt: null,
+      },
+      platformSalesDetailSummary: {
+        scope: 'platform_sales_details',
+        salesDetailRows: 0,
+        totalSaleAmount: 0,
+        totalSettlementTargetAmount: 0,
+        totalSettlementAmount: 0,
+        latestRecognitionDate: null,
+        currency: 'KRW',
+        dataStatus: 'local_persisted_rows',
+      },
+      settlementSummary: {
+        scope: 'platform_settlement_details',
+        settlementRows: 0,
+        totalSettlementAmount: 0,
+        totalFinalAmount: 0,
+        totalServiceFee: 0,
+        latestRevenueRecognitionYearMonth: null,
+        latestSettlementDate: null,
+        currency: 'KRW',
+        dataStatus: 'local_persisted_rows',
+      },
+      sourceBoundaries: adaptFinancialSourceBoundaries(),
+    };
+  }
+
+  const orderSalesSummary = data.order_sales_summary || {};
+  const platformSalesDetailSummary = data.platform_sales_detail_summary || {};
+  const settlementSummary = data.settlement_summary || {};
+
+  return {
+    available: true,
+    orderSalesSummary: {
+      scope: orderSalesSummary.scope || 'order_amount_from_orders',
+      totalOrders: numberValue(orderSalesSummary.total_orders),
+      totalOrderSalesAmount: numberValue(orderSalesSummary.total_order_sales_amount),
+      currency: orderSalesSummary.currency || 'KRW',
+      latestOrderedAt: orderSalesSummary.latest_ordered_at || null,
+    },
+    platformSalesDetailSummary: {
+      scope: platformSalesDetailSummary.scope || 'platform_sales_details',
+      salesDetailRows: numberValue(platformSalesDetailSummary.sales_detail_rows),
+      totalSaleAmount: numberValue(platformSalesDetailSummary.total_sale_amount),
+      totalSettlementTargetAmount: numberValue(platformSalesDetailSummary.total_settlement_target_amount),
+      totalSettlementAmount: numberValue(platformSalesDetailSummary.total_settlement_amount),
+      latestRecognitionDate: platformSalesDetailSummary.latest_recognition_date || null,
+      currency: platformSalesDetailSummary.currency || 'KRW',
+      dataStatus: platformSalesDetailSummary.data_status || 'local_persisted_rows',
+    },
+    settlementSummary: {
+      scope: settlementSummary.scope || 'platform_settlement_details',
+      settlementRows: numberValue(settlementSummary.settlement_rows),
+      totalSettlementAmount: numberValue(settlementSummary.total_settlement_amount),
+      totalFinalAmount: numberValue(settlementSummary.total_final_amount),
+      totalServiceFee: numberValue(settlementSummary.total_service_fee),
+      latestRevenueRecognitionYearMonth: settlementSummary.latest_revenue_recognition_year_month || null,
+      latestSettlementDate: settlementSummary.latest_settlement_date || null,
+      currency: settlementSummary.currency || 'KRW',
+      dataStatus: settlementSummary.data_status || 'local_persisted_rows',
+    },
+    sourceBoundaries: adaptFinancialSourceBoundaries(data.source_boundaries || {}),
+  };
+}
+
 function normalizePlatformForBackend(value) {
   const normalized = String(value || '').trim().toLowerCase();
   const platforms = {
@@ -799,6 +884,7 @@ export function adaptDashboardSummary(data = {}) {
     businessDayStart: data.business_day_start,
     businessDayEnd: data.business_day_end,
     apiCapabilitySummary: adaptApiCapabilitySummary(data.api_capability_summary),
+    financialSummary: adaptFinancialSummary(data.financial_summary),
   };
 
   const todos = pendingCustomers > 0
@@ -849,6 +935,7 @@ export function adaptAiDailyContext(data = {}) {
     orderSummary: data.order_summary || {},
     customerInquirySummary: data.customer_inquiry_summary || {},
     syncSummary: data.sync_summary || {},
+    financialContext: adaptFinancialSummary(data.financial_context),
     apiCapabilityContext: adaptApiCapabilitySummary(data.api_capability_context),
     riskFlags: data.risk_flags || [],
     recommendedFocus: data.recommended_focus || [],

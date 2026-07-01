@@ -20,15 +20,179 @@ import {
 
 const formatWon = (value) => `KRW ${Number(value || 0).toLocaleString()}`;
 const formatStructured = (value) => (
-  Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : '暂无结构化数据'
+  Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : 'No structured data.'
 );
 
 const emptyApiCapabilitySummary = {
-  semanticNotice: 'mock 模式不维护后端 API 能力摘要，请切换 backend 模式查看 Codex1 记录。',
+  semanticNotice: 'Mock mode does not maintain Codex1 API capability records.',
   platformSummary: [],
   storeResultSummary: [],
   attentionItems: [],
 };
+
+function createEmptyFinancialSummary() {
+  return {
+    available: false,
+    orderSalesSummary: {
+      scope: 'order_amount_from_orders',
+      totalOrders: 0,
+      totalOrderSalesAmount: 0,
+      currency: 'KRW',
+      latestOrderedAt: null,
+    },
+    platformSalesDetailSummary: {
+      scope: 'platform_sales_details',
+      salesDetailRows: 0,
+      totalSaleAmount: 0,
+      totalSettlementTargetAmount: 0,
+      totalSettlementAmount: 0,
+      latestRecognitionDate: null,
+      currency: 'KRW',
+      dataStatus: 'local_persisted_rows',
+    },
+    settlementSummary: {
+      scope: 'platform_settlement_details',
+      settlementRows: 0,
+      totalSettlementAmount: 0,
+      totalFinalAmount: 0,
+      totalServiceFee: 0,
+      latestRevenueRecognitionYearMonth: null,
+      latestSettlementDate: null,
+      currency: 'KRW',
+      dataStatus: 'local_persisted_rows',
+    },
+    sourceBoundaries: {
+      orderSalesScope: '订单金额口径来自 orders.order_amount。',
+      platformSalesDetailScope: '销售确认口径来自 platform_sales_details。',
+      settlementScope: '结算口径来自 platform_settlement_details。',
+      settlementMonthGranularityNotice: 'Settlement uses revenueRecognitionYearMonth and is not day-precise.',
+      finalAmountNotice: 'finalAmount is not profit and is not withdrawable balance.',
+      zeroDataNotice: 'Zero rows only mean local persisted data is currently empty.',
+    },
+  };
+}
+
+function buildSummaryNotes(summary, kind) {
+  if (!summary) return [];
+  if (kind === 'sales') {
+    return summary.salesDetailRows === 0 ? ['本地暂无持久化数据'] : [];
+  }
+  if (kind === 'settlement') {
+    return summary.settlementRows === 0 ? ['本地暂无持久化数据'] : [];
+  }
+  if (kind === 'orders') {
+    return summary.totalOrders === 0 ? ['当前订单金额口径为 0'] : [];
+  }
+  return [];
+}
+
+function FinancialScopeCard({ title, subtitle, items, notes = [] }) {
+  return (
+    <article className="financial-card">
+      <div className="financial-card-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </div>
+      </div>
+      <InfoGrid columns={2} items={items} />
+      {notes.length ? (
+        <div className="financial-card-note">
+          {notes.map((note) => <span key={note}>{note}</span>)}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function FinancialSummarySection({ financialSummary, title = '财务摘要 / Financial Summary', framed = true }) {
+  const summary = financialSummary || createEmptyFinancialSummary();
+  const boundaries = summary.sourceBoundaries || {};
+  const Wrapper = framed ? 'section' : 'div';
+  const wrapperClassName = framed ? 'content-card' : 'detail-section financial-summary-embedded';
+
+  return (
+    <Wrapper className={wrapperClassName}>
+      <div className="card-title">
+        <div>
+          <h2>{title}</h2>
+          <p>订单金额、销售确认金额、结算金额分区展示，不做混算。</p>
+        </div>
+        <span className="period-chip">KRW scoped</span>
+      </div>
+
+      {!summary.available ? (
+        <EmptyState
+          title="暂无财务摘要"
+          description="当前响应未提供 financial_summary / financial_context，页面已做兼容降级。"
+        />
+      ) : (
+        <>
+          <div className="financial-summary-grid">
+            <FinancialScopeCard
+              title="订单金额口径"
+              subtitle="基于 orders.order_amount"
+              items={[
+                { label: '订单金额', value: formatWon(summary.orderSalesSummary.totalOrderSalesAmount) },
+                { label: '订单数', value: summary.orderSalesSummary.totalOrders },
+                { label: '最近订单时间', value: formatKstDateTimeWithLabel(summary.orderSalesSummary.latestOrderedAt) },
+                { label: '币种', value: summary.orderSalesSummary.currency || 'KRW' },
+              ]}
+              notes={buildSummaryNotes(summary.orderSalesSummary, 'orders')}
+            />
+            <FinancialScopeCard
+              title="销售确认口径"
+              subtitle="基于 platform_sales_details"
+              items={[
+                { label: '明细行数', value: summary.platformSalesDetailSummary.salesDetailRows },
+                { label: '销售确认金额', value: formatWon(summary.platformSalesDetailSummary.totalSaleAmount) },
+                { label: '待结算目标金额', value: formatWon(summary.platformSalesDetailSummary.totalSettlementTargetAmount) },
+                { label: '已映射结算金额', value: formatWon(summary.platformSalesDetailSummary.totalSettlementAmount) },
+                { label: '最近确认日期', value: formatKstDate(summary.platformSalesDetailSummary.latestRecognitionDate) },
+                { label: '数据状态', value: summary.platformSalesDetailSummary.dataStatus || 'local_persisted_rows' },
+              ]}
+              notes={buildSummaryNotes(summary.platformSalesDetailSummary, 'sales')}
+            />
+            <FinancialScopeCard
+              title="结算口径"
+              subtitle="基于 platform_settlement_details"
+              items={[
+                { label: '结算行数', value: summary.settlementSummary.settlementRows },
+                { label: '结算金额', value: formatWon(summary.settlementSummary.totalSettlementAmount) },
+                { label: 'finalAmount', value: formatWon(summary.settlementSummary.totalFinalAmount) },
+                { label: 'serviceFee', value: formatWon(summary.settlementSummary.totalServiceFee) },
+                { label: '最近 revenueRecognitionYearMonth', value: summary.settlementSummary.latestRevenueRecognitionYearMonth || '-' },
+                { label: '最近结算日期', value: formatKstDate(summary.settlementSummary.latestSettlementDate) },
+              ]}
+              notes={buildSummaryNotes(summary.settlementSummary, 'settlement')}
+            />
+          </div>
+
+          <div className="financial-boundary-list">
+            <div className="financial-boundary-item">
+              <strong>口径边界</strong>
+              <p>{boundaries.orderSalesScope}</p>
+              <p>{boundaries.platformSalesDetailScope}</p>
+              <p>{boundaries.settlementScope}</p>
+            </div>
+            <div className="financial-boundary-item">
+              <strong>结算说明</strong>
+              <p>{boundaries.settlementMonthGranularityNotice}</p>
+            </div>
+            <div className="financial-boundary-item">
+              <strong>金额解释</strong>
+              <p>{boundaries.finalAmountNotice}</p>
+            </div>
+            <div className="financial-boundary-item">
+              <strong>0 数据说明</strong>
+              <p>{boundaries.zeroDataNotice}</p>
+            </div>
+          </div>
+        </>
+      )}
+    </Wrapper>
+  );
+}
 
 function ApiCapabilitySummarySection({ summary, source = 'dashboard', onOpenMatrix }) {
   const data = summary || emptyApiCapabilitySummary;
@@ -41,96 +205,96 @@ function ApiCapabilitySummarySection({ summary, source = 'dashboard', onOpenMatr
     <section className="content-card">
       <div className="card-title">
         <div>
-          <h2>{source === 'ai' ? 'AI 能力上下文' : 'API 能力确认摘要'}</h2>
-          <p>docs-only / manual / mock / sandbox 只是记录状态，不代表已经完成平台连接。</p>
+          <h2>{source === 'ai' ? 'AI API Capability Context' : 'API Capability Summary'}</h2>
+          <p>docs-only / manual / mock / sandbox are record states only and do not mean real platform connectivity.</p>
         </div>
-        <button className="button ghost" onClick={onOpenMatrix}>查看能力矩阵</button>
+        <button className="button ghost" onClick={onOpenMatrix}>Open Matrix</button>
       </div>
       <div className="form-info">
-        tested_success_count 显示为“记录为通过”；real_readonly_count 只是未来预留统计，本阶段未执行真实只读测试。
+        `tested_success_count` means recorded success only. `real_readonly_count` is reserved for future explicit real readonly verification.
       </div>
       {isEmpty ? (
         <EmptyState
-          title={source === 'mock' ? 'mock 模式无后端能力摘要' : '暂无 API 能力摘要'}
-          description={data.semanticNotice || '当前没有平台级或店铺级 API 能力记录。'}
+          title={source === 'mock' ? 'Mock mode has no backend capability summary' : 'No API capability summary'}
+          description={data.semanticNotice || 'There are no platform-level or store-level API capability records yet.'}
         />
       ) : (
         <>
           <div className="panel-grid">
             <div className="detail-section">
-              <h3>平台级能力统计</h3>
+              <h3>Platform Summary</h3>
               {platformRows.length ? (
                 <div className="detail-list">
                   {platformRows.map((item) => (
                     <div className="log-item" key={item.rawPlatform || item.platform}>
                       <div className="log-item-head">
                         <strong>{item.platform}</strong>
-                        <span className="period-chip">总能力 {item.totalCapabilities}</span>
+                        <span className="period-chip">Capabilities {item.totalCapabilities}</span>
                       </div>
                       <InfoGrid
                         columns={3}
                         items={[
                           { label: 'docs-only', value: item.docsOnlyCount },
                           { label: 'manual', value: item.manualCount },
-                          { label: '记录为通过', value: item.testedSuccessCount },
-                          { label: '未确认', value: item.notTestedCount },
-                          { label: '需要权限', value: item.permissionRequiredCount },
-                          { label: '不可用', value: item.unavailableCount },
-                          { label: '首阶段候选', value: item.firstPhaseCandidateCount },
-                          { label: '未来只读预留', value: item.realReadonlyCount },
-                          { label: '最近确认', value: formatKstDateTimeWithLabel(item.lastCheckedAt) },
+                          { label: 'tested success', value: item.testedSuccessCount },
+                          { label: 'not tested', value: item.notTestedCount },
+                          { label: 'permission required', value: item.permissionRequiredCount },
+                          { label: 'unavailable', value: item.unavailableCount },
+                          { label: 'phase-1 candidate', value: item.firstPhaseCandidateCount },
+                          { label: 'real readonly', value: item.realReadonlyCount },
+                          { label: 'last checked', value: formatKstDateTimeWithLabel(item.lastCheckedAt) },
                         ]}
                       />
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState title="暂无平台级记录" description="当前没有 Codex1 API Capability 平台级摘要。" />}
+              ) : <EmptyState title="No platform records" description="Codex1 has not returned any platform-level capability summary." />}
             </div>
             <div className="detail-section">
-              <h3>当前店铺级结果</h3>
+              <h3>Store Summary</h3>
               {storeRows.length ? (
                 <div className="detail-list">
                   {storeRows.map((item) => (
                     <div className="log-item" key={`${item.storeId}-${item.rawPlatform || item.platform}`}>
                       <div className="log-item-head">
                         <strong>{item.platform}</strong>
-                        <span className="period-chip">店铺结果 {item.totalResults}</span>
+                        <span className="period-chip">Results {item.totalResults}</span>
                       </div>
                       <InfoGrid
                         columns={2}
                         items={[
-                          { label: '绑定凭证记录', value: item.credentialBoundResults },
+                          { label: 'credential bound', value: item.credentialBoundResults },
                           { label: 'manual', value: item.manualCount },
                           { label: 'docs-only', value: item.docsOnlyCount },
                           { label: 'mock/sandbox', value: `${item.mockCount}/${item.sandboxCount}` },
-                          { label: '记录为通过', value: item.testedSuccessCount },
-                          { label: '记录失败', value: item.testedFailedCount },
-                          { label: '需要权限', value: item.permissionRequiredCount },
-                          { label: '未确认候选', value: item.missingFirstPhaseCandidates.length },
-                          { label: '最近记录', value: formatKstDateTimeWithLabel(item.latestTestedAt) },
+                          { label: 'tested success', value: item.testedSuccessCount },
+                          { label: 'tested failed', value: item.testedFailedCount },
+                          { label: 'permission required', value: item.permissionRequiredCount },
+                          { label: 'missing phase-1', value: item.missingFirstPhaseCandidates.length },
+                          { label: 'latest record', value: formatKstDateTimeWithLabel(item.latestTestedAt) },
                         ]}
                       />
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState title="暂无当前店铺级记录" description="选择店铺后，这里显示该店铺的 API 能力人工/文档记录摘要。" />}
+              ) : <EmptyState title="No store records" description="Select a store to view store-level capability results." />}
             </div>
           </div>
           <div className="detail-section">
-            <h3>需要关注项</h3>
+            <h3>Attention Items</h3>
             {attentionItems.length ? (
               <div className="risk-panel">
                 {attentionItems.map((item) => (
                   <div className="risk-item" key={item.id}>
                     <div className="risk-item-head">
-                      <strong>{item.platform || '全部平台'}</strong>
-                      <span className="period-chip">{item.level} · {item.count}</span>
+                      <strong>{item.platform || 'All platforms'}</strong>
+                      <span className="period-chip">{item.level} / {item.count}</span>
                     </div>
                     <p>{item.message}</p>
                   </div>
                 ))}
               </div>
-            ) : <p>暂无权限不足、不可用或首阶段候选缺口提醒。</p>}
+            ) : <p>No current attention items.</p>}
           </div>
         </>
       )}
@@ -171,6 +335,7 @@ export default function Dashboard() {
         unreadImportantEmails: 0,
         businessTimezone: BUSINESS_TIME_ZONE,
         apiCapabilitySummary: emptyApiCapabilitySummary,
+        financialSummary: createEmptyFinancialSummary(),
       });
       setRisks([]);
       setTodos([]);
@@ -194,7 +359,7 @@ export default function Dashboard() {
         setActivities(dashboardData.activities);
         setTrend(trendData);
       })
-      .catch((requestError) => setError(requestError.message || '总览数据加载失败'));
+      .catch((requestError) => setError(requestError.message || 'Failed to load dashboard data.'));
   }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
 
   useEffect(() => {
@@ -206,7 +371,7 @@ export default function Dashboard() {
     setContextError('');
     dataProvider.getAiDailyContext({ storeId: selectedStoreId })
       .then(setDailyContext)
-      .catch((requestError) => setContextError(requestError.message || 'Daily Context 加载失败'));
+      .catch((requestError) => setContextError(requestError.message || 'Failed to load daily context.'));
   }, [selectedStoreId, storeLoading, versions.aiDailyContext]);
 
   if (error) {
@@ -214,25 +379,25 @@ export default function Dashboard() {
       <>
         <PageHeader title="运营总览" description="汇总核心运营、风险、待办和审计数据。" />
         <article className="content-card empty-state">
-          <h2>总览数据加载失败</h2>
+          <h2>Dashboard load failed</h2>
           <p>{error}</p>
         </article>
       </>
     );
   }
 
-  if (!summary) return <div className="table-state"><span className="spinner" />正在加载数据...</div>;
+  if (!summary) return <div className="table-state"><span className="spinner" />Loading dashboard data...</div>;
 
   const businessDate = summary.businessDate || dailyContext?.date;
   const orderMetricLabel = isBackendSource ? '当前范围订单数' : 'KST 今日订单数';
-  const salesMetricLabel = isBackendSource ? '当前范围销售额' : 'KST 今日销售额';
+  const salesMetricLabel = isBackendSource ? '当前范围订单金额' : 'KST 今日订单金额';
   const stats = [
     { label: '店铺总数', value: summary.storeTotal, detail: '已接入多平台店铺', tone: 'positive' },
-    { label: '商品总数', value: summary.productTotal, detail: '当前店铺在售商品', tone: 'info' },
-    { label: orderMetricLabel, value: summary.scopeOrderCount ?? summary.todayOrderCount, detail: 'KST business scope', tone: 'info' },
-    { label: salesMetricLabel, value: formatWon(summary.scopeSalesAmount ?? summary.todaySalesAmount), detail: 'KRW / KST scope', tone: 'positive' },
-    { label: '待处理客服', value: summary.pendingCustomers, detail: '待回复客服咨询', tone: 'warning' },
-    { label: '申诉中案件', value: summary.pendingAppeals, detail: '资料准备/审核中', tone: 'danger' },
+    { label: '商品总数', value: summary.productTotal, detail: '当前店铺本地商品', tone: 'info' },
+    { label: orderMetricLabel, value: summary.scopeOrderCount ?? summary.todayOrderCount, detail: 'orders scope', tone: 'info' },
+    { label: salesMetricLabel, value: formatWon(summary.scopeSalesAmount ?? summary.todaySalesAmount), detail: 'orders.order_amount only', tone: 'positive' },
+    { label: '待处理客服', value: summary.pendingCustomers, detail: '待回复客户咨询', tone: 'warning' },
+    { label: '申诉中案件', value: summary.pendingAppeals, detail: '资料准备或审核中', tone: 'danger' },
     { label: '风险环境数量', value: summary.riskEnvironments, detail: '需要重点检查', tone: 'danger' },
     { label: '未读重要邮件', value: summary.unreadImportantEmails, detail: '优先跟进提醒', tone: 'warning' },
   ];
@@ -249,12 +414,14 @@ export default function Dashboard() {
         actions={(
           <>
             {isBackendSource && <MockSyncPanel />}
-            <span className="period-chip">数据源：{DATA_SOURCE}</span>
-            <span className="period-chip">韩国业务日：{businessDate ? formatKstDate(businessDate) : BUSINESS_TIME_LABEL}</span>
+            <span className="period-chip">数据源: {DATA_SOURCE}</span>
+            <span className="period-chip">韩国业务日: {businessDate ? formatKstDate(businessDate) : BUSINESS_TIME_LABEL}</span>
           </>
         )}
       />
       <StatGrid items={stats} />
+
+      <FinancialSummarySection financialSummary={summary.financialSummary} />
 
       <ApiCapabilitySummarySection
         summary={dashboardCapabilitySummary}
@@ -265,8 +432,11 @@ export default function Dashboard() {
       <section className="panel-grid">
         <article className="content-card">
           <div className="card-title">
-            <div><h2>简易销售趋势</h2><p>复用销售模块近 7 天趋势数据。</p></div>
-            <span className="period-chip">KST 近 7 天</span>
+            <div>
+              <h2>销售趋势</h2>
+              <p>复用销售模块近 7 天趋势数据。</p>
+            </div>
+            <span className="period-chip">KST last 7 days</span>
           </div>
           <div className="trend-bars">
             {trend.map((item) => (
@@ -276,13 +446,18 @@ export default function Dashboard() {
                 </div>
                 <strong>{item.date.slice(5)}</strong>
                 <span>{formatWon(item.sales)}</span>
-                <small>{item.orders} 单</small>
+                <small>{item.orders} orders</small>
               </div>
             ))}
           </div>
         </article>
         <article className="content-card">
-          <div className="card-title"><div><h2>待办事项</h2><p>跨客服、申诉、订单、邮箱、环境的待处理事项。</p></div></div>
+          <div className="card-title">
+            <div>
+              <h2>待办事项</h2>
+              <p>跨客服、申诉、订单、邮箱、环境的待处理项。</p>
+            </div>
+          </div>
           <TodoList items={todos} />
         </article>
       </section>
@@ -290,7 +465,12 @@ export default function Dashboard() {
       <section className="panel-grid">
         <RiskPanel title="风险提醒区域" items={risks} />
         <article className="content-card">
-          <div className="card-title"><div><h2>最近动态区域</h2><p>最近操作日志、申诉更新、客服回复和邮箱提醒。</p></div></div>
+          <div className="card-title">
+            <div>
+              <h2>最近动态区域</h2>
+              <p>最近操作日志、申诉更新、客户回复和邮箱提醒。</p>
+            </div>
+          </div>
           <ActivityList items={(activities.logs || []).map((item) => ({
             id: item.id,
             title: item.module,
@@ -305,9 +485,12 @@ export default function Dashboard() {
       {isBackendSource && (
         <section className="content-card">
           <div className="card-title">
-            <div><h2>AI Daily Context（结构化数据）</h2><p>仅展示 Codex1 聚合结果，不调用模型，也不生成日报文案。</p></div>
+            <div>
+              <h2>AI Daily Context</h2>
+              <p>只展示 Codex1 聚合结果，不调用模型，也不生成日报文案。</p>
+            </div>
           </div>
-          {contextError ? <EmptyState title="Daily Context 加载失败" description={contextError} /> : dailyContext ? (
+          {contextError ? <EmptyState title="Daily Context load failed" description={contextError} /> : dailyContext ? (
             <>
               <InfoGrid items={[
                 { label: '统计日期', value: formatKstDate(dailyContext.date) },
@@ -318,17 +501,31 @@ export default function Dashboard() {
               ]}
               />
               <div className="panel-grid">
-                <div className="detail-section"><h3>销售与订单摘要</h3><pre>{formatStructured({ sales: dailyContext.salesSummary, orders: dailyContext.orderSummary })}</pre></div>
-                <div className="detail-section"><h3>客服与同步摘要</h3><pre>{formatStructured({ inquiries: dailyContext.customerInquirySummary, sync: dailyContext.syncSummary })}</pre></div>
+                <div className="detail-section">
+                  <h3>销售与订单摘要</h3>
+                  <pre>{formatStructured({ sales: dailyContext.salesSummary, orders: dailyContext.orderSummary })}</pre>
+                </div>
+                <div className="detail-section">
+                  <h3>客服与同步摘要</h3>
+                  <pre>{formatStructured({ inquiries: dailyContext.customerInquirySummary, sync: dailyContext.syncSummary })}</pre>
+                </div>
               </div>
+              <FinancialSummarySection
+                financialSummary={dailyContext.financialContext}
+                title="AI 财务上下文 / Financial Context"
+                framed={false}
+              />
               <ApiCapabilitySummarySection
                 summary={aiCapabilityContext}
                 source="ai"
                 onOpenMatrix={openApiCapabilities}
               />
-              <div className="detail-section"><h3>风险与建议关注</h3><pre>{JSON.stringify({ riskFlags: dailyContext.riskFlags, recommendedFocus: dailyContext.recommendedFocus }, null, 2)}</pre></div>
+              <div className="detail-section">
+                <h3>风险与建议关注</h3>
+                <pre>{JSON.stringify({ riskFlags: dailyContext.riskFlags, recommendedFocus: dailyContext.recommendedFocus }, null, 2)}</pre>
+              </div>
             </>
-          ) : <div className="table-state"><span className="spinner" />正在加载 Daily Context...</div>}
+          ) : <div className="table-state"><span className="spinner" />Loading daily context...</div>}
         </section>
       )}
     </>

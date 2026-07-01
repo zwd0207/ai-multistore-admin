@@ -73,6 +73,52 @@ function mockSyncResult(type, payload = {}) {
   };
 }
 
+function withMockFinancialSummary(summary = {}) {
+  if (summary.financialSummary) return summary;
+  return {
+    ...summary,
+    financialSummary: {
+      available: true,
+      orderSalesSummary: {
+        scope: 'order_amount_from_orders',
+        totalOrders: Number(summary.todayOrderCount || summary.scopeOrderCount || 0),
+        totalOrderSalesAmount: Number(summary.todaySalesAmount || summary.scopeSalesAmount || 0),
+        currency: summary.currency || 'KRW',
+        latestOrderedAt: null,
+      },
+      platformSalesDetailSummary: {
+        scope: 'platform_sales_details',
+        salesDetailRows: 0,
+        totalSaleAmount: 0,
+        totalSettlementTargetAmount: 0,
+        totalSettlementAmount: 0,
+        latestRecognitionDate: null,
+        currency: 'KRW',
+        dataStatus: 'local_persisted_rows',
+      },
+      settlementSummary: {
+        scope: 'platform_settlement_details',
+        settlementRows: 0,
+        totalSettlementAmount: 0,
+        totalFinalAmount: 0,
+        totalServiceFee: 0,
+        latestRevenueRecognitionYearMonth: null,
+        latestSettlementDate: null,
+        currency: 'KRW',
+        dataStatus: 'local_persisted_rows',
+      },
+      sourceBoundaries: {
+        orderSalesScope: 'Mock mode keeps order amount scope separate from sales confirmation and settlement scope.',
+        platformSalesDetailScope: 'Mock mode does not persist real Coupang sales detail rows.',
+        settlementScope: 'Mock mode does not persist real Coupang settlement rows.',
+        settlementMonthGranularityNotice: 'Settlement uses revenueRecognitionYearMonth and is not day-precise.',
+        finalAmountNotice: 'finalAmount is not profit and is not withdrawable balance.',
+        zeroDataNotice: 'Zero rows only mean local persisted data is currently empty.',
+      },
+    },
+  };
+}
+
 async function getMockDashboardData() {
   const [summary, risks, todos, activities] = await Promise.all([
     mockApi.getDashboardSummary(),
@@ -80,7 +126,7 @@ async function getMockDashboardData() {
     mockApi.getDashboardTodos(),
     mockApi.getDashboardActivities(),
   ]);
-  return { summary, risks, todos, activities };
+  return { summary: withMockFinancialSummary(summary), risks, todos, activities };
 }
 
 async function getBackendDashboardData(params) {
@@ -97,7 +143,7 @@ const sourceMethods = {
   healthCheck: backendApi.healthCheck,
   getDashboardData: (params) => (isBackendSource ? getBackendDashboardData(params) : getMockDashboardData()),
   getDashboardSummary: async (params) => {
-    if (!isBackendSource) return mockApi.getDashboardSummary(params);
+    if (!isBackendSource) return withMockFinancialSummary(await mockApi.getDashboardSummary(params));
     return adapters.dashboardSummary(await backendApi.getDashboardSummary(params)).summary;
   },
   getDashboardSalesTrend: mockApi.getDashboardSalesTrend,
