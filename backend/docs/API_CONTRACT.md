@@ -198,13 +198,13 @@ Response example:
 }
 ```
 
-`auth_status` is a local configuration or future test status only. This stage does not perform real Naver or Coupang API validation and does not refresh tokens.
+`auth_status` is local credential metadata plus future test state. Readiness does not call external APIs, and smoke-test does not persist or return token values.
 
-`GET /api/v1/api-credentials/readiness` reads only local environment variable presence. It returns platform status values such as `configured`, `missing`, and `disabled`, plus `real_api_test_enabled` and `real_api_write_enabled`. The endpoint does not decrypt database credentials, does not return access keys, secret keys, client secrets, tokens, passwords, or encrypted values, and does not call Naver or Coupang.
+`GET /api/v1/api-credentials/readiness` has two roles. The env fallback path reads only local environment variable presence and is a temporary developer fallback, not the final multi-store credential path. The formal multi-store path is store-bound: `GET /api/v1/api-credentials/readiness?store_id=...` checks the selected store, its active platform credential, decryptability, and token metadata without calling Naver or Coupang. Neither path returns access keys, secret keys, client secrets, tokens, passwords, or encrypted values.
 
 Naver readiness requires only `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, and `NAVER_API_BASE` (default: `https://api.commerce.naver.com/external`). `NAVER_CHANNEL_NO`, `NAVER_ACCESS_TOKEN`, `NAVER_REFRESH_TOKEN`, and `NAVER_TOKEN_EXPIRES_AT` are not manual readiness requirements. Coupang readiness requires `COUPANG_VENDOR_ID`, `COUPANG_ACCESS_KEY`, and `COUPANG_SECRET_KEY`.
 
-`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. If `REAL_API_TEST_ENABLED=false`, it returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/product/order checks and returns only step statuses:
+`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. The env fallback path is a developer fallback only and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. If `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/product/order checks and returns only step statuses plus capability mapping metadata:
 
 ```text
 platform
@@ -219,9 +219,10 @@ settlement_read_test
 error_code
 masked_message
 tested_at
+capability_mapping
 ```
 
-The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, or raw external response bodies. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
+The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, or raw external response bodies. Naver capability records may include non-sensitive guardrail metadata such as `docs_confirmed`, `implemented_now`, `safe_to_real_test`, and blocked reasons so docs-pending capabilities cannot be mistaken for real tested success. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
 
 When `REAL_API_TEST_ENABLED=true`, the smoke-test endpoint may write a store-level `ApiCapabilityTestResult` with `test_mode=real_readonly`. That write is limited to local result metadata: step statuses, `error_code`, `http_status`, `tested_at`, and short operator notes. Public `POST /api/v1/api-capability-results` still rejects manually supplied `real_readonly` payloads; only this readonly smoke-test endpoint can create those records.
 

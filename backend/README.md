@@ -164,6 +164,8 @@ scripts/verify_stage_1e.py
 scripts/verify_stage_1f.py
 ```
 
+`scripts/verify_all.py` uses an isolated temporary SQLite database and does not mutate `backend/codex1.db`. It is safe to run during real API integration as long as the script keeps its temp-db guardrail.
+
 The verification scripts rebuild the local SQLite database during tests and should be used for local validation only.
 
 ## API Response Format
@@ -220,9 +222,9 @@ DELETE /api/v1/credentials/{credential_id}
 
 Create and update requests accept `access_key` and `secret_key`, but the API never returns plaintext keys. Responses only include metadata such as `has_access_key` and `has_secret_key`.
 
-`GET /api/v1/api-credentials/readiness` reads only local `.env` variable presence and returns `configured`, `missing`, or `disabled` readiness metadata plus the real API test/write switches. It never returns access keys, secret keys, client secrets, tokens, encrypted values, or decrypted database credentials, and it does not call Naver or Coupang.
+`GET /api/v1/api-credentials/readiness` supports two paths. The env fallback path reads only local `.env` variable presence and remains a temporary developer path. The formal multi-store path is store-bound: `GET /api/v1/api-credentials/readiness?store_id=...` checks the selected store and its active encrypted credential metadata without calling Naver or Coupang. Neither path returns access keys, secret keys, client secrets, tokens, encrypted values, or decrypted database credentials.
 
-`POST /api/v1/api-credentials/smoke-test` accepts `platform: naver | coupang | all` and `mode: readonly`. When `REAL_API_TEST_ENABLED=false`, it returns `disabled` results before creating any external HTTP client. When enabled, it runs only minimal read-only checks and still never returns keys, tokens, authorization headers, request signatures, or raw external response payloads. `REAL_API_WRITE_ENABLED=false` keeps write operations out of scope. Enabled smoke tests may write local `ApiCapabilityTestResult` records with `test_mode=real_readonly`; those records contain only step statuses, error code, HTTP status, and timestamps.
+`POST /api/v1/api-credentials/smoke-test` accepts `platform: naver | coupang | all` and `mode: readonly`. The env fallback path remains a developer-only fallback and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. When `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results before creating any external HTTP client. When enabled, it runs only minimal read-only checks and still never returns keys, tokens, authorization headers, request signatures, or raw external response payloads. `REAL_API_WRITE_ENABLED=false` keeps write operations out of scope. Store-bound readonly smoke tests may write local `ApiCapabilityTestResult` records with `test_mode=real_readonly`; those records contain only step statuses, error code, HTTP status, timestamps, and docs-pending guardrail metadata.
 
 The database stores only:
 

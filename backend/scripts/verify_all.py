@@ -571,9 +571,10 @@ def verify_api_credential_readiness() -> None:
 
             original_request_naver_token = api_credential_readiness_service._request_naver_token
             original_store_bound_token = api_credential_readiness_service._request_naver_token_from_context
-            original_seller_confirmed = api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED
-            original_product_confirmed = api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED
-            original_order_confirmed = api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED
+            original_naver_capability_map = {
+                key: value.copy()
+                for key, value in api_credential_readiness_service.NAVER_CAPABILITY_MAP.items()
+            }
 
             class FakeResponse:
                 def __init__(self, status_code: int, payload: dict | None = None) -> None:
@@ -601,21 +602,18 @@ def verify_api_credential_readiness() -> None:
                 def get(self, url: str, headers=None, params=None):
                     if url.endswith("/v1/seller/account"):
                         return FakeResponse(200, {"channelNo": "123456"})
-                    if url.endswith("/v1/products/search"):
-                        return FakeResponse(200, {"items": [{"id": "product-1"}]})
                     if url.endswith("/v1/pay-order/seller/product-orders"):
                         return FakeResponse(200, {"data": [{"id": "order-1"}]})
                     raise AssertionError(f"unexpected GET url: {url}")
 
-                def post(self, url: str, data=None):
+                def post(self, url: str, headers=None, params=None, data=None):
+                    if url.endswith("/v1/products/search"):
+                        return FakeResponse(200, {"items": [{"id": "product-1"}]})
                     raise AssertionError(f"unexpected POST url: {url}")
 
             api_credential_readiness_service._request_naver_token = lambda settings: ("fake-env-token", 200)
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
             api_credential_readiness_service.httpx.Client = FakeHttpClient
-            api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED = True
-            api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED = True
-            api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED = True
 
             with SessionLocal() as db:
                 before_env_fallback_count = len(db.scalars(
@@ -667,7 +665,35 @@ def verify_api_credential_readiness() -> None:
             assert store_bound_result["shipping_delivery_read_test"] == "skipped", store_bound_result
             assert store_bound_result["channel_no_source"] == "seller_account", store_bound_result
             assert store_bound_result["capability_result_ids"], store_bound_result
+            assert store_bound_result["capability_mapping"], store_bound_result
+            mapping_by_key = {
+                item["capability_key"]: item for item in store_bound_result["capability_mapping"]
+            }
+            assert mapping_by_key["naver.seller_account_read"]["docs_confirmed"] is True
+            assert mapping_by_key["naver.seller_account_read"]["safe_to_real_test"] is False
+            assert mapping_by_key["naver.product_read"]["docs_confirmed"] is True
+            assert mapping_by_key["naver.product_read"]["safe_to_real_test"] is False
+            assert mapping_by_key["naver.order_read"]["safe_to_real_test"] is False
+            assert mapping_by_key["naver.seller_channels_read"]["implemented_now"] is False
             assert "fake-store-token" not in str(store_bound.json()).lower(), store_bound.text
+
+            capability_results_by_key = {
+                item["capability_key"]: item for item in store_bound_payload["capability_results"]
+            }
+            assert capability_results_by_key["naver.token_auth"]["test_status"] == "tested_success", capability_results_by_key
+            for guarded_key in [
+                "naver.seller_account_read",
+                "naver.seller_channels_read",
+                "naver.product_read",
+                "naver.order_read",
+                "naver.sales_read",
+                "naver.settlement_read",
+                "naver.customer_inquiry_read",
+                "naver.shipping_delivery_read",
+            ]:
+                assert capability_results_by_key[guarded_key]["test_status"] == "not_tested", capability_results_by_key[guarded_key]
+                assert capability_results_by_key[guarded_key]["safe_to_real_test"] is False, capability_results_by_key[guarded_key]
+                assert capability_results_by_key[guarded_key]["blocked_reason"], capability_results_by_key[guarded_key]
 
             with SessionLocal() as db:
                 bound_results = db.scalars(
@@ -734,9 +760,8 @@ def verify_api_credential_readiness() -> None:
             api_credential_readiness_service.httpx.Client = original_client
             api_credential_readiness_service._request_naver_token = original_request_naver_token
             api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
-            api_credential_readiness_service.NAVER_REAL_SELLER_ACCOUNT_ENDPOINT_CONFIRMED = original_seller_confirmed
-            api_credential_readiness_service.NAVER_REAL_PRODUCT_READ_ENDPOINT_CONFIRMED = original_product_confirmed
-            api_credential_readiness_service.NAVER_REAL_ORDER_READ_ENDPOINT_CONFIRMED = original_order_confirmed
+            api_credential_readiness_service.NAVER_CAPABILITY_MAP.clear()
+            api_credential_readiness_service.NAVER_CAPABILITY_MAP.update(original_naver_capability_map)
 
             if original_env_client_id is None:
                 os.environ.pop("NAVER_CLIENT_ID", None)
