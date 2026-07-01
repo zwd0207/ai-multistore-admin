@@ -45,6 +45,7 @@ COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
 COUPANG_SETTLEMENT_SYNC_TYPE = "settlements_coupang_real"
 COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
 NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
+NAVER_PRODUCT_SYNC_SOURCE_TYPE = "naver_real_sync"
 NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
@@ -311,6 +312,7 @@ def preview_naver_products(
     keyword: str | None = None,
     seller_product_id: str | None = None,
     real_preview: bool = False,
+    real_sync: bool = False,
 ) -> dict:
     normalized_status = _resolve_naver_product_preview_status(status)
     credential = _ensure_naver_product_preview_credential(
@@ -330,6 +332,12 @@ def preview_naver_products(
         "preview_endpoint_planned": capability_meta.get("preview_endpoint_planned", False),
         "preview_endpoint_implemented": capability_meta.get("preview_endpoint_implemented", False),
     })
+    if real_sync and not real_preview:
+        raise ApiError(
+            message="Naver product local sync requires real_preview=true",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
     if not real_preview:
         return _build_naver_product_guardrail_preview_result(
             store_id=store_id,
@@ -369,6 +377,7 @@ def preview_naver_products(
                 "minimum_request_body_confirmed": False,
             },
             error_code="docs_pending",
+            real_sync=real_sync,
         )
 
     return _run_naver_product_real_micro_preview(
@@ -379,6 +388,7 @@ def preview_naver_products(
         size=size,
         status=normalized_status,
         field_observation=field_observation,
+        real_sync=real_sync,
     )
 
 
@@ -1603,6 +1613,7 @@ def _build_naver_product_guardrail_preview_result(
     seller_product_id_configured: bool,
     field_observation: dict,
     error_code: str = "guardrail_blocked",
+    real_sync: bool = False,
 ) -> dict:
     return _build_naver_product_preview_result(
         store_id=store_id,
@@ -1619,6 +1630,7 @@ def _build_naver_product_guardrail_preview_result(
         has_more=False,
         keyword_configured=keyword_configured,
         seller_product_id_configured=seller_product_id_configured,
+        local_sync_result=_default_naver_product_local_sync_result(real_sync),
     )
 
 
@@ -1631,6 +1643,7 @@ def _run_naver_product_real_micro_preview(
     size: int,
     status: str,
     field_observation: dict,
+    real_sync: bool = False,
 ) -> dict:
     context = _build_naver_token_context_from_credential(credential)
     try:
@@ -1669,6 +1682,14 @@ def _run_naver_product_real_micro_preview(
         field_observation.update(_summarize_naver_product_preview_fields(payload))
         mapping_summary = _summarize_naver_product_mapping(payload)
         dry_run_diff = _build_naver_product_dry_run_diff(db, store_id=store_id, payload=payload)
+        local_sync_result = _sync_naver_product_preview_candidate(
+            db,
+            store_id=store_id,
+            payload=payload,
+            dry_run_diff=dry_run_diff,
+            real_sync=real_sync,
+        )
+        field_observation["products_written"] = local_sync_result["products_written"]
         preview_status = "success" if sample_ids else "success_empty"
         return _build_naver_product_preview_result(
             store_id=store_id,
@@ -1685,6 +1706,7 @@ def _run_naver_product_real_micro_preview(
             has_more=_naver_product_preview_has_more(payload),
             mapping_summary=mapping_summary,
             dry_run_diff=dry_run_diff,
+            local_sync_result=local_sync_result,
         )
     except ApiError:
         raise
@@ -1950,6 +1972,7 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
         + skip_reasons["missing_external_product_id"]
         + skip_reasons["missing_product_name"]
     )
+    ready_for_local_sync = len(unique_candidate_ids) == 1 and would_skip == 0
     return {
         "would_create": would_create,
         "would_update": would_update,
@@ -1957,7 +1980,7 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
         "skip_reasons": skip_reasons,
         "matched_existing_count": len(existing_ids),
         "incoming_candidate_count": len(unique_candidate_ids),
-        "ready_for_local_sync": False,
+        "ready_for_local_sync": ready_for_local_sync,
         "source_type": "naver_product_preview_dry_run",
     }
 
@@ -1982,6 +2005,134 @@ def _default_naver_product_dry_run_diff() -> dict:
         "ready_for_local_sync": False,
         "source_type": "naver_product_preview_dry_run",
     }
+
+
+def _default_naver_product_local_sync_result(real_sync: bool = False) -> dict:
+    return {
+        "requested": bool(real_sync),
+        "status": "not_requested" if not real_sync else "blocked",
+        "source_type": NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_count": 0,
+        "skip_reasons": _empty_naver_product_skip_reasons(),
+        "sample_ids": [],
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "write_limit": 1,
+    }
+
+
+def _sync_naver_product_preview_candidate(
+    db: Session,
+    *,
+    store_id: int,
+    payload: object | None,
+    dry_run_diff: dict,
+    real_sync: bool,
+) -> dict:
+    result = _default_naver_product_local_sync_result(real_sync)
+    if not real_sync:
+        return result
+    if not dry_run_diff.get("ready_for_local_sync"):
+        result["status"] = "skipped"
+        result["skipped_count"] = int(dry_run_diff.get("would_skip") or 0)
+        result["skip_reasons"] = dict(dry_run_diff.get("skip_reasons") or _empty_naver_product_skip_reasons())
+        return result
+
+    candidates, skip_reasons = _extract_naver_product_sync_candidates(payload)
+    if len(candidates) != 1:
+        result["status"] = "skipped"
+        result["skipped_count"] = max(1, len(candidates))
+        result["skip_reasons"] = skip_reasons
+        return result
+
+    candidate = candidates[0]
+    product = db.scalar(
+        select(Product).where(
+            Product.store_id == store_id,
+            Product.platform == "naver",
+            Product.external_product_id == candidate["external_product_id"],
+        )
+    )
+    payload_fields = {
+        "store_id": store_id,
+        "platform": "naver",
+        **candidate,
+    }
+    if product is None:
+        db.add(Product(**payload_fields))
+        result["created_count"] = 1
+    else:
+        for field, value in payload_fields.items():
+            setattr(product, field, value)
+        result["updated_count"] = 1
+    db.commit()
+
+    result["status"] = "success"
+    result["products_written"] = True
+    result["sample_ids"] = [_mask_external_identifier(candidate["external_product_id"])]
+    result["skip_reasons"] = skip_reasons
+    return result
+
+
+def _extract_naver_product_sync_candidates(payload: object | None) -> tuple[list[dict], dict[str, int]]:
+    candidates: list[dict] = []
+    skip_reasons = _empty_naver_product_skip_reasons()
+    synced_at = get_utc_now()
+    for content in _iter_naver_product_contents(payload):
+        channel_products = content.get("channelProducts")
+        if not isinstance(channel_products, list) or len(channel_products) == 0:
+            skip_reasons["missing_external_product_id"] += 1
+            continue
+        if len(channel_products) > 1:
+            skip_reasons["multiple_channel_products"] += 1
+            continue
+        channel_product = channel_products[0]
+        if not isinstance(channel_product, dict):
+            skip_reasons["missing_external_product_id"] += 1
+            continue
+        external_product_id = _bounded_text(_extract_scalar_by_keys(channel_product, ("channelProductNo", "channelProductId")), 120)
+        if not external_product_id:
+            skip_reasons["missing_external_product_id"] += 1
+            continue
+        product_name = _bounded_text(_extract_scalar_by_keys(channel_product, ("productName", "name")), 300)
+        if not product_name:
+            skip_reasons["missing_product_name"] += 1
+            continue
+
+        price = _extract_decimal_by_keys(channel_product, ("salePrice", "discountPrice", "price"))
+        stock_quantity = _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory"))
+        if price is None or stock_quantity is None:
+            skip_reasons["missing_optional_fields"] += 1
+        origin_product_no = _bounded_text(_extract_scalar_by_keys(content, ("originProductNo",)), 120)
+        display_status = _bounded_text(_extract_scalar_by_keys(channel_product, ("channelProductDisplayStatusType", "displayStatus")), 30)
+        candidates.append({
+            "external_product_id": external_product_id,
+            "name": product_name,
+            "sku": None,
+            "brand": None,
+            "category": None,
+            "status": _bounded_text(_extract_scalar_by_keys(channel_product, ("statusType", "saleStatus", "status")) or "unknown", 30),
+            "price": price or Decimal("0"),
+            "currency": "KRW",
+            "stock_quantity": stock_quantity if stock_quantity is not None else 0,
+            "source_type": NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+            "last_synced_at": synced_at,
+            "raw_data": {
+                "platform_origin_product_no": _mask_external_identifier(origin_product_no) if origin_product_no else None,
+                "platform_channel_product_id": _mask_external_identifier(external_product_id),
+                "display_status": display_status,
+                "channel_products_count": 1,
+                "source_preview_id_hash": _mask_external_identifier(external_product_id),
+                "mapping_version": "naver_product_v1",
+                "synced_from": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+                "raw_response_saved": False,
+            },
+        })
+    return candidates[:1], skip_reasons
 
 
 def _iter_naver_product_contents(payload: object | None) -> list[dict]:
@@ -2043,9 +2194,14 @@ def _build_naver_product_preview_result(
     seller_product_id_configured: bool = False,
     mapping_summary: dict | None = None,
     dry_run_diff: dict | None = None,
+    local_sync_result: dict | None = None,
 ) -> dict:
     safe_mapping_summary = mapping_summary or _summarize_naver_product_mapping(None)
     safe_dry_run_diff = dry_run_diff or _default_naver_product_dry_run_diff()
+    safe_local_sync_result = local_sync_result or _default_naver_product_local_sync_result(False)
+    semantic_notice = "Readonly preview scaffold only. No local product rows were written."
+    if safe_local_sync_result.get("products_written"):
+        semantic_notice = "Naver product local sync micro test wrote one sanitized local product row."
     return {
         "store_id": store_id,
         "credential_id": credential_id,
@@ -2069,13 +2225,14 @@ def _build_naver_product_preview_result(
         "sample_ids": sample_ids,
         "field_observation": field_observation,
         "dry_run_diff": safe_dry_run_diff,
+        "local_sync_result": safe_local_sync_result,
         "product_field_mapping_summary": safe_mapping_summary["product_field_mapping_summary"],
         "observed_field_names": safe_mapping_summary["observed_field_names"],
         "missing_field_names": safe_mapping_summary["missing_field_names"],
         "mapping_readiness": safe_mapping_summary["mapping_readiness"],
         "channel_products_summary": safe_mapping_summary["channel_products_summary"],
         "business_status_summary": _extend_naver_product_mapping_business_summary(preview_status),
-        "semantic_notice": "Readonly preview scaffold only. No local product rows were written.",
+        "semantic_notice": semantic_notice,
     }
 
 

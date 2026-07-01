@@ -318,6 +318,33 @@ The dry-run reads local `products` by `store_id + platform=naver + external_prod
 
 Phase 6D-6J is only the write-design contract for a later Naver product local sync phase. It does not add a public sync endpoint and does not write any table. A future approved write must require `real_sync=true`, `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, and a dry-run candidate that is single-channel and has both `channelProductNo` and `productName`. It may create or update at most one `products` row using `store_id + platform=naver + external_product_id`.
 
+Phase 6D-6K implements that approved one-row micro-test on the existing preview endpoint. The request must include `real_preview=true` and `real_sync=true`; `real_sync=true` without `real_preview=true` is blocked. The external Naver call is still readonly and remains `POST /v1/products/search` with body `{"page":1,"size":1}`. The local write path only runs after a successful preview response and only for one single-channel candidate. It creates or updates at most one `products` row, returns a sanitized `local_sync_result`, and still does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, does not save tokens, and does not save raw Naver response payloads. This is not batch product sync and does not mark `naver.product_read.safe_to_real_test` as formally open.
+
+`local_sync_result` response shape:
+
+```json
+{
+  "requested": true,
+  "status": "success",
+  "source_type": "naver_real_sync",
+  "created_count": 1,
+  "updated_count": 0,
+  "skipped_count": 0,
+  "skip_reasons": {
+    "multiple_channel_products": 0,
+    "missing_external_product_id": 0,
+    "missing_product_name": 0,
+    "missing_optional_fields": 0
+  },
+  "sample_ids": ["id-hash-*"],
+  "products_written": true,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "raw_response_saved": false,
+  "write_limit": 1
+}
+```
+
 Future Naver product local sync field mapping:
 
 ```text

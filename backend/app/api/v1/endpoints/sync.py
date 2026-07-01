@@ -71,6 +71,7 @@ def preview_naver_products(
         keyword=payload.keyword,
         seller_product_id=payload.seller_product_id,
         real_preview=payload.real_preview,
+        real_sync=payload.real_sync,
     )
     return success_response(data=result, message="naver product preview scaffold completed")
 

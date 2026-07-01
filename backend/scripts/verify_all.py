@@ -1748,10 +1748,12 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert dry_run["would_skip"] == 0, dry_run
                 assert dry_run["matched_existing_count"] == 0, dry_run
                 assert dry_run["incoming_candidate_count"] == 1, dry_run
-                assert dry_run["ready_for_local_sync"] is False, dry_run
+                assert dry_run["ready_for_local_sync"] is True, dry_run
                 assert dry_run["source_type"] == "naver_product_preview_dry_run", dry_run
                 assert fake_product_data["would_create"] == dry_run["would_create"], fake_product_data
                 assert fake_product_data["would_update"] == dry_run["would_update"], fake_product_data
+                assert fake_product_data["local_sync_result"]["requested"] is False, fake_product_data
+                assert fake_product_data["local_sync_result"]["products_written"] is False, fake_product_data
                 mapping = fake_product_data["product_field_mapping_summary"]
                 assert mapping["external_product_id"]["target"] == "products.external_product_id", mapping
                 assert mapping["external_product_id"]["source_priority"][0] == "contents[].channelProducts[].channelProductNo", mapping
@@ -1842,6 +1844,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert update_diff["would_update"] == 1, update_diff
                 assert update_diff["matched_existing_count"] == 1, update_diff
                 assert update_diff["incoming_candidate_count"] == 1, update_diff
+                assert update_diff["ready_for_local_sync"] is True, update_diff
                 fake_update_text = str(fake_product_update.json()).lower()
                 for forbidden in ["naver-existing-001", "update-origin-must-not-leak", "must-not-leak-existing-name"]:
                     assert forbidden not in fake_update_text, fake_update_text
@@ -2034,6 +2037,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_missing_data["dry_run_diff"]["would_skip"] == 0, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["would_create"] == 1, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["incoming_candidate_count"] == 1, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["ready_for_local_sync"] is True, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["skip_reasons"]["missing_optional_fields"] == 1, fake_missing_data
                 fake_missing_text = str(fake_product_missing.json()).lower()
                 for forbidden in [
@@ -2069,6 +2073,97 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert after_fake_product_count == before_fake_product_count, after_fake_product_count
                     assert after_fake_sync_log_count == before_fake_sync_log_count, after_fake_sync_log_count
                     assert after_fake_capability_success_count == before_fake_capability_success_count, after_fake_capability_success_count
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "SYNC-ORIGIN-MUST-NOT-LEAK-1234567890",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "SYNC-CHANNEL-MUST-NOT-LEAK-1234567890",
+                                        "productName": "must-not-leak-sync-product-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1234,
+                                        "stockQuantity": 5,
+                                        "detailHtml": "<p>must-not-leak-sync-html</p>",
+                                        "imageUrl": "must-not-leak-sync-image",
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_real_sync = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": True,
+                })
+                assert fake_product_real_sync.status_code == 200, fake_product_real_sync.text
+                fake_sync_data = fake_product_real_sync.json()["data"]
+                assert fake_sync_data["preview_status"] == "success", fake_sync_data
+                assert fake_sync_data["dry_run_diff"]["ready_for_local_sync"] is True, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["requested"] is True, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["status"] == "success", fake_sync_data
+                assert fake_sync_data["local_sync_result"]["created_count"] == 1, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["updated_count"] == 0, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["products_written"] is True, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["sync_log_written"] is False, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["capability_tested_success_written"] is False, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["raw_response_saved"] is False, fake_sync_data
+                assert fake_sync_data["field_observation"]["products_written"] is True, fake_sync_data
+                fake_sync_text = str(fake_product_real_sync.json()).lower()
+                for forbidden in [
+                    "sync-origin-must-not-leak",
+                    "sync-channel-must-not-leak",
+                    "must-not-leak-sync-product-name",
+                    "must-not-leak-sync-html",
+                    "must-not-leak-sync-image",
+                    "detailhtml",
+                    "imageurl",
+                    "fake-product-token",
+                    "authorization",
+                    "headers",
+                    "signature",
+                    "phase-6d6c-channel-no",
+                ]:
+                    assert forbidden not in fake_sync_text, fake_sync_text
+
+                with SessionLocal() as db:
+                    synced_product = db.scalar(select(Product).where(
+                        Product.store_id == naver_store_id,
+                        Product.platform == "naver",
+                        Product.external_product_id == "SYNC-CHANNEL-MUST-NOT-LEAK-1234567890",
+                    ))
+                    assert synced_product is not None
+                    assert synced_product.name == "must-not-leak-sync-product-name"
+                    assert synced_product.source_type == "naver_real_sync"
+                    assert str(synced_product.price) == "1234.00"
+                    assert synced_product.stock_quantity == 5
+                    assert synced_product.raw_data["raw_response_saved"] is False
+                    assert synced_product.raw_data["mapping_version"] == "naver_product_v1"
+                    assert synced_product.raw_data["synced_from"] == "naver_product_preview"
+                    raw_data_text = str(synced_product.raw_data).lower()
+                    for forbidden in [
+                        "sync-origin-must-not-leak",
+                        "sync-channel-must-not-leak",
+                        "must-not-leak-sync",
+                        "authorization",
+                        "signature",
+                        "phase-6d6c-channel-no",
+                    ]:
+                        assert forbidden not in raw_data_text, raw_data_text
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_fake_sync_log_count
+                    after_sync_capability_success = db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()
+                    assert len(after_sync_capability_success) == before_fake_capability_success_count
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
@@ -3356,7 +3451,10 @@ def verify_naver_product_local_sync_design_docs() -> None:
     combined = readme + "\n" + api_contract
     for required in [
         "Phase 6D-6J",
+        "Phase 6D-6K",
         "real_sync=true",
+        "real_preview=true",
+        "local_sync_result",
         "store_id=8",
         "credential_id=7",
         "page=1",
@@ -3381,6 +3479,7 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "Phase 6D-6J writes products",
         "Phase 6D-6J writes SyncLog",
         "product sync is open",
+        "batch product sync is open",
     ]
     for forbidden in forbidden_claims:
         assert forbidden not in combined, f"Forbidden 6D-6J sync-open wording found: {forbidden}"
