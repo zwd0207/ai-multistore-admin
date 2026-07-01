@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import os
+import tempfile
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -16,6 +17,22 @@ PYTHON = sys.executable
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+VERIFY_DB_PATH = Path(tempfile.gettempdir()) / f"codex1-verify-all-{os.getpid()}-{uuid.uuid4().hex[:8]}.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{VERIFY_DB_PATH.as_posix()}"
+os.environ["REAL_API_TEST_ENABLED"] = "false"
+os.environ["REAL_API_WRITE_ENABLED"] = "false"
+for env_name in (
+    "COUPANG_VENDOR_ID",
+    "COUPANG_ACCESS_KEY",
+    "COUPANG_SECRET_KEY",
+    "NAVER_CLIENT_ID",
+    "NAVER_CLIENT_SECRET",
+    "NAVER_CHANNEL_NO",
+    "NAVER_ACCESS_TOKEN",
+    "NAVER_REFRESH_TOKEN",
+    "NAVER_TOKEN_EXPIRES_AT",
+):
+    os.environ[env_name] = ""
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
 
 GIT_CMD_DIR = Path("C:/Program Files/Git/cmd")
@@ -39,6 +56,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/sync/products/mock",
     "/api/v1/sync/orders/mock",
     "/api/v1/sync/orders/coupang/preview",
+    "/api/v1/sync/orders/coupang",
     "/api/v1/sync/customer-inquiries/mock",
     "/api/v1/stats/sales",
     "/api/v1/stats/sales/by-platform",
@@ -934,6 +952,7 @@ def verify_git_tracking() -> None:
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",
         " M backend/app/schemas/product.py",
+        " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
         " M backend/app/services/api_capability_service.py",
         " M backend/app/services/api_credential_readiness_service.py",
@@ -976,20 +995,49 @@ def verify_docs_no_real_secrets() -> None:
     print("docs secret scan: ok")
 
 
+def cleanup_verify_database() -> None:
+    try:
+        from app.database import engine
+
+        engine.dispose()
+    except Exception:
+        pass
+
+    removed: list[Path] = []
+    retained: list[Path] = []
+    for path in (VERIFY_DB_PATH, VERIFY_DB_PATH.with_suffix(VERIFY_DB_PATH.suffix + "-wal"), VERIFY_DB_PATH.with_suffix(VERIFY_DB_PATH.suffix + "-shm")):
+        if not path.exists():
+            continue
+        try:
+            path.unlink()
+            removed.append(path)
+        except PermissionError:
+            retained.append(path)
+
+    if removed:
+        print("verify_all database removed: " + ", ".join(str(path) for path in removed))
+    if retained:
+        print("verify_all database retained outside project: " + ", ".join(str(path) for path in retained))
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    verify_compile()
-    verify_stage_scripts()
-    verify_openapi()
-    verify_api_credential_schema_and_security()
-    verify_api_credential_readiness()
-    verify_api_capabilities()
-    verify_sync_preview_schema_and_security()
-    verify_kst_business_timezone()
-    verify_git_tracking()
-    verify_docs_no_real_secrets()
-    print("verify_all: ok")
+    print(f"verify_all database: {VERIFY_DB_PATH}")
+    try:
+        verify_compile()
+        verify_stage_scripts()
+        verify_openapi()
+        verify_api_credential_schema_and_security()
+        verify_api_credential_readiness()
+        verify_api_capabilities()
+        verify_sync_preview_schema_and_security()
+        verify_kst_business_timezone()
+        verify_git_tracking()
+        verify_docs_no_real_secrets()
+        print("verify_all: ok")
+    finally:
+        cleanup_verify_database()
 
 
 if __name__ == "__main__":
