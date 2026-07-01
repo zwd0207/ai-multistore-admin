@@ -204,7 +204,7 @@ Response example:
 
 Naver readiness requires only `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, and `NAVER_API_BASE` (default: `https://api.commerce.naver.com/external`). `NAVER_CHANNEL_NO`, `NAVER_ACCESS_TOKEN`, `NAVER_REFRESH_TOKEN`, and `NAVER_TOKEN_EXPIRES_AT` are not manual readiness requirements. Coupang readiness requires `COUPANG_VENDOR_ID`, `COUPANG_ACCESS_KEY`, and `COUPANG_SECRET_KEY`.
 
-`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. The env fallback path is a developer fallback only and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. If `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/product/order checks and returns only step statuses plus capability mapping metadata:
+`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. The env fallback path is a developer fallback only and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. If `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/channel checks and returns only step statuses plus capability mapping metadata. Naver product and order readonly checks remain protected by guardrails and are not sent to the real API.
 
 ```text
 platform
@@ -222,7 +222,34 @@ tested_at
 capability_mapping
 ```
 
-The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, or raw external response bodies. Naver capability records may include non-sensitive guardrail metadata such as `docs_confirmed`, `implemented_now`, `safe_to_real_test`, and blocked reasons so docs-pending capabilities cannot be mistaken for real tested success. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
+The smoke-test response must not include access tokens, refresh tokens, client secrets, access keys, secret keys, authorization headers, request signatures, full channel numbers, or raw external response bodies. Naver capability records may include non-sensitive guardrail metadata such as `docs_confirmed`, `docs_reference_version`, `endpoint_confirmed`, `request_params_confirmed`, `grant_confirmed`, `preview_endpoint_planned`, `preferred_preview_strategy`, `safe_to_real_test`, and blocked reasons so docs-pending capabilities cannot be mistaken for real tested success. `REAL_API_WRITE_ENABLED=false` keeps write operations disabled and this endpoint never modifies products, orders, shipments, returns, exchanges, or customer inquiries.
+
+### Planned Naver Product / Order Preview Guardrail
+
+Naver Commerce API documentation is tracked against the current / 2.81.0 documentation line. Product and order preview are planned but not open for real requests in this phase:
+
+| Planned API | Current status | Naver reference route | Preview strategy |
+|---|---|---|---|
+| `POST /api/v1/sync/products/naver/preview` | Not implemented; `safe_to_real_test=false` | `POST /v1/products/search` | Dedicated readonly product preview after request parameters are verified |
+| `POST /api/v1/sync/orders/naver/preview` | Not implemented; `safe_to_real_test=false` | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then query details by `productOrderId` |
+
+The older direct order draft route `GET /v1/pay-order/seller/product-orders` is treated as `deprecated_or_unconfirmed` and must not be used for real readonly testing. Product and order preview, when implemented later, must be preview-only:
+
+```text
+No writes to products or orders
+No token persistence
+No raw response persistence
+No client secret, token, Authorization header, signature, request header, or full channel_no output
+Sanitized counts/samples only
+```
+
+Current frontend-facing business wording should remain conservative:
+
+```text
+商品读取：前置条件部分满足，暂未开放真实测试
+订单读取：前置条件部分满足，暂未开放真实测试
+商品/订单接口当前仍处于保护状态，等待 preview 实现
+```
 
 When `REAL_API_TEST_ENABLED=true`, the smoke-test endpoint may write a store-level `ApiCapabilityTestResult` with `test_mode=real_readonly`. That write is limited to local result metadata: step statuses, `error_code`, `http_status`, `tested_at`, and short operator notes. Public `POST /api/v1/api-capability-results` still rejects manually supplied `real_readonly` payloads; only this readonly smoke-test endpoint can create those records.
 

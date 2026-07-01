@@ -70,26 +70,41 @@ NAVER_CAPABILITY_MAP = {
         "endpoint_path": "/v1/products/search",
         "method": "POST",
         "docs_confirmed": True,
+        "docs_reference_version": "current/2.81.0",
+        "endpoint_confirmed": True,
+        "request_params_confirmed": "partial",
+        "grant_confirmed": "partial",
         "implemented_now": True,
         "safe_to_real_test": False,
-        "token_type_required": "docs_confirmation_pending",
-        "account_id_required": "docs_confirmation_pending",
-        "channel_no_required": "docs_confirmation_pending",
-        "blocked_reason": "Endpoint is documented, but grant, seller account id, and channelNo requirements are not fully confirmed for real readonly success.",
+        "token_type_required": "SELF_or_SELLER_docs_review_pending",
+        "account_id_required": "SELLER_only_docs_review_pending",
+        "channel_no_required": "unknown",
+        "preview_endpoint_planned": True,
+        "preferred_preview_strategy": "planned_naver_product_preview_endpoint",
+        "blocked_reason": "Preview endpoint is not implemented and request parameters are not fully verified. Product readonly smoke-test remains guardrail_blocked.",
     },
     "naver.order_read": {
         "capability_key": "naver.order_read",
         "capability_name": "Naver order readonly test",
         "api_category": "orders",
-        "endpoint_path": "/v1/pay-order/seller/product-orders",
+        "endpoint_path": "/v1/pay-order/seller/product-orders/last-changed-statuses",
         "method": "GET",
         "docs_confirmed": True,
+        "docs_reference_version": "current/2.81.0",
+        "endpoint_confirmed": "partial",
+        "feed_endpoint": "/v1/pay-order/seller/product-orders/last-changed-statuses",
+        "detail_endpoint": "/v1/pay-order/seller/product-orders/query",
+        "deprecated_or_unconfirmed_endpoint": "/v1/pay-order/seller/product-orders",
+        "request_params_confirmed": "partial",
+        "grant_confirmed": "partial",
         "implemented_now": True,
         "safe_to_real_test": False,
-        "token_type_required": "docs_confirmation_pending",
-        "account_id_required": "docs_confirmation_pending",
-        "channel_no_required": "docs_confirmation_pending",
-        "blocked_reason": "Endpoint is documented, but grant and request parameter semantics are not fully confirmed for real readonly success.",
+        "token_type_required": "SELF_or_SELLER_docs_review_pending",
+        "account_id_required": "SELLER_only_docs_review_pending",
+        "channel_no_required": "unknown",
+        "preview_endpoint_planned": True,
+        "preferred_preview_strategy": "last_changed_feed_then_detail_query",
+        "blocked_reason": "Preview strategy and request parameters are not fully implemented. The old direct product-orders draft path is deprecated_or_unconfirmed and must not be called.",
     },
     "naver.sales_read": {
         "capability_key": "naver.sales_read",
@@ -231,11 +246,20 @@ def _build_naver_capability_mapping_summary() -> list[dict]:
             "endpoint": meta["endpoint_path"],
             "method": meta["method"],
             "docs_confirmed": meta["docs_confirmed"],
+            "docs_reference_version": meta.get("docs_reference_version"),
+            "endpoint_confirmed": meta.get("endpoint_confirmed", meta["docs_confirmed"]),
+            "request_params_confirmed": meta.get("request_params_confirmed"),
+            "grant_confirmed": meta.get("grant_confirmed"),
             "implemented_now": meta["implemented_now"],
             "safe_to_real_test": meta["safe_to_real_test"],
             "token_type_required": meta["token_type_required"],
             "account_id_required": meta["account_id_required"],
             "channel_no_required": meta["channel_no_required"],
+            "preview_endpoint_planned": meta.get("preview_endpoint_planned", False),
+            "preferred_preview_strategy": meta.get("preferred_preview_strategy"),
+            "feed_endpoint": meta.get("feed_endpoint"),
+            "detail_endpoint": meta.get("detail_endpoint"),
+            "deprecated_or_unconfirmed_endpoint": meta.get("deprecated_or_unconfirmed_endpoint"),
             "blocked_reason": meta["blocked_reason"],
         }
         for meta in NAVER_CAPABILITY_MAP.values()
@@ -894,32 +918,20 @@ def _run_naver_env_fallback_smoke_test(settings) -> tuple[dict, list[dict]]:
                 return result
 
             channel_no = _extract_channel_no(seller_response.json()) or settings.naver_channel_no
-            product_params = {"page": 1, "size": 1}
             if channel_no:
-                product_params["channelNo"] = channel_no
                 result["channel_no_source"] = "seller_account"
             elif settings.naver_channel_no:
                 result["channel_no_source"] = "env_fallback"
             else:
                 result["channel_no_source"] = "missing"
-            product_response = client.post(f"{base}/v1/products/search", headers=headers, params=product_params)
-            _step_from_response(result, "product_read_test", product_response)
-
-            now = get_utc_now()
-            order_params = {
-                "from": (now - timedelta(days=1)).date().isoformat(),
-                "to": now.date().isoformat(),
-                "page": 1,
-                "size": 1,
-            }
-            order_response = client.get(f"{base}/v1/pay-order/seller/product-orders", headers=headers, params=order_params)
-            _step_from_response(result, "order_read_test", order_response)
+            result["product_read_test"] = "skipped"
+            result["order_read_test"] = "skipped"
             result["sales_read_test"] = "skipped"
             result["settlement_read_test"] = "skipped"
             result["customer_inquiry_read_test"] = "skipped"
             result["shipping_delivery_read_test"] = "skipped"
             if not result["masked_message"]:
-                result["masked_message"] = "Readonly env fallback smoke test completed without returning raw API data."
+                result["masked_message"] = "Readonly env fallback completed token and seller/account checks only. Product/order remain guardrail_blocked."
     except ImportError:
         result["token_test"] = "failed"
         _mark_failed(result, "dependency_missing", "bcrypt dependency is required for Naver client_secret_sign")
@@ -976,9 +988,8 @@ def _run_naver_store_bound_smoke_test(
     if capability_scope in {"product_read", "order_read"}:
         selected_capability = selected_capabilities[0]
         if not _naver_capability_meta(selected_capability)["safe_to_real_test"]:
+            _mark_failed(result, "guardrail_blocked", "Selected readonly capability is guardrail_blocked and was not executed.")
             capability_results.append(_build_naver_scope_docs_pending_record(context, result, selected_capability))
-            if not result["masked_message"]:
-                result["masked_message"] = "Selected readonly capability is still docs_pending and was not executed."
             result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
@@ -1157,21 +1168,17 @@ def _run_naver_product_read(context: dict, result: dict, headers: dict[str, str]
 
 
 def _run_naver_order_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
-    now = get_utc_now()
-    params = {
-        "from": (now - timedelta(days=1)).date().isoformat(),
-        "to": now.date().isoformat(),
-        "page": 1,
-        "size": 1,
-    }
-    with httpx.Client(timeout=10.0) as client:
-        response = client.get(f"{context['api_base']}/v1/pay-order/seller/product-orders", headers=headers, params=params)
-    _step_from_response(result, "order_read_test", response)
+    _mark_failed(
+        result,
+        "guardrail_blocked",
+        "Naver order readonly preview must use last-changed feed then detail query. The direct product-orders draft path is deprecated_or_unconfirmed.",
+    )
+    result["order_read_test"] = "skipped"
     return _build_naver_capability_record(
         capability_key="naver.order_read",
         result=result,
         test_step="order_read_test",
-        notes="Readonly order query only. No write operation was executed.",
+        notes="Readonly order query was not executed. Future preview must use last-changed feed then detail query.",
     ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
 
 
@@ -1482,11 +1489,20 @@ def _build_naver_capability_record(
         forced_test_status=forced_test_status or meta_forced_status,
         extra_fields={
             "docs_confirmed": meta["docs_confirmed"],
+            "docs_reference_version": meta.get("docs_reference_version"),
+            "endpoint_confirmed": meta.get("endpoint_confirmed", meta["docs_confirmed"]),
+            "request_params_confirmed": meta.get("request_params_confirmed"),
+            "grant_confirmed": meta.get("grant_confirmed"),
             "implemented_now": meta["implemented_now"],
             "safe_to_real_test": meta["safe_to_real_test"],
             "token_type_required": meta["token_type_required"],
             "account_id_required": meta["account_id_required"],
             "channel_no_required": meta["channel_no_required"],
+            "preview_endpoint_planned": meta.get("preview_endpoint_planned", False),
+            "preferred_preview_strategy": meta.get("preferred_preview_strategy"),
+            "feed_endpoint": meta.get("feed_endpoint"),
+            "detail_endpoint": meta.get("detail_endpoint"),
+            "deprecated_or_unconfirmed_endpoint": meta.get("deprecated_or_unconfirmed_endpoint"),
             "blocked_reason": meta["blocked_reason"],
         },
     )
@@ -1558,7 +1574,7 @@ def _response_fields_observed(result: dict) -> str:
 def _step_status_from_result(result: dict, step: str) -> str:
     if step is None:
         return "not_tested"
-    if result.get("error_code") in {"missing_credentials", "naver_api_not_implemented", "seller_account_id_missing"}:
+    if result.get("error_code") in {"missing_credentials", "naver_api_not_implemented", "seller_account_id_missing", "guardrail_blocked"}:
         return "not_tested"
     if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
         return "permission_required"
@@ -1606,7 +1622,7 @@ def _persist_real_readonly_capability_results(db: Session, results: list[dict]) 
                 test_status=result["test_status"],
                 test_mode="real_readonly",
                 response_fields_summary=result["response_fields_observed"],
-                error_codes_summary="real_api_test_disabled, credential_not_ready, credential_decrypt_failed, dependency_missing, token_auth_failed, auth_failed, ip_not_allowed, readonly_request_failed, naver_api_not_implemented, seller_account_id_missing",
+                error_codes_summary="real_api_test_disabled, credential_not_ready, credential_decrypt_failed, dependency_missing, token_auth_failed, auth_failed, ip_not_allowed, readonly_request_failed, guardrail_blocked, naver_api_not_implemented, seller_account_id_missing",
                 data_usefulness="medium",
                 first_phase_candidate=False,
                 sales_source_type="not_applicable",

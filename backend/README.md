@@ -226,6 +226,17 @@ Create and update requests accept `access_key` and `secret_key`, but the API nev
 
 `POST /api/v1/api-credentials/smoke-test` accepts `platform: naver | coupang | all` and `mode: readonly`. The env fallback path remains a developer-only fallback and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. When `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results before creating any external HTTP client. When enabled, it runs only minimal read-only checks and still never returns keys, tokens, authorization headers, request signatures, or raw external response payloads. `REAL_API_WRITE_ENABLED=false` keeps write operations out of scope. Store-bound readonly smoke tests may write local `ApiCapabilityTestResult` records with `test_mode=real_readonly`; those records contain only step statuses, error code, HTTP status, timestamps, and docs-pending guardrail metadata.
 
+Naver product/order real preview is intentionally locked behind guardrails. The current reference documentation line is current / 2.81.0, but product and order requests are not yet sent to the real API. Planned preview endpoints are:
+
+```text
+POST /api/v1/sync/products/naver/preview
+POST /api/v1/sync/orders/naver/preview
+```
+
+The planned product preview route is based on `POST /v1/products/search`. The planned order preview route should read `GET /v1/pay-order/seller/product-orders/last-changed-statuses` first, then query details with `POST /v1/pay-order/seller/product-orders/query`. The older direct `GET /v1/pay-order/seller/product-orders` draft is treated as deprecated or unconfirmed and must not be called. Until a later preview stage explicitly opens these routes, product/order capability results stay `guardrail_blocked`, `not_tested`, and `safe_to_real_test=false`.
+
+Future Naver preview endpoints must remain preview-only: no writes to `products` or `orders`, no raw response persistence, no token persistence, and no output of client secrets, tokens, authorization headers, request signatures, request headers, or full `channel_no` values.
+
 The database stores only:
 
 ```text

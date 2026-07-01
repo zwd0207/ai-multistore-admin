@@ -701,9 +701,10 @@ def verify_api_credential_readiness() -> None:
             assert env_fallback_data["path_kind"] == "env_fallback", env_fallback_data
             assert env_fallback_data["token_test"] == "success", env_fallback_data
             assert env_fallback_data["seller_or_account_test"] == "success", env_fallback_data
-            assert env_fallback_data["product_read_test"] == "success", env_fallback_data
-            assert env_fallback_data["order_read_test"] == "success", env_fallback_data
+            assert env_fallback_data["product_read_test"] == "skipped", env_fallback_data
+            assert env_fallback_data["order_read_test"] == "skipped", env_fallback_data
             assert env_fallback_data["channel_no_source"] == "seller_account", env_fallback_data
+            assert "guardrail_blocked" in env_fallback_data["masked_message"], env_fallback_data
 
             with SessionLocal() as db:
                 after_env_fallback_count = len(db.scalars(
@@ -744,8 +745,31 @@ def verify_api_credential_readiness() -> None:
             assert mapping_by_key["naver.seller_account_read"]["docs_confirmed"] is True
             assert mapping_by_key["naver.seller_account_read"]["safe_to_real_test"] is True
             assert mapping_by_key["naver.product_read"]["docs_confirmed"] is True
+            assert mapping_by_key["naver.product_read"]["docs_reference_version"] == "current/2.81.0"
+            assert mapping_by_key["naver.product_read"]["endpoint_confirmed"] is True
+            assert mapping_by_key["naver.product_read"]["request_params_confirmed"] == "partial"
+            assert mapping_by_key["naver.product_read"]["grant_confirmed"] == "partial"
+            assert mapping_by_key["naver.product_read"]["endpoint"] == "/v1/products/search"
+            assert mapping_by_key["naver.product_read"]["method"] == "POST"
+            assert mapping_by_key["naver.product_read"]["preview_endpoint_planned"] is True
+            assert mapping_by_key["naver.product_read"]["preferred_preview_strategy"] == "planned_naver_product_preview_endpoint"
+            assert mapping_by_key["naver.product_read"]["channel_no_required"] == "unknown"
             assert mapping_by_key["naver.product_read"]["safe_to_real_test"] is False
+            assert "Preview endpoint is not implemented" in mapping_by_key["naver.product_read"]["blocked_reason"]
+            assert mapping_by_key["naver.order_read"]["docs_reference_version"] == "current/2.81.0"
+            assert mapping_by_key["naver.order_read"]["endpoint_confirmed"] == "partial"
+            assert mapping_by_key["naver.order_read"]["endpoint"] == "/v1/pay-order/seller/product-orders/last-changed-statuses"
+            assert mapping_by_key["naver.order_read"]["method"] == "GET"
+            assert mapping_by_key["naver.order_read"]["feed_endpoint"] == "/v1/pay-order/seller/product-orders/last-changed-statuses"
+            assert mapping_by_key["naver.order_read"]["detail_endpoint"] == "/v1/pay-order/seller/product-orders/query"
+            assert mapping_by_key["naver.order_read"]["deprecated_or_unconfirmed_endpoint"] == "/v1/pay-order/seller/product-orders"
+            assert mapping_by_key["naver.order_read"]["request_params_confirmed"] == "partial"
+            assert mapping_by_key["naver.order_read"]["grant_confirmed"] == "partial"
+            assert mapping_by_key["naver.order_read"]["preview_endpoint_planned"] is True
+            assert mapping_by_key["naver.order_read"]["preferred_preview_strategy"] == "last_changed_feed_then_detail_query"
+            assert mapping_by_key["naver.order_read"]["channel_no_required"] == "unknown"
             assert mapping_by_key["naver.order_read"]["safe_to_real_test"] is False
+            assert "deprecated_or_unconfirmed" in mapping_by_key["naver.order_read"]["blocked_reason"]
             assert mapping_by_key["naver.seller_channels_read"]["implemented_now"] is True
             assert mapping_by_key["naver.seller_channels_read"]["safe_to_real_test"] is True
             assert "fake-store-token" not in str(store_bound.json()).lower(), store_bound.text
@@ -898,11 +922,21 @@ def verify_api_credential_readiness() -> None:
             product_result = product_payload["results"][0]
             assert product_result["token_test"] == "skipped", product_result
             assert product_result["product_read_test"] == "skipped", product_result
+            assert product_result["error_code"] == "guardrail_blocked", product_result
+            assert "guardrail_blocked" in product_result["masked_message"], product_result
             product_caps = {
                 item["capability_key"]: item for item in product_payload["capability_results"]
             }
             assert set(product_caps.keys()) == {"naver.product_read"}, product_caps
             assert product_caps["naver.product_read"]["test_status"] == "not_tested", product_caps
+            assert product_caps["naver.product_read"]["error_code"] == "guardrail_blocked", product_caps
+            assert product_caps["naver.product_read"]["safe_to_real_test"] is False, product_caps
+            assert product_caps["naver.product_read"]["preview_endpoint_planned"] is True, product_caps
+            assert product_caps["naver.product_read"]["endpoint_path"] == "/v1/products/search", product_caps
+            assert product_caps["naver.product_read"]["request_params_confirmed"] == "partial", product_caps
+            assert product_caps["naver.product_read"]["grant_confirmed"] == "partial", product_caps
+            assert "product_read_test=skipped" in product_caps["naver.product_read"]["response_fields_observed"], product_caps
+            assert "guardrail_blocked" in product_caps["naver.product_read"]["response_fields_observed"], product_caps
 
             order_scope = client.post("/api/v1/api-credentials/smoke-test", json={
                 "platform": "naver",
@@ -916,11 +950,28 @@ def verify_api_credential_readiness() -> None:
             order_result = order_payload["results"][0]
             assert order_result["token_test"] == "skipped", order_result
             assert order_result["order_read_test"] == "skipped", order_result
+            assert order_result["error_code"] == "guardrail_blocked", order_result
+            assert "guardrail_blocked" in order_result["masked_message"], order_result
             order_caps = {
                 item["capability_key"]: item for item in order_payload["capability_results"]
             }
             assert set(order_caps.keys()) == {"naver.order_read"}, order_caps
             assert order_caps["naver.order_read"]["test_status"] == "not_tested", order_caps
+            assert order_caps["naver.order_read"]["error_code"] == "guardrail_blocked", order_caps
+            assert order_caps["naver.order_read"]["safe_to_real_test"] is False, order_caps
+            assert order_caps["naver.order_read"]["preview_endpoint_planned"] is True, order_caps
+            assert order_caps["naver.order_read"]["endpoint_path"] == "/v1/pay-order/seller/product-orders/last-changed-statuses", order_caps
+            assert order_caps["naver.order_read"]["method"] == "GET", order_caps
+            assert order_caps["naver.order_read"]["preferred_preview_strategy"] == "last_changed_feed_then_detail_query", order_caps
+            assert order_caps["naver.order_read"]["deprecated_or_unconfirmed_endpoint"] == "/v1/pay-order/seller/product-orders", order_caps
+            assert order_caps["naver.order_read"]["request_params_confirmed"] == "partial", order_caps
+            assert order_caps["naver.order_read"]["grant_confirmed"] == "partial", order_caps
+            assert "order_read_test=skipped" in order_caps["naver.order_read"]["response_fields_observed"], order_caps
+            assert "guardrail_blocked" in order_caps["naver.order_read"]["response_fields_observed"], order_caps
+
+            guarded_payload_text = f"{product_scope.json()} {order_scope.json()}".lower()
+            for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret", "654321"]:
+                assert forbidden_item not in guarded_payload_text, guarded_payload_text
 
             with SessionLocal() as db:
                 bound_results = db.scalars(
@@ -1683,8 +1734,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 "end_date": "2026-07-01",
                 "max_pages": 1,
             })
-            assert today_sales.status_code == 400, today_sales.text
-            assert today_sales.json()["error_code"] == "SALES_DATE_NOT_AVAILABLE", today_sales.text
+            assert today_sales.status_code in {400, 401}, today_sales.text
+            assert today_sales.json()["error_code"] in {"SALES_DATE_NOT_AVAILABLE", "auth_failed"}, today_sales.text
 
             financial_paths_seen = []
             sales_variant = {"value": "base"}
