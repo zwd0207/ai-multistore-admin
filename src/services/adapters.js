@@ -589,6 +589,7 @@ export function toBackendCredentialPayload(item = {}, storeId) {
   if (credentialName) payload.credential_name = String(credentialName).trim();
   if (normalizedPlatform === 'coupang' && 'vendorId' in item) payload.vendor_id = trimmedOrNull(item.vendorId);
   if (normalizedPlatform === 'naver' && 'clientId' in item) payload.client_id = trimmedOrNull(item.clientId);
+  if (normalizedPlatform === 'naver') payload.access_key = null;
   if (normalizedPlatform === 'coupang' && optionalSecret(item.accessKeyInput)) payload.access_key = optionalSecret(item.accessKeyInput);
   if (optionalSecret(item.secretKeyInput)) payload.secret_key = optionalSecret(item.secretKeyInput);
   if (normalizedPlatform === 'naver' && optionalSecret(item.accessTokenInput)) payload.access_token = optionalSecret(item.accessTokenInput);
