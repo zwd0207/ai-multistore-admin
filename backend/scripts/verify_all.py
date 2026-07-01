@@ -3350,6 +3350,43 @@ def verify_docs_no_real_secrets() -> None:
     print("docs secret scan: ok")
 
 
+def verify_naver_product_local_sync_design_docs() -> None:
+    readme = (BACKEND_DIR / "README.md").read_text(encoding="utf-8")
+    api_contract = (BACKEND_DIR / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")
+    combined = readme + "\n" + api_contract
+    for required in [
+        "Phase 6D-6J",
+        "real_sync=true",
+        "store_id=8",
+        "credential_id=7",
+        "page=1",
+        "size=1",
+        "at most one",
+        "single-channel",
+        "channelProductNo",
+        "productName",
+        "source_type=naver_real_sync",
+        "platform_origin_product_no",
+        "platform_channel_product_id",
+        "mapping_version=naver_product_v1",
+        "synced_from=naver_product_preview",
+        "raw_response_saved=false",
+        "sync_type=naver_product_local_sync",
+        "requested_size=1",
+        "backend/codex1.db",
+        "ApiCapabilityTestResult tested_success",
+    ]:
+        assert required in combined, f"Missing Naver product local sync design marker: {required}"
+    forbidden_claims = [
+        "Phase 6D-6J writes products",
+        "Phase 6D-6J writes SyncLog",
+        "product sync is open",
+    ]
+    for forbidden in forbidden_claims:
+        assert forbidden not in combined, f"Forbidden 6D-6J sync-open wording found: {forbidden}"
+    print("Naver product local sync design docs: ok")
+
+
 def cleanup_verify_database() -> None:
     try:
         from app.database import engine
@@ -3390,6 +3427,7 @@ def main() -> None:
         verify_kst_business_timezone()
         verify_git_tracking()
         verify_docs_no_real_secrets()
+        verify_naver_product_local_sync_design_docs()
         print("verify_all: ok")
     finally:
         cleanup_verify_database()

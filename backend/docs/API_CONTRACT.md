@@ -316,6 +316,40 @@ Phase 6D-6I adds a local sync dry-run diff to Naver product preview:
 
 The dry-run reads local `products` by `store_id + platform=naver + external_product_id` only to estimate create/update counts. It does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not imply formal product sync availability. Multiple `channelProducts`, missing `channelProductNo`, and missing `productName` are skipped; missing price or stock is reported under `missing_optional_fields` without forcing a skip. Top-level `would_create` and `would_update` mirror `dry_run_diff` for compatibility.
 
+Phase 6D-6J is only the write-design contract for a later Naver product local sync phase. It does not add a public sync endpoint and does not write any table. A future approved write must require `real_sync=true`, `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, and a dry-run candidate that is single-channel and has both `channelProductNo` and `productName`. It may create or update at most one `products` row using `store_id + platform=naver + external_product_id`.
+
+Future Naver product local sync field mapping:
+
+```text
+store_id                 request store id
+platform                 naver
+external_product_id      contents[].channelProducts[].channelProductNo
+name                     contents[].channelProducts[].productName, max 300 chars
+status                   contents[].channelProducts[].statusType
+price                    salePrice | discountPrice | price, Decimal, default 0 if missing
+currency                 KRW
+stock_quantity           stockQuantity | quantity | inventory, int, default 0 if missing
+source_type              naver_real_sync
+last_synced_at           UTC write time
+```
+
+Future `products.raw_data` must be sanitized metadata only:
+
+```json
+{
+  "platform_origin_product_no": "masked-or-bounded-id",
+  "platform_channel_product_id": "masked-or-bounded-id",
+  "display_status": "ON",
+  "channel_products_count": 1,
+  "source_preview_id_hash": "id-hash-*",
+  "mapping_version": "naver_product_v1",
+  "synced_from": "naver_product_preview",
+  "raw_response_saved": false
+}
+```
+
+Future local sync must skip multiple `channelProducts`, missing external IDs, and missing names. Missing price or stock records `missing_optional_fields` but does not block the row. Before the first approved write, back up `backend/codex1.db`; after writing, read back `products where store_id=8 and platform='naver'`. If field mapping is wrong, recover by deleting the single row or restoring the backup. A future sanitized `SyncLog` may use `sync_type=naver_product_local_sync`, `requested_size=1`, created/updated/skipped counts, skip reasons, and `raw_response_saved=false`. It must not contain raw Naver responses, HTML, image-detail content, tokens, headers, signatures, client secrets, complete channel numbers, or long descriptions. `ApiCapabilityTestResult tested_success` remains unwritten until a separate capability decision explicitly changes that.
+
 `POST /api/v1/sync/orders/naver/preview` is a readonly micro preview scaffold. The default `real_preview=false` returns `guardrail_status=blocked` before token/HTTP. `real_preview=true` is allowed only for the approved local Naver store/credential, with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, `page=1`, `size=1`, KST window <= 1 day, and `order_status` null/ALL. It still does not mean Naver order sync is open, and `naver.order_read.safe_to_real_test` remains false.
 
 Phase 6D-6D-Fix2 fixes the feed request to the verified parameter shape: `lastChangedFrom` formatted with milliseconds plus `limitCount=1`, with `lastChangedTo` omitted. Page, size, and order_status remain local preview controls and are not passed through to the Naver feed. When `include_detail=true`, detail lookup runs only if the feed produced a productOrderId, and it queries at most one ID with `POST /v1/pay-order/seller/product-orders/query`. If the feed is empty, detail is skipped with `detail_skipped_reason=no_changed_orders` and the time window is not expanded. Detail responses are reduced to field-observation booleans and sanitized field-name summaries such as `detail_record_observed`, status/product-name presence, buyer/receiver presence booleans, `privacy_fields_suppressed=true`, `raw_response_saved=false`, and `orders_written=false`. It never returns a full URL, query values, raw error body, full order IDs, full productOrderIds, buyer/receiver names, phone numbers, addresses, delivery detail, payment raw payload, raw response bodies, tokens, authorization headers, signatures, or full channel numbers. It does not write `orders`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`.
