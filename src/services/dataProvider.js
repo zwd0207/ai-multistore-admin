@@ -202,6 +202,58 @@ const sourceMethods = {
       max_pages: Number(payload.maxPages || 1),
     }));
   },
+  previewCoupangProducts: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangProductSyncResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        source_type: 'mock',
+        status_filter: payload?.status || 'APPROVED',
+        status_semantic_notice: 'APPROVED is a Coupang API product review/listing status and may not exactly match the seller center sales status.',
+        max_pages: payload?.maxPages,
+        page_count: 0,
+        next_cursor_exists: false,
+        would_create: 0,
+        would_update: 0,
+        sample_ids: [],
+        per_status: [],
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangProductSyncResult(await backendApi.previewCoupangProducts({
+      store_id: Number(store.id),
+      status: payload.status || 'APPROVED',
+      max_pages: Number(payload.maxPages || 1),
+    }));
+  },
+  syncCoupangProducts: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangProductSyncResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        source_type: 'mock',
+        write_scope: 'local_products_only',
+        platform_write: false,
+        real_api_write_enabled: false,
+        status_filter: payload?.status || 'APPROVED',
+        status_semantic_notice: 'APPROVED is a Coupang API product review/listing status and may not exactly match the seller center sales status.',
+        max_pages: payload?.maxPages,
+        page_count: 0,
+        next_cursor_exists: false,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        sample_ids: [],
+        per_status: [],
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangProductSyncResult(await backendApi.syncCoupangProducts({
+      store_id: Number(store.id),
+      status: payload.status || 'APPROVED',
+      max_pages: Number(payload.maxPages || 1),
+    }));
+  },
   getSyncLogs: async (params) => {
     if (!isBackendSource) return mockApi.getOperationLogs(params);
     const result = await backendApi.getSyncLogs(params);

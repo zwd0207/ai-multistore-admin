@@ -645,6 +645,55 @@ export function adaptCoupangOrderSyncResult(data = {}) {
   };
 }
 
+export function adaptCoupangProductSyncResult(data = {}) {
+  const syncLog = data.sync_log || {};
+  const checkpoint = data.checkpoint || {};
+  return {
+    storeId: data.store_id,
+    platform: adaptPlatform(data.platform),
+    rawPlatform: data.platform,
+    syncType: data.sync_type,
+    sourceType: data.source_type,
+    writeScope: data.write_scope,
+    platformWrite: Boolean(data.platform_write),
+    realApiWriteEnabled: Boolean(data.real_api_write_enabled),
+    statusFilter: data.status_filter || 'APPROVED',
+    statusSemanticNotice: data.status_semantic_notice || '',
+    maxPages: numberValue(data.max_pages),
+    pageCount: numberValue(data.page_count),
+    nextCursorExists: Boolean(data.next_cursor_exists),
+    wouldCreate: numberValue(data.would_create),
+    wouldUpdate: numberValue(data.would_update),
+    createdCount: numberValue(data.created_count),
+    updatedCount: numberValue(data.updated_count),
+    skippedCount: numberValue(data.skipped_count),
+    sampleIds: data.sample_ids || [],
+    perStatus: (data.per_status || []).map((item) => ({
+      status: item.status,
+      statusSemantic: item.status_semantic || '',
+      pageCount: numberValue(item.page_count),
+      nextCursorExists: Boolean(item.next_cursor_exists),
+      itemCount: numberValue(item.item_count),
+      wouldCreate: numberValue(item.would_create),
+      wouldUpdate: numberValue(item.would_update),
+      skippedCount: numberValue(item.skipped_count),
+      sampleIds: item.sample_ids || [],
+    })),
+    lastSyncedAt: data.last_synced_at,
+    syncLog: {
+      id: syncLog.id,
+      status: syncLog.status,
+      message: syncLog.message,
+    },
+    checkpoint: {
+      id: checkpoint.id,
+      lastSyncedAt: checkpoint.last_synced_at,
+      windowStartAt: checkpoint.window_start_at,
+      windowEndAt: checkpoint.window_end_at,
+    },
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -759,6 +808,7 @@ export const adapters = {
   apiCredentialReadiness: adaptApiCredentialReadiness,
   apiCredentialSmokeTest: adaptApiCredentialSmokeTest,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
+  coupangProductSyncResult: adaptCoupangProductSyncResult,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
