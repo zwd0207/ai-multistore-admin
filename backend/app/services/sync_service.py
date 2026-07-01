@@ -1622,14 +1622,60 @@ def _run_naver_order_real_micro_preview(
         field_observation["token_http_status"] = token_status
         headers = {"Authorization": f"Bearer {access_token}"}
         field_observation["feed_called"] = True
-        feed_payload, feed_status = _request_naver_order_last_changed_feed(
+        feed_attempts: list[dict] = []
+        first_attempt = _request_naver_order_last_changed_feed(
             api_base=context["api_base"],
             headers=headers,
             start_kst=start_kst,
             end_kst=end_kst,
             size=size,
+            attempt="attempt_a",
+            include_last_changed_to=True,
+            datetime_format_shape="offset_seconds",
         )
-        field_observation["feed_http_status"] = feed_status
+        feed_attempts.append(first_attempt["diagnostics"])
+        feed_result = first_attempt
+        if not first_attempt["success"] and first_attempt.get("http_status") == 400:
+            second_attempt = _request_naver_order_last_changed_feed(
+                api_base=context["api_base"],
+                headers=headers,
+                start_kst=start_kst,
+                end_kst=end_kst,
+                size=size,
+                attempt="attempt_b",
+                include_last_changed_to=False,
+                datetime_format_shape="offset_milliseconds",
+            )
+            feed_attempts.append(second_attempt["diagnostics"])
+            feed_result = second_attempt
+        field_observation["feed_attempts"] = feed_attempts
+        field_observation["feed_http_status"] = feed_result.get("http_status")
+        field_observation["detail_called"] = False
+        field_observation["detail_limit"] = 0
+        if include_detail:
+            field_observation["detail_skipped_reason"] = "feed_parameter_diagnostics_phase"
+        if not feed_result["success"]:
+            status_code = feed_result.get("http_status")
+            error_code = feed_result.get("error_code") or "readonly_request_failed"
+            return _build_naver_order_preview_result(
+                store_id=store_id,
+                credential_id=credential.id,
+                start_datetime=start_kst.isoformat(),
+                end_datetime=end_kst.isoformat(),
+                page=page,
+                size=size,
+                order_status=order_status,
+                guardrail_status="allowed",
+                preview_status="failed",
+                test_status="preview_failed",
+                error_code=error_code,
+                field_observation={**field_observation, "http_status": status_code},
+                sample_ids=[],
+                has_more=False,
+                would_create=0,
+                would_update=0,
+            )
+        feed_payload = feed_result["payload"]
         product_order_ids = _extract_naver_product_order_ids(feed_payload)
         sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:1]]
         if not product_order_ids:
@@ -1651,16 +1697,6 @@ def _run_naver_order_real_micro_preview(
                 would_create=0,
                 would_update=0,
             )
-        if include_detail:
-            field_observation["detail_called"] = True
-            field_observation["detail_limit"] = 1
-            detail_payload, detail_status = _request_naver_order_detail_query(
-                api_base=context["api_base"],
-                headers=headers,
-                product_order_id=product_order_ids[0],
-            )
-            field_observation["detail_http_status"] = detail_status
-            field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_payload)
         return _build_naver_order_preview_result(
             store_id=store_id,
             credential_id=credential.id,
@@ -1732,20 +1768,144 @@ def _request_naver_order_last_changed_feed(
     start_kst: datetime,
     end_kst: datetime,
     size: int,
-) -> tuple[dict, int]:
-    params = {
-        "lastChangedFrom": start_kst.isoformat(),
-        "lastChangedTo": end_kst.isoformat(),
-        "limitCount": size,
+    attempt: str,
+    include_last_changed_to: bool,
+    datetime_format_shape: str,
+) -> dict:
+    params: dict[str, str | int] = {
+        "lastChangedFrom": _format_naver_order_feed_datetime(start_kst, datetime_format_shape),
+        "limitCount": int(size),
     }
+    if include_last_changed_to:
+        params["lastChangedTo"] = _format_naver_order_feed_datetime(end_kst, datetime_format_shape)
+    diagnostics = _build_naver_order_feed_request_diagnostics(
+        params=params,
+        attempt=attempt,
+        datetime_format_shape=datetime_format_shape,
+    )
     with httpx.Client(timeout=10.0) as client:
         response = client.get(
             f"{api_base}/v1/pay-order/seller/product-orders/last-changed-statuses",
             headers=headers,
             params=params,
         )
-    response.raise_for_status()
-    return response.json(), response.status_code
+    diagnostics["http_status"] = response.status_code
+    if response.status_code >= 400:
+        diagnostics.update(_extract_naver_error_diagnostics(response))
+        return {
+            "attempt": attempt,
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": _naver_readonly_error_code(response),
+            "diagnostics": diagnostics,
+        }
+    return {
+        "attempt": attempt,
+        "success": True,
+        "http_status": response.status_code,
+        "payload": response.json(),
+        "diagnostics": diagnostics,
+    }
+
+
+def _format_naver_order_feed_datetime(value: datetime, datetime_format_shape: str) -> str:
+    if datetime_format_shape == "offset_milliseconds":
+        return value.isoformat(timespec="milliseconds")
+    return value.isoformat(timespec="seconds")
+
+
+def _build_naver_order_feed_request_diagnostics(
+    *,
+    params: dict[str, str | int],
+    attempt: str,
+    datetime_format_shape: str,
+) -> dict:
+    encoded_query = urlencode(params)
+    return {
+        "attempt": attempt,
+        "feed_request_param_keys": list(params.keys()),
+        "datetime_format_shape": datetime_format_shape,
+        "last_changed_from_present": "lastChangedFrom" in params,
+        "last_changed_to_present": "lastChangedTo" in params,
+        "limit_count_present": "limitCount" in params,
+        "query_encoded_plus_safely": "%2B" in encoded_query and "+09" not in encoded_query,
+    }
+
+
+def _extract_naver_error_diagnostics(response: httpx.Response) -> dict:
+    diagnostics: dict[str, object] = {}
+    payload: object | None = None
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        error_code = _find_first_string_value(
+            payload,
+            {"code", "errorCode", "error_code", "error", "returnCode"},
+        )
+        error_message = _find_first_string_value(
+            payload,
+            {"message", "errorMessage", "error_message", "detail", "returnMessage"},
+        )
+        error_fields = _find_error_field_names(payload)
+        if error_code:
+            diagnostics["naver_error_code"] = _sanitize_naver_error_text(error_code, max_length=80)
+        if error_message:
+            diagnostics["naver_error_message_masked"] = _sanitize_naver_error_text(error_message, max_length=120)
+        if error_fields:
+            diagnostics["naver_error_fields"] = error_fields[:10]
+    elif response.text:
+        diagnostics["naver_error_message_masked"] = _sanitize_naver_error_text(response.text, max_length=120)
+    return diagnostics
+
+
+def _find_first_string_value(payload: object, keys: set[str]) -> str | None:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in keys and isinstance(value, (str, int)):
+                return str(value)
+        for value in payload.values():
+            found = _find_first_string_value(value, keys)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _find_first_string_value(item, keys)
+            if found:
+                return found
+    return None
+
+
+def _find_error_field_names(payload: object) -> list[str]:
+    field_names: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            normalized_key = str(key)
+            if normalized_key in {"field", "fieldName", "parameter", "param", "name"} and isinstance(value, str):
+                field_names.append(value)
+            elif normalized_key in {"errors", "fieldErrors", "invalidParams"}:
+                field_names.extend(_find_error_field_names(value))
+            elif isinstance(value, (dict, list)):
+                field_names.extend(_find_error_field_names(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            field_names.extend(_find_error_field_names(item))
+    unique: list[str] = []
+    for value in field_names:
+        sanitized = re.sub(r"[^A-Za-z0-9_.-]", "", value)[:80]
+        if sanitized and sanitized not in unique:
+            unique.append(sanitized)
+    return unique
+
+
+def _sanitize_naver_error_text(value: str, *, max_length: int) -> str:
+    text = _mask_sensitive_text(value)
+    text = re.sub(r"\b\d{2,4}-\d{3,4}-\d{4}\b", "[masked-phone]", text)
+    text = re.sub(r"\b\d{10,}\b", "[masked-id]", text)
+    text = re.sub(r"(?i)(productOrderId|orderId|channelNo)=?['\"]?[A-Za-z0-9_-]+", r"\1=[masked]", text)
+    text = re.sub(r"https?://\S+", "[masked-url]", text)
+    return text[:max_length]
 
 
 def _request_naver_order_detail_query(

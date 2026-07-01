@@ -1742,6 +1742,8 @@ def verify_sync_preview_schema_and_security() -> None:
             class FakeNaverOrderHttpClient:
                 detail_called = False
                 feed_called = False
+                calls = []
+                response_sequence = []
 
                 def __init__(self, *args, **kwargs) -> None:
                     pass
@@ -1754,8 +1756,15 @@ def verify_sync_preview_schema_and_security() -> None:
 
                 def get(self, url: str, headers=None, params=None):
                     assert url.endswith("/v1/pay-order/seller/product-orders/last-changed-statuses"), url
+                    assert "page" not in params, params
+                    assert "size" not in params, params
+                    assert "order_status" not in params, params
+                    assert "orderStatus" not in params, params
                     assert params["limitCount"] == 1, params
                     FakeNaverOrderHttpClient.feed_called = True
+                    FakeNaverOrderHttpClient.calls.append(dict(params))
+                    if FakeNaverOrderHttpClient.response_sequence:
+                        return FakeNaverOrderHttpClient.response_sequence.pop(0)
                     return FakeNaverOrderResponse(200, {
                         "data": {
                             "lastChangeStatuses": [
@@ -1773,23 +1782,15 @@ def verify_sync_preview_schema_and_security() -> None:
                     })
 
                 def post(self, url: str, headers=None, json=None):
-                    assert url.endswith("/v1/pay-order/seller/product-orders/query"), url
-                    assert json == {"productOrderIds": ["PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890"]}, json
                     FakeNaverOrderHttpClient.detail_called = True
-                    return FakeNaverOrderResponse(200, {
-                        "data": [
-                            {
-                                "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
-                                "buyerName": "must-not-leak-buyer",
-                                "receiverAddress": "must-not-leak-address",
-                                "paymentDetail": {"raw": "must-not-leak-payment"},
-                            }
-                        ]
-                    })
+                    raise AssertionError("Fix1 order feed diagnostics must not call detail query")
 
             sync_service.httpx.Client = FakeNaverOrderHttpClient
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-order-token", 200)
             try:
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = []
+                FakeNaverOrderHttpClient.detail_called = False
                 feed_preview = client.post("/api/v1/sync/orders/naver/preview", json={
                     "store_id": 8,
                     "credential_id": 7,
@@ -1810,6 +1811,15 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert feed_data["field_observation"]["detail_called"] is False, feed_data
                 assert feed_data["field_observation"]["raw_response_saved"] is False, feed_data
                 assert feed_data["field_observation"]["orders_written"] is False, feed_data
+                assert len(feed_data["field_observation"]["feed_attempts"]) == 1, feed_data
+                attempt_a = feed_data["field_observation"]["feed_attempts"][0]
+                assert attempt_a["attempt"] == "attempt_a", attempt_a
+                assert attempt_a["feed_request_param_keys"] == ["lastChangedFrom", "limitCount", "lastChangedTo"], attempt_a
+                assert attempt_a["datetime_format_shape"] == "offset_seconds", attempt_a
+                assert attempt_a["last_changed_from_present"] is True, attempt_a
+                assert attempt_a["last_changed_to_present"] is True, attempt_a
+                assert attempt_a["limit_count_present"] is True, attempt_a
+                assert attempt_a["query_encoded_plus_safely"] is True, attempt_a
                 assert feed_data["sample_ids"] and feed_data["sample_ids"][0].startswith("id-hash-"), feed_data
                 feed_text = str(feed_preview.json()).lower()
                 for forbidden in [
@@ -1821,9 +1831,15 @@ def verify_sync_preview_schema_and_security() -> None:
                     "must-not-leak-address",
                     "fake-order-token",
                     "authorization",
+                    "lastchangedfrom=",
+                    "lastchangedto=",
+                    "https://",
                 ]:
                     assert forbidden not in feed_text, feed_text
 
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = []
+                FakeNaverOrderHttpClient.detail_called = False
                 detail_preview = client.post("/api/v1/sync/orders/naver/preview", json={
                     "store_id": 8,
                     "credential_id": 7,
@@ -1839,20 +1855,113 @@ def verify_sync_preview_schema_and_security() -> None:
                 detail_data = detail_preview.json()["data"]
                 assert detail_data["preview_status"] == "success", detail_data
                 assert detail_data["field_observation"]["feed_called"] is True, detail_data
-                assert detail_data["field_observation"]["detail_called"] is True, detail_data
-                assert detail_data["field_observation"]["detail_limit"] == 1, detail_data
+                assert detail_data["field_observation"]["detail_called"] is False, detail_data
+                assert detail_data["field_observation"]["detail_limit"] == 0, detail_data
+                assert detail_data["field_observation"]["detail_skipped_reason"] == "feed_parameter_diagnostics_phase", detail_data
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
+                assert FakeNaverOrderHttpClient.detail_called is False, detail_data
                 detail_text = str(detail_preview.json()).lower()
                 for forbidden in [
                     "product-order-id-must-not-leak",
                     "order-id-must-not-leak",
                     "must-not-leak-buyer",
                     "must-not-leak-address",
-                    "must-not-leak-payment",
                     "fake-order-token",
                     "authorization",
                 ]:
                     assert forbidden not in detail_text, detail_text
+
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = [
+                    FakeNaverOrderResponse(400, {
+                        "errorCode": "INVALID_PARAMETER",
+                        "message": "Invalid lastChangedTo productOrderId=PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
+                        "errors": [{"field": "lastChangedTo", "rejectedValue": "must-not-leak-query-value"}],
+                    }),
+                    FakeNaverOrderResponse(200, {"data": {"lastChangeStatuses": [], "hasMore": False}}),
+                ]
+                FakeNaverOrderHttpClient.detail_called = False
+                simplified_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": False,
+                })
+                assert simplified_preview.status_code == 200, simplified_preview.text
+                simplified_data = simplified_preview.json()["data"]
+                assert simplified_data["preview_status"] == "success_empty", simplified_data
+                assert simplified_data["field_observation"]["detail_called"] is False, simplified_data
+                assert len(simplified_data["field_observation"]["feed_attempts"]) == 2, simplified_data
+                simplified_attempt_a = simplified_data["field_observation"]["feed_attempts"][0]
+                simplified_attempt_b = simplified_data["field_observation"]["feed_attempts"][1]
+                assert simplified_attempt_a["http_status"] == 400, simplified_attempt_a
+                assert simplified_attempt_a["naver_error_code"] == "INVALID_PARAMETER", simplified_attempt_a
+                assert simplified_attempt_a["naver_error_fields"] == ["lastChangedTo"], simplified_attempt_a
+                assert "PRODUCT-ORDER-ID-MUST-NOT-LEAK" not in str(simplified_attempt_a), simplified_attempt_a
+                assert "must-not-leak-query-value" not in str(simplified_attempt_a), simplified_attempt_a
+                assert simplified_attempt_b["attempt"] == "attempt_b", simplified_attempt_b
+                assert simplified_attempt_b["feed_request_param_keys"] == ["lastChangedFrom", "limitCount"], simplified_attempt_b
+                assert simplified_attempt_b["datetime_format_shape"] == "offset_milliseconds", simplified_attempt_b
+                assert simplified_attempt_b["last_changed_to_present"] is False, simplified_attempt_b
+                assert FakeNaverOrderHttpClient.calls[1]["lastChangedFrom"].endswith("+09:00"), FakeNaverOrderHttpClient.calls
+                assert "." in FakeNaverOrderHttpClient.calls[1]["lastChangedFrom"], FakeNaverOrderHttpClient.calls
+                simplified_text = str(simplified_preview.json()).lower()
+                for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "must-not-leak-query-value",
+                    "lastchangedfrom=",
+                    "https://",
+                    "fake-order-token",
+                    "authorization",
+                ]:
+                    assert forbidden not in simplified_text, simplified_text
+
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = [
+                    FakeNaverOrderResponse(400, {
+                        "errorCode": "INVALID_PARAMETER",
+                        "message": "Invalid date parameter",
+                        "errors": [{"field": "lastChangedTo"}],
+                    }),
+                    FakeNaverOrderResponse(400, {
+                        "errorCode": "INVALID_PARAMETER",
+                        "message": "Invalid lastChangedFrom format",
+                        "errors": [{"field": "lastChangedFrom"}],
+                    }),
+                ]
+                failed_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": False,
+                })
+                assert failed_preview.status_code == 200, failed_preview.text
+                failed_data = failed_preview.json()["data"]
+                assert failed_data["preview_status"] == "failed", failed_data
+                assert failed_data["error_code"] == "readonly_request_failed", failed_data
+                assert failed_data["field_observation"]["http_status"] == 400, failed_data
+                assert failed_data["field_observation"]["detail_called"] is False, failed_data
+                assert len(failed_data["field_observation"]["feed_attempts"]) == 2, failed_data
+                failed_text = str(failed_preview.json()).lower()
+                for forbidden in [
+                    "lastchangedfrom=",
+                    "lastchangedto=",
+                    "https://",
+                    "fake-order-token",
+                    "authorization",
+                    "raw response",
+                ]:
+                    assert forbidden not in failed_text, failed_text
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
