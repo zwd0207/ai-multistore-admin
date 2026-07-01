@@ -57,6 +57,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/sync/products/coupang/preview",
     "/api/v1/sync/products/coupang",
     "/api/v1/sync/sales/coupang/preview",
+    "/api/v1/sync/sales/coupang",
     "/api/v1/sync/settlements/coupang/preview",
     "/api/v1/sync/settlements/coupang",
     "/api/v1/sync/orders/mock",
@@ -846,6 +847,12 @@ def verify_sync_preview_schema_and_security() -> None:
                     "end_date": "2026-06-30",
                     "max_pages": 1,
                 })
+                disabled_sales_sync = client.post("/api/v1/sync/sales/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-06-30",
+                    "max_pages": 1,
+                })
                 disabled_settlement = client.post("/api/v1/sync/settlements/coupang/preview", json={
                     "store_id": store_id,
                     "start_date": "2026-06-29",
@@ -865,6 +872,8 @@ def verify_sync_preview_schema_and_security() -> None:
             assert disabled_product.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_product.text
             assert disabled_sales.status_code == 403, disabled_sales.text
             assert disabled_sales.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_sales.text
+            assert disabled_sales_sync.status_code == 403, disabled_sales_sync.text
+            assert disabled_sales_sync.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_sales_sync.text
             assert disabled_settlement.status_code == 403, disabled_settlement.text
             assert disabled_settlement.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_settlement.text
             assert disabled_settlement_sync.status_code == 403, disabled_settlement_sync.text
@@ -1093,9 +1102,10 @@ def verify_sync_preview_schema_and_security() -> None:
             assert today_sales.json()["error_code"] == "SALES_DATE_NOT_AVAILABLE", today_sales.text
 
             financial_paths_seen = []
+            sales_variant = {"value": "base"}
 
             def fake_coupang_financial_get(credential, path, query_string):
-                query = parse_qs(query_string)
+                query = parse_qs(query_string, keep_blank_values=True)
                 financial_paths_seen.append((path, query))
                 request = httpx.Request("GET", f"https://example.invalid{path}?{query_string}")
                 if "revenue-history" in path:
@@ -1107,8 +1117,23 @@ def verify_sync_preview_schema_and_security() -> None:
                         return httpx.Response(
                             200,
                             request=request,
-                            json={"data": [{"revenueId": "sales-row-002", "recognitionDate": "2026-06-30", "saleAmount": "2000"}]},
+                            json={
+                                "data": [
+                                    {
+                                        "recognitionDate": "2026-06-30",
+                                        "orderSheetId": "fallback-order-sheet-002",
+                                        "vendorItemId": "fallback-vendor-item-002",
+                                        "saleType": "SALE",
+                                        "status": "CONFIRMED",
+                                        "saleAmount": "2000",
+                                        "header": "must-not-be-saved",
+                                        "key": "must-not-be-saved",
+                                    }
+                                ]
+                            },
                         )
+                    assert query.get("token") == [""], query
+                    stable_amount = "1100" if sales_variant["value"] == "changed" else "1000"
                     return httpx.Response(
                         200,
                         request=request,
@@ -1117,9 +1142,19 @@ def verify_sync_preview_schema_and_security() -> None:
                                 {
                                     "revenueId": "sales-row-001",
                                     "recognitionDate": "2026-06-29",
-                                    "saleAmount": "1000",
+                                    "orderId": "order-001",
+                                    "saleType": "SALE",
+                                    "status": "CONFIRMED",
+                                    "saleAmount": stable_amount,
+                                    "totalSale": stable_amount,
                                     "authorization": "must-not-be-saved",
                                     "signature": "must-not-be-saved",
+                                    "token": "must-not-be-saved",
+                                    "secret": "must-not-be-saved",
+                                },
+                                {
+                                    "saleAmount": "9999",
+                                    "authorization": "must-not-be-saved",
                                 }
                             ],
                             "nextToken": "token-2",
@@ -1155,6 +1190,25 @@ def verify_sync_preview_schema_and_security() -> None:
                     "end_date": "2026-06-30",
                     "max_pages": 3,
                 })
+                sales_sync_first = client.post("/api/v1/sync/sales/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-06-30",
+                    "max_pages": 3,
+                })
+                sales_sync_second = client.post("/api/v1/sync/sales/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-06-30",
+                    "max_pages": 3,
+                })
+                sales_variant["value"] = "changed"
+                sales_sync_third = client.post("/api/v1/sync/sales/coupang", json={
+                    "store_id": store_id,
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-06-30",
+                    "max_pages": 3,
+                })
                 settlement_preview = client.post("/api/v1/sync/settlements/coupang/preview", json={
                     "store_id": store_id,
                     "start_date": "2026-06-29",
@@ -1176,14 +1230,40 @@ def verify_sync_preview_schema_and_security() -> None:
             assert sales_preview.status_code == 200, sales_preview.text
             sales_data = sales_preview.json()["data"]
             assert sales_data["sync_type"] == "sales_coupang_real_preview", sales_data
-            assert sales_data["total_rows"] == 2, sales_data
+            assert sales_data["total_rows"] == 3, sales_data
             assert sales_data["page_count"] == 2, sales_data
             assert sales_data["next_cursor_exists"] is False, sales_data
-            assert set(sales_data["sample_ids"]) == {"sales-row-001", "sales-row-002"}, sales_data
-            assert sales_data["summary_totals"]["saleAmount"] == "3000", sales_data
+            assert "sales-row-001" in sales_data["sample_ids"], sales_data
+            assert "fallback-order-sheet-002" in sales_data["sample_ids"], sales_data
+            assert sales_data["summary_totals"]["saleAmount"] == "12999", sales_data
             sales_text = str(sales_data).lower()
-            for forbidden in ["authorization", "signature", "token-2", "must-not-be-saved"]:
+            for forbidden in ["authorization", "signature", "token-2", "header", "key", "secret", "must-not-be-saved"]:
                 assert forbidden not in sales_text, sales_text
+
+            assert sales_sync_first.status_code == 200, sales_sync_first.text
+            first_sales_sync_data = sales_sync_first.json()["data"]
+            assert first_sales_sync_data["sync_type"] == "sales_coupang_real", first_sales_sync_data
+            assert first_sales_sync_data["write_scope"] == "local_platform_sales_details_only", first_sales_sync_data
+            assert first_sales_sync_data["platform_write"] is False, first_sales_sync_data
+            assert first_sales_sync_data["created_count"] == 2, first_sales_sync_data
+            assert first_sales_sync_data["updated_count"] == 0, first_sales_sync_data
+            assert first_sales_sync_data["unchanged_count"] == 0, first_sales_sync_data
+            assert first_sales_sync_data["skipped_count"] == 1, first_sales_sync_data
+            assert first_sales_sync_data["count_semantic_notice"], first_sales_sync_data
+
+            assert sales_sync_second.status_code == 200, sales_sync_second.text
+            second_sales_sync_data = sales_sync_second.json()["data"]
+            assert second_sales_sync_data["created_count"] == 0, second_sales_sync_data
+            assert second_sales_sync_data["updated_count"] == 0, second_sales_sync_data
+            assert second_sales_sync_data["unchanged_count"] == 2, second_sales_sync_data
+            assert second_sales_sync_data["skipped_count"] == 1, second_sales_sync_data
+
+            assert sales_sync_third.status_code == 200, sales_sync_third.text
+            third_sales_sync_data = sales_sync_third.json()["data"]
+            assert third_sales_sync_data["created_count"] == 0, third_sales_sync_data
+            assert third_sales_sync_data["updated_count"] == 1, third_sales_sync_data
+            assert third_sales_sync_data["unchanged_count"] == 1, third_sales_sync_data
+            assert third_sales_sync_data["skipped_count"] == 1, third_sales_sync_data
 
             assert settlement_preview.status_code == 200, settlement_preview.text
             settlement_data = settlement_preview.json()["data"]
@@ -1218,6 +1298,38 @@ def verify_sync_preview_schema_and_security() -> None:
             assert second_sync_data["skipped_count"] == 0, second_sync_data
 
             with SessionLocal() as db:
+                sales_rows = db.scalars(
+                    select(PlatformSalesDetail)
+                    .where(
+                        PlatformSalesDetail.store_id == store_id,
+                        PlatformSalesDetail.platform == "coupang",
+                    )
+                    .order_by(PlatformSalesDetail.external_sales_id)
+                ).all()
+                assert len(sales_rows) == 2, sales_rows
+                assert "sales-row-001" in {row.external_sales_id for row in sales_rows}
+                assert {row.source_type for row in sales_rows} == {"real_coupang"}
+                assert all(row.last_synced_at is not None for row in sales_rows)
+                stable_sales_row = next(row for row in sales_rows if row.external_sales_id == "sales-row-001")
+                assert stable_sales_row.sale_amount == 1100, stable_sales_row
+                sales_observed_text = str([row.observed_fields for row in sales_rows]).lower()
+                for forbidden in ["authorization", "signature", "token", "header", "key", "secret"]:
+                    assert forbidden not in sales_observed_text, sales_observed_text
+
+                sales_checkpoint = db.scalars(
+                    select(SyncCheckpoint)
+                    .where(
+                        SyncCheckpoint.store_id == store_id,
+                        SyncCheckpoint.platform == "coupang",
+                        SyncCheckpoint.sync_type == "sales",
+                    )
+                ).first()
+                assert sales_checkpoint is not None
+                sales_checkpoint_text = f"{sales_checkpoint.cursor_value} {sales_checkpoint.notes}".lower()
+                assert "2026-06-29" in sales_checkpoint_text and "2026-06-30" in sales_checkpoint_text, sales_checkpoint_text
+                for forbidden in ["authorization", "signature", "token", "header", "key", "secret"]:
+                    assert forbidden not in sales_checkpoint_text, sales_checkpoint_text
+
                 settlement_rows = db.scalars(
                     select(PlatformSettlementDetail)
                     .where(
@@ -1267,6 +1379,16 @@ def verify_sync_preview_schema_and_security() -> None:
                 ).first()
                 assert latest_sales_log is not None
                 assert latest_sales_log.status == "success", latest_sales_log
+                latest_sales_sync_log = db.scalars(
+                    select(SyncLog)
+                    .where(
+                        SyncLog.store_id == store_id,
+                        SyncLog.sync_type == "sales_coupang_real",
+                    )
+                    .order_by(SyncLog.id.desc())
+                ).first()
+                assert latest_sales_sync_log is not None
+                assert latest_sales_sync_log.status == "success", latest_sales_sync_log
                 assert latest_settlement_log is not None
                 assert latest_settlement_log.status == "success", latest_settlement_log
                 latest_settlement_sync_log = db.scalars(
@@ -1281,6 +1403,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert latest_settlement_sync_log.status == "success", latest_settlement_sync_log
                 combined_financial_log_text = (
                     f"{latest_sales_log.raw_summary} {latest_sales_log.message} {latest_sales_log.error_detail} "
+                    f"{latest_sales_sync_log.raw_summary} {latest_sales_sync_log.message} {latest_sales_sync_log.error_detail} "
                     f"{latest_settlement_log.raw_summary} {latest_settlement_log.message} {latest_settlement_log.error_detail} "
                     f"{latest_settlement_sync_log.raw_summary} {latest_settlement_sync_log.message} {latest_settlement_sync_log.error_detail}"
                 ).lower()
@@ -1290,6 +1413,9 @@ def verify_sync_preview_schema_and_security() -> None:
                     "authorization",
                     "signature",
                     "token-2",
+                    "header",
+                    "key",
+                    "secret",
                     "bankaccountholder",
                     "bankname",
                     "bankaccount",
@@ -1428,6 +1554,7 @@ def verify_git_tracking() -> None:
         " M backend/app/database.py",
         " M backend/app/models/__init__.py",
         " M backend/app/models/api_credential.py",
+        " M backend/app/models/financial.py",
         " M backend/app/models/order.py",
         " M backend/app/models/product.py",
         " M backend/app/models/store.py",

@@ -69,6 +69,21 @@ def preview_coupang_sales(
     return success_response(data=result, message="coupang readonly sales preview completed")
 
 
+@router.post("/sales/coupang")
+def sync_coupang_sales(
+    payload: CoupangSalesPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.sync_coupang_sales(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        max_pages=payload.max_pages,
+    )
+    return success_response(data=result, message="coupang readonly sales sync completed")
+
+
 @router.post("/settlements/coupang/preview")
 def preview_coupang_settlements(
     payload: CoupangSettlementPreviewRequest,

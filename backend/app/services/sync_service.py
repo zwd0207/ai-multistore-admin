@@ -16,7 +16,7 @@ from app.clients.naver_client import NaverClient
 from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now
-from app.models.financial import PlatformSettlementDetail
+from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.order import Order
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
@@ -36,6 +36,8 @@ COUPANG_PRODUCT_PREVIEW_SYNC_TYPE = "products_coupang_real_preview"
 COUPANG_PRODUCT_SYNC_TYPE = "products_coupang_real"
 COUPANG_PRODUCT_CHECKPOINT_SYNC_TYPE = "products"
 COUPANG_SALES_PREVIEW_SYNC_TYPE = "sales_coupang_real_preview"
+COUPANG_SALES_SYNC_TYPE = "sales_coupang_real"
+COUPANG_SALES_CHECKPOINT_SYNC_TYPE = "sales"
 COUPANG_SETTLEMENT_PREVIEW_SYNC_TYPE = "settlements_coupang_real_preview"
 COUPANG_SETTLEMENT_SYNC_TYPE = "settlements_coupang_real"
 COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
@@ -86,7 +88,7 @@ def _mask_sensitive_text(message: str | None) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|access[_-]?key|secret[_-]?key|authorization|signature|bankAccountHolder|bankName|bankAccount)",
+        r"(?i)(access[_-]?token|refresh[_-]?token|client[_-]?secret|access[_-]?key|secret[_-]?key|api[_-]?key|authorization|signature|header|bankAccountHolder|bankName|bankAccount)",
         "credential_field",
         text,
     )
@@ -533,6 +535,154 @@ def preview_coupang_sales(
         raise ApiError(
             message="Coupang sales preview failed",
             error_code="COUPANG_SALES_PREVIEW_FAILED",
+            status_code=502,
+        ) from exc
+
+
+def sync_coupang_sales(
+    db: Session,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    max_pages: int = 1,
+) -> dict:
+    settings = get_settings()
+    if not settings.real_api_test_enabled:
+        raise ApiError(
+            message="Readonly real API sales sync is disabled",
+            error_code="REAL_API_TEST_DISABLED",
+            status_code=403,
+        )
+
+    _ensure_coupang_store(db, store_id)
+    start_date, end_date = _resolve_sales_preview_date_range(start_date, end_date)
+    _ensure_financial_page_limit(max_pages)
+    credential = credential_service.get_decrypted_credential_by_store_and_platform(db, store_id, "coupang")
+    _ensure_coupang_preview_credential(credential)
+
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="coupang",
+        sync_type=COUPANG_SALES_SYNC_TYPE,
+        message="coupang readonly sales sync started",
+        raw_summary={
+            "stage": "started",
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "write_scope": "local_platform_sales_details_only",
+            "platform_write": False,
+            "date_window": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "business_timezone": str(get_business_timezone()),
+            },
+            "max_pages": max_pages,
+            "system_phase_limit_days": COUPANG_FINANCIAL_PREVIEW_MAX_DAYS,
+        },
+    )
+
+    try:
+        fetch_result = _fetch_coupang_sales_pages(
+            credential=credential,
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=max_pages,
+        )
+        synced_at = get_utc_now()
+        sales_items = [
+            payload
+            for item in fetch_result["items"]
+            if (payload := _to_coupang_sales_payload(item, synced_at=synced_at)) is not None
+        ]
+        write_result = _upsert_coupang_sales_details(db, store_id, sales_items)
+        sample_ids = [item["external_sales_id"] for item in sales_items[:10]]
+        result = {
+            "store_id": store_id,
+            "platform": "coupang",
+            "sync_type": COUPANG_SALES_SYNC_TYPE,
+            "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+            "write_scope": "local_platform_sales_details_only",
+            "platform_write": False,
+            "real_api_write_enabled": settings.real_api_write_enabled,
+            "business_timezone": str(get_business_timezone()),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "window_start_at": _utc_isoformat(get_business_day_range(start_date)[0]),
+            "window_end_at": _utc_isoformat(get_business_day_range(end_date)[1]),
+            "max_pages": max_pages,
+            "page_count": fetch_result["page_count"],
+            "next_cursor_exists": fetch_result["next_cursor_exists"],
+            "total_rows": len(fetch_result["items"]),
+            "created_count": write_result["created"],
+            "updated_count": write_result["updated"],
+            "unchanged_count": write_result["unchanged"],
+            "skipped_count": len(fetch_result["items"]) - len(sales_items),
+            "sample_ids": sample_ids,
+            "summary_totals": _build_financial_summary_totals(fetch_result["items"]),
+            "last_synced_at": synced_at.isoformat(),
+            "semantic_notice": "Sales sync is readonly toward Coupang and writes only sanitized sales details to the local database. It does not call Coupang write APIs.",
+            "date_availability_notice": "Sales sync only allows completed historical KST dates before the current business date. The 7-day window is this system phase limit, not Coupang's official maximum.",
+            "count_semantic_notice": "updated_count means mapped business fields changed. Existing rows with identical mapped fields are counted as unchanged_count, even when last_synced_at is refreshed.",
+        }
+        checkpoint = _upsert_coupang_sync_checkpoint(
+            db,
+            store_id=store_id,
+            sync_type=COUPANG_SALES_CHECKPOINT_SYNC_TYPE,
+            cursor_payload={
+                "date_window": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+                "max_pages": max_pages,
+                "page_count": result["page_count"],
+                "next_cursor_exists": result["next_cursor_exists"],
+                "total_rows": result["total_rows"],
+            },
+            synced_at=synced_at,
+            notes_payload={
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "last_success_at": synced_at.isoformat(),
+                "write_scope": "local_platform_sales_details_only",
+                "platform_write": False,
+                "date_availability_notice": result["date_availability_notice"],
+            },
+            window_start_at=get_business_day_range(start_date)[0],
+            window_end_at=get_business_day_range(end_date)[1],
+        )
+        result["checkpoint"] = checkpoint
+        finished_log = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly sales sync success",
+            raw_summary=_sales_sync_summary_for_log(result),
+        )
+        result["sync_log"] = finished_log
+        return result
+    except ApiError as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly sales sync failed",
+            error_detail=_mask_sensitive_text(exc.message),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": exc.error_code,
+            },
+        )
+        raise
+    except Exception as exc:
+        sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="coupang readonly sales sync failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "source_type": COUPANG_FINANCIAL_SOURCE_TYPE,
+                "error_code": "COUPANG_SALES_SYNC_FAILED",
+            },
+        )
+        raise ApiError(
+            message="Coupang sales sync failed",
+            error_code="COUPANG_SALES_SYNC_FAILED",
             status_code=502,
         ) from exc
 
@@ -1290,6 +1440,156 @@ def _fetch_coupang_sales_page(
             "date_availability_notice": "Sales confirmation dates may only be queryable after Coupang completes historical recognition.",
         },
     )
+
+
+def _to_coupang_sales_payload(item: dict, synced_at: datetime) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    recognition_date = _extract_date_by_keys(item, ("recognitionDate", "revenueRecognitionDate"))
+    if recognition_date is None:
+        return None
+    external_sales_id = _resolve_sales_external_id(item, recognition_date)
+    if external_sales_id is None:
+        return None
+    return {
+        "external_sales_id": external_sales_id,
+        "recognition_date": recognition_date,
+        "order_id": _bounded_text(_extract_scalar_by_keys(item, ("orderId", "orderID")), 120),
+        "order_sheet_id": _bounded_text(_extract_scalar_by_keys(item, ("orderSheetId", "order_sheet_id")), 120),
+        "shipment_box_id": _bounded_text(_extract_scalar_by_keys(item, ("shipmentBoxId", "shipment_box_id")), 120),
+        "product_id": _bounded_text(_extract_scalar_by_keys(item, ("productId", "sellerProductId", "product_id")), 120),
+        "vendor_item_id": _bounded_text(_extract_scalar_by_keys(item, ("vendorItemId", "vendor_item_id")), 120),
+        "sale_type": _bounded_text(_extract_scalar_by_keys(item, ("saleType", "salesType", "sale_type")), 60),
+        "status": _bounded_text(_extract_scalar_by_keys(item, ("status", "statusName")), 60),
+        "currency": _extract_scalar_by_keys(item, ("currency", "currencyCode")) or "KRW",
+        "sale_amount": _extract_krw_amount_by_keys(item, ("saleAmount", "salesAmount", "sale_amount")),
+        "total_sale": _extract_krw_amount_by_keys(item, ("totalSale", "total_sale")),
+        "discount_amount": _extract_krw_amount_by_keys(item, ("discountAmount", "discount_amount")),
+        "refund_amount": _extract_krw_amount_by_keys(item, ("refundAmount", "refund_amount")),
+        "commission_amount": _extract_krw_amount_by_keys(item, ("commissionAmount", "commission_amount")),
+        "fee_amount": _extract_krw_amount_by_keys(item, ("feeAmount", "serviceFee", "fee_amount")),
+        "settlement_target_amount": _extract_krw_amount_by_keys(item, ("settlementTargetAmount", "settlement_target_amount")),
+        "settlement_amount": _extract_krw_amount_by_keys(item, ("settlementAmount", "settlement_amount")),
+        "observed_fields": _extract_allowed_observed_fields(item),
+        "last_synced_at": synced_at,
+    }
+
+
+def _resolve_sales_external_id(item: dict, recognition_date: date) -> str | None:
+    stable_id = _extract_scalar_by_keys(
+        item,
+        (
+            "revenueId",
+            "salesId",
+            "saleId",
+            "transactionId",
+            "revenueHistoryId",
+            "salesHistoryId",
+        ),
+    )
+    if stable_id:
+        return _bounded_text(str(stable_id), 160) or str(stable_id)
+
+    identity_fields = {
+        "recognitionDate": recognition_date.isoformat(),
+        "orderId": _extract_scalar_by_keys(item, ("orderId", "orderID")),
+        "orderSheetId": _extract_scalar_by_keys(item, ("orderSheetId",)),
+        "shipmentBoxId": _extract_scalar_by_keys(item, ("shipmentBoxId",)),
+        "productId": _extract_scalar_by_keys(item, ("productId", "sellerProductId")),
+        "vendorItemId": _extract_scalar_by_keys(item, ("vendorItemId",)),
+        "saleType": _extract_scalar_by_keys(item, ("saleType", "salesType")),
+        "status": _extract_scalar_by_keys(item, ("status", "statusName")),
+    }
+    hash_payload = {key: value for key, value in identity_fields.items() if value not in {None, ""}}
+    has_platform_identity = any(
+        hash_payload.get(key)
+        for key in ("orderId", "orderSheetId", "shipmentBoxId", "productId", "vendorItemId")
+    )
+    has_classification = bool(hash_payload.get("saleType") or hash_payload.get("status"))
+    if not has_platform_identity or not has_classification:
+        return None
+
+    # Amount fields are a last-resort collision reducer only; if Coupang later corrects
+    # amounts, this fallback id can change. Stable platform ids remain preferred.
+    for key in (
+        "saleAmount",
+        "salesAmount",
+        "totalSale",
+        "discountAmount",
+        "refundAmount",
+        "commissionAmount",
+        "feeAmount",
+        "serviceFee",
+        "settlementTargetAmount",
+        "settlementAmount",
+    ):
+        value = _extract_scalar_by_keys(item, (key,))
+        if value not in {None, ""}:
+            hash_payload[key] = value
+
+    serialized = json.dumps(hash_payload, sort_keys=True, ensure_ascii=True, default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:24]
+    return f"coupang_sales_v1:{digest}"
+
+
+def _upsert_coupang_sales_details(db: Session, store_id: int, items: list[dict]) -> dict:
+    created = 0
+    updated = 0
+    unchanged = 0
+    business_fields = (
+        "recognition_date",
+        "order_id",
+        "order_sheet_id",
+        "shipment_box_id",
+        "product_id",
+        "vendor_item_id",
+        "sale_type",
+        "status",
+        "currency",
+        "sale_amount",
+        "total_sale",
+        "discount_amount",
+        "refund_amount",
+        "commission_amount",
+        "fee_amount",
+        "settlement_target_amount",
+        "settlement_amount",
+        "observed_fields",
+    )
+    for item in items:
+        external_sales_id = item["external_sales_id"]
+        existing = db.scalar(
+            select(PlatformSalesDetail).where(
+                PlatformSalesDetail.store_id == store_id,
+                PlatformSalesDetail.platform == "coupang",
+                PlatformSalesDetail.external_sales_id == external_sales_id,
+            )
+        )
+        if existing is None:
+            db.add(PlatformSalesDetail(
+                store_id=store_id,
+                platform="coupang",
+                source_type=COUPANG_FINANCIAL_SOURCE_TYPE,
+                **item,
+            ))
+            created += 1
+            continue
+
+        business_changed = False
+        for field in business_fields:
+            new_value = item.get(field)
+            if getattr(existing, field) != new_value:
+                setattr(existing, field, new_value)
+                business_changed = True
+        existing.source_type = COUPANG_FINANCIAL_SOURCE_TYPE
+        existing.last_synced_at = item["last_synced_at"]
+        if business_changed:
+            updated += 1
+        else:
+            unchanged += 1
+
+    db.commit()
+    return {"created": created, "updated": updated, "unchanged": unchanged}
 
 
 def _fetch_coupang_settlement_months(
@@ -2197,7 +2497,10 @@ def _sanitize_financial_sample_row(item: dict, settlement: bool = False) -> dict
 
 def _is_forbidden_financial_sample_field(normalized_key: str) -> bool:
     forbidden_fragments = (
+        "key",
         "accesskey",
+        "header",
+        "secret",
         "secretkey",
         "authorization",
         "signature",
@@ -2352,6 +2655,33 @@ def _financial_preview_summary_for_log(result: dict) -> dict:
         summary["per_month"] = result["per_month"]
         summary["month_semantic_notice"] = result["month_semantic_notice"]
     return summary
+
+
+def _sales_sync_summary_for_log(result: dict) -> dict:
+    return {
+        "source_type": result["source_type"],
+        "sync_type": result["sync_type"],
+        "write_scope": result["write_scope"],
+        "platform_write": result["platform_write"],
+        "date_window": {
+            "start_date": result["start_date"],
+            "end_date": result["end_date"],
+            "business_timezone": result["business_timezone"],
+        },
+        "max_pages": result["max_pages"],
+        "page_count": result["page_count"],
+        "next_cursor_exists": result["next_cursor_exists"],
+        "total_rows": result["total_rows"],
+        "created_count": result["created_count"],
+        "updated_count": result["updated_count"],
+        "unchanged_count": result["unchanged_count"],
+        "skipped_count": result["skipped_count"],
+        "sample_ids": result["sample_ids"],
+        "summary_totals": result["summary_totals"],
+        "semantic_notice": result["semantic_notice"],
+        "date_availability_notice": result["date_availability_notice"],
+        "count_semantic_notice": result["count_semantic_notice"],
+    }
 
 
 def _settlement_sync_summary_for_log(result: dict) -> dict:

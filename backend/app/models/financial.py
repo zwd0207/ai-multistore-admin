@@ -8,9 +8,12 @@ from app.models.store import utc_now
 
 
 FORBIDDEN_OBSERVED_FIELDS = {
+    "key",
     "bankaccountholder",
     "bankname",
     "bankaccount",
+    "header",
+    "secret",
     "accesskey",
     "secretkey",
     "access_key",
@@ -25,8 +28,12 @@ FORBIDDEN_OBSERVED_FIELDS = {
 def validate_observed_fields(value: list[str] | None) -> list[str] | None:
     if value is None:
         return value
-    lowered = {str(item).replace("_", "").lower() for item in value}
-    forbidden = sorted(lowered & FORBIDDEN_OBSERVED_FIELDS)
+    lowered = {str(item).replace("_", "").replace("-", "").lower() for item in value}
+    forbidden = sorted(
+        field
+        for field in lowered
+        if any(fragment in field for fragment in FORBIDDEN_OBSERVED_FIELDS)
+    )
     if forbidden:
         raise ValueError(f"observed_fields contains forbidden field names: {forbidden}")
     return value
