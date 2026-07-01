@@ -54,6 +54,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/orders",
     "/api/v1/customer-inquiries",
     "/api/v1/sync/products/mock",
+    "/api/v1/sync/products/coupang/preview",
+    "/api/v1/sync/products/coupang",
     "/api/v1/sync/orders/mock",
     "/api/v1/sync/orders/coupang/preview",
     "/api/v1/sync/orders/coupang",
@@ -654,6 +656,7 @@ def verify_sync_preview_schema_and_security() -> None:
     from app.database import SessionLocal
     from app.main import app
     from app.models.order import Order
+    from app.models.product import Product
     from app.models.sync_log import SyncLog
     from app.services import sync_service
     from scripts.upgrade_sync_schema import upgrade
@@ -719,11 +722,18 @@ def verify_sync_preview_schema_and_security() -> None:
                     "end_date": "2026-06-30",
                     "max_pages": 1,
                 })
+                disabled_product = client.post("/api/v1/sync/products/coupang/preview", json={
+                    "store_id": store_id,
+                    "status": "APPROVED",
+                    "max_pages": 1,
+                })
             finally:
                 sync_service.httpx.Client = original_http_client
                 app_config.get_settings.cache_clear()
             assert disabled.status_code == 403, disabled.text
             assert disabled.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled.text
+            assert disabled_product.status_code == 403, disabled_product.text
+            assert disabled_product.json()["error_code"] == "REAL_API_TEST_DISABLED", disabled_product.text
 
             with SessionLocal() as db:
                 db.add(Order(
@@ -817,6 +827,126 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert forbidden not in log_text, log_text
                 store_orders = db.scalars(select(Order).where(Order.store_id == store_id)).all()
                 assert len(store_orders) == 1, store_orders
+
+            original_get = sync_service._coupang_get_with_credential
+            product_statuses_seen = []
+
+            def fake_coupang_product_get(credential, path, query_string):
+                query = parse_qs(query_string)
+                request = httpx.Request("GET", f"https://example.invalid{path}?{query_string}")
+                assert "seller-products" in path, path
+                status = query.get("status", [""])[0]
+                product_statuses_seen.append(status)
+                if status == "APPROVED":
+                    return httpx.Response(
+                        200,
+                        request=request,
+                        json={
+                            "data": [
+                                {
+                                    "sellerProductId": "product-approved-001",
+                                    "sellerProductName": "Approved Product 1",
+                                    "statusName": "APPROVED",
+                                    "brand": "VerifyBrand",
+                                    "displayCategoryCode": "1234",
+                                    "salePrice": 12000,
+                                },
+                                {
+                                    "sellerProductId": "product-approved-002",
+                                    "sellerProductName": "Approved Product 2",
+                                    "statusName": "APPROVED",
+                                    "brand": "VerifyBrand",
+                                    "displayCategoryCode": "5678",
+                                    "salePrice": 34000,
+                                },
+                            ]
+                        },
+                    )
+                if status == "PARTIAL_APPROVED":
+                    return httpx.Response(
+                        200,
+                        request=request,
+                        json={"data": [{"sellerProductName": "Missing ID Product", "statusName": "PARTIAL_APPROVED"}]},
+                    )
+                return httpx.Response(200, request=request, json={"data": []})
+
+            sync_service._coupang_get_with_credential = fake_coupang_product_get
+            try:
+                product_preview = client.post("/api/v1/sync/products/coupang/preview", json={
+                    "store_id": store_id,
+                    "status": "all",
+                    "max_pages": 1,
+                })
+            finally:
+                sync_service._coupang_get_with_credential = original_get
+
+            assert set(product_statuses_seen) == {
+                "IN_REVIEW",
+                "SAVED",
+                "APPROVING",
+                "APPROVED",
+                "PARTIAL_APPROVED",
+                "DENIED",
+                "DELETED",
+            }, product_statuses_seen
+            assert product_preview.status_code == 200, product_preview.text
+            product_preview_data = product_preview.json()["data"]
+            assert product_preview_data["would_create"] == 2, product_preview_data
+            assert product_preview_data["would_update"] == 0, product_preview_data
+            assert len(product_preview_data["per_status"]) == 7, product_preview_data
+            assert product_preview_data["status_semantic_notice"], product_preview_data
+            with SessionLocal() as db:
+                assert not db.scalars(select(Product).where(Product.store_id == store_id)).all()
+
+            product_statuses_seen.clear()
+            sync_service._coupang_get_with_credential = fake_coupang_product_get
+            try:
+                product_sync = client.post("/api/v1/sync/products/coupang", json={
+                    "store_id": store_id,
+                    "status": "all",
+                    "max_pages": 1,
+                })
+            finally:
+                sync_service._coupang_get_with_credential = original_get
+            assert set(product_statuses_seen) == {
+                "IN_REVIEW",
+                "SAVED",
+                "APPROVING",
+                "APPROVED",
+                "PARTIAL_APPROVED",
+                "DENIED",
+                "DELETED",
+            }, product_statuses_seen
+
+            assert product_sync.status_code == 200, product_sync.text
+            product_sync_data = product_sync.json()["data"]
+            assert product_sync_data["created_count"] == 2, product_sync_data
+            assert product_sync_data["updated_count"] == 0, product_sync_data
+            assert product_sync_data["skipped_count"] == 1, product_sync_data
+            assert product_sync_data["checkpoint"]["sync_type"] == "products", product_sync_data
+            with SessionLocal() as db:
+                store_products = db.scalars(select(Product).where(Product.store_id == store_id)).all()
+                assert len(store_products) == 2, store_products
+                assert {item.source_type for item in store_products} == {"real_coupang"}
+                assert all(item.last_synced_at is not None for item in store_products)
+                latest_product_log = db.scalars(
+                    select(SyncLog)
+                    .where(
+                        SyncLog.store_id == store_id,
+                        SyncLog.sync_type == "products_coupang_real",
+                    )
+                    .order_by(SyncLog.id.desc())
+                ).first()
+                assert latest_product_log is not None
+                product_log_text = str(latest_product_log.raw_summary).lower()
+                for forbidden in [
+                    "phase-6c6a-access-key",
+                    "phase-6c6a-secret-key",
+                    "authorization",
+                    "signature",
+                    "token",
+                ]:
+                    assert forbidden not in product_log_text, product_log_text
     finally:
         if original_test_enabled is None:
             os.environ.pop("REAL_API_TEST_ENABLED", None)

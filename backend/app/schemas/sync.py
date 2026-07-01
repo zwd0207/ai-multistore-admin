@@ -18,3 +18,9 @@ class CoupangOrderPreviewRequest(BaseModel):
 
 class CoupangOrderSyncRequest(CoupangOrderPreviewRequest):
     pass
+
+
+class CoupangProductSyncRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    status: str = Field(default="APPROVED")
+    max_pages: int = Field(default=1, ge=1, le=3)
