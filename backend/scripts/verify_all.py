@@ -1680,7 +1680,10 @@ def verify_sync_preview_schema_and_security() -> None:
                     def post(self, url: str, headers=None, json=None, params=None):
                         assert url.endswith("/v1/products/search"), url
                         assert params is None, params
-                        assert json == {"page": 1, "size": 1}, json
+                        assert json is not None, json
+                        assert json.get("page") == 1, json
+                        assert json.get("size") in {1, 5}, json
+                        assert set(json.keys()) == {"page", "size"}, json
                         FakeNaverProductHttpClient.calls.append({"json": dict(json or {})})
                         if FakeNaverProductHttpClient.response_sequence:
                             return FakeNaverProductHttpClient.response_sequence.pop(0)
@@ -1748,7 +1751,13 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert dry_run["would_skip"] == 0, dry_run
                 assert dry_run["matched_existing_count"] == 0, dry_run
                 assert dry_run["incoming_candidate_count"] == 1, dry_run
-                assert dry_run["ready_for_local_sync"] is True, dry_run
+                assert dry_run["ready_for_local_sync"] is False, dry_run
+                assert dry_run["single_channel_product_count"] == 1, dry_run
+                assert dry_run["multiple_channel_products_count"] == 0, dry_run
+                assert dry_run["missing_external_product_id_count"] == 0, dry_run
+                assert dry_run["missing_product_name_count"] == 0, dry_run
+                assert dry_run["missing_price_count"] == 0, dry_run
+                assert dry_run["missing_stock_count"] == 0, dry_run
                 assert dry_run["source_type"] == "naver_product_preview_dry_run", dry_run
                 assert fake_product_data["would_create"] == dry_run["would_create"], fake_product_data
                 assert fake_product_data["would_update"] == dry_run["would_update"], fake_product_data
@@ -1844,7 +1853,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert update_diff["would_update"] == 1, update_diff
                 assert update_diff["matched_existing_count"] == 1, update_diff
                 assert update_diff["incoming_candidate_count"] == 1, update_diff
-                assert update_diff["ready_for_local_sync"] is True, update_diff
+                assert update_diff["ready_for_local_sync"] is False, update_diff
                 fake_update_text = str(fake_product_update.json()).lower()
                 for forbidden in ["naver-existing-001", "update-origin-must-not-leak", "must-not-leak-existing-name"]:
                     assert forbidden not in fake_update_text, fake_update_text
@@ -1920,6 +1929,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_multi_data["dry_run_diff"]["would_skip"] == 1, fake_multi_data
                 assert fake_multi_data["dry_run_diff"]["skip_reasons"]["multiple_channel_products"] == 1, fake_multi_data
                 assert fake_multi_data["dry_run_diff"]["incoming_candidate_count"] == 0, fake_multi_data
+                assert fake_multi_data["dry_run_diff"]["multiple_channel_products_count"] == 1, fake_multi_data
                 assert "imageUrl" not in fake_multi_data["observed_field_names"], fake_multi_data
                 fake_multi_text = str(fake_product_multi.json()).lower()
                 for forbidden in [
@@ -1964,6 +1974,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert no_id_data["dry_run_diff"]["would_skip"] == 1, no_id_data
                 assert no_id_data["dry_run_diff"]["skip_reasons"]["missing_external_product_id"] == 1, no_id_data
                 assert no_id_data["dry_run_diff"]["incoming_candidate_count"] == 0, no_id_data
+                assert no_id_data["dry_run_diff"]["missing_external_product_id_count"] == 1, no_id_data
                 no_id_text = str(fake_product_no_id.json()).lower()
                 for forbidden in ["no-id-origin-must-not-leak", "must-not-leak-no-id-name"]:
                     assert forbidden not in no_id_text, no_id_text
@@ -2000,6 +2011,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert no_name_data["dry_run_diff"]["would_skip"] == 1, no_name_data
                 assert no_name_data["dry_run_diff"]["skip_reasons"]["missing_product_name"] == 1, no_name_data
                 assert no_name_data["dry_run_diff"]["incoming_candidate_count"] == 0, no_name_data
+                assert no_name_data["dry_run_diff"]["missing_product_name_count"] == 1, no_name_data
                 no_name_text = str(fake_product_no_name.json()).lower()
                 for forbidden in ["no-name-origin-must-not-leak", "no-name-channel-must-not-leak"]:
                     assert forbidden not in no_name_text, no_name_text
@@ -2037,8 +2049,10 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_missing_data["dry_run_diff"]["would_skip"] == 0, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["would_create"] == 1, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["incoming_candidate_count"] == 1, fake_missing_data
-                assert fake_missing_data["dry_run_diff"]["ready_for_local_sync"] is True, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["ready_for_local_sync"] is False, fake_missing_data
                 assert fake_missing_data["dry_run_diff"]["skip_reasons"]["missing_optional_fields"] == 1, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["missing_price_count"] == 1, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["missing_stock_count"] == 1, fake_missing_data
                 fake_missing_text = str(fake_product_missing.json()).lower()
                 for forbidden in [
                     "missing-price-stock-must-not-leak",
@@ -2046,6 +2060,144 @@ def verify_sync_preview_schema_and_security() -> None:
                     "must-not-leak-missing-price-stock",
                 ]:
                     assert forbidden not in fake_missing_text, fake_missing_text
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "BATCH-UPDATE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-existing-001",
+                                        "productName": "must-not-leak-batch-update-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1000,
+                                        "stockQuantity": 3,
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "BATCH-CREATE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "BATCH-CREATE-CHANNEL-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-batch-create-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "BATCH-MULTI-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "BATCH-MULTI-CHANNEL-1-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-batch-multi-name-1",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2000,
+                                        "stockQuantity": 2,
+                                    },
+                                    {
+                                        "channelProductNo": "BATCH-MULTI-CHANNEL-2-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-batch-multi-name-2",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2001,
+                                        "stockQuantity": 4,
+                                        "imageUrl": "must-not-leak-batch-image",
+                                    },
+                                ],
+                            },
+                            {
+                                "originProductNo": "BATCH-NO-ID-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "productName": "must-not-leak-batch-no-id-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 3000,
+                                        "stockQuantity": 5,
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "BATCH-NO-NAME-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "BATCH-NO-NAME-CHANNEL-MUST-NOT-LEAK",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 4000,
+                                        "stockQuantity": 6,
+                                        "detailHtml": "<p>must-not-leak-batch-html</p>",
+                                    }
+                                ],
+                            },
+                        ],
+                        "last": True,
+                    })
+                ]
+                FakeNaverProductHttpClient.calls = []
+                fake_product_small_batch = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert fake_product_small_batch.status_code == 200, fake_product_small_batch.text
+                assert FakeNaverProductHttpClient.calls[-1]["json"] == {"page": 1, "size": 5}, FakeNaverProductHttpClient.calls
+                batch_data = fake_product_small_batch.json()["data"]
+                batch_diff = batch_data["dry_run_diff"]
+                assert batch_data["preview_status"] == "success", batch_data
+                assert batch_data["field_observation"]["request_body_shape"] == "page_size_only", batch_data
+                assert batch_data["field_observation"]["product_status_filter_sent"] is False, batch_data
+                assert batch_data["field_observation"]["channel_no_sent"] is False, batch_data
+                assert len(batch_data["sample_ids"]) <= 5, batch_data
+                assert batch_data["sample_ids"], batch_data
+                assert all(item.startswith("id-hash-") for item in batch_data["sample_ids"]), batch_data
+                assert batch_diff["would_create"] == 1, batch_diff
+                assert batch_diff["would_update"] == 1, batch_diff
+                assert batch_diff["would_skip"] == 3, batch_diff
+                assert batch_diff["matched_existing_count"] == 1, batch_diff
+                assert batch_diff["incoming_candidate_count"] == 2, batch_diff
+                assert batch_diff["ready_for_local_sync"] is False, batch_diff
+                assert batch_diff["single_channel_product_count"] == 2, batch_diff
+                assert batch_diff["multiple_channel_products_count"] == 1, batch_diff
+                assert batch_diff["missing_external_product_id_count"] == 1, batch_diff
+                assert batch_diff["missing_product_name_count"] == 1, batch_diff
+                assert batch_diff["missing_price_count"] == 1, batch_diff
+                assert batch_diff["missing_stock_count"] == 1, batch_diff
+                assert batch_diff["skip_reasons"]["multiple_channel_products"] == 1, batch_diff
+                assert batch_diff["skip_reasons"]["missing_external_product_id"] == 1, batch_diff
+                assert batch_diff["skip_reasons"]["missing_product_name"] == 1, batch_diff
+                assert batch_diff["skip_reasons"]["missing_optional_fields"] == 1, batch_diff
+                batch_text = str(fake_product_small_batch.json()).lower()
+                for forbidden in [
+                    "naver-existing-001",
+                    "batch-update-origin-must-not-leak",
+                    "batch-create-origin-must-not-leak",
+                    "batch-create-channel-must-not-leak",
+                    "batch-multi-origin-must-not-leak",
+                    "batch-multi-channel-1-must-not-leak",
+                    "batch-multi-channel-2-must-not-leak",
+                    "batch-no-id-origin-must-not-leak",
+                    "batch-no-name-origin-must-not-leak",
+                    "batch-no-name-channel-must-not-leak",
+                    "must-not-leak-batch-update-name",
+                    "must-not-leak-batch-create-name",
+                    "must-not-leak-batch-multi-name",
+                    "must-not-leak-batch-no-id-name",
+                    "must-not-leak-batch-image",
+                    "must-not-leak-batch-html",
+                    "detailhtml",
+                    "imageurl",
+                ]:
+                    assert forbidden not in batch_text, batch_text
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(403, {"message": "ip whitelist blocked"}, text="ip whitelist blocked")
@@ -2108,7 +2260,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_product_real_sync.status_code == 200, fake_product_real_sync.text
                 fake_sync_data = fake_product_real_sync.json()["data"]
                 assert fake_sync_data["preview_status"] == "success", fake_sync_data
-                assert fake_sync_data["dry_run_diff"]["ready_for_local_sync"] is True, fake_sync_data
+                assert fake_sync_data["dry_run_diff"]["ready_for_local_sync"] is False, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["requested"] is True, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["status"] == "success", fake_sync_data
                 assert fake_sync_data["local_sync_result"]["created_count"] == 1, fake_sync_data
@@ -3452,6 +3604,7 @@ def verify_naver_product_local_sync_design_docs() -> None:
     for required in [
         "Phase 6D-6J",
         "Phase 6D-6K",
+        "Phase 6D-6M",
         "real_sync=true",
         "real_preview=true",
         "local_sync_result",
@@ -3459,6 +3612,9 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "credential_id=7",
         "page=1",
         "size=1",
+        "size<=5",
+        "sample_ids",
+        "ready_for_local_sync",
         "at most one",
         "single-channel",
         "channelProductNo",

@@ -230,7 +230,7 @@ Naver Commerce API documentation is tracked against the current / 2.81.0 documen
 
 | Planned API | Current status | Naver reference route | Preview strategy |
 |---|---|---|---|
-| `POST /api/v1/sync/products/naver/preview` | Endpoint exists; default blocked; size=1 real micro preview requires explicit gate; `safe_to_real_test=false` | `POST /v1/products/search` | Defaults to `guardrail_blocked`; `real_preview=true` may call only the minimum `{"page":1,"size":1}` body |
+| `POST /api/v1/sync/products/naver/preview` | Endpoint exists; default blocked; readonly small-batch preview requires explicit gate; `safe_to_real_test=false` | `POST /v1/products/search` | Defaults to `guardrail_blocked`; `real_preview=true` may call only the minimum `{"page":1,"size":N}` body, with `N<=5` for `real_sync=false` and `N=1` for `real_sync=true` |
 | `POST /api/v1/sync/orders/naver/preview` | Scaffold endpoint exists; default blocked; real micro preview requires explicit gate | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then optionally query one detail by `productOrderId` |
 
 The older direct order draft route `GET /v1/pay-order/seller/product-orders` is treated as `deprecated_or_unconfirmed` and must not be used for real readonly testing. Product and order preview, when implemented later, must be preview-only:
@@ -276,7 +276,7 @@ Sanitized counts/samples only
 }
 ```
 
-For the blocked scaffold path, the service does not create a Naver HTTP client, does not request a token, does not call `POST /v1/products/search`, does not write `products`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`. `real_preview=true` is an explicit micro-preview gate, not formal product sync availability. It is restricted to the approved local Naver store/credential, `page=1`, `size=1`, and `status` null/ALL with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, decryptable credential, configured channel number, and `minimum_request_body_confirmed=true`. Credential decryption only means the local encrypted secret is readable; it does not mean product API access is available.
+For the blocked scaffold path, the service does not create a Naver HTTP client, does not request a token, does not call `POST /v1/products/search`, does not write `products`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`. `real_preview=true` is an explicit micro-preview gate, not formal product sync availability. It is restricted to the approved local Naver store/credential, `page=1`, `status` null/ALL, `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, decryptable credential, configured channel number, and `minimum_request_body_confirmed=true`. Phase 6D-6M keeps preview-only `real_sync=false` and allows `size<=5`; the approved one-row local sync path still requires `real_sync=true` with `size=1`. Credential decryption only means the local encrypted secret is readable; it does not mean product API access is available.
 
 Phase 6D-6G confirms the official minimum product search request body for the micro gate as `{"page":1,"size":1}`. The public request may pass `status=null` or `status=ALL`, but the Naver request must not send internal `ALL`, `productStatusTypes`, keyword, seller product id, date filters, search keyword fields, channel product numbers, origin product numbers, group product numbers, or full channel number. A successful preview may return `preview_status=success` or `success_empty`, masked `sample_ids`, and field-observation booleans such as product id/name/status/price/stock presence. It still never writes `products`, never writes `SyncLog`, never writes `ApiCapabilityTestResult tested_success`, never saves token/raw response, and never marks formal product sync as available.
 
@@ -315,6 +315,21 @@ Phase 6D-6I adds a local sync dry-run diff to Naver product preview:
 ```
 
 The dry-run reads local `products` by `store_id + platform=naver + external_product_id` only to estimate create/update counts. It does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not imply formal product sync availability. Multiple `channelProducts`, missing `channelProductNo`, and missing `productName` are skipped; missing price or stock is reported under `missing_optional_fields` without forcing a skip. Top-level `would_create` and `would_update` mirror `dry_run_diff` for compatibility.
+
+Phase 6D-6M extends that readonly preview into a small-batch dry-run without opening batch sync. When `real_preview=true` and `real_sync=false`, the only allowed upstream body is `{"page":1,"size":N}` with `1 <= N <= 5`; no `productStatusTypes`, keyword, seller-product filters, channel number, date range, or product-number filters may be sent. `sample_ids` may contain up to 5 masked hashes. `dry_run_diff` also carries:
+
+```json
+{
+  "single_channel_product_count": 0,
+  "multiple_channel_products_count": 0,
+  "missing_external_product_id_count": 0,
+  "missing_product_name_count": 0,
+  "missing_price_count": 0,
+  "missing_stock_count": 0
+}
+```
+
+In this readonly small-batch phase, `dry_run_diff.ready_for_local_sync` is intentionally fixed to `false` even if create/update candidates are found. That is a guardrail signal, not a parser failure. It prevents the preview response from being misread as a writable approval. `real_sync=false` continues to guarantee no `products`, no `SyncLog`, and no `ApiCapabilityTestResult tested_success` writes.
 
 Phase 6D-6J is only the write-design contract for a later Naver product local sync phase. It does not add a public sync endpoint and does not write any table. A future approved write must require `real_sync=true`, `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, and a dry-run candidate that is single-channel and has both `channelProductNo` and `productName`. It may create or update at most one `products` row using `store_id + platform=naver + external_product_id`.
 
