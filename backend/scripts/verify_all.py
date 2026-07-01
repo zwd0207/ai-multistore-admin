@@ -1742,6 +1742,16 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_product_data["product_preview_called"] is True, fake_product_data
                 assert fake_product_data["http_status"] == 200, fake_product_data
                 assert fake_product_data["sample_ids"] and fake_product_data["sample_ids"][0].startswith("id-hash-"), fake_product_data
+                dry_run = fake_product_data["dry_run_diff"]
+                assert dry_run["would_create"] == 1, dry_run
+                assert dry_run["would_update"] == 0, dry_run
+                assert dry_run["would_skip"] == 0, dry_run
+                assert dry_run["matched_existing_count"] == 0, dry_run
+                assert dry_run["incoming_candidate_count"] == 1, dry_run
+                assert dry_run["ready_for_local_sync"] is False, dry_run
+                assert dry_run["source_type"] == "naver_product_preview_dry_run", dry_run
+                assert fake_product_data["would_create"] == dry_run["would_create"], fake_product_data
+                assert fake_product_data["would_update"] == dry_run["would_update"], fake_product_data
                 mapping = fake_product_data["product_field_mapping_summary"]
                 assert mapping["external_product_id"]["target"] == "products.external_product_id", mapping
                 assert mapping["external_product_id"]["source_priority"][0] == "contents[].channelProducts[].channelProductNo", mapping
@@ -1798,6 +1808,45 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert forbidden not in fake_product_text, fake_product_text
 
                 FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "UPDATE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-existing-001",
+                                        "productName": "must-not-leak-existing-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1000,
+                                        "stockQuantity": 3,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_update = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_update.status_code == 200, fake_product_update.text
+                fake_update_data = fake_product_update.json()["data"]
+                update_diff = fake_update_data["dry_run_diff"]
+                assert update_diff["would_create"] == 0, update_diff
+                assert update_diff["would_update"] == 1, update_diff
+                assert update_diff["matched_existing_count"] == 1, update_diff
+                assert update_diff["incoming_candidate_count"] == 1, update_diff
+                fake_update_text = str(fake_product_update.json()).lower()
+                for forbidden in ["naver-existing-001", "update-origin-must-not-leak", "must-not-leak-existing-name"]:
+                    assert forbidden not in fake_update_text, fake_update_text
+
+                FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(200, {"contents": [], "hasMore": False})
                 ]
                 fake_product_empty = client.post("/api/v1/sync/products/naver/preview", json={
@@ -1818,6 +1867,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_empty_data["channel_products_summary"]["observed"] is False, fake_empty_data
                 assert "price" in fake_empty_data["missing_field_names"], fake_empty_data
                 assert "stock" in fake_empty_data["missing_field_names"], fake_empty_data
+                assert fake_empty_data["dry_run_diff"]["incoming_candidate_count"] == 0, fake_empty_data
+                assert fake_empty_data["dry_run_diff"]["would_skip"] == 0, fake_empty_data
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(200, {
@@ -1863,6 +1914,9 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_multi_data["channel_products_summary"]["multiple_observed"] is True, fake_multi_data
                 assert fake_multi_data["product_field_mapping_summary"]["multi_channel_rule"]["local_sync_allowed"] is False, fake_multi_data
                 assert fake_multi_data["mapping_readiness"]["ready_for_local_sync"] is False, fake_multi_data
+                assert fake_multi_data["dry_run_diff"]["would_skip"] == 1, fake_multi_data
+                assert fake_multi_data["dry_run_diff"]["skip_reasons"]["multiple_channel_products"] == 1, fake_multi_data
+                assert fake_multi_data["dry_run_diff"]["incoming_candidate_count"] == 0, fake_multi_data
                 assert "imageUrl" not in fake_multi_data["observed_field_names"], fake_multi_data
                 fake_multi_text = str(fake_product_multi.json()).lower()
                 for forbidden in [
@@ -1874,6 +1928,78 @@ def verify_sync_preview_schema_and_security() -> None:
                     "imageurl",
                 ]:
                     assert forbidden not in fake_multi_text, fake_multi_text
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "NO-ID-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "productName": "must-not-leak-no-id-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1000,
+                                        "stockQuantity": 3,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_no_id = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_no_id.status_code == 200, fake_product_no_id.text
+                no_id_data = fake_product_no_id.json()["data"]
+                assert no_id_data["dry_run_diff"]["would_skip"] == 1, no_id_data
+                assert no_id_data["dry_run_diff"]["skip_reasons"]["missing_external_product_id"] == 1, no_id_data
+                assert no_id_data["dry_run_diff"]["incoming_candidate_count"] == 0, no_id_data
+                no_id_text = str(fake_product_no_id.json()).lower()
+                for forbidden in ["no-id-origin-must-not-leak", "must-not-leak-no-id-name"]:
+                    assert forbidden not in no_id_text, no_id_text
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "NO-NAME-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "NO-NAME-CHANNEL-MUST-NOT-LEAK",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1000,
+                                        "stockQuantity": 3,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_no_name = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_no_name.status_code == 200, fake_product_no_name.text
+                no_name_data = fake_product_no_name.json()["data"]
+                assert no_name_data["dry_run_diff"]["would_skip"] == 1, no_name_data
+                assert no_name_data["dry_run_diff"]["skip_reasons"]["missing_product_name"] == 1, no_name_data
+                assert no_name_data["dry_run_diff"]["incoming_candidate_count"] == 0, no_name_data
+                no_name_text = str(fake_product_no_name.json()).lower()
+                for forbidden in ["no-name-origin-must-not-leak", "no-name-channel-must-not-leak"]:
+                    assert forbidden not in no_name_text, no_name_text
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(200, {
@@ -1905,6 +2031,10 @@ def verify_sync_preview_schema_and_security() -> None:
                 fake_missing_data = fake_product_missing.json()["data"]
                 assert "price" in fake_missing_data["missing_field_names"], fake_missing_data
                 assert "stock" in fake_missing_data["missing_field_names"], fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["would_skip"] == 0, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["would_create"] == 1, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["incoming_candidate_count"] == 1, fake_missing_data
+                assert fake_missing_data["dry_run_diff"]["skip_reasons"]["missing_optional_fields"] == 1, fake_missing_data
                 fake_missing_text = str(fake_product_missing.json()).lower()
                 for forbidden in [
                     "missing-price-stock-must-not-leak",

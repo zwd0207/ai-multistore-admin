@@ -292,6 +292,30 @@ channel_products_summary
 
 The summary is design metadata only. `external_product_id` is planned to prefer `contents[].channelProducts[].channelProductNo` when exactly one channel product is observed, with `contents[].originProductNo` retained as sanitized metadata. Product name maps to `products.name`, sale status to `products.status`, display status to sanitized `products.raw_data.display_status`, price to `products.price` as KRW Decimal, and stock to `products.stock_quantity` as int. Multiple `channelProducts` return only counts and `multiple_observed=true`; preview never expands raw channel payloads and never writes multiple products. The existing `products` table is sufficient for a first Naver snapshot, but `originProductNo`, `channelProductNo`, display status, and channel count must stay in sanitized `raw_data` metadata in a future sync phase. Raw Naver product responses, long HTML, image-detail payloads, tokens, headers, signatures, client secrets, and full channel numbers must not be returned or persisted.
 
+Phase 6D-6I adds a local sync dry-run diff to Naver product preview:
+
+```json
+{
+  "dry_run_diff": {
+    "would_create": 0,
+    "would_update": 0,
+    "would_skip": 0,
+    "skip_reasons": {
+      "multiple_channel_products": 0,
+      "missing_external_product_id": 0,
+      "missing_product_name": 0,
+      "missing_optional_fields": 0
+    },
+    "matched_existing_count": 0,
+    "incoming_candidate_count": 0,
+    "ready_for_local_sync": false,
+    "source_type": "naver_product_preview_dry_run"
+  }
+}
+```
+
+The dry-run reads local `products` by `store_id + platform=naver + external_product_id` only to estimate create/update counts. It does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not imply formal product sync availability. Multiple `channelProducts`, missing `channelProductNo`, and missing `productName` are skipped; missing price or stock is reported under `missing_optional_fields` without forcing a skip. Top-level `would_create` and `would_update` mirror `dry_run_diff` for compatibility.
+
 `POST /api/v1/sync/orders/naver/preview` is a readonly micro preview scaffold. The default `real_preview=false` returns `guardrail_status=blocked` before token/HTTP. `real_preview=true` is allowed only for the approved local Naver store/credential, with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, `page=1`, `size=1`, KST window <= 1 day, and `order_status` null/ALL. It still does not mean Naver order sync is open, and `naver.order_read.safe_to_real_test` remains false.
 
 Phase 6D-6D-Fix2 fixes the feed request to the verified parameter shape: `lastChangedFrom` formatted with milliseconds plus `limitCount=1`, with `lastChangedTo` omitted. Page, size, and order_status remain local preview controls and are not passed through to the Naver feed. When `include_detail=true`, detail lookup runs only if the feed produced a productOrderId, and it queries at most one ID with `POST /v1/pay-order/seller/product-orders/query`. If the feed is empty, detail is skipped with `detail_skipped_reason=no_changed_orders` and the time window is not expanded. Detail responses are reduced to field-observation booleans and sanitized field-name summaries such as `detail_record_observed`, status/product-name presence, buyer/receiver presence booleans, `privacy_fields_suppressed=true`, `raw_response_saved=false`, and `orders_written=false`. It never returns a full URL, query values, raw error body, full order IDs, full productOrderIds, buyer/receiver names, phone numbers, addresses, delivery detail, payment raw payload, raw response bodies, tokens, authorization headers, signatures, or full channel numbers. It does not write `orders`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`.
