@@ -562,16 +562,17 @@ export function adaptApiCapabilityResult(item = {}) {
 
 export function toBackendCredentialPayload(item = {}, storeId) {
   const credentialName = item.name || item.credentialName;
+  const normalizedPlatform = 'platform' in item ? normalizeCredentialPlatformForBackend(item.platform) : undefined;
   const payload = { store_id: Number(item.storeId || storeId) };
-  if ('platform' in item) payload.platform = normalizeCredentialPlatformForBackend(item.platform);
+  if ('platform' in item) payload.platform = normalizedPlatform;
   if (credentialName) payload.credential_name = String(credentialName).trim();
-  if ('vendorId' in item) payload.vendor_id = item.vendorId ? String(item.vendorId).trim() : null;
-  if ('clientId' in item) payload.client_id = item.clientId ? String(item.clientId).trim() : null;
-  if (item.accessKeyInput) payload.access_key = String(item.accessKeyInput);
+  if (normalizedPlatform === 'coupang' && 'vendorId' in item) payload.vendor_id = item.vendorId ? String(item.vendorId).trim() : null;
+  if (normalizedPlatform === 'naver' && 'clientId' in item) payload.client_id = item.clientId ? String(item.clientId).trim() : null;
+  if (normalizedPlatform === 'coupang' && item.accessKeyInput) payload.access_key = String(item.accessKeyInput);
   if (item.secretKeyInput) payload.secret_key = String(item.secretKeyInput);
-  if (item.accessTokenInput) payload.access_token = String(item.accessTokenInput);
-  if (item.refreshTokenInput) payload.refresh_token = String(item.refreshTokenInput);
-  if ('tokenExpiresAt' in item) payload.token_expires_at = item.tokenExpiresAt || null;
+  if (normalizedPlatform === 'naver' && item.accessTokenInput) payload.access_token = String(item.accessTokenInput);
+  if (normalizedPlatform === 'naver' && item.refreshTokenInput) payload.refresh_token = String(item.refreshTokenInput);
+  if (normalizedPlatform === 'naver' && 'tokenExpiresAt' in item) payload.token_expires_at = item.tokenExpiresAt || null;
   if ('market' in item) payload.market = item.market ? String(item.market).trim() : null;
   if ('authStatus' in item) payload.auth_status = normalizeAuthStatusForBackend(item.authStatus);
   if ('lastTestedAt' in item) payload.last_tested_at = item.lastTestedAt || null;
