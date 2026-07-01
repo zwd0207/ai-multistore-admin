@@ -52,12 +52,32 @@ const columns = [
 ];
 
 function cleanError(error) {
+  const detail = error?.data?.detail || error?.detail;
+  if (Array.isArray(detail) && detail.length) {
+    const messages = detail
+      .map((item) => {
+        const field = Array.isArray(item?.loc) ? item.loc.join('.') : item?.field;
+        const message = item?.msg || item?.message;
+        return [field, message].filter(Boolean).join(': ');
+      })
+      .filter(Boolean);
+    if (messages.length) return `${error?.message || '请求参数校验失败'}：${messages.join('；')}`;
+  }
+  if (detail?.missing_fields?.length) {
+    return `${error?.message || '请求参数校验失败'}：缺少 ${detail.missing_fields.join(', ')}`;
+  }
   return error?.message || '后端保存失败，请检查 Codex1 状态或表单内容。';
 }
 
 function toDatetimeLocalValue(value) {
   if (!value) return '';
   return String(value).slice(0, 16);
+}
+
+function hasInvalidDatetime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  return Number.isNaN(new Date(raw).getTime());
 }
 
 function buildRecordForm(record) {
@@ -176,14 +196,16 @@ export default function BackendCredentialPage({ embedded = false }) {
     if (!modal.record && !String(form.secretKeyInput || '').trim()) {
       nextErrors.secretKeyInput = isNaverForm ? '请填写 Client Secret' : '请填写密钥配置';
     }
+    if (isNaverForm && hasInvalidDatetime(form.tokenExpiresAt)) nextErrors.tokenExpiresAt = '请填写有效的 Token 到期时间';
     setErrors(nextErrors);
     return !Object.keys(nextErrors).length;
   };
 
   const save = async () => {
-    if (submitting || !validate()) return;
-    setSubmitting(true);
+    if (submitting) return;
     setSaveError('');
+    if (!validate()) return;
+    setSubmitting(true);
     try {
       const payload = { ...form, storeId: selectedStoreId };
       if (modal.record) {
@@ -492,7 +514,7 @@ export default function BackendCredentialPage({ embedded = false }) {
                   placeholder={modal.record ? '留空则不更新' : '可选填写 Refresh Token'}
                 />
               </FormField>
-              <FormField label="Token 到期时间">
+              <FormField label="Token 到期时间" error={errors.tokenExpiresAt}>
                 <input
                   type="datetime-local"
                   value={form.tokenExpiresAt}

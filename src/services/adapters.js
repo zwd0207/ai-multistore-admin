@@ -560,23 +560,45 @@ export function adaptApiCapabilityResult(item = {}) {
   };
 }
 
+const NAVER_DEFAULT_API_BASE = 'https://api.commerce.naver.com/external';
+
+function trimmedOrNull(value) {
+  if (typeof value !== 'string') return value ?? null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function optionalSecret(value) {
+  const trimmed = trimmedOrNull(value);
+  return trimmed || undefined;
+}
+
+function normalizeTokenExpiresAt(value) {
+  const trimmed = trimmedOrNull(value);
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
 export function toBackendCredentialPayload(item = {}, storeId) {
   const credentialName = item.name || item.credentialName;
   const normalizedPlatform = 'platform' in item ? normalizeCredentialPlatformForBackend(item.platform) : undefined;
   const payload = { store_id: Number(item.storeId || storeId) };
   if ('platform' in item) payload.platform = normalizedPlatform;
   if (credentialName) payload.credential_name = String(credentialName).trim();
-  if (normalizedPlatform === 'coupang' && 'vendorId' in item) payload.vendor_id = item.vendorId ? String(item.vendorId).trim() : null;
-  if (normalizedPlatform === 'naver' && 'clientId' in item) payload.client_id = item.clientId ? String(item.clientId).trim() : null;
-  if (normalizedPlatform === 'coupang' && item.accessKeyInput) payload.access_key = String(item.accessKeyInput);
-  if (item.secretKeyInput) payload.secret_key = String(item.secretKeyInput);
-  if (normalizedPlatform === 'naver' && item.accessTokenInput) payload.access_token = String(item.accessTokenInput);
-  if (normalizedPlatform === 'naver' && item.refreshTokenInput) payload.refresh_token = String(item.refreshTokenInput);
-  if (normalizedPlatform === 'naver' && 'tokenExpiresAt' in item) payload.token_expires_at = item.tokenExpiresAt || null;
-  if ('market' in item) payload.market = item.market ? String(item.market).trim() : null;
+  if (normalizedPlatform === 'coupang' && 'vendorId' in item) payload.vendor_id = trimmedOrNull(item.vendorId);
+  if (normalizedPlatform === 'naver' && 'clientId' in item) payload.client_id = trimmedOrNull(item.clientId);
+  if (normalizedPlatform === 'coupang' && optionalSecret(item.accessKeyInput)) payload.access_key = optionalSecret(item.accessKeyInput);
+  if (optionalSecret(item.secretKeyInput)) payload.secret_key = optionalSecret(item.secretKeyInput);
+  if (normalizedPlatform === 'naver' && optionalSecret(item.accessTokenInput)) payload.access_token = optionalSecret(item.accessTokenInput);
+  if (normalizedPlatform === 'naver' && optionalSecret(item.refreshTokenInput)) payload.refresh_token = optionalSecret(item.refreshTokenInput);
+  if (normalizedPlatform === 'naver' && 'tokenExpiresAt' in item) payload.token_expires_at = normalizeTokenExpiresAt(item.tokenExpiresAt);
+  if (normalizedPlatform === 'naver') payload.extra_config = { api_base: NAVER_DEFAULT_API_BASE };
+  if ('market' in item) payload.market = trimmedOrNull(item.market);
   if ('authStatus' in item) payload.auth_status = normalizeAuthStatusForBackend(item.authStatus);
   if ('lastTestedAt' in item) payload.last_tested_at = item.lastTestedAt || null;
-  if ('apiRemark' in item) payload.api_remark = item.apiRemark || null;
+  if ('apiRemark' in item) payload.api_remark = trimmedOrNull(item.apiRemark);
   if ('status' in item) payload.status = normalizeAccountStatusForBackend(item.status);
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
