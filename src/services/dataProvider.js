@@ -254,6 +254,63 @@ const sourceMethods = {
       max_pages: Number(payload.maxPages || 1),
     }));
   },
+  previewCoupangSales: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangFinancialPreviewResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        sync_type: 'sales_coupang_mock_preview',
+        source_type: 'mock',
+        business_timezone: 'Asia/Seoul',
+        start_date: payload?.startDate,
+        end_date: payload?.endDate,
+        max_pages: payload?.maxPages,
+        page_count: 0,
+        next_cursor_exists: false,
+        total_rows: 0,
+        sample_ids: [],
+        sample_rows: [],
+        summary_totals: {},
+        semantic_notice: 'mock mode shows an empty preview state and does not represent real Coupang financial data.',
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangFinancialPreviewResult(await backendApi.previewCoupangSales({
+      store_id: Number(store.id),
+      start_date: payload.startDate,
+      end_date: payload.endDate,
+      max_pages: Number(payload.maxPages || 1),
+    }));
+  },
+  previewCoupangSettlements: async (payload) => {
+    if (!isBackendSource) {
+      return adapters.coupangFinancialPreviewResult({
+        store_id: payload?.storeId,
+        platform: 'coupang',
+        sync_type: 'settlements_coupang_mock_preview',
+        source_type: 'mock',
+        business_timezone: 'Asia/Seoul',
+        start_date: payload?.startDate,
+        end_date: payload?.endDate,
+        months: [],
+        page_count: 0,
+        next_cursor_exists: false,
+        total_rows: 0,
+        sample_ids: [],
+        sample_rows: [],
+        summary_totals: {},
+        per_month: [],
+        month_semantic_notice: 'Settlement preview uses revenueRecognitionYearMonth=YYYY-MM; mock mode does not query Coupang.',
+        field_mapping_suggestion: {},
+      });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.coupangFinancialPreviewResult(await backendApi.previewCoupangSettlements({
+      store_id: Number(store.id),
+      start_date: payload.startDate,
+      end_date: payload.endDate,
+    }));
+  },
   getSyncLogs: async (params) => {
     if (!isBackendSource) return mockApi.getOperationLogs(params);
     const result = await backendApi.getSyncLogs(params);

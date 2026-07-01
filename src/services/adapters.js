@@ -16,6 +16,45 @@ function compactPayload(payload) {
   );
 }
 
+function isSensitiveFinancialField(key = '') {
+  const normalized = String(key).replace(/[_-]/g, '').toLowerCase();
+  return [
+    'bankaccountholder',
+    'bankname',
+    'bankaccount',
+    'accesskey',
+    'secretkey',
+    'authorization',
+    'signature',
+    'token',
+    'clientsecret',
+  ].some((item) => normalized.includes(item));
+}
+
+function sanitizeFinancialObject(item = {}) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return {};
+  return Object.fromEntries(
+    Object.entries(item)
+      .filter(([key]) => !isSensitiveFinancialField(key))
+      .map(([key, value]) => [key, value && typeof value === 'object' ? String(value) : value]),
+  );
+}
+
+function sanitizeFieldMappingSuggestion(data = {}) {
+  if (!data || typeof data !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([key]) => !isSensitiveFinancialField(key))
+      .map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return [key, value.filter((item) => !isSensitiveFinancialField(item))];
+        }
+        if (value && typeof value === 'object') return [key, sanitizeFinancialObject(value)];
+        return [key, value];
+      }),
+  );
+}
+
 function normalizePlatformForBackend(value) {
   const normalized = String(value || '').trim().toLowerCase();
   const platforms = {
@@ -694,6 +733,44 @@ export function adaptCoupangProductSyncResult(data = {}) {
   };
 }
 
+export function adaptCoupangFinancialPreviewResult(data = {}) {
+  const syncLog = data.sync_log || {};
+  return {
+    storeId: data.store_id,
+    platform: adaptPlatform(data.platform),
+    rawPlatform: data.platform,
+    syncType: data.sync_type,
+    sourceType: data.source_type,
+    businessTimezone: data.business_timezone,
+    startDate: data.start_date,
+    endDate: data.end_date,
+    windowStartAt: data.window_start_at,
+    windowEndAt: data.window_end_at,
+    maxPages: numberValue(data.max_pages),
+    pageCount: numberValue(data.page_count),
+    nextCursorExists: Boolean(data.next_cursor_exists),
+    totalRows: numberValue(data.total_rows),
+    sampleIds: data.sample_ids || [],
+    sampleRows: (data.sample_rows || []).map(sanitizeFinancialObject),
+    summaryTotals: sanitizeFinancialObject(data.summary_totals || {}),
+    months: data.months || [],
+    perMonth: (data.per_month || []).map((item) => ({
+      revenueRecognitionYearMonth: item.revenue_recognition_year_month,
+      itemCount: numberValue(item.item_count),
+      sampleIds: item.sample_ids || [],
+    })),
+    semanticNotice: data.semantic_notice || '',
+    dateAvailabilityNotice: data.date_availability_notice || '',
+    monthSemanticNotice: data.month_semantic_notice || '',
+    fieldMappingSuggestion: sanitizeFieldMappingSuggestion(data.field_mapping_suggestion || {}),
+    syncLog: {
+      id: syncLog.id,
+      status: syncLog.status,
+      message: syncLog.message,
+    },
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -809,6 +886,7 @@ export const adapters = {
   apiCredentialSmokeTest: adaptApiCredentialSmokeTest,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
+  coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
