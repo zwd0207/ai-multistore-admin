@@ -6,6 +6,7 @@ import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
+import { getNaverProductPreviewStatus } from '../utils/capabilityStatusMapper';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const api = {
@@ -243,7 +244,7 @@ function CoupangProductSyncPanel() {
         </div>
       </div>
 
-      <p className="mock-sync-note">max_pages 默认 1，最大 3。不会显示 key / secret / token / header / signature，也不会新增 API key 输入逻辑。</p>
+      <p className="mock-sync-note">max_pages 默认 1，最大 3。不会显示平台密钥、临时授权凭证或请求签名，也不会新增 API key 输入逻辑。</p>
       {form.status === 'APPROVED' && (
         <div className="sync-inline-warning">APPROVED 是 Coupang API 商品审核/刊登状态，不一定完全等于后台“销售中”。</div>
       )}
@@ -256,11 +257,50 @@ function CoupangProductSyncPanel() {
   );
 }
 
+function NaverProductPreviewStatusPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+  const status = getNaverProductPreviewStatus();
+
+  return (
+    <section className="content-card naver-preview-status-panel">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 商品读取状态</h2>
+          <p>面向 SmartStore 商品数据接入的阶段状态，当前不执行真实商品请求。</p>
+        </div>
+        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+      </div>
+      <div className="business-capability-grid">
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>商品读取</strong>
+            <span>{status.statusLabel}</span>
+          </div>
+          <p>{status.reason}</p>
+          <small>{status.nextAction}</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>商品同步</strong>
+            <span>未开放</span>
+          </div>
+          <p>当前不会写入本地 products，也不会保存 Naver 商品原始响应。</p>
+          <small>完成商品只读微量 preview 评审后，再单独开放本地同步。</small>
+        </article>
+      </div>
+      <p className="mock-sync-note">页面不会展示平台密钥、临时授权凭证、请求签名、原始响应或完整店铺频道编号。</p>
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
   return (
     <>
+      <NaverProductPreviewStatusPanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"

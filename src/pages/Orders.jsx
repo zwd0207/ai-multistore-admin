@@ -6,6 +6,7 @@ import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
+import { getNaverOrderPreviewStatus } from '../utils/capabilityStatusMapper';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const api = {
@@ -189,7 +190,7 @@ function CoupangOrderSyncPanel() {
         </div>
       </div>
 
-      <p className="mock-sync-note">单次日期窗口最多 3 天，max_pages 最大 3。不会显示或保存 key / secret / token / header / signature。</p>
+      <p className="mock-sync-note">单次日期窗口最多 3 天，max_pages 最大 3。不会显示或保存平台密钥、临时授权凭证或请求签名。</p>
       {validationError && <div className="sync-inline-warning">{validationError}</div>}
       {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? 'Preview 请求中...' : 'Sync 请求中...'}</div>}
       {message && <div className="mock-sync-success">{message}</div>}
@@ -199,11 +200,58 @@ function CoupangOrderSyncPanel() {
   );
 }
 
+function NaverOrderPreviewStatusPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+  const status = getNaverOrderPreviewStatus();
+
+  return (
+    <section className="content-card naver-preview-status-panel">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 订单读取状态</h2>
+          <p>订单 preview 已准备，但正式订单同步仍未开放。</p>
+        </div>
+        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+      </div>
+      <div className="business-capability-grid">
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>订单变更检测</strong>
+            <span>{status.feed.statusLabel}</span>
+          </div>
+          <p>{status.feed.reason}</p>
+          <small>{status.feed.nextAction}</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>订单详情</strong>
+            <span>{status.detail.statusLabel}</span>
+          </div>
+          <p>{status.detail.reason}</p>
+          <small>{status.detail.nextAction}</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>正式订单同步</strong>
+            <span>未开放</span>
+          </div>
+          <p>{status.sync.reason}</p>
+          <small>当前不会写入本地 orders，也不会保存订单原始响应。</small>
+        </article>
+      </div>
+      <p className="mock-sync-note">页面不会展示完整订单标识、客户、收件人、电话、地址、配送、付款原始内容、平台密钥、临时授权凭证或请求签名。</p>
+    </section>
+  );
+}
+
 export default function Orders() {
   const { selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
   return (
     <>
+      <NaverOrderPreviewStatusPanel />
       <CoupangOrderSyncPanel />
       <ResourcePage
         title="订单管理"

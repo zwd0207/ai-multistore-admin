@@ -11,6 +11,8 @@ const STATUS_LABELS = {
   token_auth_failed: '平台授权失败',
   readonly_request_failed: '只读请求失败',
   ip_not_allowed: '平台 IP 白名单限制',
+  guardrail_blocked: '保护中，暂未开放真实测试',
+  success_empty: '检测成功，但当前暂无数据',
 };
 
 const CAPABILITY_LABELS = {
@@ -18,7 +20,8 @@ const CAPABILITY_LABELS = {
   'naver.seller_account_read': '卖家账号信息读取',
   'naver.seller_channels_read': '店铺频道信息读取',
   'naver.product_read': '商品读取',
-  'naver.order_read': '订单读取',
+  'naver.order_read': '订单变更检测',
+  'naver.order_detail_preview': '订单详情',
   'naver.sales_read': '销售读取',
   'naver.settlement_read': '结算读取',
   'naver.customer_inquiry_read': '客户咨询读取',
@@ -31,7 +34,31 @@ const CAPABILITY_LABELS = {
   'coupang.cs_read': 'CS/咨询读取',
 };
 
-const NaverProtectedMessage = '为避免误触真实业务数据，商品/订单接口当前仍处于保护状态，暂未开放真实请求。';
+const NaverProtectedMessage = '为避免误触真实业务数据，商品/订单接口当前仍处于保护状态，暂未开放正式同步。';
+
+const NAVER_PRODUCT_PREVIEW_STATUS = {
+  statusLabel: '保护中，暂未开放真实测试',
+  reason: '商品 preview 接口已准备，但真实商品读取仍处于保护状态；当前不会写入本地商品数据。',
+  nextAction: '等待后端开放商品只读微量 preview 后，再进入本地同步设计。',
+};
+
+const NAVER_ORDER_PREVIEW_STATUS = {
+  statusLabel: '订单变更 feed 可访问',
+  reason: '系统已完成一次 Naver 订单只读微量检测，订单变更 feed 返回 HTTP 200；当前 KST 时间窗口暂无订单变更。',
+  nextAction: '等店铺出现订单变更后，执行 1 条订单详情脱敏预览。',
+};
+
+const NAVER_ORDER_DETAIL_STATUS = {
+  statusLabel: '待有订单变更后检测',
+  reason: '当前没有可查询的订单变更编号，因此订单详情暂未检测；这不代表订单详情已打通。',
+  nextAction: '出现订单变更后，只查询 1 条详情并仅展示脱敏字段观察摘要。',
+};
+
+const NAVER_SYNC_PROTECTION_STATUS = {
+  statusLabel: '商品/订单同步未开放',
+  reason: '当前不会写入本地商品或订单数据，也不会保存 Naver 原始响应。',
+  nextAction: '完成商品 preview 与订单详情脱敏预览后，再单独评审正式同步开关。',
+};
 
 function normalizePlatform(value) {
   return String(value || '').trim().toLowerCase();
@@ -44,8 +71,8 @@ function labelForStatus(status, errorCode) {
 
 function toneForStatus(status, errorCode) {
   if (errorCode || status === 'tested_failed') return 'danger';
-  if (status === 'tested_success') return 'success';
-  if (status === 'permission_required') return 'warning';
+  if (status === 'tested_success' || status === 'preview_success' || status === 'success_empty') return 'success';
+  if (status === 'permission_required' || status === 'guardrail_blocked') return 'warning';
   if (status === 'not_tested' || status === 'planned') return 'muted';
   return 'info';
 }
@@ -83,14 +110,22 @@ function latestResultForKey(results = [], capabilities = [], capabilityKey) {
 }
 
 function resultCard({
-  key, title, status, statusLabel, errorCode, reason, nextAction, details,
+  key,
+  title,
+  status,
+  statusLabel,
+  errorCode,
+  reason,
+  nextAction,
+  details,
+  tone,
 }) {
   return {
     key,
     title: title || CAPABILITY_LABELS[key] || key,
     status,
     statusLabel: statusLabel || labelForStatus(status, errorCode),
-    tone: toneForStatus(status, errorCode),
+    tone: tone || toneForStatus(status, errorCode),
     reason,
     nextAction,
     details,
@@ -167,7 +202,7 @@ function buildNaverCards({ capabilities, results, readiness }) {
       'naver.seller_channels_read',
       sellerChannels,
       '店铺频道信息读取成功，系统已确认该 Naver 凭证可读取频道信息。',
-      channelConfigured ? '频道编号已识别，可进入商品/订单前置设计。' : '请继续识别或补充店铺频道编号。',
+      channelConfigured ? '店铺频道编号已识别，后续可作为商品/订单 preview 的前置状态。' : '请继续识别或补充店铺频道编号。',
     ),
     resultCard({
       key: 'naver.channel_no',
@@ -176,27 +211,44 @@ function buildNaverCards({ capabilities, results, readiness }) {
       statusLabel: channelConfigured ? '已识别' : '暂未识别',
       tone: channelConfigured ? 'success' : 'warning',
       reason: channelConfigured
-        ? '已识别店铺频道编号。'
+        ? '已识别店铺频道编号，但页面不会显示完整编号。'
         : '暂未识别到店铺频道编号，后续商品/订单同步可能需要补充。',
       nextAction: channelConfigured
-        ? '后续商品/订单读取设计可以使用该前置状态。'
+        ? '后续商品/订单 preview 可以使用该前置状态。'
         : '请先完成 seller/channels 只读识别，或由运营人员确认 channel_no。',
     }),
     resultCard({
       key: 'naver.product_read',
-      status: 'not_tested',
-      statusLabel: '暂未开放真实测试',
-      tone: 'muted',
-      reason: NaverProtectedMessage,
-      nextAction: '需等待后端完成 Naver 商品接口前置设计。',
+      status: 'guardrail_blocked',
+      statusLabel: NAVER_PRODUCT_PREVIEW_STATUS.statusLabel,
+      tone: 'warning',
+      reason: NAVER_PRODUCT_PREVIEW_STATUS.reason,
+      nextAction: NAVER_PRODUCT_PREVIEW_STATUS.nextAction,
     }),
     resultCard({
       key: 'naver.order_read',
+      status: 'success_empty',
+      statusLabel: NAVER_ORDER_PREVIEW_STATUS.statusLabel,
+      tone: 'success',
+      reason: NAVER_ORDER_PREVIEW_STATUS.reason,
+      nextAction: NAVER_ORDER_PREVIEW_STATUS.nextAction,
+    }),
+    resultCard({
+      key: 'naver.order_detail_preview',
       status: 'not_tested',
-      statusLabel: '暂未开放真实测试',
+      statusLabel: NAVER_ORDER_DETAIL_STATUS.statusLabel,
       tone: 'muted',
-      reason: NaverProtectedMessage,
-      nextAction: '需等待后端完成 Naver 订单接口前置设计。',
+      reason: NAVER_ORDER_DETAIL_STATUS.reason,
+      nextAction: NAVER_ORDER_DETAIL_STATUS.nextAction,
+    }),
+    resultCard({
+      key: 'naver.sync_protection',
+      title: '正式同步状态',
+      status: 'guardrail_blocked',
+      statusLabel: NAVER_SYNC_PROTECTION_STATUS.statusLabel,
+      tone: 'warning',
+      reason: NAVER_SYNC_PROTECTION_STATUS.reason,
+      nextAction: NAVER_SYNC_PROTECTION_STATUS.nextAction,
     }),
   ];
 }
@@ -264,6 +316,18 @@ export function businessCapabilityTitle(platform) {
 
 export function statusLabel(value, errorCode) {
   return labelForStatus(value, errorCode);
+}
+
+export function getNaverProductPreviewStatus() {
+  return NAVER_PRODUCT_PREVIEW_STATUS;
+}
+
+export function getNaverOrderPreviewStatus() {
+  return {
+    feed: NAVER_ORDER_PREVIEW_STATUS,
+    detail: NAVER_ORDER_DETAIL_STATUS,
+    sync: NAVER_SYNC_PROTECTION_STATUS,
+  };
 }
 
 export { CAPABILITY_LABELS, NaverProtectedMessage };
