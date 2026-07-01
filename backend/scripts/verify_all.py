@@ -3,6 +3,7 @@ import sys
 import os
 import tempfile
 import uuid
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -1440,6 +1441,7 @@ def verify_kst_business_timezone() -> None:
 
     from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now, to_business_timezone
     from app.database import SessionLocal
+    from app.models.financial import PlatformSettlementDetail
     from app.main import app
     from app.models.order import Order
 
@@ -1498,6 +1500,56 @@ def verify_kst_business_timezone() -> None:
                     ordered_at=datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc),
                     raw_data={"source": "verify_kst_business_timezone"},
                 ),
+                PlatformSettlementDetail(
+                    store_id=store_id,
+                    platform="naver",
+                    source_type="real_coupang",
+                    external_settlement_id=f"kst-settlement-2026-06-{suffix}",
+                    revenue_recognition_year_month="2026-06",
+                    settlement_type="MONTHLY",
+                    settlement_date=date(2026, 6, 30),
+                    revenue_recognition_date_from=date(2026, 6, 1),
+                    revenue_recognition_date_to=date(2026, 6, 30),
+                    currency="KRW",
+                    total_sale=180000,
+                    service_fee=40000,
+                    settlement_target_amount=150000,
+                    settlement_amount=120000,
+                    last_amount=0,
+                    pending_released_amount=0,
+                    dedicated_delivery_amount=0,
+                    seller_service_fee=15000,
+                    courantee_fee=0,
+                    deduction_amount=0,
+                    final_amount=90000,
+                    observed_fields=["settlementAmount", "finalAmount"],
+                    last_synced_at=get_utc_now(),
+                ),
+                PlatformSettlementDetail(
+                    store_id=store_id,
+                    platform="naver",
+                    source_type="real_coupang",
+                    external_settlement_id=f"kst-settlement-2026-05-{suffix}",
+                    revenue_recognition_year_month="2026-05",
+                    settlement_type="MONTHLY",
+                    settlement_date=date(2026, 5, 31),
+                    revenue_recognition_date_from=date(2026, 5, 1),
+                    revenue_recognition_date_to=date(2026, 5, 31),
+                    currency="KRW",
+                    total_sale=320000,
+                    service_fee=50000,
+                    settlement_target_amount=280000,
+                    settlement_amount=248870,
+                    last_amount=0,
+                    pending_released_amount=0,
+                    dedicated_delivery_amount=0,
+                    seller_service_fee=22000,
+                    courantee_fee=0,
+                    deduction_amount=0,
+                    final_amount=173479,
+                    observed_fields=["settlementAmount", "serviceFee", "finalAmount"],
+                    last_synced_at=get_utc_now(),
+                ),
             ])
             db.commit()
 
@@ -1518,6 +1570,24 @@ def verify_kst_business_timezone() -> None:
         assert dashboard_data["business_timezone"] == "Asia/Seoul", dashboard_data
         assert "business_day_start" in dashboard_data and "business_day_end" in dashboard_data
         assert "api_capability_summary" in dashboard_data
+        assert dashboard_data["total_sales_amount"] == "3000.00", dashboard_data
+        assert "financial_summary" in dashboard_data, dashboard_data
+        financial_summary = dashboard_data["financial_summary"]
+        assert "source_boundaries" in financial_summary, financial_summary
+        assert financial_summary["order_sales_summary"]["total_order_sales_amount"] == "3000.00", financial_summary
+        assert financial_summary["order_sales_summary"]["total_orders"] == 2, financial_summary
+        assert financial_summary["platform_sales_detail_summary"]["sales_detail_rows"] == 0, financial_summary
+        assert financial_summary["platform_sales_detail_summary"]["total_sale_amount"] == 0, financial_summary
+        assert financial_summary["platform_sales_detail_summary"]["latest_recognition_date"] is None, financial_summary
+        assert financial_summary["settlement_summary"]["settlement_rows"] == 2, financial_summary
+        assert financial_summary["settlement_summary"]["total_settlement_amount"] == 368870, financial_summary
+        assert financial_summary["settlement_summary"]["total_final_amount"] == 263479, financial_summary
+        assert financial_summary["settlement_summary"]["total_service_fee"] == 90000, financial_summary
+        assert financial_summary["settlement_summary"]["latest_revenue_recognition_year_month"] == "2026-06", financial_summary
+        assert financial_summary["settlement_summary"]["latest_settlement_date"] == "2026-06-30", financial_summary
+        assert "combined_total" not in financial_summary, financial_summary
+        assert "merged_sales" not in financial_summary, financial_summary
+        assert "total_financial_sales" not in financial_summary, financial_summary
 
         context = client.get(f"/api/v1/ai/daily-context?store_id={store_id}")
         assert context.status_code == 200, context.text
@@ -1526,6 +1596,29 @@ def verify_kst_business_timezone() -> None:
         assert context_data["business_timezone"] == "Asia/Seoul", context_data
         assert context_data["business_day_start"] == get_business_day_range(get_business_date())[0].isoformat()
         assert "api_capability_context" in context_data
+        assert "financial_context" in context_data, context_data
+        financial_context = context_data["financial_context"]
+        assert financial_context["order_sales_summary"]["total_order_sales_amount"] == "3000.00", financial_context
+        assert financial_context["platform_sales_detail_summary"]["sales_detail_rows"] == 0, financial_context
+        assert financial_context["settlement_summary"]["total_settlement_amount"] == 368870, financial_context
+        assert "source_boundaries" in financial_context, financial_context
+        assert "combined_total" not in financial_context, financial_context
+        assert "merged_sales" not in financial_context, financial_context
+        assert "total_financial_sales" not in financial_context, financial_context
+
+        serialized = json.dumps({"dashboard": dashboard_data, "context": context_data}, ensure_ascii=False)
+        for forbidden in (
+            "bankAccountHolder",
+            "bankName",
+            "bankAccount",
+            "authorization",
+            "signature",
+            "secret",
+            "access_key",
+            "secret_key",
+            "raw_response",
+        ):
+            assert forbidden not in serialized, serialized
 
         converted = to_business_timezone(datetime(2026, 6, 29, 15, 0, tzinfo=timezone.utc))
         assert converted.date() == date(2026, 6, 30), converted

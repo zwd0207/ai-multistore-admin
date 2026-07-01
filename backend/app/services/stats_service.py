@@ -3,12 +3,13 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, to_business_timezone
 from app.core.exceptions import ApiError
 from app.models.customer_inquiry import CustomerInquiry
+from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.order import Order
 from app.models.product import Product
 from app.models.store import Store
@@ -106,6 +107,147 @@ def _safe_sync_log(sync_log: SyncLog) -> dict[str, Any]:
         "error_detail": sync_log.error_detail,
         "raw_summary": sync_log.raw_summary,
     }
+
+
+def _sum_krw(values: list[int | None]) -> int:
+    return sum(value or 0 for value in values)
+
+
+def _build_order_sales_summary(sales_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "scope": "order_amount_from_orders",
+        "total_orders": sales_summary["total_orders"],
+        "total_order_sales_amount": sales_summary["total_sales_amount"],
+        "currency": sales_summary["currency"],
+        "latest_ordered_at": sales_summary["latest_ordered_at"],
+    }
+
+
+def _build_platform_sales_detail_summary(
+    db: Session,
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    statement = _apply_filters(select(PlatformSalesDetail), PlatformSalesDetail, store_id=store_id, platform=platform)
+    rows = db.scalars(statement).all()
+    latest_recognition_date = db.scalar(
+        _apply_filters(
+            select(func.max(PlatformSalesDetail.recognition_date)),
+            PlatformSalesDetail,
+            store_id=store_id,
+            platform=platform,
+        )
+    )
+
+    total_sale_amount = sum((row.total_sale if row.total_sale is not None else row.sale_amount or 0) for row in rows)
+    total_settlement_target_amount = _sum_krw([row.settlement_target_amount for row in rows])
+    total_settlement_amount = _sum_krw([row.settlement_amount for row in rows])
+
+    return {
+        "scope": "platform_sales_details",
+        "sales_detail_rows": len(rows),
+        "total_sale_amount": total_sale_amount,
+        "total_settlement_target_amount": total_settlement_target_amount,
+        "total_settlement_amount": total_settlement_amount,
+        "latest_recognition_date": latest_recognition_date.isoformat() if latest_recognition_date else None,
+        "currency": "KRW",
+        "data_status": "local_persisted_rows",
+    }
+
+
+def _build_settlement_summary(
+    db: Session,
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    statement = _apply_filters(
+        select(PlatformSettlementDetail),
+        PlatformSettlementDetail,
+        store_id=store_id,
+        platform=platform,
+    )
+    rows = db.scalars(statement).all()
+    latest_revenue_recognition_year_month = db.scalar(
+        _apply_filters(
+            select(func.max(PlatformSettlementDetail.revenue_recognition_year_month)),
+            PlatformSettlementDetail,
+            store_id=store_id,
+            platform=platform,
+        )
+    )
+    latest_settlement_date = db.scalar(
+        _apply_filters(
+            select(func.max(PlatformSettlementDetail.settlement_date)),
+            PlatformSettlementDetail,
+            store_id=store_id,
+            platform=platform,
+        )
+    )
+
+    return {
+        "scope": "platform_settlement_details",
+        "settlement_rows": len(rows),
+        "total_settlement_amount": _sum_krw([row.settlement_amount for row in rows]),
+        "total_final_amount": _sum_krw([row.final_amount for row in rows]),
+        "total_service_fee": _sum_krw([row.service_fee for row in rows]),
+        "latest_revenue_recognition_year_month": latest_revenue_recognition_year_month,
+        "latest_settlement_date": latest_settlement_date.isoformat() if latest_settlement_date else None,
+        "currency": "KRW",
+        "data_status": "local_persisted_rows",
+    }
+
+
+def _build_financial_source_boundaries() -> dict[str, str]:
+    return {
+        "order_sales_scope": "orders.order_amount is the order amount scope and remains separate from Coupang financial summaries.",
+        "platform_sales_detail_scope": (
+            "platform_sales_details contains Coupang sales confirmation and revenue detail scope, not the same as order totals."
+        ),
+        "settlement_scope": "platform_settlement_details contains Coupang settlement scope and must not be mixed with orders or sales details.",
+        "settlement_month_granularity_notice": (
+            "Settlement data is queried by revenueRecognitionYearMonth and is not a day-precise cutoff."
+        ),
+        "final_amount_notice": "finalAmount is not profit and is not withdrawable balance unless a later business definition says so.",
+        "zero_data_notice": "A zero row count only means current local persisted data is zero and does not prove the platform has no data.",
+    }
+
+
+def _build_financial_summary(
+    db: Session,
+    order_sales_summary: dict[str, Any],
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "order_sales_summary": order_sales_summary,
+        "platform_sales_detail_summary": _build_platform_sales_detail_summary(
+            db,
+            store_id=store_id,
+            platform=platform,
+        ),
+        "settlement_summary": _build_settlement_summary(
+            db,
+            store_id=store_id,
+            platform=platform,
+        ),
+        "source_boundaries": _build_financial_source_boundaries(),
+    }
+
+
+def _build_financial_context(
+    db: Session,
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    order_sales_summary = _build_order_sales_summary(
+        get_sales_stats(db, store_id=store_id, platform=platform)
+    )
+    return _build_financial_summary(
+        db,
+        order_sales_summary=order_sales_summary,
+        store_id=store_id,
+        platform=platform,
+    )
 
 
 def get_sales_stats(
@@ -335,6 +477,12 @@ def get_dashboard_summary(
         platform = normalize_platform(platform)
 
     sales = get_sales_stats(db, store_id=store_id, platform=platform, start_date=start_date, end_date=end_date)
+    financial_summary = _build_financial_summary(
+        db,
+        order_sales_summary=_build_order_sales_summary(sales),
+        store_id=store_id,
+        platform=platform,
+    )
     business_metadata = _business_scope_metadata(start_date if start_date == end_date else None)
     return {
         **business_metadata,
@@ -348,6 +496,7 @@ def get_dashboard_summary(
         "open_customer_inquiries": _count_open_customer_inquiries(db, store_id=store_id, platform=platform),
         "recent_orders": get_recent_orders(db, store_id=store_id, platform=platform, limit=5),
         "risk_flags": build_risk_flags(db, store_id=store_id, platform=platform),
+        "financial_summary": financial_summary,
         "api_capability_summary": get_api_capability_summary(db, store_id=store_id, platform=platform),
     }
 
@@ -365,6 +514,11 @@ def get_daily_context(
     open_inquiries = _count_records(db, CustomerInquiry, store_id=store_id)
     sync_logs = get_latest_sync_logs(db, store_id=store_id, limit=5)
     recent_orders = get_recent_orders(db, store_id=store_id, start_date=context_date, end_date=context_date, limit=5)
+    financial_context = _build_financial_context(
+        db,
+        store_id=store_id,
+        platform=store.platform if store else None,
+    )
 
     focus = []
     if open_inquiries:
@@ -404,6 +558,7 @@ def get_daily_context(
             "latest_sync_logs": sync_logs,
             "failed_count": sum(1 for log in sync_logs if log["status"] == "failed"),
         },
+        "financial_context": financial_context,
         "api_capability_context": get_api_capability_summary(
             db,
             store_id=store_id,
