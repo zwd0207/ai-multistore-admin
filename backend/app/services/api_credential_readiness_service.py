@@ -56,12 +56,12 @@ NAVER_CAPABILITY_MAP = {
         "endpoint_path": "/v1/seller/channels",
         "method": "GET",
         "docs_confirmed": True,
-        "implemented_now": False,
+        "implemented_now": True,
         "safe_to_real_test": False,
         "token_type_required": "docs_confirmation_pending",
         "account_id_required": "docs_confirmation_pending",
         "channel_no_required": False,
-        "blocked_reason": "This is a channelNo source candidate, but it is still docs_pending and not wired into the smoke-test execution path.",
+        "blocked_reason": "Endpoint is documented, but real tested_success still requires grant and channel semantics confirmation.",
     },
     "naver.product_read": {
         "capability_key": "naver.product_read",
@@ -148,6 +148,45 @@ NAVER_CAPABILITY_MAP = {
         "blocked_reason": "A dedicated shipping/delivery readonly smoke-test endpoint has not been confirmed from docs yet.",
     },
 }
+NAVER_SCOPE_DEFAULT = "token_auth"
+NAVER_SCOPE_ALL = "all"
+NAVER_CAPABILITY_SCOPES = {
+    "token_auth",
+    "seller_account",
+    "seller_channels",
+    "product_read",
+    "order_read",
+    NAVER_SCOPE_ALL,
+}
+NAVER_SCOPE_TO_CAPABILITIES = {
+    "token_auth": ["naver.token_auth"],
+    "seller_account": ["naver.token_auth", "naver.seller_account_read"],
+    "seller_channels": ["naver.token_auth", "naver.seller_channels_read"],
+    "product_read": ["naver.product_read"],
+    "order_read": ["naver.order_read"],
+    NAVER_SCOPE_ALL: [
+        "naver.token_auth",
+        "naver.seller_account_read",
+        "naver.seller_channels_read",
+        "naver.product_read",
+        "naver.order_read",
+        "naver.sales_read",
+        "naver.settlement_read",
+        "naver.customer_inquiry_read",
+        "naver.shipping_delivery_read",
+    ],
+}
+NAVER_CAPABILITY_TO_STEP = {
+    "naver.token_auth": "token_test",
+    "naver.seller_account_read": "seller_or_account_test",
+    "naver.seller_channels_read": "seller_or_account_test",
+    "naver.product_read": "product_read_test",
+    "naver.order_read": "order_read_test",
+    "naver.sales_read": "sales_read_test",
+    "naver.settlement_read": "settlement_read_test",
+    "naver.customer_inquiry_read": "customer_inquiry_read_test",
+    "naver.shipping_delivery_read": "shipping_delivery_read_test",
+}
 
 SMOKE_STEPS = [
     "token_test",
@@ -208,6 +247,23 @@ def _naver_forced_test_status(capability_key: str) -> str | None:
     if meta["safe_to_real_test"]:
         return None
     return "not_tested"
+
+
+def _resolve_naver_capability_scope(capability_scope: str | None) -> str:
+    if capability_scope is None:
+        return NAVER_SCOPE_DEFAULT
+    normalized = capability_scope.strip().lower()
+    if normalized not in NAVER_CAPABILITY_SCOPES:
+        raise ValueError(f"Unsupported Naver capability scope: {capability_scope}")
+    return normalized
+
+
+def _naver_scope_capabilities(capability_scope: str) -> list[str]:
+    return list(NAVER_SCOPE_TO_CAPABILITIES[capability_scope])
+
+
+def _naver_step_for_capability(capability_key: str) -> str | None:
+    return NAVER_CAPABILITY_TO_STEP.get(capability_key)
 
 
 def _is_configured(value: str | None) -> bool:
@@ -689,6 +745,7 @@ def run_api_credential_smoke_test(
     mode: str = "readonly",
     store_id: int | None = None,
     credential_id: int | None = None,
+    capability_scope: str | None = None,
 ) -> dict:
     settings = get_settings()
     if platform == "naver" and store_id is not None:
@@ -703,6 +760,7 @@ def run_api_credential_smoke_test(
             settings=settings,
             store_id=store_id,
             credential_id=credential_id,
+            capability_scope=_resolve_naver_capability_scope(capability_scope),
         )
         if (
             db is not None
@@ -826,6 +884,7 @@ def _run_naver_store_bound_smoke_test(
     settings,
     store_id: int,
     credential_id: int | None,
+    capability_scope: str,
 ) -> tuple[dict, list[dict]]:
     if not settings.real_api_test_enabled:
         result = _new_naver_store_bound_result(store_id=store_id, credential_id=credential_id)
@@ -844,6 +903,7 @@ def _run_naver_store_bound_smoke_test(
 
     context, result = _load_naver_smoke_context(db, store_id, credential_id)
     capability_results: list[dict] = []
+    selected_capabilities = _naver_scope_capabilities(capability_scope)
 
     result["enabled"] = True
     if context is None:
@@ -855,31 +915,97 @@ def _run_naver_store_bound_smoke_test(
         ) | {"store_id": store_id, "credential_id": result.get("credential_id")})
         return result, capability_results
 
+    if capability_scope in {"product_read", "order_read"}:
+        selected_capability = selected_capabilities[0]
+        if not _naver_capability_meta(selected_capability)["safe_to_real_test"]:
+            capability_results.append(_build_naver_scope_docs_pending_record(context, result, selected_capability))
+            if not result["masked_message"]:
+                result["masked_message"] = "Selected readonly capability is still docs_pending and was not executed."
+            return result, capability_results
+
     try:
         access_token, token_status = _request_naver_token_from_context(context)
         result["http_status"] = token_status
         result["token_test"] = "success"
-        capability_results.append(_build_naver_capability_record(
+        token_record = _build_naver_capability_record(
             capability_key="naver.token_auth",
             result=result,
             test_step="token_test",
             notes=f"Store-bound readonly token exchange using {context['grant_type_used']} grant.",
-        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+        capability_results.append(token_record)
+
+        if capability_scope == "token_auth":
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly token exchange completed without returning raw API data."
+            return result, capability_results
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        seller_record = _run_naver_seller_account_read(context, result, headers)
-        capability_results.append(seller_record)
+        if capability_scope == "seller_account":
+            capability_results.append(_run_naver_seller_account_read(context, result, headers))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly seller/account smoke test completed without returning raw API data."
+            return result, capability_results
+
+        if capability_scope == "seller_channels":
+            capability_results.append(_run_naver_seller_channels_read(context, result, headers))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly seller/channels smoke test completed without returning raw API data."
+            return result, capability_results
+
+        if capability_scope == "product_read":
+            capability_results.append(_run_naver_product_read(context, result, headers))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly product smoke test completed without returning raw API data."
+            return result, capability_results
+
+        if capability_scope == "order_read":
+            capability_results.append(_run_naver_order_read(context, result, headers))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly order smoke test completed without returning raw API data."
+            return result, capability_results
+
+        capability_results.append(_run_naver_seller_account_read(context, result, headers))
         if result["seller_or_account_test"] != "success":
-            capability_results.extend(_build_naver_docs_pending_capability_records(context, result))
+            capability_results.extend(_build_naver_docs_pending_capability_records(
+                context,
+                result,
+                [capability for capability in selected_capabilities if capability not in {"naver.token_auth", "naver.seller_account_read"}],
+            ))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly smoke test stopped after seller/account failure without returning raw API data."
             return result, capability_results
 
-        product_record = _run_naver_product_read(context, result, headers)
-        capability_results.append(product_record)
+        capability_results.append(_run_naver_seller_channels_read(context, result, headers))
+        if result["seller_or_account_test"] != "success":
+            capability_results.extend(_build_naver_docs_pending_capability_records(
+                context,
+                result,
+                [capability for capability in selected_capabilities if capability not in {"naver.token_auth", "naver.seller_account_read", "naver.seller_channels_read"}],
+            ))
+            if not result["masked_message"]:
+                result["masked_message"] = "Store-bound readonly smoke test stopped after seller/channels failure without returning raw API data."
+            return result, capability_results
 
-        order_record = _run_naver_order_read(context, result, headers)
-        capability_results.append(order_record)
+        for guarded_capability in ["naver.product_read", "naver.order_read"]:
+            if guarded_capability not in selected_capabilities:
+                continue
+            capability_results.append(_build_naver_scope_docs_pending_record(context, result, guarded_capability))
+
+        capability_results.extend(_build_naver_docs_pending_capability_records(
+            context,
+            result,
+            [
+                capability
+                for capability in selected_capabilities
+                if capability in {
+                    "naver.sales_read",
+                    "naver.settlement_read",
+                    "naver.customer_inquiry_read",
+                    "naver.shipping_delivery_read",
+                }
+            ],
+        ))
     except ImportError:
         result["token_test"] = "failed"
         _mark_failed(result, "dependency_missing", "bcrypt dependency is required for Naver client_secret_sign")
@@ -903,7 +1029,6 @@ def _run_naver_store_bound_smoke_test(
         elif result.get("error_code") is None:
             _mark_failed(result, "readonly_request_failed", str(exc))
 
-    capability_results.extend(_build_naver_docs_pending_capability_records(context, result))
     if not result["masked_message"]:
         result["masked_message"] = "Store-bound readonly smoke test completed without returning raw API data."
     return result, capability_results
@@ -977,24 +1102,57 @@ def _run_naver_order_read(context: dict, result: dict, headers: dict[str, str]) 
     ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
 
 
-def _build_naver_docs_pending_capability_records(context: dict, result: dict) -> list[dict]:
-    for step in ("sales_read_test", "settlement_read_test", "customer_inquiry_read_test", "shipping_delivery_read_test"):
+def _run_naver_seller_channels_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(f"{context['api_base']}/v1/seller/channels", headers=headers)
+    _step_from_response(result, "seller_or_account_test", response)
+    if result["seller_or_account_test"] == "success":
+        channel_no = _extract_channel_no(response.json())
+        if channel_no:
+            result["channel_no_source"] = "seller_channels"
+        elif context.get("channel_no"):
+            result["channel_no_source"] = "credential_extra_config"
+        else:
+            result["channel_no_source"] = "missing"
+    return _build_naver_capability_record(
+        capability_key="naver.seller_channels_read",
+        result=result,
+        test_step="seller_or_account_test",
+        notes="Readonly seller/channels query only. No write operation was executed.",
+    ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+
+def _build_naver_scope_docs_pending_record(
+    context: dict,
+    result: dict,
+    capability_key: str,
+) -> dict:
+    step = _naver_step_for_capability(capability_key)
+    if step is not None and result.get(step, "skipped") == "skipped":
         result[step] = "skipped"
-    docs_pending = [
-        ("naver.seller_channels_read", None),
-        ("naver.sales_read", "sales_read_test"),
-        ("naver.settlement_read", "settlement_read_test"),
-        ("naver.customer_inquiry_read", "customer_inquiry_read_test"),
-        ("naver.shipping_delivery_read", "shipping_delivery_read_test"),
+    return _build_naver_capability_record(
+        capability_key=capability_key,
+        result=result,
+        test_step=step,
+        notes="Docs pending. This readonly capability is not approved for real tested_success in the store-bound smoke test yet.",
+    ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
+
+
+def _build_naver_docs_pending_capability_records(
+    context: dict,
+    result: dict,
+    capability_keys: list[str] | None = None,
+) -> list[dict]:
+    selected_keys = capability_keys or [
+        "naver.seller_channels_read",
+        "naver.sales_read",
+        "naver.settlement_read",
+        "naver.customer_inquiry_read",
+        "naver.shipping_delivery_read",
     ]
     records: list[dict] = []
-    for capability_key, step in docs_pending:
-        records.append(_build_naver_capability_record(
-            capability_key=capability_key,
-            result=result,
-            test_step=step,
-            notes="Docs pending. This readonly capability is not approved for real tested_success in the store-bound smoke test yet.",
-        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+    for capability_key in selected_keys:
+        records.append(_build_naver_scope_docs_pending_record(context, result, capability_key))
     return records
 
 

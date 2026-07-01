@@ -6,6 +6,7 @@ class ApiCredentialSmokeTestRequest(BaseModel):
     mode: str = Field(default="readonly")
     store_id: int | None = Field(default=None, ge=1)
     credential_id: int | None = Field(default=None, ge=1)
+    capability_scope: str | None = Field(default=None)
 
     @field_validator("platform")
     @classmethod
@@ -21,6 +22,17 @@ class ApiCredentialSmokeTestRequest(BaseModel):
         normalized = value.strip().lower()
         if normalized != "readonly":
             raise ValueError("mode must be readonly")
+        return normalized
+
+    @field_validator("capability_scope")
+    @classmethod
+    def validate_capability_scope(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        allowed = {"token_auth", "seller_account", "seller_channels", "product_read", "order_read", "all"}
+        if normalized not in allowed:
+            raise ValueError("capability_scope must be token_auth, seller_account, seller_channels, product_read, order_read, or all")
         return normalized
 
     @model_validator(mode="after")

@@ -589,7 +589,7 @@ def verify_api_credential_readiness() -> None:
                     if self.status_code >= 400:
                         raise RuntimeError(f"http_{self.status_code}")
 
-            class FakeHttpClient:
+            class EnvFallbackHttpClient:
                 def __init__(self, *args, **kwargs) -> None:
                     pass
 
@@ -611,9 +611,45 @@ def verify_api_credential_readiness() -> None:
                         return FakeResponse(200, {"items": [{"id": "product-1"}]})
                     raise AssertionError(f"unexpected POST url: {url}")
 
+            class SellerAccountOnlyHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    if url.endswith("/v1/seller/account"):
+                        return FakeResponse(200, {"channelNo": "123456"})
+                    raise AssertionError(f"unexpected GET url: {url}")
+
+                def post(self, url: str, headers=None, params=None, data=None):
+                    raise AssertionError(f"unexpected POST url: {url}")
+
+            class SellerChannelsOnlyHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    if url.endswith("/v1/seller/channels"):
+                        return FakeResponse(200, {"items": [{"channelNo": "654321"}]})
+                    raise AssertionError(f"unexpected GET url: {url}")
+
+                def post(self, url: str, headers=None, params=None, data=None):
+                    raise AssertionError(f"unexpected POST url: {url}")
+
             api_credential_readiness_service._request_naver_token = lambda settings: ("fake-env-token", 200)
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
-            api_credential_readiness_service.httpx.Client = FakeHttpClient
+            api_credential_readiness_service.httpx.Client = EnvFallbackHttpClient
 
             with SessionLocal() as db:
                 before_env_fallback_count = len(db.scalars(
@@ -656,14 +692,14 @@ def verify_api_credential_readiness() -> None:
             assert store_bound_result["grant_type_used"] == "SELF", store_bound_result
             assert store_bound_result["seller_account_id_configured"] is False, store_bound_result
             assert store_bound_result["token_test"] == "success", store_bound_result
-            assert store_bound_result["seller_or_account_test"] == "success", store_bound_result
-            assert store_bound_result["product_read_test"] == "success", store_bound_result
-            assert store_bound_result["order_read_test"] == "success", store_bound_result
+            assert store_bound_result["seller_or_account_test"] == "skipped", store_bound_result
+            assert store_bound_result["product_read_test"] == "skipped", store_bound_result
+            assert store_bound_result["order_read_test"] == "skipped", store_bound_result
             assert store_bound_result["sales_read_test"] == "skipped", store_bound_result
             assert store_bound_result["settlement_read_test"] == "skipped", store_bound_result
             assert store_bound_result["customer_inquiry_read_test"] == "skipped", store_bound_result
             assert store_bound_result["shipping_delivery_read_test"] == "skipped", store_bound_result
-            assert store_bound_result["channel_no_source"] == "seller_account", store_bound_result
+            assert store_bound_result["channel_no_source"] == "not_attempted", store_bound_result
             assert store_bound_result["capability_result_ids"], store_bound_result
             assert store_bound_result["capability_mapping"], store_bound_result
             mapping_by_key = {
@@ -674,26 +710,101 @@ def verify_api_credential_readiness() -> None:
             assert mapping_by_key["naver.product_read"]["docs_confirmed"] is True
             assert mapping_by_key["naver.product_read"]["safe_to_real_test"] is False
             assert mapping_by_key["naver.order_read"]["safe_to_real_test"] is False
-            assert mapping_by_key["naver.seller_channels_read"]["implemented_now"] is False
+            assert mapping_by_key["naver.seller_channels_read"]["implemented_now"] is True
             assert "fake-store-token" not in str(store_bound.json()).lower(), store_bound.text
 
             capability_results_by_key = {
                 item["capability_key"]: item for item in store_bound_payload["capability_results"]
             }
             assert capability_results_by_key["naver.token_auth"]["test_status"] == "tested_success", capability_results_by_key
-            for guarded_key in [
-                "naver.seller_account_read",
-                "naver.seller_channels_read",
-                "naver.product_read",
-                "naver.order_read",
-                "naver.sales_read",
-                "naver.settlement_read",
-                "naver.customer_inquiry_read",
-                "naver.shipping_delivery_read",
-            ]:
-                assert capability_results_by_key[guarded_key]["test_status"] == "not_tested", capability_results_by_key[guarded_key]
-                assert capability_results_by_key[guarded_key]["safe_to_real_test"] is False, capability_results_by_key[guarded_key]
-                assert capability_results_by_key[guarded_key]["blocked_reason"], capability_results_by_key[guarded_key]
+            assert set(capability_results_by_key.keys()) == {"naver.token_auth"}, capability_results_by_key
+
+            api_credential_readiness_service.httpx.Client = SellerAccountOnlyHttpClient
+            seller_account_scope = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "seller_account",
+            })
+            assert seller_account_scope.status_code == 200, seller_account_scope.text
+            seller_account_payload = seller_account_scope.json()["data"]
+            seller_account_result = seller_account_payload["results"][0]
+            assert seller_account_result["token_test"] == "success", seller_account_result
+            assert seller_account_result["seller_or_account_test"] == "success", seller_account_result
+            assert seller_account_result["product_read_test"] == "skipped", seller_account_result
+            assert seller_account_result["order_read_test"] == "skipped", seller_account_result
+            seller_account_caps = {
+                item["capability_key"]: item for item in seller_account_payload["capability_results"]
+            }
+            assert set(seller_account_caps.keys()) == {"naver.token_auth", "naver.seller_account_read"}, seller_account_caps
+            assert seller_account_caps["naver.seller_account_read"]["test_status"] == "not_tested", seller_account_caps
+
+            api_credential_readiness_service.httpx.Client = SellerChannelsOnlyHttpClient
+            seller_channels_scope = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "seller_channels",
+            })
+            assert seller_channels_scope.status_code == 200, seller_channels_scope.text
+            seller_channels_payload = seller_channels_scope.json()["data"]
+            seller_channels_result = seller_channels_payload["results"][0]
+            assert seller_channels_result["token_test"] == "success", seller_channels_result
+            assert seller_channels_result["seller_or_account_test"] == "success", seller_channels_result
+            assert seller_channels_result["product_read_test"] == "skipped", seller_channels_result
+            assert seller_channels_result["order_read_test"] == "skipped", seller_channels_result
+            seller_channels_caps = {
+                item["capability_key"]: item for item in seller_channels_payload["capability_results"]
+            }
+            assert set(seller_channels_caps.keys()) == {"naver.token_auth", "naver.seller_channels_read"}, seller_channels_caps
+            assert seller_channels_caps["naver.seller_channels_read"]["test_status"] == "not_tested", seller_channels_caps
+
+            class ForbiddenScopedHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    raise AssertionError("guardrailed product/order scopes must not create an HTTP client")
+
+            api_credential_readiness_service.httpx.Client = ForbiddenScopedHttpClient
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                AssertionError("guardrailed product/order scopes must not request token")
+            )
+
+            product_scope = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "product_read",
+            })
+            assert product_scope.status_code == 200, product_scope.text
+            product_payload = product_scope.json()["data"]
+            product_result = product_payload["results"][0]
+            assert product_result["token_test"] == "skipped", product_result
+            assert product_result["product_read_test"] == "skipped", product_result
+            product_caps = {
+                item["capability_key"]: item for item in product_payload["capability_results"]
+            }
+            assert set(product_caps.keys()) == {"naver.product_read"}, product_caps
+            assert product_caps["naver.product_read"]["test_status"] == "not_tested", product_caps
+
+            order_scope = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "order_read",
+            })
+            assert order_scope.status_code == 200, order_scope.text
+            order_payload = order_scope.json()["data"]
+            order_result = order_payload["results"][0]
+            assert order_result["token_test"] == "skipped", order_result
+            assert order_result["order_read_test"] == "skipped", order_result
+            order_caps = {
+                item["capability_key"]: item for item in order_payload["capability_results"]
+            }
+            assert set(order_caps.keys()) == {"naver.order_read"}, order_caps
+            assert order_caps["naver.order_read"]["test_status"] == "not_tested", order_caps
 
             with SessionLocal() as db:
                 bound_results = db.scalars(
@@ -709,6 +820,9 @@ def verify_api_credential_readiness() -> None:
             observed_text = " ".join((item.response_fields_observed or "") for item in bound_results).lower()
             for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret", "channelno", "account_id"]:
                 assert forbidden_item not in observed_text, observed_text
+
+            api_credential_readiness_service.httpx.Client = EnvFallbackHttpClient
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
 
             api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(RuntimeError("token_auth_failed"))
             token_failed = client.post("/api/v1/api-credentials/smoke-test", json={

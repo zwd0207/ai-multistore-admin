@@ -32,4 +32,5 @@ def run_readonly_smoke_test(
         mode=payload.mode,
         store_id=payload.store_id,
         credential_id=payload.credential_id,
+        capability_scope=payload.capability_scope,
     ))
