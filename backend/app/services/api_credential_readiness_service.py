@@ -43,11 +43,11 @@ NAVER_CAPABILITY_MAP = {
         "method": "GET",
         "docs_confirmed": True,
         "implemented_now": True,
-        "safe_to_real_test": False,
-        "token_type_required": "docs_confirmation_pending",
-        "account_id_required": "docs_confirmation_pending",
+        "safe_to_real_test": True,
+        "token_type_required": "SELF_or_SELLER",
+        "account_id_required": "SELLER_only",
         "channel_no_required": False,
-        "blocked_reason": "Endpoint is documented, but real tested_success still requires grant and seller account id confirmation.",
+        "blocked_reason": None,
     },
     "naver.seller_channels_read": {
         "capability_key": "naver.seller_channels_read",
@@ -57,11 +57,11 @@ NAVER_CAPABILITY_MAP = {
         "method": "GET",
         "docs_confirmed": True,
         "implemented_now": True,
-        "safe_to_real_test": False,
-        "token_type_required": "docs_confirmation_pending",
-        "account_id_required": "docs_confirmation_pending",
+        "safe_to_real_test": True,
+        "token_type_required": "SELF_or_SELLER",
+        "account_id_required": "SELLER_only",
         "channel_no_required": False,
-        "blocked_reason": "Endpoint is documented, but real tested_success still requires grant and channel semantics confirmation.",
+        "blocked_reason": None,
     },
     "naver.product_read": {
         "capability_key": "naver.product_read",
@@ -906,6 +906,7 @@ def _run_naver_store_bound_smoke_test(
     selected_capabilities = _naver_scope_capabilities(capability_scope)
 
     result["enabled"] = True
+    result["capability_scope"] = capability_scope
     if context is None:
         capability_results.append(_build_naver_capability_record(
             capability_key="naver.token_auth",
@@ -1425,6 +1426,15 @@ def _permission_result(result: dict) -> str:
 
 def _response_fields_observed(result: dict) -> str:
     statuses = [f"{step}={result.get(step, 'skipped')}" for step in SMOKE_STEPS]
+    statuses.extend([
+        f"path_kind={result.get('path_kind', 'unknown')}",
+        f"capability_scope={result.get('capability_scope', 'unknown')}",
+        f"grant_type_used={result.get('grant_type_used', 'unknown')}",
+        f"seller_account_id_configured={bool(result.get('seller_account_id_configured'))}",
+        f"channel_no_source={result.get('channel_no_source', 'unknown')}",
+        f"http_status={result.get('http_status')}",
+        f"error_code={result.get('error_code')}",
+    ])
     return "; ".join(statuses)
 
 

@@ -706,11 +706,12 @@ def verify_api_credential_readiness() -> None:
                 item["capability_key"]: item for item in store_bound_result["capability_mapping"]
             }
             assert mapping_by_key["naver.seller_account_read"]["docs_confirmed"] is True
-            assert mapping_by_key["naver.seller_account_read"]["safe_to_real_test"] is False
+            assert mapping_by_key["naver.seller_account_read"]["safe_to_real_test"] is True
             assert mapping_by_key["naver.product_read"]["docs_confirmed"] is True
             assert mapping_by_key["naver.product_read"]["safe_to_real_test"] is False
             assert mapping_by_key["naver.order_read"]["safe_to_real_test"] is False
             assert mapping_by_key["naver.seller_channels_read"]["implemented_now"] is True
+            assert mapping_by_key["naver.seller_channels_read"]["safe_to_real_test"] is True
             assert "fake-store-token" not in str(store_bound.json()).lower(), store_bound.text
 
             capability_results_by_key = {
@@ -738,7 +739,8 @@ def verify_api_credential_readiness() -> None:
                 item["capability_key"]: item for item in seller_account_payload["capability_results"]
             }
             assert set(seller_account_caps.keys()) == {"naver.token_auth", "naver.seller_account_read"}, seller_account_caps
-            assert seller_account_caps["naver.seller_account_read"]["test_status"] == "not_tested", seller_account_caps
+            assert seller_account_caps["naver.seller_account_read"]["test_status"] == "tested_success", seller_account_caps
+            assert "capability_scope=seller_account" in seller_account_caps["naver.seller_account_read"]["response_fields_observed"], seller_account_caps
 
             api_credential_readiness_service.httpx.Client = SellerChannelsOnlyHttpClient
             seller_channels_scope = client.post("/api/v1/api-credentials/smoke-test", json={
@@ -759,7 +761,8 @@ def verify_api_credential_readiness() -> None:
                 item["capability_key"]: item for item in seller_channels_payload["capability_results"]
             }
             assert set(seller_channels_caps.keys()) == {"naver.token_auth", "naver.seller_channels_read"}, seller_channels_caps
-            assert seller_channels_caps["naver.seller_channels_read"]["test_status"] == "not_tested", seller_channels_caps
+            assert seller_channels_caps["naver.seller_channels_read"]["test_status"] == "tested_success", seller_channels_caps
+            assert "capability_scope=seller_channels" in seller_channels_caps["naver.seller_channels_read"]["response_fields_observed"], seller_channels_caps
 
             class ForbiddenScopedHttpClient:
                 def __init__(self, *args, **kwargs) -> None:
@@ -818,7 +821,7 @@ def verify_api_credential_readiness() -> None:
                 ).all()
             assert bound_results, "store-bound smoke test should persist capability results"
             observed_text = " ".join((item.response_fields_observed or "") for item in bound_results).lower()
-            for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret", "channelno", "account_id"]:
+            for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret", "channelno", "account_id="]:
                 assert forbidden_item not in observed_text, observed_text
 
             api_credential_readiness_service.httpx.Client = EnvFallbackHttpClient
