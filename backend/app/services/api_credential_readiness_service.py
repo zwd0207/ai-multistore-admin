@@ -321,6 +321,46 @@ def _naver_seller_account_id_from_extra_config(extra_config: dict | None) -> str
     return None
 
 
+def _build_naver_business_status_summary(result: dict) -> dict:
+    token_status = result.get("token_test", "skipped")
+    seller_status = result.get("seller_or_account_test", "skipped")
+    channel_observed = bool(result.get("channel_no_observed"))
+    channel_persisted = bool(result.get("channel_no_persisted"))
+    multiple_channels = bool(result.get("multiple_channels_observed"))
+
+    if token_status == "success":
+        auth_message = "Naver 平台授权检测成功。"
+    elif token_status == "failed":
+        auth_message = "Naver 平台授权检测失败，请检查 Client ID / Client Secret 或 API 权限。"
+    else:
+        auth_message = "Naver 平台授权暂未检测。"
+
+    if seller_status == "success":
+        channels_message = "店铺频道信息读取成功，系统已确认该 Naver 凭证可读取频道信息。"
+    elif seller_status == "failed":
+        channels_message = "店铺频道信息读取失败，请检查 API 权限或平台授权状态。"
+    else:
+        channels_message = "店铺频道信息暂未读取。"
+
+    if multiple_channels:
+        channel_message = "识别到多个店铺频道，需要人工确认后再保存频道编号。"
+    elif channel_persisted:
+        channel_message = "已识别并保存店铺频道编号。"
+    elif channel_observed:
+        channel_message = "已识别店铺频道编号，但本次未写入凭证配置。"
+    elif result.get("channel_no_configured"):
+        channel_message = "店铺频道编号已配置。"
+    else:
+        channel_message = "暂未识别到店铺频道编号，后续商品/订单同步可能需要补充或自动识别 channel_no。"
+
+    return {
+        "platform_auth_status": auth_message,
+        "seller_channels": channels_message,
+        "channel_no": channel_message,
+        "product_order_guardrail": "为避免误触真实业务数据，商品/订单接口当前仍处于保护状态，暂未开放真实请求。",
+    }
+
+
 def _safe_decrypt(value: str | None) -> tuple[str | None, bool]:
     if value is None:
         return None, False
@@ -531,6 +571,11 @@ def _new_naver_store_bound_result(store_id: int, credential_id: int | None = Non
         "grant_type_used": "SELF",
         "seller_account_id_configured": False,
         "channel_no_source": "not_attempted",
+        "channel_no_observed": False,
+        "channel_no_configured": False,
+        "channel_no_persisted": False,
+        "multiple_channels_observed": False,
+        "business_status_summary": {},
         "capability_result_ids": {},
         "capability_mapping": _build_naver_capability_mapping_summary(),
     })
@@ -546,6 +591,11 @@ def _new_naver_env_fallback_result() -> dict:
         "grant_type_used": "SELF",
         "seller_account_id_configured": False,
         "channel_no_source": "not_attempted",
+        "channel_no_observed": False,
+        "channel_no_configured": False,
+        "channel_no_persisted": False,
+        "multiple_channels_observed": False,
+        "business_status_summary": {},
         "capability_result_ids": {},
         "capability_mapping": _build_naver_capability_mapping_summary(),
     })
@@ -622,6 +672,7 @@ def _load_naver_smoke_context(
     result["credential_id"] = credential.id
     result["grant_type_used"] = _naver_grant_type_from_extra_config(credential.extra_config)
     result["seller_account_id_configured"] = bool(_naver_seller_account_id_from_extra_config(credential.extra_config))
+    result["channel_no_configured"] = bool(_naver_channel_no_from_extra_config(credential.extra_config))
 
     api_base = _naver_api_base_from_extra_config(credential.extra_config)
     client_id = credential.client_id.strip() if _is_configured(credential.client_id) else None
@@ -746,6 +797,7 @@ def run_api_credential_smoke_test(
     store_id: int | None = None,
     credential_id: int | None = None,
     capability_scope: str | None = None,
+    persist_channel_no: bool = False,
 ) -> dict:
     settings = get_settings()
     if platform == "naver" and store_id is not None:
@@ -761,6 +813,7 @@ def run_api_credential_smoke_test(
             store_id=store_id,
             credential_id=credential_id,
             capability_scope=_resolve_naver_capability_scope(capability_scope),
+            persist_channel_no=persist_channel_no,
         )
         if (
             db is not None
@@ -885,6 +938,7 @@ def _run_naver_store_bound_smoke_test(
     store_id: int,
     credential_id: int | None,
     capability_scope: str,
+    persist_channel_no: bool = False,
 ) -> tuple[dict, list[dict]]:
     if not settings.real_api_test_enabled:
         result = _new_naver_store_bound_result(store_id=store_id, credential_id=credential_id)
@@ -897,8 +951,10 @@ def _run_naver_store_bound_smoke_test(
                 result["grant_type_used"] = _naver_grant_type_from_extra_config(credential.extra_config)
                 result["seller_account_id_configured"] = bool(_naver_seller_account_id_from_extra_config(credential.extra_config))
                 result["channel_no_source"] = "credential_extra_config" if _naver_channel_no_from_extra_config(credential.extra_config) else "missing"
+                result["channel_no_configured"] = bool(_naver_channel_no_from_extra_config(credential.extra_config))
         result["test_mode"] = "disabled"
         result["enabled"] = False
+        result["business_status_summary"] = _build_naver_business_status_summary(result)
         return _mark_failed(result, "real_api_test_disabled", "REAL_API_TEST_ENABLED is false"), []
 
     context, result = _load_naver_smoke_context(db, store_id, credential_id)
@@ -908,6 +964,7 @@ def _run_naver_store_bound_smoke_test(
     result["enabled"] = True
     result["capability_scope"] = capability_scope
     if context is None:
+        result["business_status_summary"] = _build_naver_business_status_summary(result)
         capability_results.append(_build_naver_capability_record(
             capability_key="naver.token_auth",
             result=result,
@@ -922,6 +979,7 @@ def _run_naver_store_bound_smoke_test(
             capability_results.append(_build_naver_scope_docs_pending_record(context, result, selected_capability))
             if not result["masked_message"]:
                 result["masked_message"] = "Selected readonly capability is still docs_pending and was not executed."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
     try:
@@ -939,6 +997,7 @@ def _run_naver_store_bound_smoke_test(
         if capability_scope == "token_auth":
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly token exchange completed without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -946,24 +1005,34 @@ def _run_naver_store_bound_smoke_test(
             capability_results.append(_run_naver_seller_account_read(context, result, headers))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly seller/account smoke test completed without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         if capability_scope == "seller_channels":
-            capability_results.append(_run_naver_seller_channels_read(context, result, headers))
+            capability_results.append(_run_naver_seller_channels_read(
+                context,
+                result,
+                headers,
+                db=db,
+                persist_channel_no=persist_channel_no,
+            ))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly seller/channels smoke test completed without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         if capability_scope == "product_read":
             capability_results.append(_run_naver_product_read(context, result, headers))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly product smoke test completed without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         if capability_scope == "order_read":
             capability_results.append(_run_naver_order_read(context, result, headers))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly order smoke test completed without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         capability_results.append(_run_naver_seller_account_read(context, result, headers))
@@ -975,6 +1044,7 @@ def _run_naver_store_bound_smoke_test(
             ))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly smoke test stopped after seller/account failure without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         capability_results.append(_run_naver_seller_channels_read(context, result, headers))
@@ -986,6 +1056,7 @@ def _run_naver_store_bound_smoke_test(
             ))
             if not result["masked_message"]:
                 result["masked_message"] = "Store-bound readonly smoke test stopped after seller/channels failure without returning raw API data."
+            result["business_status_summary"] = _build_naver_business_status_summary(result)
             return result, capability_results
 
         for guarded_capability in ["naver.product_read", "naver.order_read"]:
@@ -1032,6 +1103,7 @@ def _run_naver_store_bound_smoke_test(
 
     if not result["masked_message"]:
         result["masked_message"] = "Store-bound readonly smoke test completed without returning raw API data."
+    result["business_status_summary"] = _build_naver_business_status_summary(result)
     return result, capability_results
 
 
@@ -1103,16 +1175,31 @@ def _run_naver_order_read(context: dict, result: dict, headers: dict[str, str]) 
     ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]}
 
 
-def _run_naver_seller_channels_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
+def _run_naver_seller_channels_read(
+    context: dict,
+    result: dict,
+    headers: dict[str, str],
+    db: Session | None = None,
+    persist_channel_no: bool = False,
+) -> dict:
     with httpx.Client(timeout=10.0) as client:
         response = client.get(f"{context['api_base']}/v1/seller/channels", headers=headers)
     _step_from_response(result, "seller_or_account_test", response)
     if result["seller_or_account_test"] == "success":
-        channel_no = _extract_channel_no(response.json())
-        if channel_no:
+        channel_numbers = _extract_channel_no_values(response.json())
+        result["channel_no_observed"] = bool(channel_numbers)
+        result["multiple_channels_observed"] = len(channel_numbers) > 1
+        if len(channel_numbers) == 1:
             result["channel_no_source"] = "seller_channels"
+            if persist_channel_no and db is not None:
+                _persist_naver_channel_no(db, context, channel_numbers[0])
+                result["channel_no_persisted"] = True
+                result["channel_no_configured"] = True
+        elif len(channel_numbers) > 1:
+            result["channel_no_source"] = "seller_channels_multiple"
         elif context.get("channel_no"):
             result["channel_no_source"] = "credential_extra_config"
+            result["channel_no_configured"] = True
         else:
             result["channel_no_source"] = "missing"
     return _build_naver_capability_record(
@@ -1157,19 +1244,45 @@ def _build_naver_docs_pending_capability_records(
     return records
 
 
+def _persist_naver_channel_no(db: Session, context: dict, channel_no: str) -> None:
+    credential = db.get(ApiCredential, context["credential_id"])
+    if credential is None or credential.store_id != context["store_id"] or credential.platform != "naver":
+        raise ApiError(
+            message="Naver credential is not available for channel_no persistence",
+            error_code="CREDENTIAL_NOT_READY",
+            status_code=400,
+            detail={"store_id": context["store_id"], "credential_id": context["credential_id"]},
+        )
+    extra_config = dict(credential.extra_config or {})
+    extra_config["channel_no"] = channel_no.strip()
+    credential.extra_config = extra_config
+    db.flush()
+
+
+def _extract_channel_no_values(payload: object) -> list[str]:
+    values: list[str] = []
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if key in {"channelNo", "channel_no"} and value:
+                    text = str(value).strip()
+                    if text and text not in values:
+                        values.append(text)
+                    continue
+                visit(value)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(payload)
+    return values
+
+
 def _extract_channel_no(payload: object) -> str | None:
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if key in {"channelNo", "channel_no"} and value:
-                return str(value)
-            found = _extract_channel_no(value)
-            if found:
-                return found
-    if isinstance(payload, list):
-        for item in payload:
-            found = _extract_channel_no(item)
-            if found:
-                return found
+    values = _extract_channel_no_values(payload)
+    if values:
+        return values[0]
     return None
 
 
@@ -1432,6 +1545,10 @@ def _response_fields_observed(result: dict) -> str:
         f"grant_type_used={result.get('grant_type_used', 'unknown')}",
         f"seller_account_id_configured={bool(result.get('seller_account_id_configured'))}",
         f"channel_no_source={result.get('channel_no_source', 'unknown')}",
+        f"channel_no_observed={bool(result.get('channel_no_observed'))}",
+        f"channel_no_configured={bool(result.get('channel_no_configured'))}",
+        f"channel_no_persisted={bool(result.get('channel_no_persisted'))}",
+        f"multiple_channels_observed={bool(result.get('multiple_channels_observed'))}",
         f"http_status={result.get('http_status')}",
         f"error_code={result.get('error_code')}",
     ])

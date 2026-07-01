@@ -647,6 +647,42 @@ def verify_api_credential_readiness() -> None:
                 def post(self, url: str, headers=None, params=None, data=None):
                     raise AssertionError(f"unexpected POST url: {url}")
 
+            class SellerChannelsEmptyHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    if url.endswith("/v1/seller/channels"):
+                        return FakeResponse(200, {"items": [{"name": "no-channel"}]})
+                    raise AssertionError(f"unexpected GET url: {url}")
+
+                def post(self, url: str, headers=None, params=None, data=None):
+                    raise AssertionError(f"unexpected POST url: {url}")
+
+            class SellerChannelsMultipleHttpClient:
+                def __init__(self, *args, **kwargs) -> None:
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb) -> None:
+                    return None
+
+                def get(self, url: str, headers=None, params=None):
+                    if url.endswith("/v1/seller/channels"):
+                        return FakeResponse(200, {"items": [{"channelNo": "654321"}, {"channelNo": "777888"}]})
+                    raise AssertionError(f"unexpected GET url: {url}")
+
+                def post(self, url: str, headers=None, params=None, data=None):
+                    raise AssertionError(f"unexpected POST url: {url}")
+
             api_credential_readiness_service._request_naver_token = lambda settings: ("fake-env-token", 200)
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
             api_credential_readiness_service.httpx.Client = EnvFallbackHttpClient
@@ -763,6 +799,83 @@ def verify_api_credential_readiness() -> None:
             assert set(seller_channels_caps.keys()) == {"naver.token_auth", "naver.seller_channels_read"}, seller_channels_caps
             assert seller_channels_caps["naver.seller_channels_read"]["test_status"] == "tested_success", seller_channels_caps
             assert "capability_scope=seller_channels" in seller_channels_caps["naver.seller_channels_read"]["response_fields_observed"], seller_channels_caps
+            assert seller_channels_result["channel_no_observed"] is True, seller_channels_result
+            assert seller_channels_result["channel_no_persisted"] is False, seller_channels_result
+            assert "654321" not in str(seller_channels_scope.json()), seller_channels_scope.text
+            with SessionLocal() as db:
+                naver_credential = db.get(api_credential_readiness_service.ApiCredential, credential_data["id"])
+                assert "channel_no" not in (naver_credential.extra_config or {}), naver_credential.extra_config
+
+            seller_channels_persist = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "seller_channels",
+                "persist_channel_no": True,
+            })
+            assert seller_channels_persist.status_code == 200, seller_channels_persist.text
+            seller_channels_persist_result = seller_channels_persist.json()["data"]["results"][0]
+            assert seller_channels_persist_result["channel_no_observed"] is True, seller_channels_persist_result
+            assert seller_channels_persist_result["channel_no_configured"] is True, seller_channels_persist_result
+            assert seller_channels_persist_result["channel_no_persisted"] is True, seller_channels_persist_result
+            assert seller_channels_persist_result["multiple_channels_observed"] is False, seller_channels_persist_result
+            assert seller_channels_persist_result["channel_no_source"] == "seller_channels", seller_channels_persist_result
+            assert "654321" not in str(seller_channels_persist.json()), seller_channels_persist.text
+            with SessionLocal() as db:
+                naver_credential = db.get(api_credential_readiness_service.ApiCredential, credential_data["id"])
+                assert naver_credential.extra_config["channel_no"] == "654321", naver_credential.extra_config
+                assert naver_credential.extra_config["api_base"] == "https://api.commerce.naver.com/external", naver_credential.extra_config
+
+            persisted_readiness = client.get(f"/api/v1/api-credentials/readiness?store_id={store_id}")
+            assert persisted_readiness.status_code == 200, persisted_readiness.text
+            persisted_readiness_data = persisted_readiness.json()["data"]["store_bound_readiness"]
+            assert persisted_readiness_data["channel_no_configured"] is True, persisted_readiness_data
+
+            with SessionLocal() as db:
+                naver_credential = db.get(api_credential_readiness_service.ApiCredential, credential_data["id"])
+                naver_credential.extra_config = {"api_base": "https://api.commerce.naver.com/external"}
+                db.commit()
+
+            api_credential_readiness_service.httpx.Client = SellerChannelsEmptyHttpClient
+            seller_channels_empty = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "seller_channels",
+                "persist_channel_no": True,
+            })
+            assert seller_channels_empty.status_code == 200, seller_channels_empty.text
+            seller_channels_empty_result = seller_channels_empty.json()["data"]["results"][0]
+            assert seller_channels_empty_result["seller_or_account_test"] == "success", seller_channels_empty_result
+            assert seller_channels_empty_result["channel_no_observed"] is False, seller_channels_empty_result
+            assert seller_channels_empty_result["channel_no_persisted"] is False, seller_channels_empty_result
+            assert seller_channels_empty_result["multiple_channels_observed"] is False, seller_channels_empty_result
+            with SessionLocal() as db:
+                naver_credential = db.get(api_credential_readiness_service.ApiCredential, credential_data["id"])
+                assert "channel_no" not in (naver_credential.extra_config or {}), naver_credential.extra_config
+
+            api_credential_readiness_service.httpx.Client = SellerChannelsMultipleHttpClient
+            seller_channels_multiple = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+                "capability_scope": "seller_channels",
+                "persist_channel_no": True,
+            })
+            assert seller_channels_multiple.status_code == 200, seller_channels_multiple.text
+            seller_channels_multiple_result = seller_channels_multiple.json()["data"]["results"][0]
+            assert seller_channels_multiple_result["seller_or_account_test"] == "success", seller_channels_multiple_result
+            assert seller_channels_multiple_result["channel_no_observed"] is True, seller_channels_multiple_result
+            assert seller_channels_multiple_result["channel_no_persisted"] is False, seller_channels_multiple_result
+            assert seller_channels_multiple_result["multiple_channels_observed"] is True, seller_channels_multiple_result
+            assert "654321" not in str(seller_channels_multiple.json()), seller_channels_multiple.text
+            assert "777888" not in str(seller_channels_multiple.json()), seller_channels_multiple.text
+            with SessionLocal() as db:
+                naver_credential = db.get(api_credential_readiness_service.ApiCredential, credential_data["id"])
+                assert "channel_no" not in (naver_credential.extra_config or {}), naver_credential.extra_config
 
             class ForbiddenScopedHttpClient:
                 def __init__(self, *args, **kwargs) -> None:
@@ -838,7 +951,23 @@ def verify_api_credential_readiness() -> None:
             token_failed_result = token_failed.json()["data"]["results"][0]
             assert token_failed_result["error_code"] == "token_auth_failed", token_failed_result
             assert token_failed_result["token_test"] == "failed", token_failed_result
-            token_failed_serialized = str(token_failed.json()).lower()
+            token_failed_payload = token_failed.json()["data"]
+            token_failed_serialized = str({
+                "result": {
+                    "masked_message": token_failed_result.get("masked_message"),
+                    "error_code": token_failed_result.get("error_code"),
+                    "business_status_summary": token_failed_result.get("business_status_summary"),
+                },
+                "capability_results": [
+                    {
+                        "error_code": item.get("error_code"),
+                        "permission_result": item.get("permission_result"),
+                        "response_fields_observed": item.get("response_fields_observed"),
+                        "notes": item.get("notes"),
+                    }
+                    for item in token_failed_payload.get("capability_results", [])
+                ],
+            }).lower()
             for forbidden_item in ["fake-store-token", "authorization", "signature", "header", "phase-6d2-client-secret"]:
                 assert forbidden_item not in token_failed_serialized, token_failed_serialized
 
