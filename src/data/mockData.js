@@ -10,6 +10,11 @@ export const stores = [
 ];
 
 export const products = [
+  { id: 801, name: 'PXG 휠 캐디백 여성 바퀴형 골프백', sku: '平台商品编号已脱敏', store: 'pxg球包店', store_id: 8, platform: 'Naver', price: 499000, currency: 'KRW', stock: 12, stock_quantity: 12, source_type: 'naver_real_sync', status: '판매중', updatedAt: '2026-07-02 23:38' },
+  { id: 802, name: 'PXG Lightweight Stand Bag', sku: '平台商品编号已脱敏', store: 'pxg球包店', store_id: 8, platform: 'Naver', price: 389000, currency: 'KRW', stock: 5, stock_quantity: 5, source_type: 'naver_real_sync', status: '판매중', updatedAt: '2026-07-02 23:38' },
+  { id: 803, name: 'PXG Tour Visor', sku: '平台商品编号已脱敏', store: 'pxg球包店', store_id: 8, platform: 'Naver', price: 69000, currency: 'KRW', stock: 3, stock_quantity: 3, source_type: 'naver_real_sync', status: '판매중', updatedAt: '2026-07-02 23:38' },
+  { id: 804, name: 'PXG Golf Gloves', sku: '平台商品编号已脱敏', store: 'pxg球包店', store_id: 8, platform: 'Naver', price: 39000, currency: 'KRW', stock: 0, stock_quantity: 0, source_type: 'naver_real_sync', status: '판매중', updatedAt: '2026-07-02 23:38' },
+  { id: 805, name: 'PXG Boston Bag', sku: '平台商品编号已脱敏', store: 'pxg球包店', store_id: 8, platform: 'Naver', price: 289000, currency: 'KRW', stock: 18, stock_quantity: 18, source_type: 'naver_real_sync', status: '판매중', updatedAt: '2026-07-02 23:38' },
   { id: 101, name: 'SK-II 스킨파워 크림', sku: 'SK2-KR-80', store: '스마트스토어 뷰티샵', platform: 'Naver', price: 139000, stock: 42, status: '판매중', updatedAt: '2026-06-29 14:18' },
   { id: 102, name: 'ECCO 골프화', sku: 'ECCO-GOLF-42', store: '韩国本土运动鞋店', platform: 'Coupang', price: 228000, stock: 18, status: '销售中', updatedAt: '2026-06-29 13:36' },
   { id: 103, name: 'Titleist 캐디백', sku: 'TITLE-CB-09', store: 'Gmarket 럭셔리 골프관', platform: 'Gmarket', price: 315000, stock: 7, status: '심사중', updatedAt: '2026-06-28 17:20' },

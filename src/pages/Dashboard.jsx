@@ -17,6 +17,7 @@ import {
   getNaverOrderPreviewStatus,
   getNaverProductPreviewStatus,
 } from '../utils/capabilityStatusMapper';
+import { buildNaverInventorySummary } from '../utils/naverInventory';
 import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
@@ -69,6 +70,7 @@ function SellerTodoOverview({
   selectedStore,
   capabilities,
   results,
+  inventorySummary,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
@@ -97,7 +99,15 @@ function SellerTodoOverview({
       description: `${naverOrderStatus?.detail.reason || 'Naver 已完成 1 条订单本地写入测试。'}正式订单批量同步仍未开放。`,
       status: 'success',
     };
-  const naverStatusTodos = [naverConnectionTodo, naverProductTodo, naverOrderTodo].filter(Boolean);
+  const naverInventoryTodo = !isNaverStore || !inventorySummary
+    ? null
+    : {
+      id: 'naver-inventory',
+      title: '库存提醒',
+      description: `${inventorySummary.businessMessage}正式商品批量同步仍未开放。`,
+      status: inventorySummary.attentionCount > 0 ? 'warning' : 'success',
+    };
+  const naverStatusTodos = [naverConnectionTodo, naverProductTodo, naverOrderTodo, naverInventoryTodo].filter(Boolean);
   const priorityItems = [
     {
       id: 'orders',
@@ -271,6 +281,7 @@ export default function Dashboard() {
   const [trend, setTrend] = useState([]);
   const [error, setError] = useState('');
   const [platformStatusData, setPlatformStatusData] = useState({ capabilities: [], results: [], readiness: null });
+  const [naverInventorySummary, setNaverInventorySummary] = useState(null);
 
   useEffect(() => {
     if (isBackendSource && storeLoading) return;
@@ -356,6 +367,32 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
 
+  useEffect(() => {
+    const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+    if (storeLoading || storeError || !selectedStoreId || !isNaverStore) {
+      setNaverInventorySummary(null);
+      return undefined;
+    }
+    let cancelled = false;
+    dataProvider.getProducts({
+      storeId: selectedStoreId,
+      platform: 'Naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((productResponse) => {
+        if (cancelled) return;
+        setNaverInventorySummary(buildNaverInventorySummary(
+          productResponse.data || productResponse.items || [],
+          { selectedStore, selectedStoreId },
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) setNaverInventorySummary(null);
+      });
+    return () => { cancelled = true; };
+  }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.products]);
+
   const stats = useMemo(() => {
     if (!summary) return [];
     return [
@@ -409,6 +446,7 @@ export default function Dashboard() {
           selectedStore={selectedStore}
           capabilities={platformStatusData.capabilities}
           results={platformStatusData.results}
+          inventorySummary={naverInventorySummary}
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>

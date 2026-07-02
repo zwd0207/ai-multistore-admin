@@ -8,6 +8,10 @@ import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 import { getNaverProductPreviewStatus } from '../utils/capabilityStatusMapper';
+import {
+  buildNaverInventorySummary,
+  getInventoryStatusForStock,
+} from '../utils/naverInventory';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const api = {
@@ -41,12 +45,22 @@ function sourceLabel(value) {
   return labels[value] || value || '-';
 }
 
+function renderStock(value) {
+  const status = getInventoryStatusForStock(value);
+  return (
+    <div>
+      <strong>{status.stockLabel}</strong>
+      <small className="cell-subtitle">{status.label}</small>
+    </div>
+  );
+}
+
 const columns = [
   { key: 'name', title: '商品名', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.sku || '平台商品编号已脱敏'}</small></div> },
   { key: 'store', title: '店铺' },
   { key: 'platform', title: '平台' },
   { key: 'price', title: '售价', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
-  { key: 'stock', title: '库存' },
+  { key: 'stock', title: '库存', render: renderStock },
   { key: 'status', title: '平台状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'sourceType', title: '来源', render: sourceLabel },
   { key: 'updatedAt', title: '最近更新' },
@@ -283,20 +297,28 @@ function NaverProductPreviewStatusPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [capabilities, setCapabilities] = useState([]);
   const [results, setResults] = useState([]);
+  const [inventoryProducts, setInventoryProducts] = useState([]);
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
 
   useEffect(() => {
     if (!isNaverStore || !selectedStoreId) {
       setCapabilities([]);
       setResults([]);
+      setInventoryProducts([]);
       return undefined;
     }
     let cancelled = false;
     Promise.all([
       dataProvider.getApiCapabilities({ page: 1, pageSize: 100 }),
       dataProvider.getApiCapabilityResults({ storeId: selectedStoreId, page: 1, pageSize: 100 }),
+      dataProvider.getProducts({
+        storeId: selectedStoreId,
+        platform: 'Naver',
+        page: 1,
+        pageSize: 100,
+      }).catch(() => ({ data: [], items: [] })),
     ])
-      .then(([capabilityResponse, resultResponse]) => {
+      .then(([capabilityResponse, resultResponse, productResponse]) => {
         if (cancelled) return;
         const capabilityRows = capabilityResponse.data || capabilityResponse.items || [];
         const capabilityMap = new Map(capabilityRows.map((item) => [String(item.id), item]));
@@ -306,11 +328,13 @@ function NaverProductPreviewStatusPanel() {
         }));
         setCapabilities(capabilityRows);
         setResults(resultRows);
+        setInventoryProducts(productResponse.data || productResponse.items || []);
       })
       .catch(() => {
         if (!cancelled) {
           setCapabilities([]);
           setResults([]);
+          setInventoryProducts([]);
         }
       });
     return () => { cancelled = true; };
@@ -321,6 +345,10 @@ function NaverProductPreviewStatusPanel() {
   const status = getNaverProductPreviewStatus({ capabilities, results });
   const summary = status.summary;
   const activeIssue = status.activeIssue;
+  const inventorySummary = buildNaverInventorySummary(inventoryProducts, {
+    selectedStore,
+    selectedStoreId,
+  });
 
   return (
     <section className="content-card naver-preview-status-panel">
@@ -349,6 +377,16 @@ function NaverProductPreviewStatusPanel() {
           </div>
           <p>Naver 商品小批量写入测试已完成。当前本地已有 5 条商品。</p>
           <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
+        </article>
+        <article className={`business-capability-card ${inventorySummary.tone}`}>
+          <div className="business-capability-head">
+            <strong>库存提醒</strong>
+            <span>{inventorySummary.statusLabel}</span>
+          </div>
+          <p>{inventorySummary.businessMessage}</p>
+          <small>
+            低库存阈值为 {inventorySummary.threshold} 件。库存数据只来自本地商品记录，不请求 Naver。
+          </small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
@@ -403,6 +441,14 @@ function NaverProductPreviewStatusPanel() {
           { label: 'dry_run_diff.would_update', value: summary.wouldUpdate },
           { label: 'dry_run_diff.would_refresh_only', value: summary.wouldRefreshOnly },
           { label: 'dry_run_diff.would_skip', value: summary.wouldSkip },
+          { label: 'inventory.source', value: inventorySummary.source },
+          { label: 'inventory.total', value: inventorySummary.total },
+          { label: 'inventory.out_of_stock', value: inventorySummary.outOfStock },
+          { label: 'inventory.low_stock', value: inventorySummary.lowStock },
+          { label: 'inventory.normal_stock', value: inventorySummary.normalStock },
+          { label: 'inventory.invalid_stock', value: inventorySummary.invalidStock },
+          { label: 'inventory.low_stock_threshold', value: inventorySummary.threshold },
+          { label: 'inventory.latest_updated_at', value: formatKstDateTimeWithLabel(inventorySummary.latestUpdatedAt) },
           { label: 'batch_sync_status', value: 'not_open' },
           ...(activeIssue
             ? activeIssue.technicalItems.map((item) => ({

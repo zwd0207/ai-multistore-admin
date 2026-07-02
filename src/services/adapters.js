@@ -265,8 +265,9 @@ export function adaptProduct(item = {}) {
     rawStatus: item.status,
     status: adaptStatus(item.status, { active: '판매중', review: '심사중', suspended: '판매중지' }),
     store: item.store_name || `店铺 #${item.store_id}`,
+    lastSyncedAt: item.last_synced_at,
     createdAt: item.created_at,
-    updatedAt: emptyText(item.updated_at),
+    updatedAt: emptyText(item.updated_at || item.last_synced_at),
   };
 }
 
