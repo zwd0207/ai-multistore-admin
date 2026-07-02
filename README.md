@@ -364,3 +364,9 @@ The mismatched Naver readonly preview is now treated only as a possible new-orde
 The Naver new-order candidate readonly preview was repeated through Codex1 with `real_sync=false`. See `PHASE_NAVER_ERP_10B_NEW_ORDER_CANDIDATE_READONLY_REPEAT.md`.
 
 The 3-day KST window returned HTTP 200 with `preview_status=success` and classified the candidate as `candidate_new`. The candidate status is `DELIVERED / 配送完成`, amount `330000 KRW`, product and option text are present, and local duplicate checks found zero operational or mock/test matches. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. This is not a write approval; a one-row new-order write requires a separate phase, database backup, and explicit approval.
+
+## Phase Naver-ERP-10C - Single New-Order Write Gate
+
+The controlled one-order Naver local write gate was executed after a database backup. See `PHASE_NAVER_ERP_10C_SINGLE_NEW_ORDER_WRITE_GATE.md`.
+
+Codex1 caps `real_sync=true` order writes to a 24-hour window. The 10C write gate returned HTTP 200 and `preview_status=success`, but the 24-hour detail matched an existing local Naver order, so `local_sync_result.status=already_exists`, `no_duplicate_created=true`, and `orders_written=false`. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. The 3-day `candidate_new` from 10B was not force-written, and formal Naver order sync remains closed.
