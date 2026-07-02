@@ -270,6 +270,48 @@ The planned product preview route is based on `POST /v1/products/search`. The pl
 
 The Naver order preview route now exists as a micro readonly scaffold. `POST /api/v1/sync/orders/naver/preview` defaults to `real_preview=false` and returns blocked before token or HTTP. `real_preview=true` is restricted to the approved local store/credential, `page=1`, `size=1`, a KST window of one day or less, and `REAL_API_WRITE_ENABLED=false`. The feed request uses the verified shape `lastChangedFrom` plus `limitCount=1`, formats `lastChangedFrom` with milliseconds, and omits `lastChangedTo`; it does not pass page, size, or order_status through to Naver. When `include_detail=true`, detail lookup is allowed only if the feed returns a productOrderId, and it queries at most one ID with `POST /v1/pay-order/seller/product-orders/query`. If the feed is empty, detail is skipped with `detail_skipped_reason=no_changed_orders` and the time window is not expanded. The response may include sanitized diagnostic metadata and detail field-observation booleans, but it never returns a full URL, query values, raw error body, request headers, token, full order IDs, productOrderIds, buyer/receiver names, phones, addresses, delivery details, payment raw payloads, authorization headers, signatures, or full `channel_no`. It never writes `orders`, never writes `SyncLog`, never writes `ApiCapabilityTestResult tested_success`, and never stores tokens/raw responses.
 
+### Phase Naver-ERP-MasterPlan: basic ERP priority roadmap
+
+Current priority is the normal Naver ERP loop: products -> orders -> inventory -> delivery/claims -> order-based sales -> Dashboard. Email center, appeal center, AI appeal replies, AI mail recognition, and deep customer-service automation stay out of scope until the operational ERP base is stable.
+
+Current baseline:
+
+- Naver store `store_id=8` and `credential_id=7` have passed token, seller/account, and seller/channel readonly checks.
+- Naver product `page=1,size=5` local small-batch sync is complete; local `products_store8=5`; post-sync dry-run reports `matched_existing_count=5`, `would_create=0`, `would_update=0`, `would_refresh_only=5`, and `would_skip=0`.
+- Naver product `page=2,size=5` readonly dry-run returned `success_empty`, so there is currently no second-page product candidate to write.
+- Naver product formal batch sync is still closed. The 5-row local sync is a controlled test only.
+
+Roadmap:
+
+| Order | Phase | Goal | Risk | Real API | Local writes | Codex2 |
+|---:|---|---|---|---|---|---|
+| 1 | `Phase Naver-ERP-1: Order feed-to-detail readonly preview` | Read the last-changed order feed; if one `productOrderId` appears, query one sanitized detail preview | Medium | Yes, readonly | No | No |
+| 2 | `Phase Naver-ERP-2: Order detail mapping and privacy gate` | Lock order field whitelist, Chinese status mapping, privacy masking, and mock coverage | Medium | No | No | No |
+| 3 | `Phase Naver-ERP-3: Single Naver order local write` | After manual approval, write exactly one sanitized order row | High | Yes, readonly | Yes, one row | Later |
+| 4 | `Phase Naver-ERP-4: Inventory basic alerts` | Use local `stock_quantity` for zero-stock, low-stock, and stock-change notices | Low | No | No | Yes |
+| 5 | `Phase Naver-ERP-5: Delivery and claim readonly classification` | Classify shipping, cancellation, return, and exchange states from order feed/detail | Medium | Yes, readonly | No | Yes |
+| 6 | `Phase Naver-ERP-6: Order-based sales summary` | Summarize today/week/month order amount and order counts from local orders | Medium | No | No | Yes |
+| 7 | `Phase Naver-ERP-7: Naver Dashboard ERP summary` | Show connection, product, order, shipping, claim, inventory, and sales work items | Medium | No | No | Yes |
+| 8 | `Phase Naver-ERP-8: Product expansion review only` | Revisit product readonly expansion only if new platform products appear | Medium | Yes, readonly | No | Optional |
+
+Module decisions:
+
+- Product management is temporarily closed at the 5-row test. Further expansion must stay small-step and readonly first (`page in {1,2}`, `size<=5`) until new candidates exist. `would_refresh_only` must never be presented as product-content updates.
+- Order management is the next main line. Wait for a real changed order or confirm a recent Seller Center order event, then run one-day feed preview and at most one detail preview. The first detail stage must not write `orders`.
+- A future single-order write may store only sanitized business fields: store/platform, hashed or masked external order key, product name, quantity, order amount, currency, order status, paid/ordered times, source type, last synced time, and sanitized metadata. Full buyer name, full phone, address, raw order detail, full `productOrderId`, and raw response are forbidden.
+- Inventory v1 is based on local product `stock_quantity`; no procurement, warehouse, or purchasing workflow is introduced in this roadmap. A global low-stock threshold is acceptable before product-level thresholds exist.
+- Delivery and claim v1 is readonly classification only. Shipment write APIs, dispatch actions, cancellation approval, return approval, and exchange actions require separate later approval.
+- Sales v1 uses local order amounts only. Settlement or final amount must not be displayed as profit or withdrawable balance.
+- Dashboard v1 should use seller-facing language only. Technical fields such as `error_code`, `http_status`, `store_id`, `credential_id`, `real_preview`, `real_sync`, full channel numbers, and full platform IDs belong only in technical detail views.
+
+Global ERP safety gates:
+
+- Keep `store_id=8` and `credential_id=7` for Naver real-preview phases until a separate expansion approval.
+- Preview/dry-run first, small window first, single-row write first, and manual approval before any broader local write.
+- Do not save tokens, `Authorization`, request headers, signatures, bcrypt output, raw responses, full channel numbers, full product IDs, full order IDs, full `productOrderId`, buyer addresses, or full buyer phone numbers.
+- Any write phase must back up `backend/codex1.db`, verify no duplicate key, verify no sensitive persistence, and verify no unexpected `SyncLog` or `ApiCapabilityTestResult tested_success` writes.
+- Formal Naver product or order batch sync remains closed until a separately named phase approves it.
+
 Future Naver preview endpoints must remain preview-only: no writes to `products` or `orders`, no raw response persistence, no token persistence, and no output of client secrets, tokens, authorization headers, request signatures, request headers, or full `channel_no` values.
 
 The database stores only:

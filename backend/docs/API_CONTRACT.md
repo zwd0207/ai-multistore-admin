@@ -431,6 +431,68 @@ Future local sync must skip multiple `channelProducts`, missing external IDs, an
 
 Phase 6D-6D-Fix2 fixes the feed request to the verified parameter shape: `lastChangedFrom` formatted with milliseconds plus `limitCount=1`, with `lastChangedTo` omitted. Page, size, and order_status remain local preview controls and are not passed through to the Naver feed. When `include_detail=true`, detail lookup runs only if the feed produced a productOrderId, and it queries at most one ID with `POST /v1/pay-order/seller/product-orders/query`. If the feed is empty, detail is skipped with `detail_skipped_reason=no_changed_orders` and the time window is not expanded. Detail responses are reduced to field-observation booleans and sanitized field-name summaries such as `detail_record_observed`, status/product-name presence, buyer/receiver presence booleans, `privacy_fields_suppressed=true`, `raw_response_saved=false`, and `orders_written=false`. It never returns a full URL, query values, raw error body, full order IDs, full productOrderIds, buyer/receiver names, phone numbers, addresses, delivery detail, payment raw payload, raw response bodies, tokens, authorization headers, signatures, or full channel numbers. It does not write `orders`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`.
 
+### Planned Naver ERP v1 Contract
+
+Phase Naver-ERP-MasterPlan keeps the current Naver focus on normal ERP operations: products -> orders -> inventory -> delivery/claims -> order-based sales -> Dashboard. Mail, appeals, AI reply generation, AI mail recognition, and deep customer-service automation are intentionally outside this contract until the core ERP loop is stable.
+
+Current Naver baseline:
+
+- `store_id=8`, `credential_id=7`, token/auth/account/channel checks passed.
+- Product small-batch local sync completed for `page=1,size=5`; `products_store8=5`.
+- Product post-sync dry-run reports no create and no business update: `would_create=0`, `would_update=0`, `would_refresh_only=5`, `would_skip=0`.
+- Product `page=2,size=5` readonly dry-run returned `success_empty`; `page=2` local sync is not justified.
+- Formal product batch sync, order batch sync, shipment writes, claim writes, settlement sync, and platform write actions remain closed.
+
+Planned ERP phases:
+
+| Phase | Contract intent | Real API | Writes | Public API impact |
+|---|---|---:|---:|---|
+| `Naver-ERP-1` | Order feed-to-detail readonly preview; one-day window, one feed item, at most one detail | Yes, readonly | No | Existing `POST /api/v1/sync/orders/naver/preview` only |
+| `Naver-ERP-2` | Order detail mapping, status Chinese labels, privacy gate, mock tests | No | No | No new route required |
+| `Naver-ERP-3` | Single sanitized order local write after separate approval | Yes, readonly upstream | Yes, one row | Existing or narrowly gated order preview route may carry explicit write intent in a later phase |
+| `Naver-ERP-4` | Inventory basic alerts from local `products.stock_quantity` | No | No | Existing product/dashboard reads may expose summary fields later |
+| `Naver-ERP-5` | Delivery and claim readonly classification from order feed/detail | Yes, readonly | No | Order/dashboard summaries may expose seller-facing counts later |
+| `Naver-ERP-6` | Order-amount sales summary from local orders | No | No | Existing stats/dashboard endpoints only |
+| `Naver-ERP-7` | Dashboard ERP summary for connection, products, orders, shipping, claims, inventory, sales | No | No | Dashboard response may add business summary fields later |
+| `Naver-ERP-8` | Product expansion review only when platform products change | Yes, readonly | No | Product preview remains guarded |
+
+Naver product v1 contract:
+
+- Product line is temporarily closed after the 5-row local write test. Continue product expansion only through small readonly previews (`page in {1,2}`, `size<=5`) until new candidates exist.
+- Product business update fields remain `name`, `status`, `price`, `currency`, and `stock_quantity`.
+- `would_refresh_only` means sync metadata refresh only and must not be displayed as "products need update".
+- Future product sync history may record sanitized counts, timestamps, diff categories, and `raw_response_saved=false`; it must not store raw Naver payloads.
+
+Naver order v1 contract:
+
+- Next executable step is `Naver-ERP-1`: call the existing order preview only with `real_preview=true`, approved store/credential, `page=1`, `size=1`, one KST-day-or-smaller window, and `include_detail` only for a single feed-produced product order id.
+- Detail preview may expose only safe booleans/counts/field names and seller-facing status summaries. It must not expose full order ids, full product order ids, buyer/receiver names, full phones, addresses, delivery raw payloads, payment raw payloads, raw response bodies, headers, tokens, signatures, or full channel numbers.
+- A future single-order write may persist only sanitized business fields: `store_id`, `platform`, masked or hashed external order key, `product_name`, `quantity`, `order_amount`, `currency`, `order_status`, `paid_at`, `ordered_at`, `source_type`, `last_synced_at`, and sanitized metadata. Full buyer privacy fields and raw detail remain forbidden.
+- Order status mapping must be seller-facing Chinese labels for new order, paid/ready-to-ship, shipped, in delivery, delivered, cancellation requested, return requested, exchange requested, refunded, and abnormal/unknown.
+
+Naver inventory, delivery, claims, sales, and Dashboard contract:
+
+- Inventory v1 is derived from local `products.stock_quantity`: zero stock, low stock, and stock-change notices. No procurement, warehouse, or purchasing workflow is part of this phase.
+- Delivery v1 is readonly display only. Shipment/dispatch write APIs are out of scope until a separate write phase.
+- Cancellation, return, and exchange v1 are readonly classifications. They can enter Dashboard todo counts, but action workflows and separate after-sales tables require a later design.
+- Sales v1 uses local `orders.order_amount` only. Settlement amount, final amount, and fee fields must not be displayed as profit or withdrawable balance.
+- Dashboard v1 should expose business summaries, not technical diagnostics. Technical fields such as `error_code`, `http_status`, `safe_keyword_flags`, `business_error_hint`, `real_preview`, `real_sync`, `store_id`, and `credential_id` belong only in technical details.
+
+All Naver ERP phases inherit these safety gates:
+
+```text
+Preview/dry-run before local writes
+Small window before larger window
+Single-row order write before multi-row order write
+Manual approval before any broader write
+No token / Authorization / headers / signature / bcrypt persistence
+No raw response persistence
+No full channel_no, full product id, full order id, or full productOrderId output
+Buyer privacy is masked or suppressed
+Every business row is bound to store_id and platform
+Formal batch sync requires a separately approved phase
+```
+
 Current frontend-facing business wording should remain conservative:
 
 ```text
