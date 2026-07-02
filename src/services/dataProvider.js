@@ -433,8 +433,13 @@ const sourceMethods = {
     if (!isBackendSource) return mockApi.getOrders(params);
     const { store, stores } = await resolveBackendStore(params);
     const result = await backendApi.getOrders({ storeId: store.id, platform: params?.platform });
-    const rows = withStoreName(adapters.list(result, adapters.order).data, stores);
-    return queryBackendRows(rows, params);
+    const adapted = adapters.list(result, adapters.order);
+    const rows = withStoreName(adapted.data, stores);
+    return {
+      ...queryBackendRows(rows, params),
+      includeTestOrders: adapted.includeTestOrders,
+      testOrdersExcluded: adapted.testOrdersExcluded,
+    };
   },
   previewNaverOrderCompleteFields: async (payload = {}) => {
     if (!isBackendSource) return mockNaverOrderCompletePreview(payload);

@@ -1132,6 +1132,8 @@ export function adaptList(data, adapter) {
     total: source.total ?? items.length,
     page: source.page ?? 1,
     pageSize: source.page_size ?? source.pageSize ?? (items.length || 10),
+    includeTestOrders: Boolean(source.include_test_orders ?? source.includeTestOrders ?? false),
+    testOrdersExcluded: Number(source.test_orders_excluded ?? source.testOrdersExcluded ?? 0),
   };
 }
 

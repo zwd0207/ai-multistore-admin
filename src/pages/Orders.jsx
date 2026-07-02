@@ -306,10 +306,12 @@ function CoupangOrderSyncPanel() {
 function NaverOrderPreviewStatusPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [orders, setOrders] = useState([]);
+  const [orderListMeta, setOrderListMeta] = useState({ testOrdersExcluded: 0 });
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
   useEffect(() => {
     if (!isNaverStore || !selectedStoreId) {
       setOrders([]);
+      setOrderListMeta({ testOrdersExcluded: 0 });
       return undefined;
     }
     let cancelled = false;
@@ -320,10 +322,16 @@ function NaverOrderPreviewStatusPanel() {
       pageSize: 100,
     })
       .then((orderResponse) => {
-        if (!cancelled) setOrders(orderResponse.data || orderResponse.items || []);
+        if (!cancelled) {
+          setOrders(orderResponse.data || orderResponse.items || []);
+          setOrderListMeta({ testOrdersExcluded: Number(orderResponse.testOrdersExcluded || 0) });
+        }
       })
       .catch(() => {
-        if (!cancelled) setOrders([]);
+        if (!cancelled) {
+          setOrders([]);
+          setOrderListMeta({ testOrdersExcluded: 0 });
+        }
       });
     return () => { cancelled = true; };
   }, [isNaverStore, selectedStoreId]);
@@ -336,7 +344,7 @@ function NaverOrderPreviewStatusPanel() {
     selectedStoreId,
   });
   const operationalOrderCount = fulfillmentSummary.total;
-  const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount;
+  const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount + orderListMeta.testOrdersExcluded;
 
   return (
     <section className="content-card naver-preview-status-panel">

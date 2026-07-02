@@ -272,3 +272,9 @@ The Orders detail panel can show `配送完成` instead of an unnecessary unknow
 Codex2 now separates Naver order display levels: the Orders detail panel can show complete readonly preview fields, the Orders list shows operational order summaries, and Dashboard uses aggregate counts only. See `PHASE_NAVER_ERP_5I_DISPLAY_HIERARCHY_CLEANUP.md`.
 
 Backend-mode Naver order lists isolate `mock_sync` test rows from operational summaries. Those rows are not deleted; they are simply excluded from the main seller-facing list, Dashboard fulfillment counts, and local order amount summaries. Formal Naver order sync remains closed.
+
+## Phase Naver-ERP-5J - Order Local List Cleanup
+
+Codex1 `/orders`, sales stats, and Dashboard summary now exclude local order test rows such as `mock_sync` and `local_frontend_mock` by default. The rows are retained in the database for audit/testing and can be inspected only with the explicit readonly diagnostic flag `include_test_orders=true`. See `PHASE_NAVER_ERP_5J_LOCAL_LIST_CLEANUP.md`.
+
+Codex2 preserves the backend `test_orders_excluded` metadata for technical/status display while keeping the seller-facing Orders list and Dashboard on operational-order counts. This phase does not call Naver, does not write orders, and does not open formal Naver order sync.
