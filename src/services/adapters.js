@@ -8,6 +8,10 @@ function adaptPlatform(value) {
   return platforms[String(value || '').toLowerCase()] || value || '—';
 }
 
+function normalizePlatform(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function adaptStatus(value, mapping = {}) {
   return mapping[String(value || '').toLowerCase()] || value || '未知';
 }
