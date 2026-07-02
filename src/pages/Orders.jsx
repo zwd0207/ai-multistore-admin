@@ -148,6 +148,129 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
   };
 }
 
+const orderRefreshGateStateLabels = {
+  ready: '已满足',
+  pending: '待准备',
+  review: '需人工确认',
+  blocked: '不可进入',
+};
+
+function buildNaverOrderRefreshGatePlan({
+  activeOrder,
+  previewAllowed,
+  previewResult,
+  previewWindow,
+  previewWindowLabel,
+}) {
+  const hasPreviewResult = Boolean(previewResult);
+  const previewAvailable = Boolean(previewResult?.available);
+  const selectedOperationalOrder = Boolean(activeOrder && !isNaverMockSyncOrder(activeOrder));
+  const savePlan = previewResult?.savePlan || {};
+  const noLocalWrites = !savePlan.ordersWritten && !savePlan.syncLogWritten && !savePlan.testedSuccessWritten;
+  const noPlatformWrites = !savePlan.platformWritesEnabled && !savePlan.formalOrderSyncOpen;
+  const rawResponseClosed = !savePlan.rawResponseSaved;
+
+  let statusKind = 'pending';
+  let statusLabel = '待只读预览';
+  let message = `先读取${previewWindowLabel}完整字段只读预览，再由人工决定是否进入后续刷新写库审核。`;
+
+  if (!previewAllowed) {
+    statusKind = 'blocked';
+    statusLabel = '不可写库';
+    message = '当前店铺不在 Naver 订单刷新写库门禁范围内。';
+  } else if (!activeOrder) {
+    statusKind = 'pending';
+    statusLabel = '待本地运营订单';
+    message = '当前没有可选择的 Naver 本地运营订单，不能进入刷新写库审核。';
+  } else if (!selectedOperationalOrder) {
+    statusKind = 'blocked';
+    statusLabel = '不可写库';
+    message = '当前选中的是测试订单或非运营订单，不能进入刷新写库审核。';
+  } else if (hasPreviewResult && !previewAvailable) {
+    statusKind = 'blocked';
+    statusLabel = '不可写库';
+    message = '完整字段只读预览当前不可用，不能进入刷新写库审核。';
+  } else if (previewAvailable) {
+    statusKind = 'review';
+    statusLabel = '可进入人工审核，不会自行写库';
+    message = '只读预览可用，但本阶段只完成门禁计划展示；后续写库必须单独批准并先备份数据库。';
+  }
+
+  const canEnterManualReview = statusKind === 'review' && noLocalWrites && noPlatformWrites && rawResponseClosed;
+
+  return {
+    statusKind,
+    statusLabel,
+    message,
+    canEnterManualReview,
+    items: [
+      {
+        label: '店铺与连接资料范围',
+        state: previewAllowed ? 'ready' : 'blocked',
+        detail: previewAllowed ? '仅限 pxg球包店已验证 Naver 配置。' : '当前店铺不允许进入该门禁。',
+      },
+      {
+        label: '本地运营订单选择',
+        state: selectedOperationalOrder ? 'ready' : (activeOrder ? 'blocked' : 'pending'),
+        detail: selectedOperationalOrder ? '已选中 1 条本地运营订单。' : '需要先有 1 条可审核的 Naver 运营订单。',
+      },
+      {
+        label: '完整字段只读预览',
+        state: previewAvailable ? 'ready' : (hasPreviewResult ? 'blocked' : 'pending'),
+        detail: previewAvailable
+          ? `已取得${previewResult.previewWindowLabel || previewWindowLabel}只读预览。`
+          : `尚未取得可用只读预览，当前窗口为${previewWindowLabel}。`,
+      },
+      {
+        label: '数据库备份',
+        state: 'review',
+        detail: '后续刷新写库前必须先备份 codex1.db，本阶段未执行。',
+      },
+      {
+        label: '人工批准',
+        state: 'review',
+        detail: '后续写库必须由人工单独批准，本阶段不会触发。',
+      },
+      {
+        label: '刷新字段白名单',
+        state: previewAvailable ? 'review' : 'pending',
+        detail: '后续只允许刷新订单状态、付款、配送、售后、金额、时间和安全商品字段。',
+      },
+      {
+        label: '本地写入边界',
+        state: noLocalWrites ? 'ready' : 'blocked',
+        detail: '本阶段不写 orders，不写 SyncLog，不新增 tested_success。',
+      },
+      {
+        label: '平台写操作边界',
+        state: noPlatformWrites ? 'ready' : 'blocked',
+        detail: '不执行发货、取消、退货、换货、退款或其他平台订单写操作。',
+      },
+      {
+        label: '原始响应边界',
+        state: rawResponseClosed ? 'ready' : 'blocked',
+        detail: '不保存 Naver 原始响应、平台密钥、临时授权、请求头或签名。',
+      },
+    ],
+    technical: {
+      phase: 'Naver-ERP-9A',
+      plannedOnly: true,
+      selectedOperationalOrder,
+      previewAvailable,
+      previewWindow: previewResult?.previewWindow || previewWindow,
+      requiresUserApproval: true,
+      requiresDbBackup: true,
+      realSyncAllowed: false,
+      ordersWriteAllowed: false,
+      syncLogWriteAllowed: false,
+      testedSuccessWriteAllowed: false,
+      platformWriteAllowed: false,
+      rawResponseSaved: false,
+      formalOrderSyncOpen: false,
+    },
+  };
+}
+
 function formatError(error) {
   const code = error?.errorCode || error?.data?.error_code || '';
   const messages = {
@@ -538,6 +661,13 @@ function NaverOrderCompleteDetailPanel() {
   const completeFieldReady = Boolean(activeOrder && fields?.orderNo !== '待接入' && fields?.buyerName !== '待接入');
   const previewAllowed = !isBackendSource || String(selectedStoreId) === '8';
   const previewWindowLabel = getNaverCompletePreviewWindowLabel(previewWindow);
+  const refreshGatePlan = buildNaverOrderRefreshGatePlan({
+    activeOrder,
+    previewAllowed,
+    previewResult,
+    previewWindow,
+    previewWindowLabel,
+  });
 
   const runCompleteFieldPreview = async () => {
     if (previewLoading || !activeOrder || !previewAllowed) return;
@@ -658,6 +788,44 @@ function NaverOrderCompleteDetailPanel() {
               </div>
             </section>
           </div>
+          <section className="detail-section">
+            <h3>Naver 订单刷新写库门禁计划</h3>
+            <div className={refreshGatePlan.statusKind === 'blocked' ? 'mock-sync-error' : 'sync-inline-warning'}>
+              {refreshGatePlan.statusLabel}：{refreshGatePlan.message}
+            </div>
+            <div className="detail-grid">
+              {refreshGatePlan.items.map((item) => (
+                <DetailItem
+                  key={item.label}
+                  label={`${orderRefreshGateStateLabels[item.state]} · ${item.label}`}
+                  value={item.detail}
+                />
+              ))}
+            </div>
+            <p className="mock-sync-note">Phase 9A 只整理后续刷新写库审核门槛；当前不新增写库按钮，不改后端，不开放正式订单同步。</p>
+            <TechnicalDetails
+              description="刷新写库门禁只保留执行边界，不展示订单原始响应。"
+              items={[
+                { label: 'order_refresh_write_gate_phase', value: refreshGatePlan.technical.phase },
+                { label: 'planned_only', value: refreshGatePlan.technical.plannedOnly },
+                { label: 'selected_store_id', value: selectedStoreId },
+                { label: 'credential_id', value: 7 },
+                { label: 'selected_operational_order', value: refreshGatePlan.technical.selectedOperationalOrder },
+                { label: 'preview_available', value: refreshGatePlan.technical.previewAvailable },
+                { label: 'preview_window', value: refreshGatePlan.technical.previewWindow },
+                { label: 'can_enter_manual_review', value: refreshGatePlan.canEnterManualReview },
+                { label: 'requires_user_approval', value: refreshGatePlan.technical.requiresUserApproval },
+                { label: 'requires_db_backup', value: refreshGatePlan.technical.requiresDbBackup },
+                { label: 'real_sync_allowed', value: refreshGatePlan.technical.realSyncAllowed },
+                { label: 'orders_write_allowed', value: refreshGatePlan.technical.ordersWriteAllowed },
+                { label: 'sync_log_write_allowed', value: refreshGatePlan.technical.syncLogWriteAllowed },
+                { label: 'tested_success_write_allowed', value: refreshGatePlan.technical.testedSuccessWriteAllowed },
+                { label: 'platform_write_allowed', value: refreshGatePlan.technical.platformWriteAllowed },
+                { label: 'raw_response_saved', value: refreshGatePlan.technical.rawResponseSaved },
+                { label: 'formal_order_sync_open', value: refreshGatePlan.technical.formalOrderSyncOpen },
+              ]}
+            />
+          </section>
           <p className="mock-sync-note">页面不会自动请求 Naver；只有点击完整字段只读预览时才通过 Codex1 做受控读取。该操作最多使用最近 7 天窗口，不写 orders，不保存原始响应，不开放正式订单同步。</p>
           <TechnicalDetails
             description="仅保留字段可用性和口径，不展示平台原始响应。"

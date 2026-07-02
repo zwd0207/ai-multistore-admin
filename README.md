@@ -314,3 +314,9 @@ The Dashboard and Sales page summarize local Naver operational order amounts by 
 Codex2 Dashboard now has a seller-facing Naver ERP daily summary. See `PHASE_NAVER_ERP_8B_DASHBOARD_ERP_SUMMARY.md`.
 
 The summary prioritizes connection issues, claim attention, pending delivery, inventory attention, and product price/stock change hints, then shows local products, local operational orders, pending delivery, claims, and local order amount. It uses existing local data only, does not call Naver, does not write orders/products/financial rows, and keeps product batch sync, order batch sync, platform delivery/claim writes, and Naver sales/settlement APIs closed.
+
+## Phase Naver-ERP-9A - Controlled Order Refresh Write Gate Plan
+
+Codex2 Orders now shows a controlled Naver order refresh write gate plan beside the complete-field readonly preview. See `PHASE_NAVER_ERP_9A_CONTROLLED_ORDER_REFRESH_WRITE_GATE_PLAN.md`.
+
+This phase is a planning and display gate only. It does not add a write button, does not call a new API, does not change Codex1, does not write orders, and does not open formal Naver order sync. The gate explains that a later refresh write would require a usable readonly complete-field preview, one selected local operational order, a database backup, explicit manual approval, a safe field whitelist, no SyncLog write, no tested_success write, no platform order write operation, and no saved raw response or platform secret.
