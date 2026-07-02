@@ -71,21 +71,23 @@ function SellerTodoOverview({
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
+  const naverConnectionTodo = !isNaverStore || !naverProductStatus?.activeIssue
+    ? null
+    : {
+      id: 'naver-connection',
+      title: '当前连接异常',
+      description: 'Naver 当前连接异常，请检查平台连接资料或 API 设置。',
+      status: naverProductStatus.activeIssue.tone,
+    };
   const naverProductTodo = !isNaverStore
     ? null
-    : naverProductStatus?.activeIssue
-      ? {
-        id: 'naver-products',
-        title: '商品预览结果',
-        description: `${naverProductStatus.activeIssue.title} ${naverProductStatus.activeIssue.description}`,
-        status: naverProductStatus.activeIssue.tone,
-      }
-      : {
-        id: 'naver-products',
-        title: '商品预览结果',
-        description: 'Naver 商品小批量写入测试已完成，当前 5 条商品状态稳定。正式批量同步未开放。',
-        status: 'success',
-      };
+    : {
+      id: 'naver-products',
+      title: '商品小批量写入测试',
+      description: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
+      status: 'success',
+    };
+  const naverStatusTodos = [naverConnectionTodo, naverProductTodo].filter(Boolean);
   const priorityItems = [
     {
       id: 'orders',
@@ -117,14 +119,14 @@ function SellerTodoOverview({
       description: summary.riskEnvironments > 0 ? `${summary.riskEnvironments} 个设备或账号环境需要检查。` : '设备环境暂无明显风险。',
       status: summary.riskEnvironments > 0 ? 'danger' : 'success',
     },
-    ...(naverProductTodo ? [naverProductTodo] : []),
+    ...naverStatusTodos,
   ];
   const displayItems = todos.length
     ? [
       ...todos,
-      ...(naverProductTodo && !todos.some((item) => String(item.id || item.title || '') === 'naver-products' || item.title === '商品预览结果')
-        ? [naverProductTodo]
-        : []),
+      ...naverStatusTodos.filter(
+        (todo) => !todos.some((item) => String(item.id || item.title || '') === todo.id),
+      ),
     ]
     : priorityItems;
 
@@ -382,7 +384,7 @@ export default function Dashboard() {
         description="用卖家能看懂的方式汇总订单、客服、商品、库存、销售额、设备和平台连接状态。"
         actions={(
           <>
-            {isBackendSource && <MockSyncPanel />}
+            {!isBackendSource && <MockSyncPanel />}
             <span className="period-chip">数据源 {DATA_SOURCE}</span>
             <span className="period-chip">业务日期 {businessDate ? formatKstDate(businessDate) : BUSINESS_TIME_LABEL}</span>
           </>

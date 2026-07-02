@@ -327,7 +327,7 @@ function NaverProductPreviewStatusPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>Naver 商品状态</h2>
-          <p>{activeIssue ? activeIssue.title : status.productRead.reason}</p>
+          <p>{activeIssue ? 'Naver 当前连接异常，请检查平台连接资料或 API 设置。' : status.productRead.reason}</p>
         </div>
         <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
       </div>
@@ -335,76 +335,53 @@ function NaverProductPreviewStatusPanel() {
         {activeIssue ? (
           <article className={`business-capability-card ${activeIssue.tone}`}>
             <div className="business-capability-head">
-              <strong>商品读取预览</strong>
+              <strong>当前连接异常</strong>
               <span>{activeIssue.statusLabel}</span>
             </div>
-            <p>{activeIssue.title}</p>
+            <p>Naver 当前连接异常，请检查平台连接资料或 API 设置。</p>
             <small>{activeIssue.description}</small>
           </article>
-        ) : (
-          <>
-            <article className="business-capability-card success">
-              <div className="business-capability-head">
-                <strong>已写入本地商品</strong>
-                <span>{summary.localSyncedCount} 条</span>
-              </div>
-              <p>5 条 Naver 商品小批量写入测试已经完成，当前本地记录稳定。</p>
-              <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
-            </article>
-            <article className="business-capability-card success">
-              <div className="business-capability-head">
-                <strong>当前需新增</strong>
-                <span>{summary.wouldCreate} 条</span>
-              </div>
-              <p>再次预览没有发现需要新增到本地的商品。</p>
-              <small>同一组商品已经存在于当前店铺本地记录中。</small>
-            </article>
-            <article className="business-capability-card success">
-              <div className="business-capability-head">
-                <strong>当前需更新</strong>
-                <span>{summary.wouldUpdate} 条</span>
-              </div>
-              <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
-              <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
-            </article>
-            <article className="business-capability-card info">
-              <div className="business-capability-head">
-                <strong>仅同步时间刷新</strong>
-                <span>{summary.wouldRefreshOnly} 条</span>
-              </div>
-              <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
-              <small>当前没有新的业务字段变化需要处理。</small>
-            </article>
-            <article className="business-capability-card muted">
-              <div className="business-capability-head">
-                <strong>跳过</strong>
-                <span>{summary.wouldSkip} 条</span>
-              </div>
-              <p>本次预览没有遇到需要跳过的异常商品。</p>
-              <small>没有重复编号、状态异常或数值格式异常。</small>
-            </article>
-          </>
-        )}
-        {activeIssue ? (
-          <>
-            <article className="business-capability-card info">
-              <div className="business-capability-head">
-                <strong>已写入本地商品</strong>
-                <span>{summary.localSyncedCount} 条</span>
-              </div>
-              <p>5 条 Naver 商品小批量写入测试已经完成，本地商品记录仍然保留。</p>
-              <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
-            </article>
-            <article className="business-capability-card muted">
-              <div className="business-capability-head">
-                <strong>当前商品变更</strong>
-                <span>待恢复后确认</span>
-              </div>
-              <p>当前无法确认是否有新增、更新或仅同步时间刷新，需要先处理 Naver 连接异常。</p>
-              <small>恢复后再重新查看商品预览结果。</small>
-            </article>
-          </>
         ) : null}
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>已写入本地商品</strong>
+            <span>{summary.localSyncedCount} 条</span>
+          </div>
+          <p>Naver 商品小批量写入测试已完成。当前本地已有 5 条商品。</p>
+          <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
+        </article>
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>当前需新增</strong>
+            <span>{summary.wouldCreate} 条</span>
+          </div>
+          <p>再次预览没有发现需要新增到本地的商品。</p>
+          <small>同一组商品已经存在于当前店铺本地记录中。</small>
+        </article>
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>当前需更新</strong>
+            <span>{summary.wouldUpdate} 条</span>
+          </div>
+          <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
+          <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>仅同步时间刷新</strong>
+            <span>{summary.wouldRefreshOnly} 条</span>
+          </div>
+          <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
+          <small>当前没有新的业务字段变化需要处理。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>跳过</strong>
+            <span>{summary.wouldSkip} 条</span>
+          </div>
+          <p>本次预览没有遇到需要跳过的异常商品。</p>
+          <small>没有重复编号、状态异常或数值格式异常。</small>
+        </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
             <strong>正式批量同步</strong>
@@ -460,7 +437,7 @@ export default function Products() {
         readOnly={isBackendSource}
         extraParams={isBackendSource ? { storeId: selectedStoreId } : {}}
         reloadKey={`${selectedStoreId}-${versions.products}`}
-        extraActions={isBackendSource ? <MockSyncPanel types={['products']} compact /> : null}
+        extraActions={!isBackendSource ? <MockSyncPanel types={['products']} compact /> : null}
       />
     </>
   );

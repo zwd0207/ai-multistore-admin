@@ -310,6 +310,7 @@ function getNaverErrorPresentation(errorCode, businessErrorHint = null) {
 }
 
 export function getNaverBusinessError(source = {}) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
   const observed = parseObservedFields(source.responseFieldsObserved || source.response_fields_observed || '');
   const errorCode = normalizeErrorCode(
     source.errorCode
@@ -375,6 +376,7 @@ export function findLatestNaverCapabilityIssue({
   const issues = capabilityKeys
     .map((capabilityKey) => {
       const result = latestResultForKey(results, capabilities, capabilityKey);
+      if (!result || typeof result !== 'object') return null;
       const issue = getNaverBusinessError(result);
       if (!issue) return null;
       const testedAt = result?.testedAt || result?.tested_at || result?.createdAt || result?.created_at || null;

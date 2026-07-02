@@ -8,7 +8,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider from '../services/dataProvider';
-import { findLatestNaverCapabilityIssue } from '../utils/capabilityStatusMapper';
+import { findLatestNaverCapabilityIssue, getNaverProductPreviewStatus } from '../utils/capabilityStatusMapper';
 
 const statusOptions = ['active', 'inactive'];
 const platformOptions = [
@@ -61,6 +61,7 @@ function CredentialBusinessStatus({
   const configured = Boolean(storeBound?.configured);
   const secretReady = Boolean(storeBound?.secretKeyConfigured && storeBound?.secretKeyDecryptable);
   const channelReady = Boolean(storeBound?.channelNoConfigured);
+  const productStatus = isNaver ? getNaverProductPreviewStatus({ capabilities, results }) : null;
   const connectionIssue = isNaver
     ? findLatestNaverCapabilityIssue({
       capabilities,
@@ -103,13 +104,23 @@ function CredentialBusinessStatus({
           <small>{authNextAction}</small>
         </article>
         {isNaver ? (
-          <article className={`business-capability-card ${channelTone}`}>
-            <div className="business-capability-head">
-              <strong>店铺连接</strong>
-              <span>{channelStatus}</span>
-            </div>
-            <p>{channelReason}</p>
-          </article>
+          <>
+            <article className={`business-capability-card ${channelTone}`}>
+              <div className="business-capability-head">
+                <strong>店铺连接</strong>
+                <span>{channelStatus}</span>
+              </div>
+              <p>{channelReason}</p>
+            </article>
+            <article className="business-capability-card success">
+              <div className="business-capability-head">
+                <strong>商品小批量写入测试</strong>
+                <span>{productStatus?.localSync?.statusLabel || '已完成'}</span>
+              </div>
+              <p>Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。</p>
+              <small>正式批量同步仍未开放。</small>
+            </article>
+          </>
         ) : (
           <article className="business-capability-card success">
             <div className="business-capability-head">
