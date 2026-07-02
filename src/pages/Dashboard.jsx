@@ -19,6 +19,7 @@ import {
 } from '../utils/capabilityStatusMapper';
 import { buildNaverInventorySummary } from '../utils/naverInventory';
 import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
+import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
 import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
@@ -210,7 +211,7 @@ function FinancialSummarySection({ financialSummary }) {
         <article className="financial-card">
           <div className="financial-card-head">
             <h3>结算金额</h3>
-            <p>不等同于利润或可提现余额</p>
+            <p>不等同于利润或账户可提取资金</p>
           </div>
           <strong>{formatWon(summary.settlementSummary.totalSettlementAmount)}</strong>
           <small>{summary.settlementSummary.settlementRows || 0} 条结算明细</small>
@@ -224,6 +225,68 @@ function FinancialSummarySection({ financialSummary }) {
           { label: 'settlement_rows', value: summary.settlementSummary.settlementRows },
           { label: 'latest_ordered_at', value: formatKstDateTimeWithLabel(summary.orderSalesSummary.latestOrderedAt) },
           { label: 'latest_settlement_date', value: summary.settlementSummary.latestSettlementDate || '-' },
+        ]}
+      />
+    </section>
+  );
+}
+
+function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
+  const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+  if (!isNaverStore || !orderSalesSummary) return null;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>Naver 订单金额摘要</h2>
+          <p>只按本地已脱敏订单金额汇总，不接入 Naver 结算、利润或账户可提取资金。</p>
+        </div>
+        <span className="period-chip">KRW</span>
+      </div>
+      <div className="financial-summary-grid">
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>本地订单金额</h3>
+            <p>来自本地 orders 的订单金额</p>
+          </div>
+          <strong>{formatWon(orderSalesSummary.totalOrderAmount)}</strong>
+          <small>{orderSalesSummary.totalOrders} 条 Naver 本地订单</small>
+        </article>
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>今日订单金额</h3>
+            <p>按本地订单日期汇总</p>
+          </div>
+          <strong>{formatWon(orderSalesSummary.todayOrderAmount)}</strong>
+          <small>{orderSalesSummary.todayOrders} 条订单</small>
+        </article>
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>本周 / 本月</h3>
+            <p>仅用于运营观察</p>
+          </div>
+          <strong>{formatWon(orderSalesSummary.weekOrderAmount)}</strong>
+          <small>本月 {formatWon(orderSalesSummary.monthOrderAmount)}</small>
+        </article>
+      </div>
+      <p className="mock-sync-note">该金额来自本地订单金额汇总，不等于平台结算金额，不等于利润，也不等于账户可提取资金。取消金额和退款金额待订单字段稳定后再拆分。</p>
+      <TechnicalDetails
+        description="技术口径仅供管理员排查，主页面用业务文案展示。"
+        items={[
+          { label: 'scope', value: orderSalesSummary.scope },
+          { label: 'total_orders', value: orderSalesSummary.totalOrders },
+          { label: 'total_order_amount', value: orderSalesSummary.totalOrderAmount },
+          { label: 'today_orders', value: orderSalesSummary.todayOrders },
+          { label: 'today_order_amount', value: orderSalesSummary.todayOrderAmount },
+          { label: 'week_orders', value: orderSalesSummary.weekOrders },
+          { label: 'week_order_amount', value: orderSalesSummary.weekOrderAmount },
+          { label: 'month_orders', value: orderSalesSummary.monthOrders },
+          { label: 'month_order_amount', value: orderSalesSummary.monthOrderAmount },
+          { label: 'latest_ordered_at', value: formatKstDateTimeWithLabel(orderSalesSummary.latestOrderedAt) },
+          { label: 'settlement_amount_available', value: orderSalesSummary.settlementAmountAvailable },
+          { label: 'profit_available', value: orderSalesSummary.profitAvailable },
+          { label: 'withdrawable_balance_available', value: orderSalesSummary.withdrawableBalanceAvailable },
         ]}
       />
     </section>
@@ -299,6 +362,7 @@ export default function Dashboard() {
   const [platformStatusData, setPlatformStatusData] = useState({ capabilities: [], results: [], readiness: null });
   const [naverInventorySummary, setNaverInventorySummary] = useState(null);
   const [naverOrderFulfillmentSummary, setNaverOrderFulfillmentSummary] = useState(null);
+  const [naverOrderSalesSummary, setNaverOrderSalesSummary] = useState(null);
 
   useEffect(() => {
     if (isBackendSource && storeLoading) return;
@@ -414,6 +478,7 @@ export default function Dashboard() {
     const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
     if (storeLoading || storeError || !selectedStoreId || !isNaverStore) {
       setNaverOrderFulfillmentSummary(null);
+      setNaverOrderSalesSummary(null);
       return undefined;
     }
     let cancelled = false;
@@ -425,13 +490,15 @@ export default function Dashboard() {
     })
       .then((orderResponse) => {
         if (cancelled) return;
-        setNaverOrderFulfillmentSummary(buildNaverOrderFulfillmentSummary(
-          orderResponse.data || orderResponse.items || [],
-          { selectedStore, selectedStoreId },
-        ));
+        const orderRows = orderResponse.data || orderResponse.items || [];
+        setNaverOrderFulfillmentSummary(buildNaverOrderFulfillmentSummary(orderRows, { selectedStore, selectedStoreId }));
+        setNaverOrderSalesSummary(buildNaverOrderSalesSummary(orderRows, { selectedStore, selectedStoreId }));
       })
       .catch(() => {
-        if (!cancelled) setNaverOrderFulfillmentSummary(null);
+        if (!cancelled) {
+          setNaverOrderFulfillmentSummary(null);
+          setNaverOrderSalesSummary(null);
+        }
       });
     return () => { cancelled = true; };
   }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.orders]);
@@ -501,6 +568,11 @@ export default function Dashboard() {
         results={platformStatusData.results}
         readiness={platformStatusData.readiness}
         financialSummary={summary.financialSummary}
+      />
+
+      <NaverOrderSalesSummarySection
+        selectedStore={selectedStore}
+        orderSalesSummary={naverOrderSalesSummary}
       />
 
       <FinancialSummarySection financialSummary={summary.financialSummary} />

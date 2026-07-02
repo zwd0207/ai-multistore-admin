@@ -648,7 +648,7 @@ function buildCoupangCards({ financialSummary }) {
       status: 'tested_success',
       statusLabel: settlementRows > 0 ? '已有结算数据' : '可查询，暂无本地结算',
       reason: settlementRows > 0 ? `本地已有 ${settlementRows} 条结算明细。` : '结算明细查询链路可用。',
-      nextAction: '结算金额不等同于利润或可提现余额，请按页面说明核对。',
+      nextAction: '结算金额不等同于利润或账户可提取资金，请按页面说明核对。',
     }),
   ];
 }

@@ -12,6 +12,7 @@ import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
+import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
@@ -256,7 +257,7 @@ function CoupangFinancialPreviewPanel() {
 
         <article className="financial-preview-card">
           <h3>结算明细</h3>
-          <p className="mock-sync-note">结算查询按平台结算口径展示，不等同于利润或可提现余额。</p>
+          <p className="mock-sync-note">结算查询按平台结算口径展示，不等同于利润或账户可提取资金。</p>
           <div className="sync-control-grid financial-control-grid">
             <label>
               <span>开始日期</span>
@@ -275,6 +276,123 @@ function CoupangFinancialPreviewPanel() {
           <FinancialPreviewResult result={settlementResult} type="settlement" />
         </article>
       </div>
+    </section>
+  );
+}
+
+function NaverOrderSalesSummaryPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [summary, setSummary] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const isNaverStore = normalizePlatform(selectedStore?.rawPlatform || selectedStore?.platform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setSummary(null);
+      setLoadError('');
+      return undefined;
+    }
+    let cancelled = false;
+    setLoadError('');
+    dataProvider.getOrders({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((orderResponse) => {
+        if (cancelled) return;
+        setSummary(buildNaverOrderSalesSummary(
+          orderResponse.data || orderResponse.items || [],
+          { selectedStore, selectedStoreId },
+        ));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSummary(null);
+        setLoadError(error.message || 'Naver 本地订单金额加载失败。');
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>Naver 订单金额统计</h2>
+          <p>按当前店铺本地已脱敏订单的 order_amount 汇总，不查询 Naver 销售、统计或结算接口。</p>
+        </div>
+        <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
+      </div>
+      {loadError ? (
+        <EmptyState title="Naver 订单金额加载失败" description={loadError} />
+      ) : summary ? (
+        <>
+          <div className="financial-summary-grid">
+            <article className="financial-card">
+              <div className="financial-card-head">
+                <h3>本地订单金额</h3>
+                <p>订单金额汇总</p>
+              </div>
+              <strong>{formatWon(summary.totalOrderAmount)}</strong>
+              <small>{summary.totalOrders} 条本地 Naver 订单</small>
+            </article>
+            <article className="financial-card">
+              <div className="financial-card-head">
+                <h3>今日订单金额</h3>
+                <p>按本地订单日期</p>
+              </div>
+              <strong>{formatWon(summary.todayOrderAmount)}</strong>
+              <small>{summary.todayOrders} 条订单</small>
+            </article>
+            <article className="financial-card">
+              <div className="financial-card-head">
+                <h3>本周订单金额</h3>
+                <p>本地订单金额口径</p>
+              </div>
+              <strong>{formatWon(summary.weekOrderAmount)}</strong>
+              <small>本月 {formatWon(summary.monthOrderAmount)}</small>
+            </article>
+          </div>
+          <div className="business-capability-grid compact">
+            <article className="business-capability-card info">
+              <div className="business-capability-head"><strong>统计口径</strong><span>本地订单</span></div>
+              <p>该金额来自本地 orders 的订单金额汇总。</p>
+              <small>不会展示完整订单号或买家隐私。</small>
+            </article>
+            <article className="business-capability-card muted">
+              <div className="business-capability-head"><strong>结算 / 利润</strong><span>待接入</span></div>
+              <p>当前不等于平台结算金额，不等于利润，也不等于账户可提取资金。</p>
+              <small>Naver 结算、利润和提现余额需要后续单独阶段确认。</small>
+            </article>
+            <article className="business-capability-card muted">
+              <div className="business-capability-head"><strong>取消 / 退款金额</strong><span>待接入</span></div>
+              <p>待取消、退货、退款字段稳定后再拆分金额。</p>
+              <small>当前不把订单金额自动扣减为净销售额。</small>
+            </article>
+          </div>
+          <TechnicalDetails
+            description="技术口径仅供管理员排查，主页面不展示完整订单标识或买家隐私。"
+            items={[
+              { label: 'scope', value: summary.scope },
+              { label: 'store_id', value: selectedStoreId },
+              { label: 'total_orders', value: summary.totalOrders },
+              { label: 'total_order_amount', value: summary.totalOrderAmount },
+              { label: 'today_order_amount', value: summary.todayOrderAmount },
+              { label: 'week_order_amount', value: summary.weekOrderAmount },
+              { label: 'month_order_amount', value: summary.monthOrderAmount },
+              { label: 'latest_ordered_at', value: formatKstDateTimeWithLabel(summary.latestOrderedAt) },
+              { label: 'settlement_amount_available', value: summary.settlementAmountAvailable },
+              { label: 'profit_available', value: summary.profitAvailable },
+              { label: 'withdrawable_balance_available', value: summary.withdrawableBalanceAvailable },
+            ]}
+          />
+        </>
+      ) : (
+        <EmptyState title="正在读取 Naver 本地订单金额" description="只读取本地订单列表，不请求 Naver 平台。" />
+      )}
     </section>
   );
 }
@@ -330,6 +448,7 @@ export default function Sales() {
         actions={<button className="button ghost" onClick={() => load()}>刷新看板</button>}
       />
 
+      <NaverOrderSalesSummaryPanel />
       <CoupangFinancialPreviewPanel />
 
       <FilterPanel>
