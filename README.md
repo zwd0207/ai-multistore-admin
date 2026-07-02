@@ -320,3 +320,9 @@ The summary prioritizes connection issues, claim attention, pending delivery, in
 Codex2 Orders now shows a controlled Naver order refresh write gate plan beside the complete-field readonly preview. See `PHASE_NAVER_ERP_9A_CONTROLLED_ORDER_REFRESH_WRITE_GATE_PLAN.md`.
 
 This phase is a planning and display gate only. It does not add a write button, does not call a new API, does not change Codex1, does not write orders, and does not open formal Naver order sync. The gate explains that a later refresh write would require a usable readonly complete-field preview, one selected local operational order, a database backup, explicit manual approval, a safe field whitelist, no SyncLog write, no tested_success write, no platform order write operation, and no saved raw response or platform secret.
+
+## Phase Naver-ERP-9B - Order Refresh Gate Mock Verification
+
+The Naver order refresh write gate has been verified in both backend-source and mock-source Orders pages. See `PHASE_NAVER_ERP_9B_ORDER_REFRESH_GATE_MOCK_VERIFICATION.md`.
+
+Backend mode shows the gate as `待只读预览` without white screen or console errors. Mock mode can move the gate to `可进入人工审核，不会自行写库` after the existing mock complete-field readonly preview, while still showing that orders, SyncLog, tested_success, and platform write operations remain closed. This phase does not call Naver, does not write local data, and does not open formal Naver order sync.
