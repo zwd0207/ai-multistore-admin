@@ -1940,7 +1940,9 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
     valid_candidates: list[dict] = []
     candidate_summaries: list[dict] = []
     create_reasons = {"external_product_id_not_found_locally": 0}
-    update_reasons = {"external_product_id_found_locally": 0}
+    update_reasons = {"business_fields_changed": 0}
+    no_change_reasons = {"business_fields_unchanged": 0}
+    refresh_only_reasons = {"sync_metadata_only": 0}
     skip_reasons = _empty_naver_product_skip_reasons()
     seen_external_product_ids: set[str] = set()
     single_channel_product_count = 0
@@ -1953,6 +1955,7 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
     unchanged_fields: set[str] = set()
     missing_optional_field_names: set[str] = set()
     risk_flags: set[str] = set()
+    synced_at = get_utc_now()
     for index, content in enumerate(_iter_naver_product_contents(payload)):
         content_risk_flags = _naver_product_content_risk_flags(content)
         risk_flags.update(content_risk_flags)
@@ -2060,14 +2063,13 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
             "index": index,
             "sample_id": _mask_external_identifier(external_product_id),
             "risk_flags": content_risk_flags,
-            "candidate": {
-                "external_product_id": external_product_id,
-                "name": product_name,
-                "status": _bounded_text(_extract_scalar_by_keys(channel_product, ("statusType", "saleStatus", "status")) or "unknown", 30),
-                "price": _extract_decimal_by_keys(channel_product, ("salePrice", "discountPrice", "price")),
-                "currency": "KRW",
-                "stock_quantity": _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory")),
-            },
+            "candidate": _build_naver_product_sync_candidate(
+                content=content,
+                channel_product=channel_product,
+                external_product_id=external_product_id,
+                product_name=product_name,
+                synced_at=synced_at,
+            ),
         })
 
     unique_candidate_ids = list(dict.fromkeys(candidate_ids))
@@ -2098,28 +2100,38 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
             })
             continue
 
-        update_reasons["external_product_id_found_locally"] += 1
         update_summary = _build_naver_product_update_diff_summary(existing_product, candidate)
         changed_fields.update(update_summary["changed_fields"])
         unchanged_fields.update(update_summary["unchanged_fields"])
         missing_optional_field_names.update(update_summary["missing_optional_fields"])
         risk_flags.update(set(valid_candidate["risk_flags"]) | set(update_summary["risk_flags"]))
+        comparison_result = update_summary["comparison_result"]
+        if comparison_result == "update":
+            update_reasons["business_fields_changed"] += 1
+        elif comparison_result == "refresh_only":
+            refresh_only_reasons["sync_metadata_only"] += 1
+        else:
+            no_change_reasons["business_fields_unchanged"] += 1
         candidate_summaries.append({
-            "candidate_type": "update",
+            "candidate_type": comparison_result,
             "sample_id": sample_id,
             "local_product_id": existing_product.id,
-            "reason": "external_product_id_found_locally",
+            "reason": update_summary["reason"],
             "match_basis": ["store_id", "platform=naver", "external_product_id"],
             "changed_fields": update_summary["changed_fields"],
             "unchanged_fields": update_summary["unchanged_fields"],
             "missing_optional_fields": update_summary["missing_optional_fields"],
+            "refresh_only_fields": update_summary["refresh_only_fields"],
+            "refresh_only_fields_unchanged": update_summary["refresh_only_fields_unchanged"],
             "risk_flags": sorted(set(valid_candidate["risk_flags"]) | set(update_summary["risk_flags"])),
             "high_risk_fields_observed_but_not_auto_overwritten": update_summary["high_risk_fields_observed_but_not_auto_overwritten"],
             "raw_payload_saved": False,
             "full_external_id_returned": False,
         })
 
-    would_update = sum(1 for product_id in unique_candidate_ids if product_id in existing_ids)
+    would_update = update_reasons["business_fields_changed"]
+    would_no_change = no_change_reasons["business_fields_unchanged"]
+    would_refresh_only = refresh_only_reasons["sync_metadata_only"]
     would_create = sum(1 for product_id in unique_candidate_ids if product_id not in existing_ids)
     would_skip = (
         skip_reasons["multiple_channel_products"]
@@ -2133,10 +2145,14 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
     return {
         "would_create": would_create,
         "would_update": would_update,
+        "would_no_change": would_no_change,
+        "would_refresh_only": would_refresh_only,
         "would_skip": would_skip,
         "skip_reasons": skip_reasons,
         "create_reasons": create_reasons,
         "update_reasons": update_reasons,
+        "no_change_reasons": no_change_reasons,
+        "refresh_only_reasons": refresh_only_reasons,
         "changed_fields": sorted(changed_fields),
         "unchanged_fields": sorted(unchanged_fields),
         "missing_optional_fields": sorted(missing_optional_field_names),
@@ -2144,6 +2160,8 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
         "diff_summary": _build_naver_product_diff_summary(
             would_create=would_create,
             would_update=would_update,
+            would_no_change=would_no_change,
+            would_refresh_only=would_refresh_only,
             would_skip=would_skip,
             candidate_summaries=candidate_summaries,
         ),
@@ -2183,6 +2201,8 @@ def _build_naver_product_update_diff_summary(product: Product, candidate: dict) 
     changed_fields: list[str] = []
     unchanged_fields: list[str] = []
     missing_optional_fields: list[str] = []
+    refresh_only_fields: list[str] = []
+    refresh_only_fields_unchanged: list[str] = []
     comparable_fields = ("name", "status", "price", "currency", "stock_quantity")
     for field in comparable_fields:
         incoming = candidate.get(field)
@@ -2198,10 +2218,30 @@ def _build_naver_product_update_diff_summary(product: Product, candidate: dict) 
             unchanged_fields.append(field)
         else:
             changed_fields.append(field)
+    for field in ("source_type", "last_synced_at", "raw_data"):
+        incoming = candidate.get(field)
+        existing = getattr(product, field)
+        if _naver_product_compare_values(field, existing, incoming):
+            refresh_only_fields_unchanged.append(field)
+        else:
+            refresh_only_fields.append(field)
+    if changed_fields:
+        comparison_result = "update"
+        reason = "business_fields_changed"
+    elif refresh_only_fields:
+        comparison_result = "refresh_only"
+        reason = "sync_metadata_only"
+    else:
+        comparison_result = "no_change"
+        reason = "business_fields_unchanged"
     return {
+        "comparison_result": comparison_result,
+        "reason": reason,
         "changed_fields": sorted(changed_fields),
         "unchanged_fields": sorted(unchanged_fields),
         "missing_optional_fields": sorted(missing_optional_fields),
+        "refresh_only_fields": sorted(refresh_only_fields),
+        "refresh_only_fields_unchanged": sorted(refresh_only_fields_unchanged),
         "risk_flags": [
             "high_risk_fields_observed_but_not_auto_overwritten",
             "raw_payload_not_saved",
@@ -2215,18 +2255,52 @@ def _build_naver_product_diff_summary(
     *,
     would_create: int,
     would_update: int,
+    would_no_change: int,
+    would_refresh_only: int,
     would_skip: int,
     candidate_summaries: list[dict],
 ) -> dict:
     return {
         "would_create": would_create,
         "would_update": would_update,
+        "would_no_change": would_no_change,
+        "would_refresh_only": would_refresh_only,
         "would_skip": would_skip,
         "candidate_summaries": candidate_summaries[:10],
         "values_returned": "field_names_counts_and_masked_ids_only",
         "raw_payload_saved": False,
         "full_external_id_returned": False,
     }
+
+
+def _naver_product_compare_values(field: str, existing: object, incoming: object) -> bool:
+    if field == "price":
+        if existing is None or incoming is None:
+            return existing is incoming
+        return Decimal(str(existing)) == Decimal(str(incoming))
+    if field == "last_synced_at":
+        return _normalize_naver_product_compare_datetime(existing) == _normalize_naver_product_compare_datetime(incoming)
+    if field == "raw_data":
+        return _normalize_naver_product_raw_data(existing) == _normalize_naver_product_raw_data(incoming)
+    return existing == incoming
+
+
+def _normalize_naver_product_raw_data(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value.get(key)
+        for key in _naver_product_raw_data_whitelist()
+        if key in value
+    }
+
+
+def _normalize_naver_product_compare_datetime(value: object) -> object:
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _naver_product_upsert_key_summary() -> dict:
@@ -2345,10 +2419,14 @@ def _default_naver_product_dry_run_diff() -> dict:
     return {
         "would_create": 0,
         "would_update": 0,
+        "would_no_change": 0,
+        "would_refresh_only": 0,
         "would_skip": 0,
         "skip_reasons": _empty_naver_product_skip_reasons(),
         "create_reasons": {"external_product_id_not_found_locally": 0},
-        "update_reasons": {"external_product_id_found_locally": 0},
+        "update_reasons": {"business_fields_changed": 0},
+        "no_change_reasons": {"business_fields_unchanged": 0},
+        "refresh_only_reasons": {"sync_metadata_only": 0},
         "changed_fields": [],
         "unchanged_fields": [],
         "missing_optional_fields": [],
@@ -2356,6 +2434,8 @@ def _default_naver_product_dry_run_diff() -> dict:
         "diff_summary": _build_naver_product_diff_summary(
             would_create=0,
             would_update=0,
+            would_no_change=0,
+            would_refresh_only=0,
             would_skip=0,
             candidate_summaries=[],
         ),
@@ -2464,6 +2544,43 @@ def _sync_naver_product_preview_candidate(
     return result
 
 
+def _build_naver_product_sync_candidate(
+    *,
+    content: dict,
+    channel_product: dict,
+    external_product_id: str,
+    product_name: str,
+    synced_at: datetime,
+) -> dict:
+    price = _extract_decimal_by_keys(channel_product, ("salePrice", "discountPrice", "price"))
+    stock_quantity = _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory"))
+    origin_product_no = _bounded_text(_extract_scalar_by_keys(content, ("originProductNo",)), 120)
+    display_status = _bounded_text(_extract_scalar_by_keys(channel_product, ("channelProductDisplayStatusType", "displayStatus")), 30)
+    return {
+        "external_product_id": external_product_id,
+        "name": product_name,
+        "sku": None,
+        "brand": None,
+        "category": None,
+        "status": _bounded_text(_extract_scalar_by_keys(channel_product, ("statusType", "saleStatus", "status")) or "unknown", 30),
+        "price": price or Decimal("0"),
+        "currency": "KRW",
+        "stock_quantity": stock_quantity if stock_quantity is not None else 0,
+        "source_type": NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+        "last_synced_at": synced_at,
+        "raw_data": {
+            "platform_origin_product_no": _mask_external_identifier(origin_product_no) if origin_product_no else None,
+            "platform_channel_product_id": _mask_external_identifier(external_product_id),
+            "display_status": display_status,
+            "channel_products_count": 1,
+            "source_preview_id_hash": _mask_external_identifier(external_product_id),
+            "mapping_version": "naver_product_v1",
+            "synced_from": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
+            "raw_response_saved": False,
+        },
+    }
+
+
 def _extract_naver_product_sync_candidates(payload: object | None) -> tuple[list[dict], dict[str, int]]:
     candidates: list[dict] = []
     skip_reasons = _empty_naver_product_skip_reasons()
@@ -2493,31 +2610,13 @@ def _extract_naver_product_sync_candidates(payload: object | None) -> tuple[list
         stock_quantity = _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory"))
         if price is None or stock_quantity is None:
             skip_reasons["missing_optional_fields"] += 1
-        origin_product_no = _bounded_text(_extract_scalar_by_keys(content, ("originProductNo",)), 120)
-        display_status = _bounded_text(_extract_scalar_by_keys(channel_product, ("channelProductDisplayStatusType", "displayStatus")), 30)
-        candidates.append({
-            "external_product_id": external_product_id,
-            "name": product_name,
-            "sku": None,
-            "brand": None,
-            "category": None,
-            "status": _bounded_text(_extract_scalar_by_keys(channel_product, ("statusType", "saleStatus", "status")) or "unknown", 30),
-            "price": price or Decimal("0"),
-            "currency": "KRW",
-            "stock_quantity": stock_quantity if stock_quantity is not None else 0,
-            "source_type": NAVER_PRODUCT_SYNC_SOURCE_TYPE,
-            "last_synced_at": synced_at,
-            "raw_data": {
-                "platform_origin_product_no": _mask_external_identifier(origin_product_no) if origin_product_no else None,
-                "platform_channel_product_id": _mask_external_identifier(external_product_id),
-                "display_status": display_status,
-                "channel_products_count": 1,
-                "source_preview_id_hash": _mask_external_identifier(external_product_id),
-                "mapping_version": "naver_product_v1",
-                "synced_from": NAVER_PRODUCT_PREVIEW_SOURCE_TYPE,
-                "raw_response_saved": False,
-            },
-        })
+        candidates.append(_build_naver_product_sync_candidate(
+            content=content,
+            channel_product=channel_product,
+            external_product_id=external_product_id,
+            product_name=product_name,
+            synced_at=synced_at,
+        ))
     return candidates[:5], skip_reasons
 
 
@@ -2608,6 +2707,8 @@ def _build_naver_product_preview_result(
         "has_more": has_more,
         "would_create": safe_dry_run_diff["would_create"],
         "would_update": safe_dry_run_diff["would_update"],
+        "would_no_change": safe_dry_run_diff["would_no_change"],
+        "would_refresh_only": safe_dry_run_diff["would_refresh_only"],
         "sample_ids": sample_ids,
         "field_observation": field_observation,
         "dry_run_diff": safe_dry_run_diff,

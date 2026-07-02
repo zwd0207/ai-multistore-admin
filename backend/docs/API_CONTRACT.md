@@ -299,6 +299,8 @@ Phase 6D-6I adds a local sync dry-run diff to Naver product preview:
   "dry_run_diff": {
     "would_create": 0,
     "would_update": 0,
+    "would_no_change": 0,
+    "would_refresh_only": 0,
     "would_skip": 0,
     "skip_reasons": {
       "multiple_channel_products": 0,
@@ -314,7 +316,7 @@ Phase 6D-6I adds a local sync dry-run diff to Naver product preview:
 }
 ```
 
-The dry-run reads local `products` by `store_id + platform=naver + external_product_id` only to estimate create/update counts. It does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not imply formal product sync availability. Multiple `channelProducts`, missing `channelProductNo`, and missing `productName` are skipped; missing price or stock is reported under `missing_optional_fields` without forcing a skip. Top-level `would_create` and `would_update` mirror `dry_run_diff` for compatibility.
+The dry-run reads local `products` by `store_id + platform=naver + external_product_id` only to estimate local impact. It does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not imply formal product sync availability. Multiple `channelProducts`, missing `channelProductNo`, and missing `productName` are skipped; missing price or stock is reported under `missing_optional_fields` without forcing a skip. Top-level `would_create` and `would_update` mirror `dry_run_diff` for compatibility.
 
 Phase 6D-6M extends that readonly preview into a small-batch dry-run without opening batch sync. When `real_preview=true` and `real_sync=false`, the only allowed upstream body is `{"page":1,"size":N}` with `1 <= N <= 5`; no `productStatusTypes`, keyword, seller-product filters, channel number, date range, or product-number filters may be sent. `sample_ids` may contain up to 5 masked hashes. `dry_run_diff` also carries:
 
@@ -332,6 +334,16 @@ Phase 6D-6M extends that readonly preview into a small-batch dry-run without ope
 In this readonly small-batch phase, `dry_run_diff.ready_for_local_sync` is intentionally fixed to `false` even if create/update candidates are found. That is a guardrail signal, not a parser failure. It prevents the preview response from being misread as a writable approval. `real_sync=false` continues to guarantee no `products`, no `SyncLog`, and no `ApiCapabilityTestResult tested_success` writes.
 
 Phase 6D-6N-Pre-Impl adds an enhanced dry-run explanation layer before any batch write approval. `dry_run_diff` may include `diff_summary`, `create_reasons`, `update_reasons`, `changed_fields`, `unchanged_fields`, `missing_optional_fields`, `risk_flags`, `upsert_key_summary`, and `write_safety_summary`. Update diffs expose only field names and local product ids; they do not expose raw Naver values or full external ids. Create explanations use `external_product_id_not_found_locally` and confirm that the upsert key is `store_id + platform=naver + external_product_id`, sourced from `channelProductNo|channelProductId`; product-name matching and fuzzy matching remain disabled. Additional skip reasons are `duplicate_external_product_id_in_same_batch`, `invalid_status_shape`, `invalid_numeric_shape_for_price`, and `invalid_numeric_shape_for_stock`. Missing price or stock is still optional metadata, not an automatic skip.
+
+Phase 6D-6P tightens the business meaning of the dry-run counters:
+
+- `would_create`: local row not found by `store_id + platform=naver + external_product_id`
+- `would_update`: business fields would change (`name`, `status`, `price`, `currency`, `stock_quantity`)
+- `would_refresh_only`: only sync metadata would change (`last_synced_at`, `source_type`, sanitized `raw_data`)
+- `would_no_change`: local row exists and neither business fields nor sync metadata would change
+- `matched_existing_count`: local rows matched by key, regardless of whether they land in `would_update`, `would_refresh_only`, or `would_no_change`
+
+`update_reasons` now refers to business-field updates only. `no_change_reasons` and `refresh_only_reasons` explain the matched-existing subsets that should not be presented to ordinary users as product-content updates. Dry-run remains preview-only: no `products`, no `SyncLog`, no `ApiCapabilityTestResult tested_success`, and no raw response/token/header/signature persistence.
 
 The enhanced dry-run is still preview-only. It does not execute `real_sync=true`, does not write `products`, does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, and does not save raw responses, tokens, headers, signatures, full channel numbers, HTML, image-detail content, or product raw payloads.
 

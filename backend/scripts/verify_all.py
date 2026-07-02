@@ -4,7 +4,7 @@ import os
 import tempfile
 import uuid
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -1526,6 +1526,7 @@ def verify_sync_preview_schema_and_security() -> None:
 
             original_http_client = sync_service.httpx.Client
             original_store_bound_token = api_credential_readiness_service._request_naver_token_from_context
+            original_sync_get_utc_now = sync_service.get_utc_now
             original_product_request_params_confirmed = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("request_params_confirmed")
             original_product_minimum_request_body_confirmed = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("minimum_request_body_confirmed")
             original_product_safe_to_real_test = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"].get("safe_to_real_test")
@@ -1612,6 +1613,57 @@ def verify_sync_preview_schema_and_security() -> None:
                         source_type="mock_seed",
                     )
                     db.add(fake_existing)
+                    fixed_preview_synced_at = datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc)
+                    no_change_external_id = "naver-nochange-001"
+                    no_change_origin_id = "NAVER-NOCHANGE-ORIGIN-001"
+                    no_change_raw_data = {
+                        "platform_origin_product_no": sync_service._mask_external_identifier(no_change_origin_id),
+                        "platform_channel_product_id": sync_service._mask_external_identifier(no_change_external_id),
+                        "display_status": "ON",
+                        "channel_products_count": 1,
+                        "source_preview_id_hash": sync_service._mask_external_identifier(no_change_external_id),
+                        "mapping_version": "naver_product_v1",
+                        "synced_from": "naver_product_preview",
+                        "raw_response_saved": False,
+                    }
+                    db.add(Product(
+                        store_id=naver_store_id,
+                        platform="naver",
+                        external_product_id=no_change_external_id,
+                        name="No Change Naver Product",
+                        status="SALE",
+                        price=Decimal("7000"),
+                        currency="KRW",
+                        stock_quantity=9,
+                        source_type="naver_real_sync",
+                        last_synced_at=fixed_preview_synced_at,
+                        raw_data=no_change_raw_data,
+                    ))
+                    refresh_external_id = "naver-refresh-001"
+                    refresh_origin_id = "NAVER-REFRESH-ORIGIN-001"
+                    refresh_raw_data = {
+                        "platform_origin_product_no": sync_service._mask_external_identifier(refresh_origin_id),
+                        "platform_channel_product_id": sync_service._mask_external_identifier(refresh_external_id),
+                        "display_status": "ON",
+                        "channel_products_count": 1,
+                        "source_preview_id_hash": sync_service._mask_external_identifier(refresh_external_id),
+                        "mapping_version": "naver_product_v1",
+                        "synced_from": "naver_product_preview",
+                        "raw_response_saved": False,
+                    }
+                    db.add(Product(
+                        store_id=naver_store_id,
+                        platform="naver",
+                        external_product_id=refresh_external_id,
+                        name="Refresh Only Naver Product",
+                        status="SALE",
+                        price=Decimal("8000"),
+                        currency="KRW",
+                        stock_quantity=11,
+                        source_type="naver_real_sync",
+                        last_synced_at=fixed_preview_synced_at - timedelta(minutes=5),
+                        raw_data=refresh_raw_data,
+                    ))
                     db.commit()
                     fake_summary = sync_service._build_naver_product_fake_preview_summary(
                         db,
@@ -1748,6 +1800,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 dry_run = fake_product_data["dry_run_diff"]
                 assert dry_run["would_create"] == 1, dry_run
                 assert dry_run["would_update"] == 0, dry_run
+                assert dry_run["would_no_change"] == 0, dry_run
+                assert dry_run["would_refresh_only"] == 0, dry_run
                 assert dry_run["would_skip"] == 0, dry_run
                 assert dry_run["matched_existing_count"] == 0, dry_run
                 assert dry_run["incoming_candidate_count"] == 1, dry_run
@@ -1851,12 +1905,115 @@ def verify_sync_preview_schema_and_security() -> None:
                 update_diff = fake_update_data["dry_run_diff"]
                 assert update_diff["would_create"] == 0, update_diff
                 assert update_diff["would_update"] == 1, update_diff
+                assert update_diff["would_no_change"] == 0, update_diff
+                assert update_diff["would_refresh_only"] == 0, update_diff
                 assert update_diff["matched_existing_count"] == 1, update_diff
                 assert update_diff["incoming_candidate_count"] == 1, update_diff
                 assert update_diff["ready_for_local_sync"] is False, update_diff
+                assert update_diff["update_reasons"]["business_fields_changed"] == 1, update_diff
+                assert update_diff["no_change_reasons"]["business_fields_unchanged"] == 0, update_diff
+                assert update_diff["refresh_only_reasons"]["sync_metadata_only"] == 0, update_diff
+                assert "name" in update_diff["changed_fields"], update_diff
                 fake_update_text = str(fake_product_update.json()).lower()
                 for forbidden in ["naver-existing-001", "update-origin-must-not-leak", "must-not-leak-existing-name"]:
                     assert forbidden not in fake_update_text, fake_update_text
+
+                sync_service.get_utc_now = lambda: fixed_preview_synced_at
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "NAVER-NOCHANGE-ORIGIN-001",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-nochange-001",
+                                        "productName": "No Change Naver Product",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 7000,
+                                        "stockQuantity": 9,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_no_change = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_no_change.status_code == 200, fake_product_no_change.text
+                no_change_data = fake_product_no_change.json()["data"]
+                no_change_diff = no_change_data["dry_run_diff"]
+                assert no_change_diff["would_create"] == 0, no_change_diff
+                assert no_change_diff["would_update"] == 0, no_change_diff
+                assert no_change_diff["would_no_change"] == 1, no_change_diff
+                assert no_change_diff["would_refresh_only"] == 0, no_change_diff
+                assert no_change_diff["matched_existing_count"] == 1, no_change_diff
+                assert no_change_diff["incoming_candidate_count"] == 1, no_change_diff
+                assert no_change_diff["changed_fields"] == [], no_change_diff
+                assert no_change_diff["no_change_reasons"]["business_fields_unchanged"] == 1, no_change_diff
+                assert no_change_diff["refresh_only_reasons"]["sync_metadata_only"] == 0, no_change_diff
+                no_change_summaries = no_change_diff["diff_summary"]["candidate_summaries"]
+                assert any(
+                    item["candidate_type"] == "no_change"
+                    and item["reason"] == "business_fields_unchanged"
+                    and item["changed_fields"] == []
+                    for item in no_change_summaries
+                ), no_change_summaries
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "NAVER-REFRESH-ORIGIN-001",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-refresh-001",
+                                        "productName": "Refresh Only Naver Product",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 8000,
+                                        "stockQuantity": 11,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_refresh_only = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_refresh_only.status_code == 200, fake_product_refresh_only.text
+                refresh_only_data = fake_product_refresh_only.json()["data"]
+                refresh_only_diff = refresh_only_data["dry_run_diff"]
+                assert refresh_only_diff["would_create"] == 0, refresh_only_diff
+                assert refresh_only_diff["would_update"] == 0, refresh_only_diff
+                assert refresh_only_diff["would_no_change"] == 0, refresh_only_diff
+                assert refresh_only_diff["would_refresh_only"] == 1, refresh_only_diff
+                assert refresh_only_diff["matched_existing_count"] == 1, refresh_only_diff
+                assert refresh_only_diff["incoming_candidate_count"] == 1, refresh_only_diff
+                assert refresh_only_diff["changed_fields"] == [], refresh_only_diff
+                assert refresh_only_diff["refresh_only_reasons"]["sync_metadata_only"] == 1, refresh_only_diff
+                refresh_summaries = refresh_only_diff["diff_summary"]["candidate_summaries"]
+                assert any(
+                    item["candidate_type"] == "refresh_only"
+                    and item["reason"] == "sync_metadata_only"
+                    and "last_synced_at" in item["refresh_only_fields"]
+                    for item in refresh_summaries
+                ), refresh_summaries
+                sync_service.get_utc_now = original_sync_get_utc_now
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(200, {"contents": [], "hasMore": False})
@@ -2162,6 +2319,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert all(item.startswith("id-hash-") for item in batch_data["sample_ids"]), batch_data
                 assert batch_diff["would_create"] == 1, batch_diff
                 assert batch_diff["would_update"] == 1, batch_diff
+                assert batch_diff["would_no_change"] == 0, batch_diff
+                assert batch_diff["would_refresh_only"] == 0, batch_diff
                 assert batch_diff["would_skip"] == 3, batch_diff
                 assert batch_diff["matched_existing_count"] == 1, batch_diff
                 assert batch_diff["incoming_candidate_count"] == 2, batch_diff
@@ -2177,7 +2336,9 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert batch_diff["skip_reasons"]["missing_product_name"] == 1, batch_diff
                 assert batch_diff["skip_reasons"]["missing_optional_fields"] == 1, batch_diff
                 assert batch_diff["create_reasons"]["external_product_id_not_found_locally"] == 1, batch_diff
-                assert batch_diff["update_reasons"]["external_product_id_found_locally"] == 1, batch_diff
+                assert batch_diff["update_reasons"]["business_fields_changed"] == 1, batch_diff
+                assert batch_diff["no_change_reasons"]["business_fields_unchanged"] == 0, batch_diff
+                assert batch_diff["refresh_only_reasons"]["sync_metadata_only"] == 0, batch_diff
                 assert batch_diff["upsert_key_summary"]["match_basis"] == ["store_id", "platform=naver", "external_product_id"], batch_diff
                 assert batch_diff["upsert_key_summary"]["external_product_id_source"] == "channelProductNo|channelProductId", batch_diff
                 assert batch_diff["upsert_key_summary"]["product_name_matching_used"] is False, batch_diff
@@ -2307,6 +2468,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 rule_diff = rule_data["dry_run_diff"]
                 assert rule_diff["would_update"] == 1, rule_diff
                 assert rule_diff["would_create"] == 0, rule_diff
+                assert rule_diff["would_no_change"] == 0, rule_diff
+                assert rule_diff["would_refresh_only"] == 0, rule_diff
                 assert rule_diff["would_skip"] == 4, rule_diff
                 assert rule_diff["incoming_candidate_count"] == 1, rule_diff
                 assert rule_diff["skip_reasons"]["duplicate_external_product_id_in_same_batch"] == 1, rule_diff
@@ -2447,6 +2610,7 @@ def verify_sync_preview_schema_and_security() -> None:
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
+                sync_service.get_utc_now = original_sync_get_utc_now
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["request_params_confirmed"] = original_product_request_params_confirmed
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["minimum_request_body_confirmed"] = original_product_minimum_request_body_confirmed
                 api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.product_read"]["safe_to_real_test"] = original_product_safe_to_real_test
