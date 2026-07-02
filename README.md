@@ -358,3 +358,9 @@ The current local operational order remains `PAYED / 499000 KRW`, while the late
 The mismatched Naver readonly preview is now treated only as a possible new-order candidate, not as a refresh payload for the existing local order. See `PHASE_NAVER_ERP_10A_NEW_ORDER_CANDIDATE_CLASSIFICATION_PLAN.md`.
 
 10A defines candidate states such as `no_candidate`, `candidate_new`, `candidate_duplicate`, `candidate_ambiguous`, `candidate_blocked_privacy`, and `candidate_stale_preview`. A future new-order write can only be considered after a fresh readonly preview, safe product-order hash duplicate checks across local Naver orders, one-order limits, database backup, explicit approval, and privacy/raw-response gates. This phase does not call Naver, does not write local data, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-10B - New Order Candidate Readonly Repeat
+
+The Naver new-order candidate readonly preview was repeated through Codex1 with `real_sync=false`. See `PHASE_NAVER_ERP_10B_NEW_ORDER_CANDIDATE_READONLY_REPEAT.md`.
+
+The 3-day KST window returned HTTP 200 with `preview_status=success` and classified the candidate as `candidate_new`. The candidate status is `DELIVERED / 配送完成`, amount `330000 KRW`, product and option text are present, and local duplicate checks found zero operational or mock/test matches. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. This is not a write approval; a one-row new-order write requires a separate phase, database backup, and explicit approval.
