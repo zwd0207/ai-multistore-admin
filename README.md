@@ -340,3 +340,9 @@ This success does not approve refresh writing. The local operational Naver order
 Codex2 now requires the complete-field readonly preview identity to match the selected local operational Naver order before the refresh gate can enter manual review. See `PHASE_NAVER_ERP_9D_ORDER_REFRESH_CANDIDATE_MATCH_GATE.md`.
 
 The gate prefers safe product-order hash matching from `detail_preview`; it falls back to full product order number comparison only when both sides have comparable full values. If the identity differs or cannot be confirmed, the Orders page blocks refresh-write review. This phase does not call Naver, does not change Codex1, does not write local data, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-9E - Order Refresh Match Walkthrough
+
+The 9D identity gate has been walked through in backend-source and mock-source Orders pages. See `PHASE_NAVER_ERP_9E_ORDER_REFRESH_MATCH_WALKTHROUGH.md`.
+
+Backend mode used the existing 3-day complete-field readonly preview with `real_sync=false`. The preview succeeded, but the product-order safe hash did not match the selected local operational order, so the gate stayed `不可写库` and did not enter manual review. Mock mode demonstrated the matched path and moved to `可进入人工审核，不会自行写库`. No local counters changed, no Codex1 files changed, and formal Naver order sync remains closed.
