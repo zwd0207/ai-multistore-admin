@@ -40,6 +40,9 @@
 .business-capability-head span { flex: 0 0 auto; color: #24476f; background: #eef4fb; border: 1px solid #dbe7f4; border-radius: 999px; padding: 4px 8px; font-size: 12px; max-width: 150px; text-align: right; }
 .business-capability-card p { margin: 0; color: #405066; font-size: 13px; line-height: 1.55; }
 .business-capability-card small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.compact-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.compact-list li { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid #e7edf4; }
+.compact-list li:first-child { padding-top: 0; border-top: 0; }
 .developer-details { margin-top: 12px; color: var(--muted); font-size: 12px; }
 .developer-details summary { cursor: pointer; color: #516173; }
 .technical-details { border: 1px dashed #d8e0ec; border-radius: 8px; padding: 10px 12px; background: #fbfcfe; }

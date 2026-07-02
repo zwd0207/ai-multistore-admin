@@ -1,4 +1,5 @@
 export const NAVER_LOW_STOCK_THRESHOLD = 5;
+const MAX_ATTENTION_ITEMS = 5;
 
 function normalizePlatform(value) {
   return String(value || '').trim().toLowerCase();
@@ -33,7 +34,7 @@ export function getInventoryStatusForStock(value, threshold = NAVER_LOW_STOCK_TH
       stockLabel: '0',
     };
   }
-  if (stock <= threshold) {
+  if (stock < threshold) {
     return {
       key: 'low_stock',
       label: '低库存',
@@ -51,6 +52,26 @@ export function getInventoryStatusForStock(value, threshold = NAVER_LOW_STOCK_TH
 
 function getProductStock(product = {}) {
   return normalizeStockValue(product.stock ?? product.stock_quantity);
+}
+
+function firstText(...values) {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  return value === undefined ? '' : String(value).trim();
+}
+
+function buildInventoryItem(product = {}, status = {}, stock = null) {
+  return {
+    id: product.id,
+    name: firstText(product.name, product.product_name, '未命名商品'),
+    status: firstText(product.status, product.rawStatus, product.raw_status, '-'),
+    sourceType: firstText(product.sourceType, product.source_type),
+    stock,
+    stockLabel: status.stockLabel,
+    statusKey: status.key,
+    statusLabel: status.label,
+    tone: status.tone,
+    updatedAt: getProductUpdatedAt(product),
+  };
 }
 
 function getProductUpdatedAt(product = {}) {
@@ -90,11 +111,16 @@ export function buildNaverInventorySummary(products = [], {
   threshold = NAVER_LOW_STOCK_THRESHOLD,
 } = {}) {
   const scopedProducts = filterNaverProductsForStore(products, selectedStore, selectedStoreId);
+  const attentionItems = [];
   const summary = scopedProducts.reduce((value, product) => {
     const stock = getProductStock(product);
+    const status = getInventoryStatusForStock(stock, threshold);
+    if (status.key !== 'normal') {
+      attentionItems.push(buildInventoryItem(product, status, stock));
+    }
     if (stock === null) return { ...value, invalidStock: value.invalidStock + 1 };
     if (stock === 0) return { ...value, outOfStock: value.outOfStock + 1 };
-    if (stock <= threshold) return { ...value, lowStock: value.lowStock + 1 };
+    if (stock < threshold) return { ...value, lowStock: value.lowStock + 1 };
     return { ...value, normalStock: value.normalStock + 1 };
   }, {
     total: scopedProducts.length,
@@ -109,6 +135,10 @@ export function buildNaverInventorySummary(products = [], {
     .sort()
     .at(-1) || null;
   const attentionCount = summary.outOfStock + summary.lowStock + summary.invalidStock;
+  const outOfStockItems = attentionItems.filter((item) => item.statusKey === 'out_of_stock');
+  const lowStockItems = attentionItems.filter((item) => item.statusKey === 'low_stock');
+  const invalidStockItems = attentionItems.filter((item) => item.statusKey === 'invalid');
+  const primaryAttentionItem = outOfStockItems[0] || invalidStockItems[0] || lowStockItems[0] || null;
   const statusLabel = summary.total === 0
     ? '暂无本地商品'
     : attentionCount > 0
@@ -124,15 +154,29 @@ export function buildNaverInventorySummary(products = [], {
   const businessMessage = summary.total === 0
     ? '当前没有可用于库存提醒的 Naver 本地商品。'
     : `已只读检查 ${summary.total} 条 Naver 本地商品：缺货 ${summary.outOfStock} 条，低库存 ${summary.lowStock} 条，库存正常 ${summary.normalStock} 条。`;
+  const nextAction = attentionCount > 0
+    ? `优先处理 ${primaryAttentionItem?.name || '库存异常商品'}；当前只做提醒，不会修改 Naver 平台库存。`
+    : '当前库存提醒稳定；继续以本地商品库存做日常观察。';
 
   return {
     ...summary,
     threshold,
+    thresholdRule: `0 < stock < ${threshold}`,
     latestUpdatedAt,
     attentionCount,
+    attentionItems: attentionItems.slice(0, MAX_ATTENTION_ITEMS),
+    outOfStockItems: outOfStockItems.slice(0, MAX_ATTENTION_ITEMS),
+    lowStockItems: lowStockItems.slice(0, MAX_ATTENTION_ITEMS),
+    invalidStockItems: invalidStockItems.slice(0, MAX_ATTENTION_ITEMS),
+    primaryAttentionItem,
     statusLabel,
     tone,
     businessMessage,
+    nextAction,
+    platformWriteEnabled: false,
+    platformReadPerformed: false,
+    inventoryHistoryAvailable: false,
+    platformComparisonAvailable: false,
     rawResponseSaved: false,
     source: 'local_products_only',
   };

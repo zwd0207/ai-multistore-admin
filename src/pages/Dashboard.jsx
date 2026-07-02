@@ -107,7 +107,7 @@ function SellerTodoOverview({
     : {
       id: 'naver-inventory',
       title: '库存提醒',
-      description: `${inventorySummary.businessMessage}正式商品批量同步仍未开放。`,
+      description: `${inventorySummary.businessMessage}${inventorySummary.nextAction}正式商品批量同步仍未开放。`,
       status: inventorySummary.attentionCount > 0 ? 'warning' : 'success',
     };
   const naverFulfillmentTodo = !isNaverStore || !orderFulfillmentSummary
@@ -348,7 +348,7 @@ function NaverErpWorkbenchSection({
       statusLabel: inventorySummary ? inventorySummary.statusLabel : '读取本地商品',
       tone: inventoryAttentionCount > 0 ? 'warning' : inventorySummary?.tone || 'muted',
       reason: inventorySummary?.businessMessage || '库存提醒只基于本地 Naver 商品记录。',
-      nextAction: '低库存和缺货只做提醒，不执行平台库存写入。',
+      nextAction: inventorySummary?.nextAction || '低库存和缺货只做提醒，不执行平台库存写入。',
     },
     {
       key: 'fulfillment',
@@ -400,6 +400,12 @@ function NaverErpWorkbenchSection({
           { label: 'order_single_write_completed', value: true },
           { label: 'order_formal_batch_sync_open', value: false },
           { label: 'inventory_attention_count', value: inventoryAttentionCount },
+          { label: 'inventory_threshold_rule', value: inventorySummary?.thresholdRule || '-' },
+          { label: 'inventory_platform_read_performed', value: inventorySummary?.platformReadPerformed ?? false },
+          { label: 'inventory_platform_write_enabled', value: inventorySummary?.platformWriteEnabled ?? false },
+          { label: 'inventory_platform_comparison_available', value: inventorySummary?.platformComparisonAvailable ?? false },
+          { label: 'inventory_history_available', value: inventorySummary?.inventoryHistoryAvailable ?? false },
+          { label: 'inventory_raw_response_saved', value: inventorySummary?.rawResponseSaved ?? false },
           { label: 'order_action_needed_count', value: orderActionCount },
           { label: 'mock_sync_orders_isolated', value: orderFulfillmentSummary?.excludedMockSyncCount ?? 0 },
           { label: 'claim_request_count', value: claimRequestCount },

@@ -55,6 +55,23 @@ function renderStock(value) {
   );
 }
 
+function InventoryAttentionList({ items = [] }) {
+  if (!items.length) return null;
+  return (
+    <ul className="compact-list">
+      {items.map((item, index) => (
+        <li key={`${item.id || item.name || 'inventory'}-${index}`}>
+          <strong>{item.name}</strong>
+          <small>
+            {item.statusLabel}，当前库存 {item.stockLabel} 件
+            {item.updatedAt ? `，最近同步 ${formatKstDateTimeWithLabel(item.updatedAt)}` : ''}
+          </small>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 const columns = [
   { key: 'name', title: '商品名', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.sku || '平台商品编号已脱敏'}</small></div> },
   { key: 'store', title: '店铺' },
@@ -384,9 +401,34 @@ function NaverProductPreviewStatusPanel() {
             <span>{inventorySummary.statusLabel}</span>
           </div>
           <p>{inventorySummary.businessMessage}</p>
-          <small>
-            低库存阈值为 {inventorySummary.threshold} 件。库存数据只来自本地商品记录，不请求 Naver。
-          </small>
+          <small>{inventorySummary.nextAction}</small>
+        </article>
+        {inventorySummary.attentionItems.length ? (
+          <article className="business-capability-card warning">
+            <div className="business-capability-head">
+              <strong>需要关注的库存</strong>
+              <span>{inventorySummary.attentionCount} 条</span>
+            </div>
+            <p>以下商品来自本地 Naver 商品记录，仅用于提醒，不会修改 Naver 平台库存。</p>
+            <InventoryAttentionList items={inventorySummary.attentionItems} />
+          </article>
+        ) : (
+          <article className="business-capability-card success">
+            <div className="business-capability-head">
+              <strong>库存处理建议</strong>
+              <span>暂无紧急项</span>
+            </div>
+            <p>当前没有缺货、低库存或库存数据异常的本地 Naver 商品。</p>
+            <small>低库存规则为库存大于 0 且低于 {inventorySummary.threshold} 件。</small>
+          </article>
+        )}
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>库存安全边界</strong>
+            <span>只读提醒</span>
+          </div>
+          <p>本阶段只基于本地商品库存生成提醒，没有请求 Naver，也没有执行库存写入。</p>
+          <small>低库存规则：{inventorySummary.thresholdRule}；正式商品批量同步仍未开放。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
@@ -448,6 +490,13 @@ function NaverProductPreviewStatusPanel() {
           { label: 'inventory.normal_stock', value: inventorySummary.normalStock },
           { label: 'inventory.invalid_stock', value: inventorySummary.invalidStock },
           { label: 'inventory.low_stock_threshold', value: inventorySummary.threshold },
+          { label: 'inventory.threshold_rule', value: inventorySummary.thresholdRule },
+          { label: 'inventory.attention_count', value: inventorySummary.attentionCount },
+          { label: 'inventory.platform_read_performed', value: inventorySummary.platformReadPerformed },
+          { label: 'inventory.platform_write_enabled', value: inventorySummary.platformWriteEnabled },
+          { label: 'inventory.platform_comparison_available', value: inventorySummary.platformComparisonAvailable },
+          { label: 'inventory.history_available', value: inventorySummary.inventoryHistoryAvailable },
+          { label: 'inventory.raw_response_saved', value: inventorySummary.rawResponseSaved },
           { label: 'inventory.latest_updated_at', value: formatKstDateTimeWithLabel(inventorySummary.latestUpdatedAt) },
           { label: 'batch_sync_status', value: 'not_open' },
           ...(activeIssue

@@ -278,3 +278,9 @@ Backend-mode Naver order lists isolate `mock_sync` test rows from operational su
 Codex1 `/orders`, sales stats, and Dashboard summary now exclude local order test rows such as `mock_sync` and `local_frontend_mock` by default. The rows are retained in the database for audit/testing and can be inspected only with the explicit readonly diagnostic flag `include_test_orders=true`. See `PHASE_NAVER_ERP_5J_LOCAL_LIST_CLEANUP.md`.
 
 Codex2 preserves the backend `test_orders_excluded` metadata for technical/status display while keeping the seller-facing Orders list and Dashboard on operational-order counts. This phase does not call Naver, does not write orders, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-6A - Inventory Basic Alerts
+
+Codex2 now shows basic Naver inventory alerts from local product records only. See `PHASE_NAVER_ERP_6A_INVENTORY_BASIC_ALERTS.md`.
+
+The Products page and Dashboard classify local Naver products as out of stock, low stock, normal, or invalid stock. The low-stock rule is `0 < stock < 5`, so stock equal to 5 remains normal. This phase does not call Naver, does not compare platform inventory, does not write products or orders, and does not open formal Naver product batch sync.
