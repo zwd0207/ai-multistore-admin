@@ -1733,7 +1733,7 @@ def verify_sync_preview_schema_and_security() -> None:
                         assert url.endswith("/v1/products/search"), url
                         assert params is None, params
                         assert json is not None, json
-                        assert json.get("page") == 1, json
+                        assert json.get("page") in {1, 2}, json
                         assert json.get("size") in {1, 5}, json
                         assert set(json.keys()) == {"page", "size"}, json
                         FakeNaverProductHttpClient.calls.append({"json": dict(json or {})})
@@ -1758,11 +1758,11 @@ def verify_sync_preview_schema_and_security() -> None:
                                     ],
                                 }
                             ],
-                            "page": 1,
-                            "size": 1,
+                            "page": json["page"],
+                            "size": json["size"],
                             "totalElements": 1,
-                            "totalPages": 1,
-                            "first": True,
+                            "totalPages": 2,
+                            "first": json["page"] == 1,
                             "last": True,
                         })
 
@@ -2380,6 +2380,238 @@ def verify_sync_preview_schema_and_security() -> None:
                     "imageurl",
                 ]:
                     assert forbidden not in batch_text, batch_text
+
+                FakeNaverProductHttpClient.calls = []
+                page2_real_sync_blocked = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 2,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": True,
+                })
+                assert page2_real_sync_blocked.status_code == 400, page2_real_sync_blocked.text
+                assert page2_real_sync_blocked.json()["error_code"] == "guardrail_blocked", page2_real_sync_blocked.text
+                assert FakeNaverProductHttpClient.calls == [], FakeNaverProductHttpClient.calls
+
+                FakeNaverProductHttpClient.calls = []
+                page3_preview_blocked = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 3,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert page3_preview_blocked.status_code == 400, page3_preview_blocked.text
+                assert page3_preview_blocked.json()["error_code"] == "guardrail_blocked", page3_preview_blocked.text
+                assert FakeNaverProductHttpClient.calls == [], FakeNaverProductHttpClient.calls
+
+                FakeNaverProductHttpClient.calls = []
+                size10_preview_blocked = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 10,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert size10_preview_blocked.status_code == 400, size10_preview_blocked.text
+                assert size10_preview_blocked.json()["error_code"] == "guardrail_blocked", size10_preview_blocked.text
+                assert FakeNaverProductHttpClient.calls == [], FakeNaverProductHttpClient.calls
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "PAGE2-CREATE-ORIGIN-001-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "page2-create-001",
+                                        "productName": "must-not-leak-page2-create-name-1",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 1111,
+                                        "stockQuantity": 4,
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "PAGE2-CREATE-ORIGIN-002-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "page2-create-002",
+                                        "productName": "must-not-leak-page2-create-name-2",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2222,
+                                        "stockQuantity": 8,
+                                    }
+                                ],
+                            },
+                        ],
+                        "page": 2,
+                        "size": 5,
+                        "totalElements": 7,
+                        "totalPages": 2,
+                        "first": False,
+                        "last": True,
+                    })
+                ]
+                FakeNaverProductHttpClient.calls = []
+                fake_product_page2_success = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 2,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert fake_product_page2_success.status_code == 200, fake_product_page2_success.text
+                assert FakeNaverProductHttpClient.calls[-1]["json"] == {"page": 2, "size": 5}, FakeNaverProductHttpClient.calls
+                page2_success_data = fake_product_page2_success.json()["data"]
+                page2_success_diff = page2_success_data["dry_run_diff"]
+                assert page2_success_data["preview_status"] == "success", page2_success_data
+                assert page2_success_diff["would_create"] == 2, page2_success_diff
+                assert page2_success_diff["would_update"] == 0, page2_success_diff
+                assert page2_success_diff["would_no_change"] == 0, page2_success_diff
+                assert page2_success_diff["would_refresh_only"] == 0, page2_success_diff
+                assert page2_success_diff["would_skip"] == 0, page2_success_diff
+                assert page2_success_diff["matched_existing_count"] == 0, page2_success_diff
+                assert page2_success_diff["incoming_candidate_count"] == 2, page2_success_diff
+                assert page2_success_diff["pagination_overlap_summary"]["requested_page"] == 2, page2_success_diff
+                assert page2_success_diff["pagination_overlap_summary"]["requested_size"] == 5, page2_success_diff
+                assert page2_success_diff["pagination_overlap_summary"]["overlap_risk_detected"] is False, page2_success_diff
+                assert page2_success_diff["pagination_overlap_summary"]["recommended_action"] == "continue_readonly_review", page2_success_diff
+                page2_success_text = str(fake_product_page2_success.json()).lower()
+                for forbidden in [
+                    "page2-create-origin-001-must-not-leak",
+                    "page2-create-origin-002-must-not-leak",
+                    "must-not-leak-page2-create-name-1",
+                    "must-not-leak-page2-create-name-2",
+                ]:
+                    assert forbidden not in page2_success_text, page2_success_text
+
+                sync_service.get_utc_now = lambda: fixed_preview_synced_at
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": no_change_origin_id,
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": no_change_external_id,
+                                        "productName": "No Change Naver Product",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 7000,
+                                        "stockQuantity": 9,
+                                    }
+                                ],
+                            }
+                        ],
+                        "page": 2,
+                        "size": 5,
+                        "totalElements": 6,
+                        "totalPages": 2,
+                        "first": False,
+                        "last": True,
+                    })
+                ]
+                FakeNaverProductHttpClient.calls = []
+                fake_product_page2_overlap = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 2,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                sync_service.get_utc_now = original_sync_get_utc_now
+                assert fake_product_page2_overlap.status_code == 200, fake_product_page2_overlap.text
+                page2_overlap_data = fake_product_page2_overlap.json()["data"]
+                page2_overlap_diff = page2_overlap_data["dry_run_diff"]
+                assert page2_overlap_diff["would_create"] == 0, page2_overlap_diff
+                assert page2_overlap_diff["would_update"] == 0, page2_overlap_diff
+                assert page2_overlap_diff["would_no_change"] == 1, page2_overlap_diff
+                assert page2_overlap_diff["would_refresh_only"] == 0, page2_overlap_diff
+                assert page2_overlap_diff["matched_existing_count"] == 1, page2_overlap_diff
+                assert page2_overlap_diff["incoming_candidate_count"] == 1, page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["overlap_risk_detected"] is True, page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["overlap_review_required"] is True, page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["recommended_action"] == "stop_and_review_pagination", page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["matched_existing_candidate_types"]["would_no_change"] == 1, page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["masked_existing_match_sample_ids"], page2_overlap_diff
+                assert page2_overlap_diff["pagination_overlap_summary"]["masked_existing_match_sample_ids"][0].startswith("id-hash-"), page2_overlap_diff
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {"contents": [], "page": 2, "size": 5, "last": True})
+                ]
+                FakeNaverProductHttpClient.calls = []
+                fake_product_page2_empty = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 2,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert fake_product_page2_empty.status_code == 200, fake_product_page2_empty.text
+                page2_empty_data = fake_product_page2_empty.json()["data"]
+                assert page2_empty_data["preview_status"] == "success_empty", page2_empty_data
+                assert page2_empty_data["dry_run_diff"]["incoming_candidate_count"] == 0, page2_empty_data
+                assert page2_empty_data["dry_run_diff"]["pagination_overlap_summary"]["requested_page"] == 2, page2_empty_data
+                assert page2_empty_data["dry_run_diff"]["pagination_overlap_summary"]["overlap_risk_detected"] is False, page2_empty_data
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "PAGE2-MISSING-OPTIONAL-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "page2-missing-optional-001",
+                                        "productName": "must-not-leak-page2-missing-optional",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                    }
+                                ],
+                            }
+                        ],
+                        "page": 2,
+                        "size": 5,
+                        "totalElements": 6,
+                        "totalPages": 2,
+                        "first": False,
+                        "last": True,
+                    })
+                ]
+                FakeNaverProductHttpClient.calls = []
+                fake_product_page2_missing_optional = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 2,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert fake_product_page2_missing_optional.status_code == 200, fake_product_page2_missing_optional.text
+                page2_missing_optional_data = fake_product_page2_missing_optional.json()["data"]
+                page2_missing_optional_diff = page2_missing_optional_data["dry_run_diff"]
+                assert page2_missing_optional_diff["would_create"] == 1, page2_missing_optional_diff
+                assert page2_missing_optional_diff["missing_price_count"] == 1, page2_missing_optional_diff
+                assert page2_missing_optional_diff["missing_stock_count"] == 1, page2_missing_optional_diff
+                assert page2_missing_optional_diff["skip_reasons"]["missing_optional_fields"] == 1, page2_missing_optional_diff
+                assert "price" in page2_missing_optional_diff["missing_optional_fields"], page2_missing_optional_diff
+                assert "stock_quantity" in page2_missing_optional_diff["missing_optional_fields"], page2_missing_optional_diff
+                assert page2_missing_optional_diff["write_safety_summary"]["missing_optional_fields_block_write_approval"] is True, page2_missing_optional_diff
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(200, {
@@ -3897,17 +4129,18 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "Phase 6D-6J",
         "Phase 6D-6K",
         "Phase 6D-6M",
+        "Phase 6D-6P",
+        "Phase 6D-6R",
         "real_sync=true",
         "real_preview=true",
         "local_sync_result",
         "store_id=8",
         "credential_id=7",
         "page=1",
-        "size=1",
+        "page=2",
         "size<=5",
         "sample_ids",
         "ready_for_local_sync",
-        "at most one",
         "single-channel",
         "channelProductNo",
         "productName",
@@ -3918,7 +4151,15 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "synced_from=naver_product_preview",
         "raw_response_saved=false",
         "sync_type=naver_product_local_sync",
-        "requested_size=1",
+        "requested_size",
+        "write_limit",
+        "would_no_change",
+        "would_refresh_only",
+        "pagination_overlap_summary",
+        "stop_and_review_pagination",
+        "missing_optional_fields_block_write_approval",
+        "missing_price_count",
+        "missing_stock_count",
         "backend/codex1.db",
         "ApiCapabilityTestResult tested_success",
     ]:

@@ -1584,16 +1584,17 @@ def _ensure_naver_product_real_preview_allowed(
             },
         )
     max_size = 5
-    if page != 1 or size < 1 or size > max_size:
+    allowed_pages = (1,) if real_sync else (1, 2)
+    if page not in allowed_pages or size < 1 or size > max_size:
         raise ApiError(
             message=(
                 "Naver product local sync small-batch test only allows page=1 and size<=5"
                 if real_sync
-                else "Naver product real preview only allows page=1 and size<=5"
+                else "Naver product real preview only allows page in {1,2} and size<=5"
             ),
             error_code="guardrail_blocked",
             status_code=400,
-            detail={"page": page, "size": size},
+            detail={"page": page, "size": size, "allowed_pages": list(allowed_pages), "max_size": max_size},
         )
     if keyword or seller_product_id:
         raise ApiError(
@@ -1688,7 +1689,13 @@ def _run_naver_product_real_micro_preview(
         sample_ids = [_mask_external_identifier(item) for item in _extract_naver_product_preview_ids(payload)[:5]]
         field_observation.update(_summarize_naver_product_preview_fields(payload))
         mapping_summary = _summarize_naver_product_mapping(payload)
-        dry_run_diff = _build_naver_product_dry_run_diff(db, store_id=store_id, payload=payload)
+        dry_run_diff = _build_naver_product_dry_run_diff(
+            db,
+            store_id=store_id,
+            payload=payload,
+            page=page,
+            size=size,
+        )
         local_sync_result = _sync_naver_product_preview_candidate(
             db,
             store_id=store_id,
@@ -1935,7 +1942,14 @@ def _summarize_naver_channel_products(payload: object | None) -> dict:
     }
 
 
-def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: object | None) -> dict:
+def _build_naver_product_dry_run_diff(
+    db: Session,
+    *,
+    store_id: int,
+    payload: object | None,
+    page: int = 1,
+    size: int = 0,
+) -> dict:
     candidate_ids: list[str] = []
     valid_candidates: list[dict] = []
     candidate_summaries: list[dict] = []
@@ -2165,6 +2179,15 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
             would_skip=would_skip,
             candidate_summaries=candidate_summaries,
         ),
+        "pagination_overlap_summary": _build_naver_product_pagination_overlap_summary(
+            page=page,
+            size=size,
+            candidate_summaries=candidate_summaries,
+            matched_existing_count=len(existing_ids),
+            would_update=would_update,
+            would_no_change=would_no_change,
+            would_refresh_only=would_refresh_only,
+        ),
         "upsert_key_summary": _naver_product_upsert_key_summary(),
         "write_safety_summary": _naver_product_write_safety_summary(),
         "matched_existing_count": len(existing_ids),
@@ -2273,6 +2296,44 @@ def _build_naver_product_diff_summary(
     }
 
 
+def _build_naver_product_pagination_overlap_summary(
+    *,
+    page: int,
+    size: int,
+    candidate_summaries: list[dict],
+    matched_existing_count: int,
+    would_update: int,
+    would_no_change: int,
+    would_refresh_only: int,
+) -> dict:
+    matched_existing_summaries = [
+        item
+        for item in candidate_summaries
+        if item.get("candidate_type") in {"update", "no_change", "refresh_only"}
+    ]
+    overlap_risk_detected = page > 1 and matched_existing_count > 0
+    return {
+        "requested_page": page,
+        "requested_size": size,
+        "overlap_risk_detected": overlap_risk_detected,
+        "overlap_review_required": overlap_risk_detected,
+        "recommended_action": "stop_and_review_pagination" if overlap_risk_detected else "continue_readonly_review",
+        "matched_existing_candidate_count": matched_existing_count,
+        "matched_existing_candidate_types": {
+            "would_update": would_update,
+            "would_no_change": would_no_change,
+            "would_refresh_only": would_refresh_only,
+        },
+        "masked_existing_match_sample_ids": [
+            item["sample_id"]
+            for item in matched_existing_summaries
+            if item.get("sample_id")
+        ][:5],
+        "raw_payload_saved": False,
+        "full_external_id_returned": False,
+    }
+
+
 def _naver_product_compare_values(field: str, existing: object, incoming: object) -> bool:
     if field == "price":
         if existing is None or incoming is None:
@@ -2364,6 +2425,8 @@ def _naver_product_write_safety_summary() -> dict:
         "sync_log_written": False,
         "capability_tested_success_written": False,
         "raw_response_saved": False,
+        "missing_optional_fields_block_write_approval": True,
+        "non_first_page_match_requires_manual_review": True,
         "update_whitelist": _naver_product_update_whitelist(),
         "raw_data_whitelist": _naver_product_raw_data_whitelist(),
         "high_risk_fields_not_auto_overwritten": _naver_product_high_risk_fields(),
@@ -2415,7 +2478,7 @@ def _empty_naver_product_skip_reasons() -> dict[str, int]:
     }
 
 
-def _default_naver_product_dry_run_diff() -> dict:
+def _default_naver_product_dry_run_diff(page: int = 1, size: int = 0) -> dict:
     return {
         "would_create": 0,
         "would_update": 0,
@@ -2438,6 +2501,15 @@ def _default_naver_product_dry_run_diff() -> dict:
             would_refresh_only=0,
             would_skip=0,
             candidate_summaries=[],
+        ),
+        "pagination_overlap_summary": _build_naver_product_pagination_overlap_summary(
+            page=page,
+            size=size,
+            candidate_summaries=[],
+            matched_existing_count=0,
+            would_update=0,
+            would_no_change=0,
+            would_refresh_only=0,
         ),
         "upsert_key_summary": _naver_product_upsert_key_summary(),
         "write_safety_summary": _naver_product_write_safety_summary(),
@@ -2682,11 +2754,12 @@ def _build_naver_product_preview_result(
     local_sync_result: dict | None = None,
 ) -> dict:
     safe_mapping_summary = mapping_summary or _summarize_naver_product_mapping(None)
-    safe_dry_run_diff = dry_run_diff or _default_naver_product_dry_run_diff()
+    safe_dry_run_diff = dry_run_diff or _default_naver_product_dry_run_diff(page=page, size=size)
     safe_local_sync_result = local_sync_result or _default_naver_product_local_sync_result(False)
     semantic_notice = "Readonly preview scaffold only. No local product rows were written."
     if safe_local_sync_result.get("products_written"):
-        semantic_notice = "Naver product local sync micro test wrote one sanitized local product row."
+        written_count = int(safe_local_sync_result.get("created_count") or 0) + int(safe_local_sync_result.get("updated_count") or 0)
+        semantic_notice = f"Naver product local sync small-batch test wrote {written_count} sanitized local product rows."
     return {
         "store_id": store_id,
         "credential_id": credential_id,
