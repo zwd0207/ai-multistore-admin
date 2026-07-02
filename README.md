@@ -266,3 +266,9 @@ The selected window only changes `start_datetime` / `end_datetime` for the exist
 Codex2 Orders now keeps delivery display aligned with complete-field order status when Naver returns a clear delivery-stage order status but a missing or unknown delivery status. See `PHASE_NAVER_ERP_5H_STATUS_MAPPING_POLISH.md`.
 
 The Orders detail panel can show `配送完成` instead of an unnecessary unknown warning when the complete-field readonly preview proves the order is delivered. Dashboard remains summary-only, and formal Naver order sync remains closed.
+
+## Phase Naver-ERP-5I - Order Display Hierarchy Cleanup
+
+Codex2 now separates Naver order display levels: the Orders detail panel can show complete readonly preview fields, the Orders list shows operational order summaries, and Dashboard uses aggregate counts only. See `PHASE_NAVER_ERP_5I_DISPLAY_HIERARCHY_CLEANUP.md`.
+
+Backend-mode Naver order lists isolate `mock_sync` test rows from operational summaries. Those rows are not deleted; they are simply excluded from the main seller-facing list, Dashboard fulfillment counts, and local order amount summaries. Formal Naver order sync remains closed.

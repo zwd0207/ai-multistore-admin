@@ -7,7 +7,11 @@ import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 import { getNaverOrderPreviewStatus } from '../utils/capabilityStatusMapper';
-import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
+import {
+  buildNaverOrderFulfillmentSummary,
+  filterNaverOrdersForStore,
+  isNaverMockSyncOrder,
+} from '../utils/naverOrderFulfillment';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const api = {
@@ -22,6 +26,7 @@ const columns = [
   { key: 'orderNo', title: '订单编号', render: (value) => <strong>{value}</strong> },
   { key: 'product', title: '商品' },
   { key: 'store', title: '店铺' },
+  { key: 'sourceType', title: '数据层级', render: (value, row) => sourceTypeLabel(row) },
   { key: 'customer', title: '客户' },
   { key: 'phone', title: '联系电话' },
   { key: 'amount', title: '订单金额', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
@@ -99,18 +104,18 @@ function formatMoney(value, currency = 'KRW') {
   return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
 }
 
-function getOrderStoreId(order = {}) {
-  return order.storeId ?? order.store_id;
+function sourceTypeLabel(order = {}) {
+  if (isNaverMockSyncOrder(order)) return '测试数据';
+  const sourceType = firstText(order.sourceType, order.source_type, order.rawData?.source_type, order.raw_data?.source_type);
+  if (sourceType === 'naver_real_order_sync') return '运营订单';
+  return sourceType || '本地订单';
 }
 
-function isNaverOrderForStore(order = {}, selectedStore = {}, selectedStoreId = '') {
-  const platform = normalizePlatform(order.rawPlatform || order.platform);
-  if (platform !== 'naver') return false;
-  const orderStoreId = getOrderStoreId(order);
-  if (selectedStoreId && orderStoreId !== undefined && orderStoreId !== null) {
-    return String(orderStoreId) === String(selectedStoreId);
-  }
-  return firstText(order.store, order.store_name) === firstText(selectedStore?.name);
+function paginateRows(rows = [], page = 1, pageSize = 5) {
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safePageSize = Math.max(Number(pageSize) || 5, 1);
+  const start = (safePage - 1) * safePageSize;
+  return rows.slice(start, start + safePageSize);
 }
 
 function getCompleteOrderFields(order = {}, previewFields = {}) {
@@ -325,10 +330,13 @@ function NaverOrderPreviewStatusPanel() {
 
   if (!isNaverStore) return null;
   const status = getNaverOrderPreviewStatus();
+  const allNaverOrders = filterNaverOrdersForStore(orders, selectedStore, selectedStoreId, { includeMockSync: true });
   const fulfillmentSummary = buildNaverOrderFulfillmentSummary(orders, {
     selectedStore,
     selectedStoreId,
   });
+  const operationalOrderCount = fulfillmentSummary.total;
+  const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount;
 
   return (
     <section className="content-card naver-preview-status-panel">
@@ -343,10 +351,10 @@ function NaverOrderPreviewStatusPanel() {
         <article className="business-capability-card success">
           <div className="business-capability-head">
             <strong>本地订单</strong>
-            <span>已写入 1 条</span>
+            <span>运营订单 {operationalOrderCount} 条</span>
           </div>
-          <p>已完成 1 条 Naver 订单本地写入测试。</p>
-          <small>订单状态为已付款 / 新订单，金额 499,000 KRW。</small>
+          <p>主列表和 Dashboard 只统计运营订单，完整字段继续留在订单详情区。</p>
+          <small>当前隔离测试数据 {isolatedTestOrderCount} 条，不混入业务摘要。</small>
         </article>
         <article className={`business-capability-card ${fulfillmentSummary.tone}`}>
           <div className="business-capability-head">
@@ -390,11 +398,11 @@ function NaverOrderPreviewStatusPanel() {
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>只读复核</strong>
+            <strong>展示层级</strong>
             <span>{status.feed.statusLabel}</span>
           </div>
-          <p>{status.feed.reason}</p>
-          <small>复核没有新增写入，也没有重复创建订单。</small>
+          <p>订单详情可展示完整字段，列表和 Dashboard 保持摘要口径。</p>
+          <small>完整买家信息、地址和商品编号不进入首页大卡片。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
@@ -417,6 +425,9 @@ function NaverOrderPreviewStatusPanel() {
         description="技术状态仅供管理员排查，普通卖家页面默认不展示。"
         items={[
           { label: 'orders_store8', value: 1 },
+          { label: 'naver_orders_scoped_total', value: allNaverOrders.length },
+          { label: 'operational_orders_visible', value: operationalOrderCount },
+          { label: 'mock_sync_orders_isolated', value: isolatedTestOrderCount },
           { label: 'source_type', value: 'naver_real_order_sync' },
           { label: 'post_write_preview_status', value: 'success' },
           { label: 'local_sync_result.status', value: 'not_requested' },
@@ -424,7 +435,7 @@ function NaverOrderPreviewStatusPanel() {
           { label: 'privacy_fields_redacted', value: true },
           { label: 'address_saved', value: false },
           { label: 'fulfillment.source', value: fulfillmentSummary.source },
-          { label: 'fulfillment.total', value: fulfillmentSummary.total },
+          { label: 'fulfillment.total', value: operationalOrderCount },
           { label: 'fulfillment.new_orders', value: fulfillmentSummary.newOrders },
           { label: 'fulfillment.pending_dispatch', value: fulfillmentSummary.pendingDispatch },
           { label: 'fulfillment.in_delivery', value: fulfillmentSummary.inDelivery },
@@ -483,8 +494,10 @@ function NaverOrderCompleteDetailPanel() {
     })
       .then((orderResponse) => {
         if (cancelled) return;
-        const naverOrders = (orderResponse.data || orderResponse.items || []).filter(
-          (order) => isNaverOrderForStore(order, selectedStore, selectedStoreId),
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
         );
         setOrders(naverOrders);
         setSelectedOrderId((currentId) => (
@@ -585,7 +598,7 @@ function NaverOrderCompleteDetailPanel() {
                 key={order.id}
                 onClick={() => setSelectedOrderId(String(order.id))}
               >
-                {displayText(order.orderNo, order.external_order_id)}
+                {displayText(order.orderNo, order.external_order_id)} · {sourceTypeLabel(order)}
               </button>
             ))}
           </div>
@@ -662,11 +675,11 @@ function NaverOrderCompleteDetailPanel() {
 }
 
 export default function Orders() {
-  const { selectedStoreId, loading: storeLoading } = useStoreContext();
+  const { selectedStore, selectedStoreId, loading: storeLoading } = useStoreContext();
   const { versions } = useSyncRefresh();
   const pageApi = useMemo(() => ({
     ...api,
-    list: (params) => {
+    list: async (params = {}) => {
       if (isBackendSource && (storeLoading || !selectedStoreId)) {
         return Promise.resolve({
           data: [],
@@ -676,9 +689,30 @@ export default function Orders() {
           pageSize: params?.pageSize || 5,
         });
       }
+      const isSelectedNaverStore = normalizePlatform(params?.platform || selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+      if (isBackendSource && isSelectedNaverStore) {
+        const fullResult = await dataProvider.getOrders({
+          ...params,
+          page: 1,
+          pageSize: 100,
+        });
+        const visibleRows = filterNaverOrdersForStore(
+          fullResult.data || fullResult.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        return {
+          ...fullResult,
+          data: paginateRows(visibleRows, params.page, params.pageSize),
+          items: paginateRows(visibleRows, params.page, params.pageSize),
+          total: visibleRows.length,
+          page: params.page || 1,
+          pageSize: params.pageSize || 5,
+        };
+      }
       return dataProvider.getOrders(params);
     },
-  }), [selectedStoreId, storeLoading]);
+  }), [selectedStore, selectedStoreId, storeLoading]);
   return (
     <>
       <NaverOrderPreviewStatusPanel />

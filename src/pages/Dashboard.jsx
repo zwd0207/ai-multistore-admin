@@ -248,10 +248,10 @@ function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
         <article className="financial-card">
           <div className="financial-card-head">
             <h3>本地订单金额</h3>
-            <p>来自本地 orders 的订单金额</p>
+            <p>来自本地运营订单金额</p>
           </div>
           <strong>{formatWon(orderSalesSummary.totalOrderAmount)}</strong>
-          <small>{orderSalesSummary.totalOrders} 条 Naver 本地订单</small>
+          <small>{orderSalesSummary.totalOrders} 条 Naver 运营订单</small>
         </article>
         <article className="financial-card">
           <div className="financial-card-head">
@@ -270,7 +270,7 @@ function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
           <small>本月 {formatWon(orderSalesSummary.monthOrderAmount)}</small>
         </article>
       </div>
-      <p className="mock-sync-note">该金额来自本地订单金额汇总，不等于平台结算金额，不等于利润，也不等于账户可提取资金。取消金额和退款金额待订单字段稳定后再拆分。</p>
+      <p className="mock-sync-note">该金额来自本地运营订单金额汇总，不等于平台结算金额，不等于利润，也不等于账户可提取资金。取消金额和退款金额待订单字段稳定后再拆分。</p>
       <TechnicalDetails
         description="技术口径仅供管理员排查，主页面用业务文案展示。"
         items={[
@@ -337,7 +337,7 @@ function NaverErpWorkbenchSection({
     {
       key: 'orders',
       title: '订单管理',
-      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条本地订单` : '单条测试完成',
+      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '单条测试完成',
       tone: orderActionCount > 0 ? 'info' : 'success',
       reason: orderFulfillmentSummary?.businessMessage || 'Naver 单条订单本地写入测试已完成。',
       nextAction: '正式订单批量同步仍未开放。',
@@ -365,7 +365,7 @@ function NaverErpWorkbenchSection({
       title: '订单金额',
       statusLabel: `${formatWon(totalOrderAmount)}`,
       tone: orderSalesSummary?.totalOrders ? 'info' : 'muted',
-      reason: orderSalesSummary?.businessMessage || '当前没有可用于金额统计的 Naver 本地订单。',
+      reason: orderSalesSummary?.businessMessage || '当前没有可用于金额统计的 Naver 运营订单。',
       nextAction: '该金额只来自本地订单，不是平台结算金额、利润或账户可提取资金。',
     },
   ];
@@ -401,6 +401,7 @@ function NaverErpWorkbenchSection({
           { label: 'order_formal_batch_sync_open', value: false },
           { label: 'inventory_attention_count', value: inventoryAttentionCount },
           { label: 'order_action_needed_count', value: orderActionCount },
+          { label: 'mock_sync_orders_isolated', value: orderFulfillmentSummary?.excludedMockSyncCount ?? 0 },
           { label: 'claim_request_count', value: claimRequestCount },
           { label: 'local_order_amount', value: totalOrderAmount },
           { label: 'order_amount_scope', value: orderSalesSummary?.scope || 'local_orders_only' },
@@ -480,6 +481,7 @@ export default function Dashboard() {
   const [naverInventorySummary, setNaverInventorySummary] = useState(null);
   const [naverOrderFulfillmentSummary, setNaverOrderFulfillmentSummary] = useState(null);
   const [naverOrderSalesSummary, setNaverOrderSalesSummary] = useState(null);
+  const isSelectedNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
 
   useEffect(() => {
     if (isBackendSource && storeLoading) return;
@@ -620,19 +622,43 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.orders]);
 
+  const sellerDisplaySummary = useMemo(() => {
+    if (!summary) return null;
+    if (!isSelectedNaverStore || !naverOrderSalesSummary) return summary;
+    return {
+      ...summary,
+      todayOrderCount: naverOrderSalesSummary.todayOrders,
+      todaySalesAmount: naverOrderSalesSummary.todayOrderAmount,
+      scopeOrderCount: naverOrderSalesSummary.totalOrders,
+      scopeSalesAmount: naverOrderSalesSummary.totalOrderAmount,
+      financialSummary: {
+        ...summary.financialSummary,
+        orderSalesSummary: {
+          ...summary.financialSummary?.orderSalesSummary,
+          scope: naverOrderSalesSummary.scope,
+          totalOrders: naverOrderSalesSummary.totalOrders,
+          totalOrderSalesAmount: naverOrderSalesSummary.totalOrderAmount,
+          latestOrderedAt: naverOrderSalesSummary.latestOrderedAt,
+        },
+      },
+    };
+  }, [isSelectedNaverStore, naverOrderSalesSummary, summary]);
+
   const stats = useMemo(() => {
-    if (!summary) return [];
+    if (!sellerDisplaySummary) return [];
+    const orderDetail = isSelectedNaverStore ? 'Naver 运营订单' : '当前范围内订单';
+    const amountDetail = isSelectedNaverStore ? '来自运营订单金额' : '来自订单金额';
     return [
-      { label: '店铺数量', value: summary.storeTotal, detail: '已接入店铺', tone: 'info' },
-      { label: '本地商品', value: summary.productTotal, detail: '当前店铺商品记录', tone: 'info' },
-      { label: '订单数', value: summary.scopeOrderCount ?? summary.todayOrderCount, detail: '当前范围内订单', tone: 'positive' },
-      { label: '订单金额', value: formatWon(summary.scopeSalesAmount ?? summary.todaySalesAmount), detail: '来自订单金额', tone: 'positive' },
-      { label: '待回复客服', value: summary.pendingCustomers, detail: '客户咨询', tone: summary.pendingCustomers > 0 ? 'warning' : 'positive' },
-      { label: '申诉事项', value: summary.pendingAppeals, detail: '需要补充资料或跟进', tone: summary.pendingAppeals > 0 ? 'danger' : 'positive' },
-      { label: '设备风险', value: summary.riskEnvironments, detail: '账号或登录环境', tone: summary.riskEnvironments > 0 ? 'danger' : 'positive' },
-      { label: '重要邮件', value: summary.unreadImportantEmails, detail: '平台通知', tone: summary.unreadImportantEmails > 0 ? 'warning' : 'positive' },
+      { label: '店铺数量', value: sellerDisplaySummary.storeTotal, detail: '已接入店铺', tone: 'info' },
+      { label: '本地商品', value: sellerDisplaySummary.productTotal, detail: '当前店铺商品记录', tone: 'info' },
+      { label: '订单数', value: sellerDisplaySummary.scopeOrderCount ?? sellerDisplaySummary.todayOrderCount, detail: orderDetail, tone: 'positive' },
+      { label: '订单金额', value: formatWon(sellerDisplaySummary.scopeSalesAmount ?? sellerDisplaySummary.todaySalesAmount), detail: amountDetail, tone: 'positive' },
+      { label: '待回复客服', value: sellerDisplaySummary.pendingCustomers, detail: '客户咨询', tone: sellerDisplaySummary.pendingCustomers > 0 ? 'warning' : 'positive' },
+      { label: '申诉事项', value: sellerDisplaySummary.pendingAppeals, detail: '需要补充资料或跟进', tone: sellerDisplaySummary.pendingAppeals > 0 ? 'danger' : 'positive' },
+      { label: '设备风险', value: sellerDisplaySummary.riskEnvironments, detail: '账号或登录环境', tone: sellerDisplaySummary.riskEnvironments > 0 ? 'danger' : 'positive' },
+      { label: '重要邮件', value: sellerDisplaySummary.unreadImportantEmails, detail: '平台通知', tone: sellerDisplaySummary.unreadImportantEmails > 0 ? 'warning' : 'positive' },
     ];
-  }, [summary]);
+  }, [isSelectedNaverStore, sellerDisplaySummary]);
 
   if (error) {
     return (
@@ -677,7 +703,7 @@ export default function Dashboard() {
 
       <section className="panel-grid">
         <SellerTodoOverview
-          summary={summary}
+          summary={sellerDisplaySummary}
           todos={todos}
           selectedStore={selectedStore}
           capabilities={platformStatusData.capabilities}
@@ -693,7 +719,7 @@ export default function Dashboard() {
         capabilities={platformStatusData.capabilities}
         results={platformStatusData.results}
         readiness={platformStatusData.readiness}
-        financialSummary={summary.financialSummary}
+        financialSummary={sellerDisplaySummary.financialSummary}
       />
 
       <NaverOrderSalesSummarySection
@@ -701,7 +727,7 @@ export default function Dashboard() {
         orderSalesSummary={naverOrderSalesSummary}
       />
 
-      <FinancialSummarySection financialSummary={summary.financialSummary} />
+      <FinancialSummarySection financialSummary={sellerDisplaySummary.financialSummary} />
 
       <section className="panel-grid">
         <article className="content-card">

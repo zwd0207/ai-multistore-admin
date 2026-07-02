@@ -71,7 +71,7 @@ export function buildNaverOrderSalesSummary(orders = [], {
     profitAvailable: false,
     withdrawableBalanceAvailable: false,
     businessMessage: scopedOrders.length
-      ? `当前本地 Naver 订单 ${scopedOrders.length} 条，订单金额合计 ${totalOrderAmount.toLocaleString()} KRW。`
-      : '当前没有可用于金额统计的 Naver 本地订单。',
+      ? `当前本地 Naver 运营订单 ${scopedOrders.length} 条，订单金额合计 ${totalOrderAmount.toLocaleString()} KRW。`
+      : '当前没有可用于金额统计的 Naver 运营订单。',
   };
 }

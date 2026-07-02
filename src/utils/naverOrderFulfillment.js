@@ -87,6 +87,24 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function sourceTypeOf(order = {}) {
+  return normalizeText(
+    order.sourceType
+      || order.source_type
+      || order.rawData?.source_type
+      || order.raw_data?.source_type,
+  ).toLowerCase();
+}
+
+export function isNaverMockSyncOrder(order = {}) {
+  const sourceType = sourceTypeOf(order);
+  return sourceType === 'mock_sync' || sourceType === 'local_frontend_mock';
+}
+
+export function isNaverOperationalOrder(order = {}) {
+  return !isNaverMockSyncOrder(order);
+}
+
 export function normalizeNaverOrderStatus(value) {
   const rawValue = normalizeText(value);
   if (!rawValue) return 'UNKNOWN';
@@ -124,9 +142,13 @@ function isSelectedStoreOrder(order = {}, selectedStore = {}, selectedStoreId = 
   return true;
 }
 
-export function filterNaverOrdersForStore(orders = [], selectedStore = {}, selectedStoreId = '') {
+export function filterNaverOrdersForStore(orders = [], selectedStore = {}, selectedStoreId = '', {
+  includeMockSync = false,
+} = {}) {
   return orders.filter((order) => (
-    isNaverOrder(order) && isSelectedStoreOrder(order, selectedStore, selectedStoreId)
+    isNaverOrder(order)
+    && isSelectedStoreOrder(order, selectedStore, selectedStoreId)
+    && (includeMockSync || isNaverOperationalOrder(order))
   ));
 }
 
@@ -154,7 +176,9 @@ export function buildNaverOrderFulfillmentSummary(orders = [], {
   selectedStore = {},
   selectedStoreId = '',
 } = {}) {
-  const scopedOrders = filterNaverOrdersForStore(orders, selectedStore, selectedStoreId);
+  const allScopedOrders = filterNaverOrdersForStore(orders, selectedStore, selectedStoreId, { includeMockSync: true });
+  const scopedOrders = allScopedOrders.filter(isNaverOperationalOrder);
+  const excludedMockSyncCount = allScopedOrders.length - scopedOrders.length;
   const counts = scopedOrders.reduce((value, order) => {
     const presentation = getNaverOrderStatusPresentation(rawStatusOf(order));
     return {
@@ -178,10 +202,11 @@ export function buildNaverOrderFulfillmentSummary(orders = [], {
       : 'success';
   const businessMessage = counts.total === 0
     ? '当前没有可用于履约 / 售后分类的 Naver 本地订单。'
-    : `已只读检查 ${counts.total} 条 Naver 本地订单：新订单 ${counts.newOrders} 条，待发货 ${counts.pendingDispatch} 条，售后请求 ${claimRequestCount} 条，异常订单 ${counts.unknown} 条。`;
+    : `已只读检查 ${counts.total} 条 Naver 运营订单：新订单 ${counts.newOrders} 条，待发货 ${counts.pendingDispatch} 条，售后请求 ${claimRequestCount} 条，异常订单 ${counts.unknown} 条。`;
 
   return {
     ...counts,
+    excludedMockSyncCount,
     claimRequestCount,
     actionNeededCount,
     statusLabel,
