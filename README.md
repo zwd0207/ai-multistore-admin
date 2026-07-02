@@ -254,3 +254,9 @@ This phase still does not call Naver, does not write Codex1 data, does not chang
 Codex2 Orders now has a manual `读取完整字段只读预览` action backed by Codex1 `POST /api/v1/sync/orders/naver/preview` with `complete_field_preview=true`, `include_detail=true`, and `real_sync=false`. See `PHASE_NAVER_ERP_5E_COMPLETE_FIELD_PREVIEW_INTEGRATION.md`.
 
 The Orders page does not auto-run this preview on load. Local sanitized order data remains visible first; complete order number, product order number, product id, buyer/receiver names, phones, and address are displayed only in the Orders detail panel after an explicit readonly preview. The phase does not write orders, does not modify Codex1, does not change schema, does not save raw response data, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-5G - Controlled Complete Field Preview Window
+
+Codex2 Orders now lets an operator choose a bounded readonly preview window before clicking `读取完整字段只读预览`: `最近 24 小时`, `最近 3 天`, or `最近 7 天`. See `PHASE_NAVER_ERP_5G_CONTROLLED_PREVIEW_WINDOW.md`.
+
+The selected window only changes `start_datetime` / `end_datetime` for the existing Codex1 preview call. The request remains `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `include_detail=true`, `complete_field_preview=true`, and `real_sync=false`. The page still does not auto-run Naver requests, does not write orders, does not save raw response data, and does not open formal Naver order sync.

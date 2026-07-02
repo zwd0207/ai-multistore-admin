@@ -38,6 +38,16 @@ const fields = [
   { key: 'createdAt', label: '下单时间', required: true, placeholder: '2026-06-29 15:00' },
 ];
 
+const naverCompletePreviewWindows = [
+  { value: '24h', label: '最近 24 小时' },
+  { value: '3d', label: '最近 3 天' },
+  { value: '7d', label: '最近 7 天' },
+];
+
+function getNaverCompletePreviewWindowLabel(value) {
+  return naverCompletePreviewWindows.find((item) => item.value === value)?.label || '最近 24 小时';
+}
+
 function normalizePlatform(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -423,6 +433,7 @@ function NaverOrderCompleteDetailPanel() {
   const [previewResult, setPreviewResult] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  const [previewWindow, setPreviewWindow] = useState('24h');
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
 
   useEffect(() => {
@@ -473,6 +484,7 @@ function NaverOrderCompleteDetailPanel() {
   const fields = activeOrder ? getCompleteOrderFields(activeOrder, previewFields) : null;
   const completeFieldReady = Boolean(activeOrder && fields?.orderNo !== '待接入' && fields?.buyerName !== '待接入');
   const previewAllowed = !isBackendSource || String(selectedStoreId) === '8';
+  const previewWindowLabel = getNaverCompletePreviewWindowLabel(previewWindow);
 
   const runCompleteFieldPreview = async () => {
     if (previewLoading || !activeOrder || !previewAllowed) return;
@@ -483,10 +495,11 @@ function NaverOrderCompleteDetailPanel() {
       const result = await dataProvider.previewNaverOrderCompleteFields({
         storeId: selectedStoreId,
         credentialId: 7,
+        previewWindow,
       });
       setPreviewResult(result);
       if (!result.available) {
-        setPreviewError(result.businessMessage || '当前窗口没有可展示的 Naver 订单完整字段。');
+        setPreviewError(result.businessMessage || `当前选择的${previewWindowLabel}窗口没有可展示的 Naver 订单完整字段。`);
       }
     } catch (error) {
       setPreviewError(formatError(error));
@@ -505,6 +518,14 @@ function NaverOrderCompleteDetailPanel() {
         <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
       <div className="sync-action-row">
+        <label className="form-field preview-window-field">
+          <span>预览窗口</span>
+          <select value={previewWindow} disabled={previewLoading} onChange={(event) => setPreviewWindow(event.target.value)}>
+            {naverCompletePreviewWindows.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
         <button
           className="button primary"
           onClick={runCompleteFieldPreview}
@@ -514,7 +535,7 @@ function NaverOrderCompleteDetailPanel() {
         </button>
         <span className="mock-sync-note">
           {previewAllowed
-            ? '手动读取 Codex1 只读 preview，不写 orders，不开放正式订单同步。'
+            ? `手动读取 Codex1 只读 preview，当前窗口：${previewWindowLabel}；不写 orders，不开放正式订单同步。`
             : '当前完整字段只读预览仅限 pxg球包店 store_id=8。'}
         </span>
       </div>
@@ -522,7 +543,7 @@ function NaverOrderCompleteDetailPanel() {
         <div className="mock-sync-error">{loadError}</div>
       ) : null}
       {previewResult?.available ? (
-        <div className="mock-sync-success">已读取完整字段只读预览，页面仅展示结果，不写库。</div>
+        <div className="mock-sync-success">已读取{previewResult.previewWindowLabel || previewWindowLabel}完整字段只读预览，页面仅展示结果，不写库。</div>
       ) : null}
       {previewError ? (
         <div className="mock-sync-error">{previewError}</div>
@@ -584,13 +605,17 @@ function NaverOrderCompleteDetailPanel() {
               </div>
             </section>
           </div>
-          <p className="mock-sync-note">页面不会自动请求 Naver；只有点击完整字段只读预览时才通过 Codex1 做受控读取。该操作不写 orders，不保存原始响应，不开放正式订单同步。</p>
+          <p className="mock-sync-note">页面不会自动请求 Naver；只有点击完整字段只读预览时才通过 Codex1 做受控读取。该操作最多使用最近 7 天窗口，不写 orders，不保存原始响应，不开放正式订单同步。</p>
           <TechnicalDetails
             description="仅保留字段可用性和口径，不展示平台原始响应。"
             items={[
               { label: 'complete_field_view', value: completeFieldReady },
               { label: 'complete_field_preview_requested', value: Boolean(previewResult?.requested) },
               { label: 'complete_field_preview_available', value: Boolean(previewResult?.available) },
+              { label: 'preview_window', value: previewResult?.previewWindow || previewWindow },
+              { label: 'window_hours', value: previewResult?.windowHours },
+              { label: 'start_datetime', value: previewResult?.startDateTime },
+              { label: 'end_datetime', value: previewResult?.endDateTime },
               { label: 'preview_status', value: previewResult?.previewStatus },
               { label: 'feed_called', value: previewResult?.feedCalled },
               { label: 'detail_called', value: previewResult?.detailCalled },

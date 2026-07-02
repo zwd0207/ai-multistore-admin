@@ -73,23 +73,47 @@ function mockSyncResult(type, payload = {}) {
   };
 }
 
+const NAVER_ORDER_PREVIEW_WINDOWS = {
+  '24h': { key: '24h', label: '最近 24 小时', hours: 24 },
+  '3d': { key: '3d', label: '最近 3 天', hours: 72 },
+  '7d': { key: '7d', label: '最近 7 天', hours: 168 },
+};
+
+function getNaverOrderPreviewWindow(value = '24h') {
+  return NAVER_ORDER_PREVIEW_WINDOWS[value] || NAVER_ORDER_PREVIEW_WINDOWS['24h'];
+}
+
 function naverOrderPreviewDateTime(hoursOffset = 0) {
   const timestamp = Date.now() + Number(hoursOffset || 0) * 60 * 60 * 1000;
   const kst = new Date(timestamp + 9 * 60 * 60 * 1000);
   return `${kst.toISOString().slice(0, 19)}+09:00`;
 }
 
+function withNaverOrderPreviewWindowMetadata(result, windowConfig, startDateTime, endDateTime) {
+  return {
+    ...result,
+    previewWindow: windowConfig.key,
+    previewWindowLabel: windowConfig.label,
+    windowHours: windowConfig.hours,
+    startDateTime,
+    endDateTime,
+  };
+}
+
 async function mockNaverOrderCompletePreview(payload = {}) {
+  const windowConfig = getNaverOrderPreviewWindow(payload.previewWindow || payload.windowKey);
+  const startDateTime = payload.startDateTime || naverOrderPreviewDateTime(-windowConfig.hours);
+  const endDateTime = payload.endDateTime || naverOrderPreviewDateTime(0);
   const result = await mockApi.getOrders({ storeId: payload.storeId, platform: 'naver', page: 1, pageSize: 1 });
   const order = (result.data || result.items || [])[0] || {};
-  return adapters.naverOrderCompletePreview({
+  return withNaverOrderPreviewWindowMetadata(adapters.naverOrderCompletePreview({
     store_id: payload.storeId,
     credential_id: payload.credentialId || 7,
     platform: 'naver',
     preview_status: order.id ? 'success' : 'success_empty',
     business_message: order.id
-      ? 'mock 模式展示 Naver 订单完整字段预览，不请求平台。'
-      : 'mock 模式当前没有可展示的 Naver 订单。',
+      ? `mock 模式展示 ${windowConfig.label} Naver 订单完整字段预览，不请求平台。`
+      : `mock 模式${windowConfig.label}没有可展示的 Naver 订单。`,
     field_observation: {
       feed_called: false,
       detail_called: Boolean(order.id),
@@ -149,7 +173,7 @@ async function mockNaverOrderCompletePreview(payload = {}) {
         raw_response_saved: false,
       },
     },
-  });
+  }), windowConfig, startDateTime, endDateTime);
 }
 
 function withMockFinancialSummary(summary = {}) {
@@ -415,11 +439,14 @@ const sourceMethods = {
   previewNaverOrderCompleteFields: async (payload = {}) => {
     if (!isBackendSource) return mockNaverOrderCompletePreview(payload);
     const { store } = await resolveBackendStore(payload);
-    return adapters.naverOrderCompletePreview(await backendApi.previewNaverOrders({
+    const windowConfig = getNaverOrderPreviewWindow(payload.previewWindow || payload.windowKey);
+    const startDateTime = payload.startDateTime || naverOrderPreviewDateTime(-windowConfig.hours);
+    const endDateTime = payload.endDateTime || naverOrderPreviewDateTime(0);
+    return withNaverOrderPreviewWindowMetadata(adapters.naverOrderCompletePreview(await backendApi.previewNaverOrders({
       store_id: Number(store.id),
       credential_id: Number(payload.credentialId || payload.credential_id || 7),
-      start_datetime: payload.startDateTime || naverOrderPreviewDateTime(-24),
-      end_datetime: payload.endDateTime || naverOrderPreviewDateTime(0),
+      start_datetime: startDateTime,
+      end_datetime: endDateTime,
       order_status: 'ALL',
       page: 1,
       size: 1,
@@ -427,7 +454,7 @@ const sourceMethods = {
       include_detail: true,
       complete_field_preview: true,
       real_sync: false,
-    }));
+    })), windowConfig, startDateTime, endDateTime);
   },
   getCustomerInquiries: async (params) => {
     if (!isBackendSource) return mockApi.getCustomerTickets(params);

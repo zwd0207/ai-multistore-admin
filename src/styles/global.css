@@ -77,6 +77,8 @@ tbody tr:hover { background: #fafbff; }
 .sync-control-grid input, .sync-control-grid select { min-height: 38px; border: 1px solid #dce1ea; background: white; border-radius: 7px; padding: 9px 11px; color: #344054; }
 .product-sync-control-grid { grid-template-columns: repeat(2, minmax(160px, 220px)) auto; justify-content: start; }
 .sync-action-row { display: flex; gap: 8px; align-items: center; }
+.sync-action-row .preview-window-field { min-width: 140px; margin: 0; }
+.sync-action-row .preview-window-field span { color: var(--muted); font-size: 12px; }
 .sync-inline-warning { color: #8a5a00; font-size: 12px; }
 .coupang-sync-result { display: grid; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; }
 .sync-result-banner { color: #176a3a; font-size: 13px; font-weight: 700; }
