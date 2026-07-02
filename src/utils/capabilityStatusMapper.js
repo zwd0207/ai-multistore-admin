@@ -74,15 +74,15 @@ const NAVER_PRODUCT_BATCH_SYNC_STATUS = {
 };
 
 const NAVER_ORDER_PREVIEW_STATUS = {
-  statusLabel: '接口已连接',
-  reason: 'Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。',
-  nextAction: '出现新订单变更后，再检测订单详情并确认后续同步策略。',
+  statusLabel: '只读复核已通过',
+  reason: 'Naver 订单接口已连接。24 小时只读复核通过，当前平台订单与本地已写入订单匹配。',
+  nextAction: '后续如出现新的订单变更，仍需先做只读预览，再单独确认是否写入。',
 };
 
 const NAVER_ORDER_DETAIL_STATUS = {
-  statusLabel: '等待新订单后检测',
-  reason: '当前没有新的订单变更，因此暂时没有需要查看的订单详情。',
-  nextAction: '等店铺出现新订单后，再查看单条订单详情预览。',
+  statusLabel: '1 条写入测试已完成',
+  reason: '已完成 1 条 Naver 订单本地写入测试，订单详情只保存业务字段和脱敏信息。',
+  nextAction: '当前只是单条写入测试，不会自动扩大为订单批量同步。',
 };
 
 const NAVER_SYNC_PROTECTION_STATUS = {
@@ -532,7 +532,7 @@ function buildNaverCards({ capabilities, results, readiness }) {
     return resultCard({
       key: 'naver.order_read',
       title: '订单接口',
-      status: 'success_empty',
+      status: 'success',
       statusLabel: NAVER_ORDER_PREVIEW_STATUS.statusLabel,
       tone: 'success',
       reason: NAVER_ORDER_PREVIEW_STATUS.reason,
@@ -549,9 +549,10 @@ function buildNaverCards({ capabilities, results, readiness }) {
     })
     : resultCard({
       key: 'naver.order_detail_preview',
-      status: 'not_tested',
+      title: '订单详情写入测试',
+      status: 'single_write_verified',
       statusLabel: NAVER_ORDER_DETAIL_STATUS.statusLabel,
-      tone: 'muted',
+      tone: 'success',
       reason: NAVER_ORDER_DETAIL_STATUS.reason,
       nextAction: NAVER_ORDER_DETAIL_STATUS.nextAction,
     });

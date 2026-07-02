@@ -14,6 +14,7 @@ import {
   buildPlatformBusinessStatus,
   buildTechnicalItemsFromCards,
   businessCapabilityTitle,
+  getNaverOrderPreviewStatus,
   getNaverProductPreviewStatus,
 } from '../utils/capabilityStatusMapper';
 import {
@@ -71,6 +72,7 @@ function SellerTodoOverview({
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
+  const naverOrderStatus = isNaverStore ? getNaverOrderPreviewStatus({ capabilities, results }) : null;
   const naverConnectionTodo = !isNaverStore || !naverProductStatus?.activeIssue
     ? null
     : {
@@ -87,7 +89,15 @@ function SellerTodoOverview({
       description: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
       status: 'success',
     };
-  const naverStatusTodos = [naverConnectionTodo, naverProductTodo].filter(Boolean);
+  const naverOrderTodo = !isNaverStore
+    ? null
+    : {
+      id: 'naver-orders',
+      title: '订单单条写入测试',
+      description: `${naverOrderStatus?.detail.reason || 'Naver 已完成 1 条订单本地写入测试。'}正式订单批量同步仍未开放。`,
+      status: 'success',
+    };
+  const naverStatusTodos = [naverConnectionTodo, naverProductTodo, naverOrderTodo].filter(Boolean);
   const priorityItems = [
     {
       id: 'orders',

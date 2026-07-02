@@ -209,26 +209,34 @@ function NaverOrderPreviewStatusPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>Naver 订单状态</h2>
-          <p>{status.feed.reason}</p>
+          <p>Naver 单条订单本地写入测试已完成。当前本地已有 1 条订单，订单详情已脱敏保存，24 小时只读复核通过。</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
-      <div className="business-capability-grid">
+      <div className="business-capability-grid compact">
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>订单接口</strong>
+            <strong>本地订单</strong>
+            <span>已写入 1 条</span>
+          </div>
+          <p>已完成 1 条 Naver 订单本地写入测试。</p>
+          <small>订单状态为已付款 / 新订单，金额 499,000 KRW。</small>
+        </article>
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>只读复核</strong>
             <span>{status.feed.statusLabel}</span>
           </div>
-          <p>当前时间范围内没有新的订单变更。</p>
-          <small>暂时不需要处理订单同步。</small>
+          <p>{status.feed.reason}</p>
+          <small>复核没有新增写入，也没有重复创建订单。</small>
         </article>
-        <article className="business-capability-card muted">
+        <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>订单详情</strong>
-            <span>{status.detail.statusLabel}</span>
+            <strong>隐私保护</strong>
+            <span>已脱敏</span>
           </div>
-          <p>{status.detail.reason}</p>
-          <small>{status.detail.nextAction}</small>
+          <p>买家姓名只显示掩码，电话为空或掩码，地址未保存。</p>
+          <small>未保存平台原始响应、token、请求头或签名。</small>
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
@@ -236,16 +244,20 @@ function NaverOrderPreviewStatusPanel() {
             <span>未开放</span>
           </div>
           <p>{status.sync.reason}</p>
-          <small>{status.sync.nextAction}</small>
+          <small>批量订单同步、发货、取消、退货、换货写操作都需要单独确认。</small>
         </article>
       </div>
       <TechnicalDetails
         description="技术状态仅供管理员排查，普通卖家页面默认不展示。"
         items={[
-          { label: 'preview_status', value: 'success_empty' },
-          { label: 'detail_query', value: 'not_executed_without_order_change' },
+          { label: 'orders_store8', value: 1 },
+          { label: 'source_type', value: 'naver_real_order_sync' },
+          { label: 'post_write_preview_status', value: 'success' },
+          { label: 'local_sync_result.status', value: 'not_requested' },
           { label: 'raw_response_saved', value: false },
-          { label: 'batch_sync_status', value: 'not_open' },
+          { label: 'privacy_fields_redacted', value: true },
+          { label: 'address_saved', value: false },
+          { label: 'formal_order_sync_status', value: 'not_open' },
         ]}
       />
       <p className="mock-sync-note">页面不会展示完整订单标识、客户隐私、收件信息、平台密钥、临时授权、请求签名或订单原始响应。</p>

@@ -271,22 +271,48 @@ export function adaptProduct(item = {}) {
 }
 
 export function adaptOrder(item = {}) {
+  const rawPlatform = normalizePlatform(item.platform);
+  const rawData = item.raw_data || {};
+  const naverStatusLabel = rawData.order_status_label_zh || rawData?.order_status?.label_zh;
+  const isNaver = rawPlatform === 'naver';
+  const isHashOrderId = /^id-hash-[a-z0-9_-]+$/i.test(String(item.external_order_id || ''));
+  const displayOrderNo = isNaver && isHashOrderId ? '订单编号已脱敏' : item.external_order_id;
+  const displayCustomer = isNaver ? (item.buyer_name || '买家信息已脱敏') : item.buyer_name;
+  const displayPhone = isNaver && !item.buyer_masked_phone ? '未保存' : emptyText(item.buyer_masked_phone);
+  const statusLabel = isNaver && naverStatusLabel
+    ? naverStatusLabel
+    : adaptStatus(item.order_status, {
+      paid: '待发货',
+      payed: '已付款 / 新订单',
+      shipped: '배송중',
+      completed: '구매확정',
+      cancelled: '取消退款',
+      canceled: '取消退款',
+    });
   return {
     id: item.id,
     storeId: item.store_id,
     platform: adaptPlatform(item.platform),
-    orderNo: item.external_order_id,
+    rawPlatform,
+    orderNo: displayOrderNo,
+    orderHash: isNaver && isHashOrderId ? item.external_order_id : null,
     product: item.product_name,
     productName: item.product_name,
-    customer: item.buyer_name,
-    customerName: item.buyer_name,
+    customer: displayCustomer,
+    customerName: displayCustomer,
     maskedPhone: item.buyer_masked_phone,
-    phone: emptyText(item.buyer_masked_phone),
+    phone: displayPhone,
     quantity: item.quantity,
     amount: numberValue(item.order_amount),
     currency: item.currency,
     rawStatus: item.order_status,
-    status: adaptStatus(item.order_status, { paid: '待发货', shipped: '배송중', completed: '구매확정', cancelled: '取消退款', canceled: '取消退款' }),
+    status: statusLabel,
+    sourceType: item.source_type,
+    rawResponseSaved: rawData.raw_response_saved,
+    privacyFieldsRedacted: rawData.privacy_fields_redacted,
+    addressSaved: rawData.address_saved,
+    addressObserved: rawData.address_observed,
+    mappingVersion: rawData.mapping_version,
     store: item.store_name || `店铺 #${item.store_id}`,
     paidAt: item.paid_at,
     createdAt: item.ordered_at,
