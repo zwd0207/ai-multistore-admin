@@ -326,3 +326,11 @@ This phase is a planning and display gate only. It does not add a write button, 
 The Naver order refresh write gate has been verified in both backend-source and mock-source Orders pages. See `PHASE_NAVER_ERP_9B_ORDER_REFRESH_GATE_MOCK_VERIFICATION.md`.
 
 Backend mode shows the gate as `待只读预览` without white screen or console errors. Mock mode can move the gate to `可进入人工审核，不会自行写库` after the existing mock complete-field readonly preview, while still showing that orders, SyncLog, tested_success, and platform write operations remain closed. This phase does not call Naver, does not write local data, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-9C - Controlled Order Readonly Preview Repeat
+
+The controlled Naver order complete-field readonly preview was repeated through Codex1 with `real_sync=false`. See `PHASE_NAVER_ERP_9C_CONTROLLED_ORDER_READONLY_PREVIEW_REPEAT.md`.
+
+The 3-day KST window returned HTTP 200 with `preview_status=success`, feed and detail both called, and complete-field preview available. The observed readonly detail status was `DELIVERED / 配送完成` with amount `330000 KRW`. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`.
+
+This success does not approve refresh writing. The local operational Naver order currently remains `PAYED` with amount `499000 KRW`, so the next gate must prove that the previewed product-order identity matches the selected local operational order before any future one-row refresh write is considered.
