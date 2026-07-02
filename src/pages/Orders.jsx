@@ -69,6 +69,32 @@ function displayText(...values) {
   return firstText(...values) || '待接入';
 }
 
+function getDeliveryDisplayText(complete = {}, order = {}) {
+  const directLabel = displayText(
+    complete.deliveryStatusLabelZh,
+    complete.delivery_status_label_zh,
+    complete.deliveryStatus,
+    complete.delivery_status,
+    order.deliveryStatusLabelZh,
+    order.delivery_status_label_zh,
+    order.deliveryStatus,
+    order.delivery_status,
+  );
+  if (directLabel && directLabel !== '待接入' && directLabel !== '未识别状态，需人工确认') {
+    return directLabel;
+  }
+  const orderLabel = displayText(
+    complete.orderStatusLabelZh,
+    complete.order_status_label_zh,
+    order.status,
+    order.order_status,
+  );
+  if (['待发货', '待发货 / 已确认订单', '已确认订单', '已发货 / 配送中', '配送完成'].includes(orderLabel)) {
+    return orderLabel;
+  }
+  return directLabel;
+}
+
 function formatMoney(value, currency = 'KRW') {
   return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
 }
@@ -100,7 +126,7 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
     amount: formatMoney(complete.orderAmount ?? complete.order_amount ?? order.amount ?? order.order_amount, complete.currency || order.currency),
     orderStatus: displayText(complete.orderStatusLabelZh, complete.order_status_label_zh, complete.orderStatus, complete.order_status, order.status, order.order_status),
     paymentStatus: displayText(complete.paymentStatus, complete.payment_status, order.paymentStatus, order.payment_status),
-    deliveryStatus: displayText(complete.deliveryStatusLabelZh, complete.delivery_status_label_zh, complete.deliveryStatus, complete.delivery_status, order.deliveryStatusLabelZh, order.delivery_status_label_zh, order.deliveryStatus, order.delivery_status),
+    deliveryStatus: getDeliveryDisplayText(complete, order),
     claimStatus: displayText(complete.claimStatusLabelZh, complete.claim_status_label_zh, complete.claimStatus, complete.claim_status, order.claimStatusLabelZh, order.claim_status_label_zh, order.claimStatus, order.claim_status),
     buyerName: displayText(complete.buyerName, complete.buyer_name, order.buyerName, order.buyer_name, order.customerName, order.customer),
     buyerPhone: displayText(complete.buyerPhone, complete.buyer_phone, order.buyerPhone, order.buyer_phone, order.phone),

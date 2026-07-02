@@ -260,3 +260,9 @@ The Orders page does not auto-run this preview on load. Local sanitized order da
 Codex2 Orders now lets an operator choose a bounded readonly preview window before clicking `读取完整字段只读预览`: `最近 24 小时`, `最近 3 天`, or `最近 7 天`. See `PHASE_NAVER_ERP_5G_CONTROLLED_PREVIEW_WINDOW.md`.
 
 The selected window only changes `start_datetime` / `end_datetime` for the existing Codex1 preview call. The request remains `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `include_detail=true`, `complete_field_preview=true`, and `real_sync=false`. The page still does not auto-run Naver requests, does not write orders, does not save raw response data, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-5H - Order Complete Field Status Mapping Polish
+
+Codex2 Orders now keeps delivery display aligned with complete-field order status when Naver returns a clear delivery-stage order status but a missing or unknown delivery status. See `PHASE_NAVER_ERP_5H_STATUS_MAPPING_POLISH.md`.
+
+The Orders detail panel can show `配送完成` instead of an unnecessary unknown warning when the complete-field readonly preview proves the order is delivered. Dashboard remains summary-only, and formal Naver order sync remains closed.

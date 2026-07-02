@@ -11,7 +11,19 @@ const STATUS_PRESENTATIONS = {
     bucketLabel: '待发货',
     nextAction: '需要准备发货，但当前页面不会执行平台发货写入。',
   },
+  READY: {
+    label: '待发货',
+    bucket: 'pendingDispatch',
+    bucketLabel: '待发货',
+    nextAction: '需要准备发货，但当前页面不会执行平台发货写入。',
+  },
   DISPATCHED: {
+    label: '已发货 / 配送中',
+    bucket: 'inDelivery',
+    bucketLabel: '配送中',
+    nextAction: '继续关注配送状态，不执行配送写操作。',
+  },
+  DELIVERING: {
     label: '已发货 / 配送中',
     bucket: 'inDelivery',
     bucketLabel: '配送中',
@@ -80,6 +92,9 @@ export function normalizeNaverOrderStatus(value) {
   if (!rawValue) return 'UNKNOWN';
   const upperValue = rawValue.toUpperCase();
   if (upperValue === 'CANCELLED') return 'CANCELED';
+  if (['DELIVERY_READY'].includes(upperValue)) return 'READY';
+  if (['SHIPPING', 'IN_DELIVERY'].includes(upperValue)) return 'DELIVERING';
+  if (['DELIVERY_COMPLETED', 'DELIVERY_COMPLETE', 'COMPLETED_DELIVERY', 'SHIPPING_COMPLETED'].includes(upperValue)) return 'DELIVERED';
   if (STATUS_PRESENTATIONS[upperValue]) return upperValue;
   return KOREAN_STATUS_ALIASES[rawValue] || 'UNKNOWN';
 }
