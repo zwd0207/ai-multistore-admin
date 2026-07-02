@@ -1937,69 +1937,218 @@ def _summarize_naver_channel_products(payload: object | None) -> dict:
 
 def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: object | None) -> dict:
     candidate_ids: list[str] = []
+    valid_candidates: list[dict] = []
+    candidate_summaries: list[dict] = []
+    create_reasons = {"external_product_id_not_found_locally": 0}
+    update_reasons = {"external_product_id_found_locally": 0}
     skip_reasons = _empty_naver_product_skip_reasons()
+    seen_external_product_ids: set[str] = set()
     single_channel_product_count = 0
     multiple_channel_products_count = 0
     missing_external_product_id_count = 0
     missing_product_name_count = 0
     missing_price_count = 0
     missing_stock_count = 0
-    for content in _iter_naver_product_contents(payload):
+    changed_fields: set[str] = set()
+    unchanged_fields: set[str] = set()
+    missing_optional_field_names: set[str] = set()
+    risk_flags: set[str] = set()
+    for index, content in enumerate(_iter_naver_product_contents(payload)):
+        content_risk_flags = _naver_product_content_risk_flags(content)
+        risk_flags.update(content_risk_flags)
         channel_products = content.get("channelProducts")
         if not isinstance(channel_products, list) or len(channel_products) == 0:
             skip_reasons["missing_external_product_id"] += 1
             missing_external_product_id_count += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="missing_external_product_id",
+                risk_flags=content_risk_flags,
+            ))
             continue
         if len(channel_products) > 1:
             skip_reasons["multiple_channel_products"] += 1
             multiple_channel_products_count += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="multiple_channel_products",
+                risk_flags=content_risk_flags,
+            ))
             continue
         channel_product = channel_products[0]
         if not isinstance(channel_product, dict):
             skip_reasons["missing_external_product_id"] += 1
             missing_external_product_id_count += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="missing_external_product_id",
+                risk_flags=content_risk_flags,
+            ))
+            continue
+        if _has_invalid_direct_shape(channel_product, ("statusType", "saleStatus", "status")):
+            skip_reasons["invalid_status_shape"] += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="invalid_status_shape",
+                risk_flags=content_risk_flags,
+            ))
             continue
         external_product_id = _bounded_text(_extract_scalar_by_keys(channel_product, ("channelProductNo", "channelProductId")), 120)
         if not external_product_id:
             skip_reasons["missing_external_product_id"] += 1
             missing_external_product_id_count += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="missing_external_product_id",
+                risk_flags=content_risk_flags,
+            ))
+            continue
+        if external_product_id in seen_external_product_ids:
+            skip_reasons["duplicate_external_product_id_in_same_batch"] += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="duplicate_external_product_id_in_same_batch",
+                sample_id=_mask_external_identifier(external_product_id),
+                risk_flags=content_risk_flags,
+            ))
             continue
         product_name = _bounded_text(_extract_scalar_by_keys(channel_product, ("productName", "name")), 300)
         if not product_name:
             skip_reasons["missing_product_name"] += 1
             missing_product_name_count += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="missing_product_name",
+                sample_id=_mask_external_identifier(external_product_id),
+                risk_flags=content_risk_flags,
+            ))
             continue
-        single_channel_product_count += 1
+        if _has_invalid_numeric_value(channel_product, ("salePrice", "discountPrice", "price")):
+            skip_reasons["invalid_numeric_shape_for_price"] += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="invalid_numeric_shape_for_price",
+                sample_id=_mask_external_identifier(external_product_id),
+                risk_flags=content_risk_flags,
+            ))
+            continue
+        if _has_invalid_numeric_value(channel_product, ("stockQuantity", "quantity", "inventory")):
+            skip_reasons["invalid_numeric_shape_for_stock"] += 1
+            candidate_summaries.append(_build_naver_product_skip_candidate_summary(
+                index=index,
+                reason="invalid_numeric_shape_for_stock",
+                sample_id=_mask_external_identifier(external_product_id),
+                risk_flags=content_risk_flags,
+            ))
+            continue
+
+        seen_external_product_ids.add(external_product_id)
         missing_optional_fields = False
         if _extract_decimal_by_keys(channel_product, ("salePrice", "discountPrice", "price")) is None:
             missing_price_count += 1
             missing_optional_fields = True
+            missing_optional_field_names.add("price")
         if _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory")) is None:
             missing_stock_count += 1
             missing_optional_fields = True
+            missing_optional_field_names.add("stock_quantity")
         if missing_optional_fields:
             skip_reasons["missing_optional_fields"] += 1
+        single_channel_product_count += 1
         candidate_ids.append(external_product_id)
+        valid_candidates.append({
+            "index": index,
+            "sample_id": _mask_external_identifier(external_product_id),
+            "risk_flags": content_risk_flags,
+            "candidate": {
+                "external_product_id": external_product_id,
+                "name": product_name,
+                "status": _bounded_text(_extract_scalar_by_keys(channel_product, ("statusType", "saleStatus", "status")) or "unknown", 30),
+                "price": _extract_decimal_by_keys(channel_product, ("salePrice", "discountPrice", "price")),
+                "currency": "KRW",
+                "stock_quantity": _extract_int_by_keys(channel_product, ("stockQuantity", "quantity", "inventory")),
+            },
+        })
 
     unique_candidate_ids = list(dict.fromkeys(candidate_ids))
-    existing_ids = _find_existing_product_ids(
+    existing_products = _find_existing_products_by_external_ids(
         db,
         store_id=store_id,
         platform="naver",
         external_product_ids=unique_candidate_ids,
     )
+    existing_ids = set(existing_products)
+    for valid_candidate in valid_candidates:
+        candidate = valid_candidate["candidate"]
+        sample_id = valid_candidate["sample_id"]
+        existing_product = existing_products.get(candidate["external_product_id"])
+        if existing_product is None:
+            create_reasons["external_product_id_not_found_locally"] += 1
+            candidate_summaries.append({
+                "candidate_type": "create",
+                "sample_id": sample_id,
+                "local_product_id": None,
+                "reason": "external_product_id_not_found_locally",
+                "match_basis": ["store_id", "platform=naver", "external_product_id"],
+                "upsert_key_source": "channelProductNo|channelProductId",
+                "product_name_matching_used": False,
+                "fuzzy_matching_used": False,
+                "raw_payload_saved": False,
+                "full_external_id_returned": False,
+            })
+            continue
+
+        update_reasons["external_product_id_found_locally"] += 1
+        update_summary = _build_naver_product_update_diff_summary(existing_product, candidate)
+        changed_fields.update(update_summary["changed_fields"])
+        unchanged_fields.update(update_summary["unchanged_fields"])
+        missing_optional_field_names.update(update_summary["missing_optional_fields"])
+        risk_flags.update(set(valid_candidate["risk_flags"]) | set(update_summary["risk_flags"]))
+        candidate_summaries.append({
+            "candidate_type": "update",
+            "sample_id": sample_id,
+            "local_product_id": existing_product.id,
+            "reason": "external_product_id_found_locally",
+            "match_basis": ["store_id", "platform=naver", "external_product_id"],
+            "changed_fields": update_summary["changed_fields"],
+            "unchanged_fields": update_summary["unchanged_fields"],
+            "missing_optional_fields": update_summary["missing_optional_fields"],
+            "risk_flags": sorted(set(valid_candidate["risk_flags"]) | set(update_summary["risk_flags"])),
+            "high_risk_fields_observed_but_not_auto_overwritten": update_summary["high_risk_fields_observed_but_not_auto_overwritten"],
+            "raw_payload_saved": False,
+            "full_external_id_returned": False,
+        })
+
     would_update = sum(1 for product_id in unique_candidate_ids if product_id in existing_ids)
     would_create = sum(1 for product_id in unique_candidate_ids if product_id not in existing_ids)
     would_skip = (
         skip_reasons["multiple_channel_products"]
         + skip_reasons["missing_external_product_id"]
         + skip_reasons["missing_product_name"]
+        + skip_reasons["duplicate_external_product_id_in_same_batch"]
+        + skip_reasons["invalid_status_shape"]
+        + skip_reasons["invalid_numeric_shape_for_price"]
+        + skip_reasons["invalid_numeric_shape_for_stock"]
     )
     return {
         "would_create": would_create,
         "would_update": would_update,
         "would_skip": would_skip,
         "skip_reasons": skip_reasons,
+        "create_reasons": create_reasons,
+        "update_reasons": update_reasons,
+        "changed_fields": sorted(changed_fields),
+        "unchanged_fields": sorted(unchanged_fields),
+        "missing_optional_fields": sorted(missing_optional_field_names),
+        "risk_flags": sorted(risk_flags | {"high_risk_fields_observed_but_not_auto_overwritten"}),
+        "diff_summary": _build_naver_product_diff_summary(
+            would_create=would_create,
+            would_update=would_update,
+            would_skip=would_skip,
+            candidate_summaries=candidate_summaries,
+        ),
+        "upsert_key_summary": _naver_product_upsert_key_summary(),
+        "write_safety_summary": _naver_product_write_safety_summary(),
         "matched_existing_count": len(existing_ids),
         "incoming_candidate_count": len(unique_candidate_ids),
         "ready_for_local_sync": False,
@@ -2013,12 +2162,182 @@ def _build_naver_product_dry_run_diff(db: Session, *, store_id: int, payload: ob
     }
 
 
+def _build_naver_product_skip_candidate_summary(
+    *,
+    index: int,
+    reason: str,
+    sample_id: str | None = None,
+    risk_flags: list[str] | None = None,
+) -> dict:
+    return {
+        "candidate_type": "skip",
+        "sample_id": sample_id or f"content-index-{index}",
+        "reason": reason,
+        "risk_flags": sorted(set(risk_flags or [])),
+        "raw_payload_saved": False,
+        "full_external_id_returned": False,
+    }
+
+
+def _build_naver_product_update_diff_summary(product: Product, candidate: dict) -> dict:
+    changed_fields: list[str] = []
+    unchanged_fields: list[str] = []
+    missing_optional_fields: list[str] = []
+    comparable_fields = ("name", "status", "price", "currency", "stock_quantity")
+    for field in comparable_fields:
+        incoming = candidate.get(field)
+        if incoming is None:
+            if field in {"price", "stock_quantity"}:
+                missing_optional_fields.append(field)
+            continue
+        existing = getattr(product, field)
+        if field == "price":
+            incoming = Decimal(str(incoming))
+            existing = Decimal(str(existing))
+        if incoming == existing:
+            unchanged_fields.append(field)
+        else:
+            changed_fields.append(field)
+    return {
+        "changed_fields": sorted(changed_fields),
+        "unchanged_fields": sorted(unchanged_fields),
+        "missing_optional_fields": sorted(missing_optional_fields),
+        "risk_flags": [
+            "high_risk_fields_observed_but_not_auto_overwritten",
+            "raw_payload_not_saved",
+            "full_external_id_masked",
+        ],
+        "high_risk_fields_observed_but_not_auto_overwritten": _naver_product_high_risk_fields(),
+    }
+
+
+def _build_naver_product_diff_summary(
+    *,
+    would_create: int,
+    would_update: int,
+    would_skip: int,
+    candidate_summaries: list[dict],
+) -> dict:
+    return {
+        "would_create": would_create,
+        "would_update": would_update,
+        "would_skip": would_skip,
+        "candidate_summaries": candidate_summaries[:10],
+        "values_returned": "field_names_counts_and_masked_ids_only",
+        "raw_payload_saved": False,
+        "full_external_id_returned": False,
+    }
+
+
+def _naver_product_upsert_key_summary() -> dict:
+    return {
+        "match_basis": ["store_id", "platform=naver", "external_product_id"],
+        "external_product_id_source": "channelProductNo|channelProductId",
+        "product_name_matching_used": False,
+        "fuzzy_matching_used": False,
+        "origin_product_no_matching_used": False,
+    }
+
+
+def _naver_product_update_whitelist() -> list[str]:
+    return [
+        "name",
+        "status",
+        "price",
+        "currency",
+        "stock_quantity",
+        "last_synced_at",
+        "source_type",
+    ]
+
+
+def _naver_product_raw_data_whitelist() -> list[str]:
+    return [
+        "platform_origin_product_no",
+        "platform_channel_product_id",
+        "display_status",
+        "channel_products_count",
+        "source_preview_id_hash",
+        "mapping_version",
+        "synced_from",
+        "raw_response_saved",
+    ]
+
+
+def _naver_product_high_risk_fields() -> list[str]:
+    return [
+        "external_product_id",
+        "store_id",
+        "platform",
+        "raw_data.* outside sanitized whitelist",
+        "html",
+        "image_detail",
+        "product_detail_raw_content",
+        "original_raw_response",
+        "request_metadata",
+        "auth_material",
+        "signing_material",
+        "full_channel_identifier",
+        "unmapped_platform_fields",
+    ]
+
+
+def _naver_product_write_safety_summary() -> dict:
+    return {
+        "ready_for_local_sync": False,
+        "real_sync_required_for_writes": True,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "update_whitelist": _naver_product_update_whitelist(),
+        "raw_data_whitelist": _naver_product_raw_data_whitelist(),
+        "high_risk_fields_not_auto_overwritten": _naver_product_high_risk_fields(),
+    }
+
+
+def _naver_product_content_risk_flags(content: dict) -> list[str]:
+    field_names = _collect_json_field_names(content)
+    normalized = {name.replace("_", "").replace("-", "").lower() for name in field_names}
+    flags: set[str] = set()
+    if any("html" in name or "detail" in name for name in normalized):
+        flags.add("detail_or_html_field_observed")
+    if any("image" in name for name in normalized):
+        flags.add("image_field_observed")
+    if any(name in {"authorization", "header", "headers", "token", "signature", "bcrypt", "secret"} for name in normalized):
+        flags.add("sensitive_material_observed_and_suppressed")
+    flags.add("high_risk_fields_observed_but_not_auto_overwritten")
+    return sorted(flags)
+
+
+def _has_invalid_direct_shape(payload: dict, keys: tuple[str, ...]) -> bool:
+    return any(isinstance(payload.get(key), (dict, list)) for key in keys if key in payload)
+
+
+def _has_invalid_numeric_value(payload: dict, keys: tuple[str, ...]) -> bool:
+    for key in keys:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, (dict, list)):
+            return True
+        if _to_decimal(value) is None:
+            return True
+    return False
+
+
 def _empty_naver_product_skip_reasons() -> dict[str, int]:
     return {
         "multiple_channel_products": 0,
         "missing_external_product_id": 0,
         "missing_product_name": 0,
         "missing_optional_fields": 0,
+        "duplicate_external_product_id_in_same_batch": 0,
+        "invalid_status_shape": 0,
+        "invalid_numeric_shape_for_price": 0,
+        "invalid_numeric_shape_for_stock": 0,
     }
 
 
@@ -2028,6 +2347,20 @@ def _default_naver_product_dry_run_diff() -> dict:
         "would_update": 0,
         "would_skip": 0,
         "skip_reasons": _empty_naver_product_skip_reasons(),
+        "create_reasons": {"external_product_id_not_found_locally": 0},
+        "update_reasons": {"external_product_id_found_locally": 0},
+        "changed_fields": [],
+        "unchanged_fields": [],
+        "missing_optional_fields": [],
+        "risk_flags": [],
+        "diff_summary": _build_naver_product_diff_summary(
+            would_create=0,
+            would_update=0,
+            would_skip=0,
+            candidate_summaries=[],
+        ),
+        "upsert_key_summary": _naver_product_upsert_key_summary(),
+        "write_safety_summary": _naver_product_write_safety_summary(),
         "matched_existing_count": 0,
         "incoming_candidate_count": 0,
         "ready_for_local_sync": False,
@@ -3636,6 +3969,24 @@ def _find_existing_product_ids(
         )
     ).all()
     return set(rows)
+
+
+def _find_existing_products_by_external_ids(
+    db: Session,
+    store_id: int,
+    platform: str,
+    external_product_ids: list[str],
+) -> dict[str, Product]:
+    if not external_product_ids:
+        return {}
+    products = db.scalars(
+        select(Product).where(
+            Product.store_id == store_id,
+            Product.platform == platform,
+            Product.external_product_id.in_(external_product_ids),
+        )
+    ).all()
+    return {product.external_product_id: product for product in products}
 
 
 def _build_product_preview_per_status(per_status: list[dict], existing_ids: set[str]) -> list[dict]:

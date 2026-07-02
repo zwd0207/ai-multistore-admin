@@ -2176,6 +2176,27 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert batch_diff["skip_reasons"]["missing_external_product_id"] == 1, batch_diff
                 assert batch_diff["skip_reasons"]["missing_product_name"] == 1, batch_diff
                 assert batch_diff["skip_reasons"]["missing_optional_fields"] == 1, batch_diff
+                assert batch_diff["create_reasons"]["external_product_id_not_found_locally"] == 1, batch_diff
+                assert batch_diff["update_reasons"]["external_product_id_found_locally"] == 1, batch_diff
+                assert batch_diff["upsert_key_summary"]["match_basis"] == ["store_id", "platform=naver", "external_product_id"], batch_diff
+                assert batch_diff["upsert_key_summary"]["external_product_id_source"] == "channelProductNo|channelProductId", batch_diff
+                assert batch_diff["upsert_key_summary"]["product_name_matching_used"] is False, batch_diff
+                assert batch_diff["upsert_key_summary"]["fuzzy_matching_used"] is False, batch_diff
+                assert batch_diff["write_safety_summary"]["ready_for_local_sync"] is False, batch_diff
+                assert batch_diff["write_safety_summary"]["products_written"] is False, batch_diff
+                assert batch_diff["write_safety_summary"]["sync_log_written"] is False, batch_diff
+                assert batch_diff["write_safety_summary"]["capability_tested_success_written"] is False, batch_diff
+                assert "external_product_id" in batch_diff["write_safety_summary"]["high_risk_fields_not_auto_overwritten"], batch_diff
+                assert "raw_response_saved" in batch_diff["write_safety_summary"]["raw_data_whitelist"], batch_diff
+                assert "price" in batch_diff["missing_optional_fields"], batch_diff
+                assert "stock_quantity" in batch_diff["missing_optional_fields"], batch_diff
+                assert "name" in batch_diff["changed_fields"], batch_diff
+                assert "currency" in batch_diff["unchanged_fields"], batch_diff
+                summaries = batch_diff["diff_summary"]["candidate_summaries"]
+                assert any(item["candidate_type"] == "update" and isinstance(item["local_product_id"], int) for item in summaries), summaries
+                assert any(item["candidate_type"] == "create" and item["reason"] == "external_product_id_not_found_locally" for item in summaries), summaries
+                assert any(item["candidate_type"] == "skip" and item["reason"] == "multiple_channel_products" for item in summaries), summaries
+                assert all(item["raw_payload_saved"] is False for item in summaries), summaries
                 batch_text = str(fake_product_small_batch.json()).lower()
                 for forbidden in [
                     "naver-existing-001",
@@ -2198,6 +2219,130 @@ def verify_sync_preview_schema_and_security() -> None:
                     "imageurl",
                 ]:
                     assert forbidden not in batch_text, batch_text
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "RULE-UPDATE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-existing-001",
+                                        "productName": "must-not-leak-rule-update-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 12345,
+                                        "stockQuantity": 7,
+                                        "detailHtml": "<p>must-not-leak-rule-html</p>",
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "RULE-DUPLICATE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "naver-existing-001",
+                                        "productName": "must-not-leak-rule-duplicate-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 12345,
+                                        "stockQuantity": 7,
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "RULE-BAD-PRICE-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "RULE-BAD-PRICE-CHANNEL-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-bad-price-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": "not-a-number",
+                                        "stockQuantity": 1,
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "RULE-BAD-STOCK-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "RULE-BAD-STOCK-CHANNEL-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-bad-stock-name",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2000,
+                                        "stockQuantity": "not-a-number",
+                                    }
+                                ],
+                            },
+                            {
+                                "originProductNo": "RULE-BAD-STATUS-ORIGIN-MUST-NOT-LEAK",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "RULE-BAD-STATUS-CHANNEL-MUST-NOT-LEAK",
+                                        "productName": "must-not-leak-bad-status-name",
+                                        "statusType": {"raw": "must-not-leak-status"},
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 3000,
+                                        "stockQuantity": 2,
+                                    }
+                                ],
+                            },
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_rule_diff = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 5,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": False,
+                })
+                assert fake_product_rule_diff.status_code == 200, fake_product_rule_diff.text
+                rule_data = fake_product_rule_diff.json()["data"]
+                rule_diff = rule_data["dry_run_diff"]
+                assert rule_diff["would_update"] == 1, rule_diff
+                assert rule_diff["would_create"] == 0, rule_diff
+                assert rule_diff["would_skip"] == 4, rule_diff
+                assert rule_diff["incoming_candidate_count"] == 1, rule_diff
+                assert rule_diff["skip_reasons"]["duplicate_external_product_id_in_same_batch"] == 1, rule_diff
+                assert rule_diff["skip_reasons"]["invalid_numeric_shape_for_price"] == 1, rule_diff
+                assert rule_diff["skip_reasons"]["invalid_numeric_shape_for_stock"] == 1, rule_diff
+                assert rule_diff["skip_reasons"]["invalid_status_shape"] == 1, rule_diff
+                assert "name" in rule_diff["changed_fields"], rule_diff
+                assert "price" in rule_diff["changed_fields"], rule_diff
+                assert "stock_quantity" in rule_diff["changed_fields"], rule_diff
+                assert "currency" in rule_diff["unchanged_fields"], rule_diff
+                assert "high_risk_fields_observed_but_not_auto_overwritten" in rule_diff["risk_flags"], rule_diff
+                assert "detail_or_html_field_observed" in rule_diff["risk_flags"], rule_diff
+                rule_summaries = rule_diff["diff_summary"]["candidate_summaries"]
+                assert any(item["candidate_type"] == "update" and item["local_product_id"] for item in rule_summaries), rule_summaries
+                assert any(item["candidate_type"] == "skip" and item["reason"] == "duplicate_external_product_id_in_same_batch" for item in rule_summaries), rule_summaries
+                assert any(item["candidate_type"] == "skip" and item["reason"] == "invalid_numeric_shape_for_price" for item in rule_summaries), rule_summaries
+                assert any(item["candidate_type"] == "skip" and item["reason"] == "invalid_numeric_shape_for_stock" for item in rule_summaries), rule_summaries
+                assert any(item["candidate_type"] == "skip" and item["reason"] == "invalid_status_shape" for item in rule_summaries), rule_summaries
+                rule_text = str(fake_product_rule_diff.json()).lower()
+                for forbidden in [
+                    "naver-existing-001",
+                    "rule-update-origin-must-not-leak",
+                    "rule-duplicate-origin-must-not-leak",
+                    "rule-bad-price-channel-must-not-leak",
+                    "rule-bad-stock-channel-must-not-leak",
+                    "rule-bad-status-channel-must-not-leak",
+                    "must-not-leak-rule-update-name",
+                    "must-not-leak-rule-duplicate-name",
+                    "must-not-leak-bad-price-name",
+                    "must-not-leak-bad-stock-name",
+                    "must-not-leak-bad-status-name",
+                    "must-not-leak-rule-html",
+                    "must-not-leak-status",
+                    "detailhtml",
+                ]:
+                    assert forbidden not in rule_text, rule_text
 
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(403, {"message": "ip whitelist blocked"}, text="ip whitelist blocked")
@@ -2248,29 +2393,29 @@ def verify_sync_preview_schema_and_security() -> None:
                         "last": True,
                     })
                 ]
-                fake_product_real_sync = client.post("/api/v1/sync/products/naver/preview", json={
+                fake_product_sync_candidate_preview = client.post("/api/v1/sync/products/naver/preview", json={
                     "store_id": naver_store_id,
                     "credential_id": naver_credential_id,
                     "page": 1,
                     "size": 1,
                     "status": "ALL",
                     "real_preview": True,
-                    "real_sync": True,
+                    "real_sync": False,
                 })
-                assert fake_product_real_sync.status_code == 200, fake_product_real_sync.text
-                fake_sync_data = fake_product_real_sync.json()["data"]
+                assert fake_product_sync_candidate_preview.status_code == 200, fake_product_sync_candidate_preview.text
+                fake_sync_data = fake_product_sync_candidate_preview.json()["data"]
                 assert fake_sync_data["preview_status"] == "success", fake_sync_data
                 assert fake_sync_data["dry_run_diff"]["ready_for_local_sync"] is False, fake_sync_data
-                assert fake_sync_data["local_sync_result"]["requested"] is True, fake_sync_data
-                assert fake_sync_data["local_sync_result"]["status"] == "success", fake_sync_data
-                assert fake_sync_data["local_sync_result"]["created_count"] == 1, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["requested"] is False, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["status"] == "not_requested", fake_sync_data
+                assert fake_sync_data["local_sync_result"]["created_count"] == 0, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["updated_count"] == 0, fake_sync_data
-                assert fake_sync_data["local_sync_result"]["products_written"] is True, fake_sync_data
+                assert fake_sync_data["local_sync_result"]["products_written"] is False, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["sync_log_written"] is False, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["capability_tested_success_written"] is False, fake_sync_data
                 assert fake_sync_data["local_sync_result"]["raw_response_saved"] is False, fake_sync_data
-                assert fake_sync_data["field_observation"]["products_written"] is True, fake_sync_data
-                fake_sync_text = str(fake_product_real_sync.json()).lower()
+                assert fake_sync_data["field_observation"]["products_written"] is False, fake_sync_data
+                fake_sync_text = str(fake_product_sync_candidate_preview.json()).lower()
                 for forbidden in [
                     "sync-origin-must-not-leak",
                     "sync-channel-must-not-leak",
@@ -2293,24 +2438,7 @@ def verify_sync_preview_schema_and_security() -> None:
                         Product.platform == "naver",
                         Product.external_product_id == "SYNC-CHANNEL-MUST-NOT-LEAK-1234567890",
                     ))
-                    assert synced_product is not None
-                    assert synced_product.name == "must-not-leak-sync-product-name"
-                    assert synced_product.source_type == "naver_real_sync"
-                    assert str(synced_product.price) == "1234.00"
-                    assert synced_product.stock_quantity == 5
-                    assert synced_product.raw_data["raw_response_saved"] is False
-                    assert synced_product.raw_data["mapping_version"] == "naver_product_v1"
-                    assert synced_product.raw_data["synced_from"] == "naver_product_preview"
-                    raw_data_text = str(synced_product.raw_data).lower()
-                    for forbidden in [
-                        "sync-origin-must-not-leak",
-                        "sync-channel-must-not-leak",
-                        "must-not-leak-sync",
-                        "authorization",
-                        "signature",
-                        "phase-6d6c-channel-no",
-                    ]:
-                        assert forbidden not in raw_data_text, raw_data_text
+                    assert synced_product is None
                     assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_fake_sync_log_count
                     after_sync_capability_success = db.execute(text(
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
