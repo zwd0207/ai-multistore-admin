@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
-import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
@@ -44,7 +43,15 @@ function normalizePlatform(value) {
 }
 
 function firstText(...values) {
-  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  const value = values
+    .map((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return item.label_zh ?? item.label ?? item.name ?? item.raw ?? item.value ?? '';
+      }
+      if (Array.isArray(item)) return item.filter(Boolean).join(', ');
+      return item;
+    })
+    .find((item) => item !== undefined && item !== null && String(item).trim() !== '');
   return value === undefined ? '' : String(value).trim();
 }
 
@@ -70,31 +77,32 @@ function isNaverOrderForStore(order = {}, selectedStore = {}, selectedStoreId = 
   return firstText(order.store, order.store_name) === firstText(selectedStore?.name);
 }
 
-function getCompleteOrderFields(order = {}) {
+function getCompleteOrderFields(order = {}, previewFields = {}) {
   const rawData = order.raw_data || {};
+  const complete = previewFields || {};
   return {
-    orderNo: displayText(order.fullOrderNo, order.orderNo, order.external_order_id),
-    productOrderNo: displayText(order.productOrderNo, order.external_product_order_id, rawData.external_product_order_id),
-    platformProductId: displayText(order.platformProductId, order.platform_product_id, rawData.platform_product_id),
-    productName: displayText(order.productName, order.product, order.product_name),
-    optionName: displayText(order.optionName, order.option_name, rawData.option_name),
-    quantity: displayText(order.quantity),
-    amount: formatMoney(order.amount ?? order.order_amount, order.currency),
-    orderStatus: displayText(order.status, order.order_status),
-    paymentStatus: displayText(order.paymentStatus, order.payment_status),
-    deliveryStatus: displayText(order.deliveryStatusLabelZh, order.delivery_status_label_zh, order.deliveryStatus, order.delivery_status),
-    claimStatus: displayText(order.claimStatusLabelZh, order.claim_status_label_zh, order.claimStatus, order.claim_status),
-    buyerName: displayText(order.buyerName, order.buyer_name, order.customerName, order.customer),
-    buyerPhone: displayText(order.buyerPhone, order.buyer_phone, order.phone),
-    receiverName: displayText(order.receiverName, order.receiver_name),
-    receiverPhone: displayText(order.receiverPhone, order.receiver_phone),
-    receiverAddress: displayText(order.receiverAddress, order.receiver_address),
-    zipCode: displayText(order.zipCode, order.zip_code),
-    orderedAt: displayText(formatKstDateTimeWithLabel(order.ordered_at || order.createdAt || order.created_at), '待接入'),
-    paidAt: displayText(formatKstDateTimeWithLabel(order.paid_at || order.paidAt), '待接入'),
+    orderNo: displayText(complete.externalOrderId, complete.external_order_id, order.fullOrderNo, order.orderNo, order.external_order_id),
+    productOrderNo: displayText(complete.externalProductOrderId, complete.external_product_order_id, order.productOrderNo, order.external_product_order_id, rawData.external_product_order_id),
+    platformProductId: displayText(complete.platformProductId, complete.platform_product_id, order.platformProductId, order.platform_product_id, rawData.platform_product_id),
+    productName: displayText(complete.productName, complete.product_name, order.productName, order.product, order.product_name),
+    optionName: displayText(complete.optionName, complete.option_name, order.optionName, order.option_name, rawData.option_name),
+    quantity: displayText(complete.quantity, order.quantity),
+    amount: formatMoney(complete.orderAmount ?? complete.order_amount ?? order.amount ?? order.order_amount, complete.currency || order.currency),
+    orderStatus: displayText(complete.orderStatusLabelZh, complete.order_status_label_zh, complete.orderStatus, complete.order_status, order.status, order.order_status),
+    paymentStatus: displayText(complete.paymentStatus, complete.payment_status, order.paymentStatus, order.payment_status),
+    deliveryStatus: displayText(complete.deliveryStatusLabelZh, complete.delivery_status_label_zh, complete.deliveryStatus, complete.delivery_status, order.deliveryStatusLabelZh, order.delivery_status_label_zh, order.deliveryStatus, order.delivery_status),
+    claimStatus: displayText(complete.claimStatusLabelZh, complete.claim_status_label_zh, complete.claimStatus, complete.claim_status, order.claimStatusLabelZh, order.claim_status_label_zh, order.claimStatus, order.claim_status),
+    buyerName: displayText(complete.buyerName, complete.buyer_name, order.buyerName, order.buyer_name, order.customerName, order.customer),
+    buyerPhone: displayText(complete.buyerPhone, complete.buyer_phone, order.buyerPhone, order.buyer_phone, order.phone),
+    receiverName: displayText(complete.receiverName, complete.receiver_name, order.receiverName, order.receiver_name),
+    receiverPhone: displayText(complete.receiverPhone, complete.receiver_phone, order.receiverPhone, order.receiver_phone),
+    receiverAddress: displayText(complete.receiverAddress, complete.receiver_address, order.receiverAddress, order.receiver_address),
+    zipCode: displayText(complete.zipCode, complete.zip_code, order.zipCode, order.zip_code),
+    orderedAt: displayText(formatKstDateTimeWithLabel(complete.orderedAt || complete.ordered_at || order.ordered_at || order.createdAt || order.created_at), '待接入'),
+    paidAt: displayText(formatKstDateTimeWithLabel(complete.paidAt || complete.paid_at || order.paid_at || order.paidAt), '待接入'),
     sourceType: displayText(order.sourceType, order.source_type),
-    mappingVersion: displayText(order.mappingVersion, rawData.mapping_version),
-    rawResponseSaved: order.rawResponseSaved ?? rawData.raw_response_saved ?? false,
+    mappingVersion: displayText(complete.mappingVersion, complete.mapping_version, order.mappingVersion, rawData.mapping_version),
+    rawResponseSaved: complete.rawResponseSaved ?? complete.raw_response_saved ?? order.rawResponseSaved ?? rawData.raw_response_saved ?? false,
   };
 }
 
@@ -412,6 +420,9 @@ function NaverOrderCompleteDetailPanel() {
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [previewResult, setPreviewResult] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
 
   useEffect(() => {
@@ -419,10 +430,14 @@ function NaverOrderCompleteDetailPanel() {
       setOrders([]);
       setSelectedOrderId('');
       setLoadError('');
+      setPreviewResult(null);
+      setPreviewError('');
       return undefined;
     }
     let cancelled = false;
     setLoadError('');
+    setPreviewResult(null);
+    setPreviewError('');
     dataProvider.getOrders({
       storeId: selectedStoreId,
       platform: 'naver',
@@ -454,8 +469,31 @@ function NaverOrderCompleteDetailPanel() {
   if (!isNaverStore) return null;
 
   const activeOrder = orders.find((order) => String(order.id) === String(selectedOrderId)) || orders[0];
-  const fields = activeOrder ? getCompleteOrderFields(activeOrder) : null;
+  const previewFields = previewResult?.available ? previewResult.completeFields : {};
+  const fields = activeOrder ? getCompleteOrderFields(activeOrder, previewFields) : null;
   const completeFieldReady = Boolean(activeOrder && fields?.orderNo !== '待接入' && fields?.buyerName !== '待接入');
+  const previewAllowed = !isBackendSource || String(selectedStoreId) === '8';
+
+  const runCompleteFieldPreview = async () => {
+    if (previewLoading || !activeOrder || !previewAllowed) return;
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreviewResult(null);
+    try {
+      const result = await dataProvider.previewNaverOrderCompleteFields({
+        storeId: selectedStoreId,
+        credentialId: 7,
+      });
+      setPreviewResult(result);
+      if (!result.available) {
+        setPreviewError(result.businessMessage || '当前窗口没有可展示的 Naver 订单完整字段。');
+      }
+    } catch (error) {
+      setPreviewError(formatError(error));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   return (
     <section className="content-card">
@@ -466,8 +504,28 @@ function NaverOrderCompleteDetailPanel() {
         </div>
         <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
+      <div className="sync-action-row">
+        <button
+          className="button primary"
+          onClick={runCompleteFieldPreview}
+          disabled={!activeOrder || previewLoading || !previewAllowed}
+        >
+          {previewLoading ? '读取完整字段中...' : '读取完整字段只读预览'}
+        </button>
+        <span className="mock-sync-note">
+          {previewAllowed
+            ? '手动读取 Codex1 只读 preview，不写 orders，不开放正式订单同步。'
+            : '当前完整字段只读预览仅限 pxg球包店 store_id=8。'}
+        </span>
+      </div>
       {loadError ? (
         <div className="mock-sync-error">{loadError}</div>
+      ) : null}
+      {previewResult?.available ? (
+        <div className="mock-sync-success">已读取完整字段只读预览，页面仅展示结果，不写库。</div>
+      ) : null}
+      {previewError ? (
+        <div className="mock-sync-error">{previewError}</div>
       ) : null}
       {!activeOrder ? (
         <div className="empty-state">当前店铺暂无可展示的 Naver 本地订单详情。</div>
@@ -526,16 +584,24 @@ function NaverOrderCompleteDetailPanel() {
               </div>
             </section>
           </div>
-          <p className="mock-sync-note">本阶段只验证 Codex2 展示结构，不请求 Naver，不写 orders，不保存原始响应，不开放正式订单同步。</p>
+          <p className="mock-sync-note">页面不会自动请求 Naver；只有点击完整字段只读预览时才通过 Codex1 做受控读取。该操作不写 orders，不保存原始响应，不开放正式订单同步。</p>
           <TechnicalDetails
             description="仅保留字段可用性和口径，不展示平台原始响应。"
             items={[
               { label: 'complete_field_view', value: completeFieldReady },
+              { label: 'complete_field_preview_requested', value: Boolean(previewResult?.requested) },
+              { label: 'complete_field_preview_available', value: Boolean(previewResult?.available) },
+              { label: 'preview_status', value: previewResult?.previewStatus },
+              { label: 'feed_called', value: previewResult?.feedCalled },
+              { label: 'detail_called', value: previewResult?.detailCalled },
               { label: 'dashboard_summary_only', value: true },
               { label: 'formal_order_sync_open', value: false },
               { label: 'raw_response_saved', value: fields.rawResponseSaved },
               { label: 'mapping_version', value: fields.mappingVersion },
-              { label: 'backend_complete_fields_required_later', value: true },
+              { label: 'codex1_schema_write_enabled', value: previewResult?.savePlan?.codex1SchemaWriteEnabled ?? false },
+              { label: 'orders_written', value: previewResult?.savePlan?.ordersWritten ?? false },
+              { label: 'sync_log_written', value: previewResult?.savePlan?.syncLogWritten ?? false },
+              { label: 'tested_success_written', value: previewResult?.savePlan?.testedSuccessWritten ?? false },
             ]}
           />
         </>
@@ -545,8 +611,23 @@ function NaverOrderCompleteDetailPanel() {
 }
 
 export default function Orders() {
-  const { selectedStoreId } = useStoreContext();
+  const { selectedStoreId, loading: storeLoading } = useStoreContext();
   const { versions } = useSyncRefresh();
+  const pageApi = useMemo(() => ({
+    ...api,
+    list: (params) => {
+      if (isBackendSource && (storeLoading || !selectedStoreId)) {
+        return Promise.resolve({
+          data: [],
+          items: [],
+          total: 0,
+          page: params?.page || 1,
+          pageSize: params?.pageSize || 5,
+        });
+      }
+      return dataProvider.getOrders(params);
+    },
+  }), [selectedStoreId, storeLoading]);
   return (
     <>
       <NaverOrderPreviewStatusPanel />
@@ -556,15 +637,14 @@ export default function Orders() {
         title="订单管理"
         description="查看订单履约、发货、退款和异常处理状态。"
         resourceName="订单"
-        api={api}
+        api={pageApi}
         columns={columns}
         fields={fields}
         statuses={statusOptions}
         initialForm={{ orderNo: '', product: '', store: '', customer: '', amount: 0, status: '', createdAt: '' }}
         readOnly={isBackendSource}
-        extraParams={isBackendSource ? { storeId: selectedStoreId } : {}}
+        extraParams={isBackendSource && selectedStoreId ? { storeId: selectedStoreId } : {}}
         reloadKey={`${selectedStoreId}-${versions.orders}`}
-        extraActions={isBackendSource ? <MockSyncPanel types={['orders']} compact /> : null}
       />
     </>
   );

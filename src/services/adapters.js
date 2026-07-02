@@ -345,6 +345,68 @@ export function adaptOrder(item = {}) {
   };
 }
 
+export function adaptNaverOrderCompletePreview(data = {}) {
+  const preview = data.complete_field_preview || {};
+  const completeFields = preview.complete_fields || {};
+  const savePlan = preview.save_plan || {};
+
+  return {
+    storeId: data.store_id,
+    credentialId: data.credential_id,
+    platform: adaptPlatform(data.platform),
+    rawPlatform: data.platform,
+    previewStatus: data.preview_status,
+    errorCode: data.error_code,
+    businessMessage: data.business_message,
+    feedCalled: Boolean(data.field_observation?.feed_called),
+    detailCalled: Boolean(data.field_observation?.detail_called),
+    detailHttpStatus: data.field_observation?.detail_http_status,
+    requested: Boolean(preview.requested),
+    previewOnly: preview.preview_only !== false,
+    available: Boolean(preview.available),
+    fieldAvailability: preview.field_availability || {},
+    savePlan: {
+      codex1SchemaWriteEnabled: Boolean(savePlan.codex1_schema_write_enabled),
+      requiresUserApproval: Boolean(savePlan.requires_user_approval),
+      requiresDbBackup: Boolean(savePlan.requires_db_backup),
+      formalOrderSyncOpen: Boolean(savePlan.formal_order_sync_open),
+      platformWritesEnabled: Boolean(savePlan.platform_writes_enabled),
+      ordersWritten: Boolean(savePlan.orders_written),
+      syncLogWritten: Boolean(savePlan.sync_log_written),
+      testedSuccessWritten: Boolean(savePlan.tested_success_written),
+      rawResponseSaved: Boolean(savePlan.raw_response_saved),
+    },
+    completeFields: {
+      externalOrderId: completeFields.external_order_id,
+      externalProductOrderId: completeFields.external_product_order_id,
+      platformProductId: completeFields.platform_product_id,
+      productName: completeFields.product_name,
+      optionName: completeFields.option_name,
+      quantity: completeFields.quantity,
+      orderAmount: completeFields.order_amount,
+      currency: completeFields.currency,
+      orderStatus: completeFields.order_status,
+      orderStatusLabelZh: completeFields.order_status_label_zh,
+      paymentStatus: completeFields.payment_status,
+      deliveryStatus: completeFields.delivery_status,
+      deliveryStatusLabelZh: completeFields.delivery_status_label_zh,
+      claimStatus: completeFields.claim_status,
+      claimStatusLabelZh: completeFields.claim_status_label_zh,
+      buyerName: completeFields.buyer_name,
+      buyerPhone: completeFields.buyer_phone,
+      receiverName: completeFields.receiver_name,
+      receiverPhone: completeFields.receiver_phone,
+      receiverAddress: completeFields.receiver_address,
+      zipCode: completeFields.zip_code,
+      orderedAt: completeFields.ordered_at,
+      paidAt: completeFields.paid_at,
+      lastChangedAt: completeFields.last_changed_at,
+      rawResponseSaved: Boolean(completeFields.raw_response_saved),
+      mappingVersion: completeFields.mapping_version,
+    },
+  };
+}
+
 export function adaptCustomerInquiry(item = {}) {
   return {
     id: item.id,

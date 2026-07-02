@@ -73,6 +73,85 @@ function mockSyncResult(type, payload = {}) {
   };
 }
 
+function naverOrderPreviewDateTime(hoursOffset = 0) {
+  const timestamp = Date.now() + Number(hoursOffset || 0) * 60 * 60 * 1000;
+  const kst = new Date(timestamp + 9 * 60 * 60 * 1000);
+  return `${kst.toISOString().slice(0, 19)}+09:00`;
+}
+
+async function mockNaverOrderCompletePreview(payload = {}) {
+  const result = await mockApi.getOrders({ storeId: payload.storeId, platform: 'naver', page: 1, pageSize: 1 });
+  const order = (result.data || result.items || [])[0] || {};
+  return adapters.naverOrderCompletePreview({
+    store_id: payload.storeId,
+    credential_id: payload.credentialId || 7,
+    platform: 'naver',
+    preview_status: order.id ? 'success' : 'success_empty',
+    business_message: order.id
+      ? 'mock 模式展示 Naver 订单完整字段预览，不请求平台。'
+      : 'mock 模式当前没有可展示的 Naver 订单。',
+    field_observation: {
+      feed_called: false,
+      detail_called: Boolean(order.id),
+      detail_http_status: order.id ? 200 : null,
+    },
+    complete_field_preview: {
+      requested: true,
+      preview_only: true,
+      available: Boolean(order.id),
+      complete_fields: order.id ? {
+        external_order_id: order.external_order_id || order.orderNo,
+        external_product_order_id: order.external_product_order_id || order.productOrderNo,
+        platform_product_id: order.platform_product_id || order.platformProductId,
+        product_name: order.product_name || order.product,
+        option_name: order.option_name || order.optionName,
+        quantity: order.quantity,
+        order_amount: order.order_amount || order.amount,
+        currency: order.currency || 'KRW',
+        order_status: order.order_status,
+        order_status_label_zh: order.status,
+        payment_status: order.payment_status,
+        delivery_status: order.delivery_status,
+        delivery_status_label_zh: order.delivery_status_label_zh,
+        claim_status: order.claim_status,
+        claim_status_label_zh: order.claim_status_label_zh,
+        buyer_name: order.buyer_name || order.customer,
+        buyer_phone: order.buyer_phone || order.buyerPhone || order.phone,
+        receiver_name: order.receiver_name || order.receiverName,
+        receiver_phone: order.receiver_phone || order.receiverPhone,
+        receiver_address: order.receiver_address || order.receiverAddress,
+        zip_code: order.zip_code || order.zipCode,
+        ordered_at: order.ordered_at || order.createdAt,
+        paid_at: order.paid_at,
+        raw_response_saved: false,
+        mapping_version: order.raw_data?.mapping_version || 'mock_naver_order_complete_field_preview_v1',
+      } : {},
+      field_availability: {
+        external_order_id: Boolean(order.external_order_id || order.orderNo),
+        external_product_order_id: Boolean(order.external_product_order_id || order.productOrderNo),
+        platform_product_id: Boolean(order.platform_product_id || order.platformProductId),
+        buyer_name: Boolean(order.buyer_name || order.customer),
+        buyer_phone: Boolean(order.buyer_phone || order.buyerPhone || order.phone),
+        receiver_name: Boolean(order.receiver_name || order.receiverName),
+        receiver_phone: Boolean(order.receiver_phone || order.receiverPhone),
+        receiver_address: Boolean(order.receiver_address || order.receiverAddress),
+        zip_code: Boolean(order.zip_code || order.zipCode),
+      },
+      save_plan: {
+        codex1_schema_write_enabled: false,
+        requires_user_approval: true,
+        requires_db_backup: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        orders_written: false,
+        sync_log_written: false,
+        tested_success_written: false,
+        raw_response_saved: false,
+      },
+    },
+  });
+}
+
 function withMockFinancialSummary(summary = {}) {
   if (summary.financialSummary) return summary;
   return {
@@ -332,6 +411,23 @@ const sourceMethods = {
     const result = await backendApi.getOrders({ storeId: store.id, platform: params?.platform });
     const rows = withStoreName(adapters.list(result, adapters.order).data, stores);
     return queryBackendRows(rows, params);
+  },
+  previewNaverOrderCompleteFields: async (payload = {}) => {
+    if (!isBackendSource) return mockNaverOrderCompletePreview(payload);
+    const { store } = await resolveBackendStore(payload);
+    return adapters.naverOrderCompletePreview(await backendApi.previewNaverOrders({
+      store_id: Number(store.id),
+      credential_id: Number(payload.credentialId || payload.credential_id || 7),
+      start_datetime: payload.startDateTime || naverOrderPreviewDateTime(-24),
+      end_datetime: payload.endDateTime || naverOrderPreviewDateTime(0),
+      order_status: 'ALL',
+      page: 1,
+      size: 1,
+      real_preview: true,
+      include_detail: true,
+      complete_field_preview: true,
+      real_sync: false,
+    }));
   },
   getCustomerInquiries: async (params) => {
     if (!isBackendSource) return mockApi.getCustomerTickets(params);

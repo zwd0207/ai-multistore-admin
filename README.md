@@ -248,3 +248,9 @@ Codex2 Orders now includes a Naver order detail section for controlled internal 
 The `pxg球包店` mock order includes complete order number, product order number, platform product number, buyer information, receiver information, address, payment status, delivery status, and claim status. Dashboard remains summary-only.
 
 This phase still does not call Naver, does not write Codex1 data, does not change database schema, and does not open formal Naver order sync. Backend mode remains tolerant when complete fields are not yet present.
+
+## Phase Naver-ERP-5E - Complete Field Readonly Preview Integration
+
+Codex2 Orders now has a manual `读取完整字段只读预览` action backed by Codex1 `POST /api/v1/sync/orders/naver/preview` with `complete_field_preview=true`, `include_detail=true`, and `real_sync=false`. See `PHASE_NAVER_ERP_5E_COMPLETE_FIELD_PREVIEW_INTEGRATION.md`.
+
+The Orders page does not auto-run this preview on load. Local sanitized order data remains visible first; complete order number, product order number, product id, buyer/receiver names, phones, and address are displayed only in the Orders detail panel after an explicit readonly preview. The phase does not write orders, does not modify Codex1, does not change schema, does not save raw response data, and does not open formal Naver order sync.
