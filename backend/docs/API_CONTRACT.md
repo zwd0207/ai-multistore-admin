@@ -439,8 +439,12 @@ Allowed `detail_preview` fields:
 {
   "product_order_id_hash": "id-hash-*",
   "order_id_hash": "id-hash-*",
+  "external_product_order_id_hash": "id-hash-*",
+  "external_order_id_hash": "id-hash-*",
+  "store_id": 8,
   "platform": "naver",
   "order_status": {"raw": "PAYED", "label_zh": "已付款 / 新订单", "unknown_status_observed": false},
+  "order_status_label_zh": "已付款 / 新订单",
   "payment_status": "PAYED",
   "product_name": "safe product text",
   "option_name": "safe option text",
@@ -451,10 +455,18 @@ Allowed `detail_preview` fields:
   "paid_at": "UTC-aware ISO timestamp or null",
   "last_changed_at": "UTC-aware ISO timestamp or null",
   "delivery_status": {"raw": "DISPATCHED", "label_zh": "已发货 / 配送中", "unknown_status_observed": false},
+  "delivery_status_label_zh": "已发货 / 配送中",
   "claim_status": {"raw": "RETURN_REQUEST", "label_zh": "退货请求", "unknown_status_observed": false},
+  "claim_status_label_zh": "退货请求",
   "buyer_name_masked": "masked-or-null",
   "buyer_phone_masked": "****1234",
+  "buyer_id_hash": "id-hash-* or null",
+  "receiver_name_masked": "masked-or-null",
+  "receiver_phone_masked": "****1234 or null",
+  "address_observed": true,
   "address_saved": false,
+  "source_type": "naver_order_preview",
+  "last_synced_at": "UTC-aware ISO timestamp",
   "raw_response_saved": false,
   "privacy_fields_redacted": true,
   "orders_written": false,
@@ -464,9 +476,13 @@ Allowed `detail_preview` fields:
 }
 ```
 
-Known status labels include `PAYED` / `결제완료` -> `已付款 / 新订单`, `PLACE_PRODUCT_ORDER` / `발주확인` -> `已确认订单`, `DISPATCHED` / `배송중` -> `已发货 / 配送中`, `DELIVERED` -> `配送完成`, `CANCELED` / `취소` -> `已取消`, `CANCEL_REQUEST` / `취소요청` -> `取消请求`, `RETURN_REQUEST` / `반품요청` -> `退货请求`, and `EXCHANGE_REQUEST` / `교환요청` -> `换货请求`. Unknown enums must set `unknown_status_observed=true` and use `未识别状态，需人工确认`; do not infer a business meaning.
+Known status labels include `PAYED` / `결제완료` -> `已付款 / 新订单`, `PLACE_PRODUCT_ORDER` / `발주확인` -> `已确认订单`, `DISPATCHED` / `배송중` -> `已发货 / 配送中`, `DELIVERED` / `배송완료` -> `配送完成`, `CANCELED` / `CANCELLED` / `취소` -> `已取消`, `CANCEL_REQUEST` / `취소요청` -> `取消请求`, `RETURN_REQUEST` / `반품요청` -> `退货请求`, `EXCHANGE_REQUEST` / `교환요청` -> `换货请求`, and `PURCHASE_DECIDED` / `구매확정` -> `已确认购买`. Unknown enums must set `unknown_status_observed=true` and use `未识别状态，需人工确认`; do not infer a business meaning.
 
 Phase Naver-ERP-1A does not write `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`; does not save raw responses, token values, `Authorization`, request headers, signatures, bcrypt output, or client secrets; does not output full `channel_no`, full product order ids, full order ids, full buyer names, full phones, or addresses; and does not open dispatch, cancel, return, exchange, delivery write, sales, settlement, customer-service, or formal order sync flows.
+
+Phase Naver-ERP-1B freezes the mapping and privacy gate for later single-order writes. Future writes may save only: `store_id`, `platform=naver`, `external_order_id_hash`, `external_product_order_id_hash`, `order_status`, `order_status_label_zh`, safely observed payment status, safe product/option text, `quantity`, `order_amount`, `currency=KRW`, `ordered_at`, `paid_at`, `last_changed_at`, safely observed delivery/claim statuses plus Chinese labels, `source_type`, `last_synced_at`, `mapping_version`, `raw_response_saved=false`, and `privacy_fields_redacted=true`. Buyer and receiver fields are limited to `buyer_name_masked`, `buyer_phone_masked`, `buyer_id_hash`, `receiver_name_masked`, and `receiver_phone_masked`; complete buyer/receiver names and phones are forbidden. If any address, zip, postal, road-name, base-address, or detailed-address field is observed, the preview may expose only `address_observed=true` and must keep `address_saved=false`.
+
+Phase Naver-ERP-1B still performs no real API request and writes no `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`. It also does not change schema, Codex2, dispatch, cancel, return, exchange, delivery write, sales, settlement, customer-service, or formal order sync flows. Phase Naver-ERP-1C is the first possible single-order local write stage, and it requires explicit user approval, a `codex1.db` backup, `store_id=8`, `credential_id=7`, the latest feed-matched one-detail payload, the whitelist above, masked or hashed privacy fields, `address_saved=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, post-write readback, no `SyncLog`, no new `tested_success`, and no shipment/claim write operation.
 
 ### Planned Naver ERP v1 Contract
 

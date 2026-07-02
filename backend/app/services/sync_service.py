@@ -3083,7 +3083,7 @@ def _run_naver_order_real_micro_preview(
                     would_create=0,
                     would_update=0,
                 )
-            detail_preview = _build_naver_order_detail_preview(detail_result["payload"])
+            detail_preview = _build_naver_order_detail_preview(detail_result["payload"], store_id=store_id)
             field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
             field_observation["detail_preview"] = detail_preview
         else:
@@ -3410,6 +3410,8 @@ def _summarize_naver_order_detail_fields(payload: object) -> dict:
             "delivery",
             "payment",
             "orderer",
+            "zip",
+            "postal",
             "memo",
             "channel",
             "productorderid",
@@ -3426,6 +3428,7 @@ def _summarize_naver_order_detail_fields(payload: object) -> dict:
         "product_name_observed": any("productname" in name or "itemname" in name for name in lower_names),
         "buyer_info_present": any("buyer" in name for name in lower_names),
         "receiver_info_present": any("receiver" in name or "recipient" in name for name in lower_names),
+        "address_info_present": any("address" in name or "zip" in name or "postal" in name for name in lower_names),
         "privacy_fields_suppressed": True,
         "raw_response_saved": False,
         "orders_written": False,
@@ -3450,6 +3453,8 @@ NAVER_ORDER_STATUS_LABELS_ZH = {
     "반품요청": "退货请求",
     "EXCHANGE_REQUEST": "换货请求",
     "교환요청": "换货请求",
+    "PURCHASE_DECIDED": "已确认购买",
+    "구매확정": "已确认购买",
 }
 
 
@@ -3494,7 +3499,20 @@ def _order_status_summary(raw_value: str | None) -> dict:
     }
 
 
-def _build_naver_order_detail_preview(payload: object) -> dict:
+def _payload_has_key_token(payload: object, tokens: tuple[str, ...]) -> bool:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            normalized = str(key).lower()
+            if any(token in normalized for token in tokens):
+                return True
+            if _payload_has_key_token(value, tokens):
+                return True
+    elif isinstance(payload, list):
+        return any(_payload_has_key_token(item, tokens) for item in payload)
+    return False
+
+
+def _build_naver_order_detail_preview(payload: object, *, store_id: int | None = None) -> dict:
     product_order_id = _extract_scalar_by_keys(payload, ("productOrderId", "productOrderNo"))
     order_id = _extract_scalar_by_keys(payload, ("orderId", "orderNo", "orderNumber"))
     order_status = _extract_scalar_by_keys(payload, ("orderStatus", "productOrderStatus", "status"))
@@ -3513,19 +3531,28 @@ def _build_naver_order_detail_preview(payload: object) -> dict:
     ))
     buyer_name = _extract_scalar_by_keys(payload, ("buyerName", "ordererName"))
     buyer_phone = _extract_scalar_by_keys(payload, ("buyerTelNo", "buyerTelNo1", "buyerPhone", "ordererTelNo", "ordererPhone"))
+    buyer_id = _extract_scalar_by_keys(payload, ("buyerId", "buyerMemberId", "ordererId", "ordererNo"))
+    receiver_name = _extract_scalar_by_keys(payload, ("receiverName", "recipientName"))
+    receiver_phone = _extract_scalar_by_keys(payload, ("receiverTelNo", "receiverTelNo1", "receiverPhone", "recipientPhone"))
     order_summary = _order_status_summary(order_status)
     delivery_summary = _order_status_summary(delivery_status)
     claim_summary = _order_status_summary(claim_status)
+    product_order_id_hash = _mask_external_identifier(product_order_id) if product_order_id else None
+    order_id_hash = _mask_external_identifier(order_id) if order_id else None
     safe_status_samples = [
         item["raw"]
         for item in (order_summary, delivery_summary, claim_summary)
         if item.get("raw")
     ]
     return {
-        "product_order_id_hash": _mask_external_identifier(product_order_id) if product_order_id else None,
-        "order_id_hash": _mask_external_identifier(order_id) if order_id else None,
+        "store_id": store_id,
         "platform": "naver",
+        "external_order_id_hash": order_id_hash,
+        "external_product_order_id_hash": product_order_id_hash,
+        "product_order_id_hash": product_order_id_hash,
+        "order_id_hash": order_id_hash,
         "order_status": order_summary,
+        "order_status_label_zh": order_summary.get("label_zh"),
         "payment_status": _safe_order_text(payment_status, max_length=40),
         "product_name": _safe_order_text(product_name, max_length=160),
         "option_name": _safe_order_text(option_name, max_length=160),
@@ -3536,10 +3563,18 @@ def _build_naver_order_detail_preview(payload: object) -> dict:
         "paid_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("paidAt", "paymentDate", "payDate"))),
         "last_changed_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("lastChangedAt", "lastChangedDate", "lastChangeDate"))),
         "delivery_status": delivery_summary,
+        "delivery_status_label_zh": delivery_summary.get("label_zh"),
         "claim_status": claim_summary,
+        "claim_status_label_zh": claim_summary.get("label_zh"),
         "buyer_name_masked": _mask_person_name(buyer_name),
         "buyer_phone_masked": _mask_phone(buyer_phone),
+        "buyer_id_hash": _mask_external_identifier(buyer_id) if buyer_id else None,
+        "receiver_name_masked": _mask_person_name(receiver_name),
+        "receiver_phone_masked": _mask_phone(receiver_phone),
+        "address_observed": _payload_has_key_token(payload, ("address", "zipcode", "zip_code", "postalcode", "postal_code")),
         "address_saved": False,
+        "source_type": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        "last_synced_at": get_utc_now().isoformat(),
         "raw_response_saved": False,
         "privacy_fields_redacted": True,
         "orders_written": False,

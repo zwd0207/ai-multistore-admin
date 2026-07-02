@@ -3163,10 +3163,12 @@ def verify_sync_preview_schema_and_security() -> None:
                                 "paymentDate": "2026-07-01T00:11:00+09:00",
                                 "lastChangedDate": "2026-07-01T00:12:00+09:00",
                                 "buyerName": "must-not-leak-buyer",
+                                "buyerId": "BUYER-ID-MUST-NOT-LEAK-1234567890",
                                 "buyerTelNo": "010-1111-2222",
                                 "receiverName": "must-not-leak-receiver",
                                 "receiverTelNo1": "010-1111-2222",
                                 "receiverAddress": "must-not-leak-address",
+                                "zipCode": "ZIP-MUST-NOT-LEAK",
                                 "paymentDetail": {"raw": "must-not-leak-payment"},
                             }
                         ]
@@ -3285,20 +3287,28 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_observed["product_name_observed"] is True, detail_observed
                 assert detail_observed["buyer_info_present"] is True, detail_observed
                 assert detail_observed["receiver_info_present"] is True, detail_observed
+                assert detail_observed["address_info_present"] is True, detail_observed
+                assert "zipcode" not in [name.lower() for name in detail_observed["observed_field_names"]], detail_observed
                 assert detail_observed["privacy_fields_suppressed"] is True, detail_observed
                 assert detail_observed["raw_response_saved"] is False, detail_observed
                 assert detail_observed["orders_written"] is False, detail_observed
                 detail_summary = detail_data["detail_preview"]
                 assert detail_summary["product_order_id_hash"].startswith("id-hash-"), detail_summary
                 assert detail_summary["order_id_hash"].startswith("id-hash-"), detail_summary
+                assert detail_summary["external_product_order_id_hash"] == detail_summary["product_order_id_hash"], detail_summary
+                assert detail_summary["external_order_id_hash"] == detail_summary["order_id_hash"], detail_summary
+                assert detail_summary["store_id"] == 8, detail_summary
                 assert detail_summary["platform"] == "naver", detail_summary
                 assert detail_summary["order_status"]["raw"] == "PAYED", detail_summary
                 assert detail_summary["order_status"]["label_zh"] == "已付款 / 新订单", detail_summary
+                assert detail_summary["order_status_label_zh"] == "已付款 / 新订单", detail_summary
                 assert detail_summary["order_status"]["unknown_status_observed"] is False, detail_summary
                 assert detail_summary["delivery_status"]["raw"] == "DISPATCHED", detail_summary
                 assert detail_summary["delivery_status"]["label_zh"] == "已发货 / 配送中", detail_summary
+                assert detail_summary["delivery_status_label_zh"] == "已发货 / 配送中", detail_summary
                 assert detail_summary["claim_status"]["raw"] == "UNEXPECTED_CLAIM_STATUS", detail_summary
                 assert detail_summary["claim_status"]["label_zh"] == "未识别状态，需人工确认", detail_summary
+                assert detail_summary["claim_status_label_zh"] == "未识别状态，需人工确认", detail_summary
                 assert detail_summary["unknown_status_observed"] is True, detail_summary
                 assert detail_summary["payment_status"] == "PAYED", detail_summary
                 assert detail_summary["product_name"] == "safe-field-presence-only", detail_summary
@@ -3311,11 +3321,55 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_summary["last_changed_at"].endswith("+00:00"), detail_summary
                 assert detail_summary["buyer_name_masked"] != "must-not-leak-buyer", detail_summary
                 assert detail_summary["buyer_phone_masked"] == "****2222", detail_summary
+                assert detail_summary["buyer_id_hash"].startswith("id-hash-"), detail_summary
+                assert detail_summary["receiver_name_masked"] != "must-not-leak-receiver", detail_summary
+                assert detail_summary["receiver_phone_masked"] == "****2222", detail_summary
+                assert detail_summary["address_observed"] is True, detail_summary
                 assert detail_summary["address_saved"] is False, detail_summary
+                assert detail_summary["source_type"] == "naver_order_preview", detail_summary
+                assert detail_summary["last_synced_at"], detail_summary
                 assert detail_summary["raw_response_saved"] is False, detail_summary
                 assert detail_summary["privacy_fields_redacted"] is True, detail_summary
                 assert detail_summary["orders_written"] is False, detail_summary
                 assert detail_summary["mapping_version"] == "naver_order_detail_preview_v1", detail_summary
+                assert set(detail_summary) == {
+                    "store_id",
+                    "platform",
+                    "external_order_id_hash",
+                    "external_product_order_id_hash",
+                    "product_order_id_hash",
+                    "order_id_hash",
+                    "order_status",
+                    "order_status_label_zh",
+                    "payment_status",
+                    "product_name",
+                    "option_name",
+                    "quantity",
+                    "order_amount",
+                    "currency",
+                    "ordered_at",
+                    "paid_at",
+                    "last_changed_at",
+                    "delivery_status",
+                    "delivery_status_label_zh",
+                    "claim_status",
+                    "claim_status_label_zh",
+                    "buyer_name_masked",
+                    "buyer_phone_masked",
+                    "buyer_id_hash",
+                    "receiver_name_masked",
+                    "receiver_phone_masked",
+                    "address_observed",
+                    "address_saved",
+                    "source_type",
+                    "last_synced_at",
+                    "raw_response_saved",
+                    "privacy_fields_redacted",
+                    "orders_written",
+                    "mapping_version",
+                    "unknown_status_observed",
+                    "safe_status_samples",
+                }, detail_summary
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
                 assert FakeNaverOrderHttpClient.detail_called is True, detail_data
                 detail_text = str(detail_preview.json()).lower()
@@ -3323,18 +3377,80 @@ def verify_sync_preview_schema_and_security() -> None:
                     "product-order-id-must-not-leak",
                     "order-id-must-not-leak",
                     "must-not-leak-buyer",
+                    "buyer-id-must-not-leak",
                     "must-not-leak-receiver",
                     "010-1111-2222",
                     "must-not-leak-address",
+                    "zip-must-not-leak",
                     "must-not-leak-payment",
                     "fake-order-token",
                     "authorization",
+                    "headers",
+                    "signature",
+                    "bcrypt",
+                    "raw response",
                     "buyername",
                     "receivername",
                     "receiveraddress",
                     "paymentdetail",
                 ]:
                     assert forbidden not in detail_text, detail_text
+
+                status_cases = {
+                    "PAYED": "已付款 / 新订单",
+                    "DISPATCHED": "已发货 / 配送中",
+                    "CANCEL_REQUEST": "取消请求",
+                    "RETURN_REQUEST": "退货请求",
+                    "EXCHANGE_REQUEST": "换货请求",
+                    "PURCHASE_DECIDED": "已确认购买",
+                    "결제완료": "已付款 / 新订单",
+                    "구매확정": "已确认购买",
+                }
+                for raw_status, label_zh in status_cases.items():
+                    mapped_preview = sync_service._build_naver_order_detail_preview({
+                        "productOrderId": "STATUS-PRODUCT-ORDER-ID-MUST-NOT-LEAK",
+                        "orderId": "STATUS-ORDER-ID-MUST-NOT-LEAK",
+                        "orderStatus": raw_status,
+                        "buyerName": "status-must-not-leak-name",
+                        "buyerTelNo": "010-3333-4444",
+                        "receiverAddress": "status-must-not-leak-address",
+                    }, store_id=8)
+                    assert mapped_preview["order_status"]["label_zh"] == label_zh, mapped_preview
+                    assert mapped_preview["order_status"]["unknown_status_observed"] is False, mapped_preview
+                    assert mapped_preview["address_observed"] is True, mapped_preview
+                    assert mapped_preview["address_saved"] is False, mapped_preview
+                    assert mapped_preview["privacy_fields_redacted"] is True, mapped_preview
+                    mapped_text = json.dumps(mapped_preview, ensure_ascii=False).lower()
+                    for forbidden in [
+                        "status-product-order-id-must-not-leak",
+                        "status-order-id-must-not-leak",
+                        "status-must-not-leak-name",
+                        "010-3333-4444",
+                        "status-must-not-leak-address",
+                    ]:
+                        assert forbidden not in mapped_text, mapped_text
+
+                unknown_preview = sync_service._build_naver_order_detail_preview({
+                    "productOrderId": "UNKNOWN-PRODUCT-ORDER-ID-MUST-NOT-LEAK",
+                    "orderId": "UNKNOWN-ORDER-ID-MUST-NOT-LEAK",
+                    "orderStatus": "UNEXPECTED_ORDER_STATUS",
+                    "buyerName": "unknown-must-not-leak-name",
+                    "buyerTelNo": "010-5555-6666",
+                    "receiverAddress": "unknown-must-not-leak-address",
+                }, store_id=8)
+                assert unknown_preview["order_status"]["label_zh"] == "未识别状态，需人工确认", unknown_preview
+                assert unknown_preview["order_status"]["unknown_status_observed"] is True, unknown_preview
+                assert unknown_preview["unknown_status_observed"] is True, unknown_preview
+                unknown_text = json.dumps(unknown_preview, ensure_ascii=False).lower()
+                for forbidden in [
+                    "unknown-product-order-id-must-not-leak",
+                    "unknown-order-id-must-not-leak",
+                    "unknown-must-not-leak-name",
+                    "010-5555-6666",
+                    "unknown-must-not-leak-address",
+                    "raw response",
+                ]:
+                    assert forbidden not in unknown_text, unknown_text
 
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = [
