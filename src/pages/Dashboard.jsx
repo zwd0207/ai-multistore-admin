@@ -269,6 +269,8 @@ function FinancialSummarySection({ financialSummary }) {
 function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   if (!isNaverStore || !orderSalesSummary) return null;
+  const topStore = orderSalesSummary.storeBreakdown?.[0];
+  const topProduct = orderSalesSummary.productBreakdown?.[0];
 
   return (
     <section className="content-card">
@@ -305,11 +307,38 @@ function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
           <small>本月 {formatWon(orderSalesSummary.monthOrderAmount)}</small>
         </article>
       </div>
-      <p className="mock-sync-note">该金额来自本地运营订单金额汇总，不等于平台结算金额，不等于利润，也不等于账户可提取资金。取消金额和退款金额待订单字段稳定后再拆分。</p>
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>按店铺汇总</strong>
+            <span>{topStore ? formatWon(topStore.amount) : '暂无金额'}</span>
+          </div>
+          <p>{topStore ? `${topStore.name}：${topStore.orders} 条订单。` : '当前店铺暂无可汇总订单。'}</p>
+          <small>只按本地运营订单计算。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>按商品汇总</strong>
+            <span>{topProduct ? formatWon(topProduct.amount) : '暂无金额'}</span>
+          </div>
+          <p>{topProduct ? `${topProduct.name}：${topProduct.quantity || topProduct.orders} 件 / ${topProduct.orders} 条订单。` : '当前暂无商品金额排行。'}</p>
+          <small>不展示完整商品编号。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>取消 / 退款金额</strong>
+            <span>{orderSalesSummary.refundAmountAvailable ? formatWon(orderSalesSummary.refundAmount) : '待接入'}</span>
+          </div>
+          <p>{orderSalesSummary.refundBusinessMessage}</p>
+          <small>当前不把订单金额自动扣减为净销售额。</small>
+        </article>
+      </div>
+      <p className="mock-sync-note">{orderSalesSummary.boundaryMessage}</p>
       <TechnicalDetails
         description="技术口径仅供管理员排查，主页面用业务文案展示。"
         items={[
           { label: 'scope', value: orderSalesSummary.scope },
+          { label: 'source', value: orderSalesSummary.source },
           { label: 'total_orders', value: orderSalesSummary.totalOrders },
           { label: 'total_order_amount', value: orderSalesSummary.totalOrderAmount },
           { label: 'today_orders', value: orderSalesSummary.todayOrders },
@@ -318,10 +347,19 @@ function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
           { label: 'week_order_amount', value: orderSalesSummary.weekOrderAmount },
           { label: 'month_orders', value: orderSalesSummary.monthOrders },
           { label: 'month_order_amount', value: orderSalesSummary.monthOrderAmount },
+          { label: 'store_breakdown_count', value: orderSalesSummary.storeBreakdown?.length || 0 },
+          { label: 'product_breakdown_count', value: orderSalesSummary.productBreakdown?.length || 0 },
+          { label: 'canceled_orders', value: orderSalesSummary.canceledOrders },
+          { label: 'canceled_order_amount_observed', value: orderSalesSummary.canceledOrderAmountObserved },
+          { label: 'refund_amount_available', value: orderSalesSummary.refundAmountAvailable },
+          { label: 'net_sales_available', value: orderSalesSummary.netSalesAvailable },
           { label: 'latest_ordered_at', value: formatKstDateTimeWithLabel(orderSalesSummary.latestOrderedAt) },
+          { label: 'platform_sales_api_called', value: orderSalesSummary.platformSalesApiCalled },
+          { label: 'platform_settlement_api_called', value: orderSalesSummary.platformSettlementApiCalled },
           { label: 'settlement_amount_available', value: orderSalesSummary.settlementAmountAvailable },
           { label: 'profit_available', value: orderSalesSummary.profitAvailable },
           { label: 'withdrawable_balance_available', value: orderSalesSummary.withdrawableBalanceAvailable },
+          { label: 'formal_order_sync_open', value: orderSalesSummary.formalOrderSyncOpen },
         ]}
       />
     </section>
@@ -410,7 +448,7 @@ function NaverErpWorkbenchSection({
       statusLabel: `${formatWon(totalOrderAmount)}`,
       tone: orderSalesSummary?.totalOrders ? 'info' : 'muted',
       reason: orderSalesSummary?.businessMessage || '当前没有可用于金额统计的 Naver 运营订单。',
-      nextAction: '该金额只来自本地订单，不是平台结算金额、利润或账户可提取资金。',
+      nextAction: orderSalesSummary?.boundaryMessage || '该金额只来自本地订单，不是平台结算金额、利润或账户可提取资金。',
     },
   ];
 
@@ -600,7 +638,7 @@ function NaverClaimReadonlySummarySection({ selectedStore, claimSummary }) {
             <strong>已取消</strong>
             <span>{claimSummary.canceled} 条</span>
           </div>
-          <p>已取消订单只用于状态观察，不等于退款金额已确认。</p>
+          <p>已取消订单只用于状态观察，不能代表退款已经确认。</p>
           <small>退款金额拆分仍待后续订单字段稳定。</small>
         </article>
         <article className={claimSummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>

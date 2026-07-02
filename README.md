@@ -302,3 +302,9 @@ The summary uses local Naver operational orders only and separates pending deliv
 Codex2 now has a dedicated Naver claim readonly classification summary. See `PHASE_NAVER_ERP_7B_CLAIM_READONLY_CLASSIFICATION.md`.
 
 The Dashboard and Orders page classify local Naver operational orders into cancel requests, return requests, exchange requests, already canceled orders, and unknown claim/order states. This phase does not call Naver, does not write orders, does not execute cancel/return/exchange/refund writes, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-8A - Order-Based Sales Summary
+
+Codex2 now has a richer Naver order-based sales summary. See `PHASE_NAVER_ERP_8A_ORDER_BASED_SALES_SUMMARY.md`.
+
+The Dashboard and Sales page summarize local Naver operational order amounts by total, today, week, month, store, and product. The displayed amount comes only from local orders and is not Naver settlement, profit, withdrawable balance, confirmed refund amount, or net sales. This phase does not call Naver sales/statistics/settlement APIs, does not write orders or financial rows, and does not open formal Naver order sync.

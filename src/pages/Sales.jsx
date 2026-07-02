@@ -316,6 +316,8 @@ function NaverOrderSalesSummaryPanel() {
   }, [isNaverStore, selectedStore, selectedStoreId]);
 
   if (!isNaverStore) return null;
+  const topStore = summary?.storeBreakdown?.[0];
+  const topProduct = summary?.productBreakdown?.[0];
 
   return (
     <section className="content-card">
@@ -362,6 +364,16 @@ function NaverOrderSalesSummaryPanel() {
               <p>该金额来自本地 orders 的订单金额汇总。</p>
               <small>不会展示完整订单号或买家隐私。</small>
             </article>
+            <article className="business-capability-card info">
+              <div className="business-capability-head"><strong>店铺汇总</strong><span>{topStore ? formatWon(topStore.amount) : '暂无金额'}</span></div>
+              <p>{topStore ? `${topStore.name}：${topStore.orders} 条订单。` : '当前店铺暂无可汇总订单。'}</p>
+              <small>只统计当前 Naver 店铺本地运营订单。</small>
+            </article>
+            <article className="business-capability-card info">
+              <div className="business-capability-head"><strong>商品汇总</strong><span>{topProduct ? formatWon(topProduct.amount) : '暂无金额'}</span></div>
+              <p>{topProduct ? `${topProduct.name}：${topProduct.quantity || topProduct.orders} 件 / ${topProduct.orders} 条订单。` : '当前暂无商品金额排行。'}</p>
+              <small>不展示完整商品编号。</small>
+            </article>
             <article className="business-capability-card muted">
               <div className="business-capability-head"><strong>结算 / 利润</strong><span>待接入</span></div>
               <p>当前不等于平台结算金额，不等于利润，也不等于账户可提取资金。</p>
@@ -369,24 +381,35 @@ function NaverOrderSalesSummaryPanel() {
             </article>
             <article className="business-capability-card muted">
               <div className="business-capability-head"><strong>取消 / 退款金额</strong><span>待接入</span></div>
-              <p>待取消、退货、退款字段稳定后再拆分金额。</p>
+              <p>{summary.refundBusinessMessage}</p>
               <small>当前不把订单金额自动扣减为净销售额。</small>
             </article>
           </div>
+          <p className="mock-sync-note">{summary.boundaryMessage}</p>
           <TechnicalDetails
             description="技术口径仅供管理员排查，主页面不展示完整订单标识或买家隐私。"
             items={[
               { label: 'scope', value: summary.scope },
+              { label: 'source', value: summary.source },
               { label: 'store_id', value: selectedStoreId },
               { label: 'total_orders', value: summary.totalOrders },
               { label: 'total_order_amount', value: summary.totalOrderAmount },
               { label: 'today_order_amount', value: summary.todayOrderAmount },
               { label: 'week_order_amount', value: summary.weekOrderAmount },
               { label: 'month_order_amount', value: summary.monthOrderAmount },
+              { label: 'store_breakdown_count', value: summary.storeBreakdown?.length || 0 },
+              { label: 'product_breakdown_count', value: summary.productBreakdown?.length || 0 },
+              { label: 'canceled_orders', value: summary.canceledOrders },
+              { label: 'canceled_order_amount_observed', value: summary.canceledOrderAmountObserved },
+              { label: 'refund_amount_available', value: summary.refundAmountAvailable },
+              { label: 'net_sales_available', value: summary.netSalesAvailable },
               { label: 'latest_ordered_at', value: formatKstDateTimeWithLabel(summary.latestOrderedAt) },
+              { label: 'platform_sales_api_called', value: summary.platformSalesApiCalled },
+              { label: 'platform_settlement_api_called', value: summary.platformSettlementApiCalled },
               { label: 'settlement_amount_available', value: summary.settlementAmountAvailable },
               { label: 'profit_available', value: summary.profitAvailable },
               { label: 'withdrawable_balance_available', value: summary.withdrawableBalanceAvailable },
+              { label: 'formal_order_sync_open', value: summary.formalOrderSyncOpen },
             ]}
           />
         </>

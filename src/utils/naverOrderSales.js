@@ -1,4 +1,4 @@
-import { filterNaverOrdersForStore } from './naverOrderFulfillment';
+import { filterNaverOrdersForStore, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 import { getKstTodayString } from './time';
 
 function numberValue(value) {
@@ -8,6 +8,10 @@ function numberValue(value) {
 
 function orderAmount(order = {}) {
   return numberValue(order.amount ?? order.order_amount);
+}
+
+function orderQuantity(order = {}) {
+  return numberValue(order.quantity);
 }
 
 function orderDate(order = {}) {
@@ -22,6 +26,22 @@ function orderDate(order = {}) {
   ).slice(0, 10);
 }
 
+function textValue(...values) {
+  return values.map((value) => String(value || '').trim()).find(Boolean) || '';
+}
+
+function productName(order = {}) {
+  return textValue(order.productName, order.product_name, order.product, '未命名商品');
+}
+
+function storeName(order = {}) {
+  return textValue(order.store, order.store_name, '当前店铺');
+}
+
+function rawStatus(order = {}) {
+  return order.rawStatus || order.order_status || order.status || '';
+}
+
 function weekStart(dateText) {
   const date = new Date(`${dateText}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return dateText;
@@ -32,6 +52,25 @@ function weekStart(dateText) {
 
 function sumOrders(orders = []) {
   return orders.reduce((sum, order) => sum + orderAmount(order), 0);
+}
+
+function summarizeBy(orders = [], keyOf, { limit = 3 } = {}) {
+  return Object.values(orders.reduce((summary, order) => {
+    const key = keyOf(order);
+    const current = summary[key] || {
+      name: key,
+      orders: 0,
+      amount: 0,
+      quantity: 0,
+    };
+    current.orders += 1;
+    current.amount += orderAmount(order);
+    current.quantity += orderQuantity(order);
+    summary[key] = current;
+    return summary;
+  }, {}))
+    .sort((left, right) => right.amount - left.amount || right.orders - left.orders)
+    .slice(0, limit);
 }
 
 export function buildNaverOrderSalesSummary(orders = [], {
@@ -54,6 +93,10 @@ export function buildNaverOrderSalesSummary(orders = [], {
     .sort()
     .at(-1) || null;
   const totalOrderAmount = sumOrders(scopedOrders);
+  const canceledOrders = scopedOrders.filter((order) => normalizeNaverOrderStatus(rawStatus(order)) === 'CANCELED');
+  const canceledOrderAmountObserved = sumOrders(canceledOrders);
+  const storeBreakdown = summarizeBy(scopedOrders, storeName);
+  const productBreakdown = summarizeBy(scopedOrders, productName);
 
   return {
     totalOrders: scopedOrders.length,
@@ -66,12 +109,28 @@ export function buildNaverOrderSalesSummary(orders = [], {
     monthOrderAmount: sumOrders(monthOrders),
     currency: 'KRW',
     latestOrderedAt,
+    storeBreakdown,
+    productBreakdown,
+    canceledOrders: canceledOrders.length,
+    canceledOrderAmountObserved,
+    refundAmount: 0,
+    cancelAmountAvailable: false,
+    refundAmountAvailable: false,
+    netSalesAvailable: false,
     scope: 'local_order_amount_from_orders',
     settlementAmountAvailable: false,
     profitAvailable: false,
     withdrawableBalanceAvailable: false,
+    source: 'local_orders_only',
+    platformSalesApiCalled: false,
+    platformSettlementApiCalled: false,
+    formalOrderSyncOpen: false,
     businessMessage: scopedOrders.length
       ? `当前本地 Naver 运营订单 ${scopedOrders.length} 条，订单金额合计 ${totalOrderAmount.toLocaleString()} KRW。`
       : '当前没有可用于金额统计的 Naver 运营订单。',
+    refundBusinessMessage: canceledOrders.length
+      ? `已观察到 ${canceledOrders.length} 条已取消订单，关联订单金额 ${canceledOrderAmountObserved.toLocaleString()} KRW；该金额不能代表退款已经确认。`
+      : '当前没有已取消订单金额可观察；退款金额字段仍待后续接入。',
+    boundaryMessage: '该金额只来自本地订单，不是 Naver 结算金额、利润或账户可提取资金；取消和退款金额暂不从订单金额中自动扣减。',
   };
 }
