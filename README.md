@@ -346,3 +346,9 @@ The gate prefers safe product-order hash matching from `detail_preview`; it fall
 The 9D identity gate has been walked through in backend-source and mock-source Orders pages. See `PHASE_NAVER_ERP_9E_ORDER_REFRESH_MATCH_WALKTHROUGH.md`.
 
 Backend mode used the existing 3-day complete-field readonly preview with `real_sync=false`. The preview succeeded, but the product-order safe hash did not match the selected local operational order, so the gate stayed `不可写库` and did not enter manual review. Mock mode demonstrated the matched path and moved to `可进入人工审核，不会自行写库`. No local counters changed, no Codex1 files changed, and formal Naver order sync remains closed.
+
+## Phase Naver-ERP-9F - Order Refresh Write Deferral And Next-Candidate Plan
+
+Naver order refresh writing is formally deferred because the real readonly preview does not match the selected local operational order. See `PHASE_NAVER_ERP_9F_ORDER_REFRESH_WRITE_DEFERRAL_AND_NEXT_CANDIDATE_PLAN.md`.
+
+The current local operational order remains `PAYED / 499000 KRW`, while the latest controlled readonly preview observed `DELIVERED / 配送完成` with `330000 KRW`. Since the product-order safe hash mismatches, the previewed detail must not update the existing local row. The safer next path is to classify the previewed detail as a possible new order candidate under a separate phase, still with preview-first, duplicate checks, one-order limits, and formal sync closed.
