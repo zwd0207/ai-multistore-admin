@@ -490,6 +490,8 @@ The 1C local write result is returned as `local_sync_result`. Possible statuses 
 
 Phase Naver-ERP-1C still does not write `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`; does not execute any Naver dispatch, cancel, return, exchange, delivery write, sales, settlement, or customer-service write; and does not declare formal Naver order sync open.
 
+Phase Naver-ERP-1D is the post-write verification contract. It performs local readback plus a 24-hour `real_sync=false` feed-to-detail preview only. The expected verified state is `orders_store8=1`, `products_store8=5`, `sync_logs_store8=0`, and unchanged `tested_success_store8`. The stored order must use a hashed product-order key as `orders.external_order_id`, `source_type=naver_real_order_sync`, `raw_response_saved=false`, `privacy_fields_redacted=true`, `address_saved=false`, `currency=KRW`, and safe order status labels. A follow-up preview may confirm that the current product-order hash matches the existing local hash, but it must keep `local_sync_result.requested=false`, `local_sync_result.status=not_requested`, and must not create a duplicate. 1D does not execute `real_sync=true`, does not write another order, and does not open formal Naver order sync.
+
 ### Planned Naver ERP v1 Contract
 
 Phase Naver-ERP-MasterPlan keeps the current Naver focus on normal ERP operations: products -> orders -> inventory -> delivery/claims -> order-based sales -> Dashboard. Mail, appeals, AI reply generation, AI mail recognition, and deep customer-service automation are intentionally outside this contract until the core ERP loop is stable.
