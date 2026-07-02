@@ -372,6 +372,8 @@ function NaverErpWorkbenchSection({
   results,
   inventorySummary,
   orderFulfillmentSummary,
+  deliverySummary,
+  claimSummary,
   orderSalesSummary,
   productChangeHints,
 }) {
@@ -385,7 +387,46 @@ function NaverErpWorkbenchSection({
   const claimRequestCount = orderFulfillmentSummary?.claimRequestCount ?? 0;
   const orderActionCount = orderFulfillmentSummary?.actionNeededCount ?? 0;
   const inventoryAttentionCount = inventorySummary?.attentionCount ?? 0;
+  const productCount = inventorySummary?.total ?? 5;
+  const orderCount = orderFulfillmentSummary?.total ?? 0;
+  const pendingDelivery = deliverySummary?.pendingDelivery ?? ((orderFulfillmentSummary?.newOrders ?? 0) + (orderFulfillmentSummary?.pendingDispatch ?? 0));
+  const claimAttentionCount = claimSummary?.claimAttentionCount ?? claimRequestCount;
   const totalOrderAmount = orderSalesSummary?.totalOrderAmount ?? 0;
+  const dailyPriority = activeIssue
+    ? {
+      label: '连接需要检查',
+      tone: activeIssue.tone || 'warning',
+      message: '先检查 Naver 平台连接资料或 API 设置。',
+    }
+    : claimAttentionCount > 0
+      ? {
+        label: '售后请求待处理',
+        tone: 'warning',
+        message: '先人工查看取消、退货或换货请求；当前不自动处理平台售后。',
+      }
+      : pendingDelivery > 0
+        ? {
+          label: '待发货订单',
+          tone: 'info',
+          message: '优先处理待发货订单；发货写入 Naver 仍未开放。',
+        }
+        : inventoryAttentionCount > 0
+          ? {
+            label: '库存需要关注',
+            tone: 'warning',
+            message: '先处理缺货、低库存或库存异常商品；当前不写平台库存。',
+          }
+          : productChangeHints?.businessChangeObserved
+            ? {
+              label: '商品变化待核对',
+              tone: 'warning',
+              message: '先核对价格、库存或其他业务字段变化；未批准前不写库。',
+            }
+            : {
+              label: '暂无高优先级阻断',
+              tone: 'success',
+              message: '继续按本地商品、订单、库存、配送、售后和订单金额观察。',
+            };
 
   const cards = [
     {
@@ -457,9 +498,49 @@ function NaverErpWorkbenchSection({
       <div className="card-title">
         <div>
           <h2>Naver ERP 工作台摘要</h2>
-          <p>围绕商品、订单、库存、配送 / 售后和订单金额展示当前店铺要处理的事项。</p>
+          <p>围绕连接、商品、订单、库存、配送 / 售后和订单金额展示当前店铺今天要处理的事项。</p>
         </div>
         <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
+      </div>
+      <div className="financial-summary-grid">
+        <article className={`financial-card ${dailyPriority.tone}`}>
+          <div className="financial-card-head">
+            <h3>今日重点</h3>
+            <p>按连接、售后、发货、库存和商品变化排序</p>
+          </div>
+          <strong>{dailyPriority.label}</strong>
+          <small>{dailyPriority.message}</small>
+        </article>
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>本地经营数据</h3>
+            <p>只读取本地 Naver ERP 数据</p>
+          </div>
+          <strong>{productCount} 商品 / {orderCount} 订单</strong>
+          <small>商品小批量写入和单条订单写入测试已阶段收口。</small>
+        </article>
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>履约待办</h3>
+            <p>发货与售后只读识别</p>
+          </div>
+          <strong>{pendingDelivery} 待发货 / {claimAttentionCount} 售后</strong>
+          <small>发货、取消、退货、换货写操作仍未开放。</small>
+        </article>
+        <article className="financial-card">
+          <div className="financial-card-head">
+            <h3>订单金额</h3>
+            <p>本地订单金额口径</p>
+          </div>
+          <strong>{formatWon(totalOrderAmount)}</strong>
+          <small>不是 Naver 结算、利润或账户可提取资金。</small>
+        </article>
+      </div>
+      <div className="financial-card-note">
+        <span>正式商品批量同步未开放</span>
+        <span>正式订单批量同步未开放</span>
+        <span>平台发货 / 售后写操作未开放</span>
+        <span>Naver 销售 / 结算接口未接入</span>
       </div>
       <div className="business-capability-grid">
         {cards.map((card) => (
@@ -477,7 +558,10 @@ function NaverErpWorkbenchSection({
         description="技术字段继续折叠展示，主工作台只呈现卖家能直接理解的业务摘要。"
         items={[
           { label: 'naver_connection_issue', value: Boolean(activeIssue) },
+          { label: 'daily_priority_label', value: dailyPriority.label },
+          { label: 'daily_priority_tone', value: dailyPriority.tone },
           { label: 'product_small_batch_completed', value: true },
+          { label: 'local_naver_product_count', value: productCount },
           { label: 'product_formal_batch_sync_open', value: false },
           { label: 'product_change_hints_status', value: productChangeHints?.statusLabel || '-' },
           { label: 'product_change_hints_would_update', value: productChangeHints?.wouldUpdate ?? 0 },
@@ -495,11 +579,18 @@ function NaverErpWorkbenchSection({
           { label: 'inventory_platform_comparison_available', value: inventorySummary?.platformComparisonAvailable ?? false },
           { label: 'inventory_history_available', value: inventorySummary?.inventoryHistoryAvailable ?? false },
           { label: 'inventory_raw_response_saved', value: inventorySummary?.rawResponseSaved ?? false },
+          { label: 'local_naver_order_count', value: orderCount },
           { label: 'order_action_needed_count', value: orderActionCount },
+          { label: 'pending_delivery_count', value: pendingDelivery },
+          { label: 'claim_attention_count', value: claimAttentionCount },
           { label: 'mock_sync_orders_isolated', value: orderFulfillmentSummary?.excludedMockSyncCount ?? 0 },
           { label: 'claim_request_count', value: claimRequestCount },
           { label: 'local_order_amount', value: totalOrderAmount },
           { label: 'order_amount_scope', value: orderSalesSummary?.scope || 'local_orders_only' },
+          { label: 'sales_api_called', value: orderSalesSummary?.platformSalesApiCalled ?? false },
+          { label: 'settlement_api_called', value: orderSalesSummary?.platformSettlementApiCalled ?? false },
+          { label: 'platform_claim_write_enabled', value: claimSummary?.platformClaimWriteEnabled ?? false },
+          { label: 'platform_delivery_write_enabled', value: deliverySummary?.platformDeliveryWriteEnabled ?? false },
         ]}
       />
     </section>
@@ -993,6 +1084,8 @@ export default function Dashboard() {
         results={platformStatusData.results}
         inventorySummary={naverInventorySummary}
         orderFulfillmentSummary={naverOrderFulfillmentSummary}
+        deliverySummary={naverDeliveryStatusSummary}
+        claimSummary={naverClaimReadonlySummary}
         orderSalesSummary={naverOrderSalesSummary}
         productChangeHints={naverProductChangeHints}
       />

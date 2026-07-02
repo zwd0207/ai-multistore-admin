@@ -308,3 +308,9 @@ The Dashboard and Orders page classify local Naver operational orders into cance
 Codex2 now has a richer Naver order-based sales summary. See `PHASE_NAVER_ERP_8A_ORDER_BASED_SALES_SUMMARY.md`.
 
 The Dashboard and Sales page summarize local Naver operational order amounts by total, today, week, month, store, and product. The displayed amount comes only from local orders and is not Naver settlement, profit, withdrawable balance, confirmed refund amount, or net sales. This phase does not call Naver sales/statistics/settlement APIs, does not write orders or financial rows, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-8B - Dashboard ERP Summary
+
+Codex2 Dashboard now has a seller-facing Naver ERP daily summary. See `PHASE_NAVER_ERP_8B_DASHBOARD_ERP_SUMMARY.md`.
+
+The summary prioritizes connection issues, claim attention, pending delivery, inventory attention, and product price/stock change hints, then shows local products, local operational orders, pending delivery, claims, and local order amount. It uses existing local data only, does not call Naver, does not write orders/products/financial rows, and keeps product batch sync, order batch sync, platform delivery/claim writes, and Naver sales/settlement APIs closed.
