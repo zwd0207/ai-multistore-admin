@@ -18,6 +18,7 @@ import {
   getNaverProductPreviewStatus,
 } from '../utils/capabilityStatusMapper';
 import { buildNaverInventorySummary } from '../utils/naverInventory';
+import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
 import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
@@ -71,6 +72,7 @@ function SellerTodoOverview({
   capabilities,
   results,
   inventorySummary,
+  orderFulfillmentSummary,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
@@ -107,7 +109,21 @@ function SellerTodoOverview({
       description: `${inventorySummary.businessMessage}正式商品批量同步仍未开放。`,
       status: inventorySummary.attentionCount > 0 ? 'warning' : 'success',
     };
-  const naverStatusTodos = [naverConnectionTodo, naverProductTodo, naverOrderTodo, naverInventoryTodo].filter(Boolean);
+  const naverFulfillmentTodo = !isNaverStore || !orderFulfillmentSummary
+    ? null
+    : {
+      id: 'naver-fulfillment',
+      title: '订单履约 / 售后',
+      description: `${orderFulfillmentSummary.businessMessage}发货、取消、退货、换货写操作仍未开放。`,
+      status: orderFulfillmentSummary.actionNeededCount > 0 ? 'warning' : 'success',
+    };
+  const naverStatusTodos = [
+    naverConnectionTodo,
+    naverProductTodo,
+    naverOrderTodo,
+    naverInventoryTodo,
+    naverFulfillmentTodo,
+  ].filter(Boolean);
   const priorityItems = [
     {
       id: 'orders',
@@ -282,6 +298,7 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [platformStatusData, setPlatformStatusData] = useState({ capabilities: [], results: [], readiness: null });
   const [naverInventorySummary, setNaverInventorySummary] = useState(null);
+  const [naverOrderFulfillmentSummary, setNaverOrderFulfillmentSummary] = useState(null);
 
   useEffect(() => {
     if (isBackendSource && storeLoading) return;
@@ -393,6 +410,32 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.products]);
 
+  useEffect(() => {
+    const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+    if (storeLoading || storeError || !selectedStoreId || !isNaverStore) {
+      setNaverOrderFulfillmentSummary(null);
+      return undefined;
+    }
+    let cancelled = false;
+    dataProvider.getOrders({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((orderResponse) => {
+        if (cancelled) return;
+        setNaverOrderFulfillmentSummary(buildNaverOrderFulfillmentSummary(
+          orderResponse.data || orderResponse.items || [],
+          { selectedStore, selectedStoreId },
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) setNaverOrderFulfillmentSummary(null);
+      });
+    return () => { cancelled = true; };
+  }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.orders]);
+
   const stats = useMemo(() => {
     if (!summary) return [];
     return [
@@ -447,6 +490,7 @@ export default function Dashboard() {
           capabilities={platformStatusData.capabilities}
           results={platformStatusData.results}
           inventorySummary={naverInventorySummary}
+          orderFulfillmentSummary={naverOrderFulfillmentSummary}
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>

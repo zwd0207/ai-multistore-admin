@@ -1,3 +1,5 @@
+import { getNaverOrderStatusPresentation } from '../utils/naverOrderFulfillment';
+
 const numberValue = (value) => Number(value || 0);
 const emptyText = (value, fallback = '—') => value ?? fallback;
 
@@ -280,8 +282,8 @@ export function adaptOrder(item = {}) {
   const displayOrderNo = isNaver && isHashOrderId ? '订单编号已脱敏' : item.external_order_id;
   const displayCustomer = isNaver ? (item.buyer_name || '买家信息已脱敏') : item.buyer_name;
   const displayPhone = isNaver && !item.buyer_masked_phone ? '未保存' : emptyText(item.buyer_masked_phone);
-  const statusLabel = isNaver && naverStatusLabel
-    ? naverStatusLabel
+  const statusLabel = isNaver
+    ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
     : adaptStatus(item.order_status, {
       paid: '待发货',
       payed: '已付款 / 新订单',

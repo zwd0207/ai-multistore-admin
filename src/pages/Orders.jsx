@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
 import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
@@ -8,6 +8,7 @@ import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 import { getNaverOrderPreviewStatus } from '../utils/capabilityStatusMapper';
+import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const api = {
@@ -200,9 +201,35 @@ function CoupangOrderSyncPanel() {
 
 function NaverOrderPreviewStatusPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
+  const [orders, setOrders] = useState([]);
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setOrders([]);
+      return undefined;
+    }
+    let cancelled = false;
+    dataProvider.getOrders({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((orderResponse) => {
+        if (!cancelled) setOrders(orderResponse.data || orderResponse.items || []);
+      })
+      .catch(() => {
+        if (!cancelled) setOrders([]);
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStoreId]);
+
   if (!isNaverStore) return null;
   const status = getNaverOrderPreviewStatus();
+  const fulfillmentSummary = buildNaverOrderFulfillmentSummary(orders, {
+    selectedStore,
+    selectedStoreId,
+  });
 
   return (
     <section className="content-card naver-preview-status-panel">
@@ -221,6 +248,46 @@ function NaverOrderPreviewStatusPanel() {
           </div>
           <p>已完成 1 条 Naver 订单本地写入测试。</p>
           <small>订单状态为已付款 / 新订单，金额 499,000 KRW。</small>
+        </article>
+        <article className={`business-capability-card ${fulfillmentSummary.tone}`}>
+          <div className="business-capability-head">
+            <strong>履约 / 售后只读分类</strong>
+            <span>{fulfillmentSummary.statusLabel}</span>
+          </div>
+          <p>{fulfillmentSummary.businessMessage}</p>
+          <small>状态只来自本地脱敏订单，不请求 Naver，不执行平台写操作。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>新订单 / 待发货</strong>
+            <span>{fulfillmentSummary.newOrders + fulfillmentSummary.pendingDispatch} 条</span>
+          </div>
+          <p>新订单 {fulfillmentSummary.newOrders} 条，待发货 {fulfillmentSummary.pendingDispatch} 条。</p>
+          <small>不把已付款订单误显示为已发货。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>配送状态</strong>
+            <span>{fulfillmentSummary.inDelivery + fulfillmentSummary.delivered} 条</span>
+          </div>
+          <p>配送中 {fulfillmentSummary.inDelivery} 条，配送完成 {fulfillmentSummary.delivered} 条。</p>
+          <small>当前只读展示配送状态，不接入配送写接口。</small>
+        </article>
+        <article className={fulfillmentSummary.claimRequestCount > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>取消 / 退货 / 换货</strong>
+            <span>{fulfillmentSummary.claimRequestCount} 条</span>
+          </div>
+          <p>取消请求 {fulfillmentSummary.cancelRequests} 条，退货请求 {fulfillmentSummary.returnRequests} 条，换货请求 {fulfillmentSummary.exchangeRequests} 条。</p>
+          <small>售后请求只进入待办识别，不自动处理。</small>
+        </article>
+        <article className={fulfillmentSummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>异常订单</strong>
+            <span>{fulfillmentSummary.unknown} 条</span>
+          </div>
+          <p>{fulfillmentSummary.unknown > 0 ? '存在未识别状态，需要人工确认。' : '当前没有未识别订单状态。'}</p>
+          <small>未知状态不会抛错，也不会进入平台写操作。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
@@ -257,6 +324,17 @@ function NaverOrderPreviewStatusPanel() {
           { label: 'raw_response_saved', value: false },
           { label: 'privacy_fields_redacted', value: true },
           { label: 'address_saved', value: false },
+          { label: 'fulfillment.source', value: fulfillmentSummary.source },
+          { label: 'fulfillment.total', value: fulfillmentSummary.total },
+          { label: 'fulfillment.new_orders', value: fulfillmentSummary.newOrders },
+          { label: 'fulfillment.pending_dispatch', value: fulfillmentSummary.pendingDispatch },
+          { label: 'fulfillment.in_delivery', value: fulfillmentSummary.inDelivery },
+          { label: 'fulfillment.delivered', value: fulfillmentSummary.delivered },
+          { label: 'fulfillment.cancel_requests', value: fulfillmentSummary.cancelRequests },
+          { label: 'fulfillment.return_requests', value: fulfillmentSummary.returnRequests },
+          { label: 'fulfillment.exchange_requests', value: fulfillmentSummary.exchangeRequests },
+          { label: 'fulfillment.unknown', value: fulfillmentSummary.unknown },
+          { label: 'platform_writes_enabled', value: fulfillmentSummary.platformWritesEnabled },
           { label: 'formal_order_sync_status', value: 'not_open' },
         ]}
       />
