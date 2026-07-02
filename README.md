@@ -376,3 +376,9 @@ Codex1 caps `real_sync=true` order writes to a 24-hour window. The 10C write gat
 The Naver new-order write window decision is documented in `PHASE_NAVER_ERP_10D_NEW_ORDER_WRITE_WINDOW_DECISION.md`.
 
 10D keeps the existing Codex1 `real_sync=true` order write gate capped to a 24-hour window. The 3-day `candidate_new` from 10B must not be forced through the current 24-hour gate or reused from a stale readonly response. If that candidate should be considered for persistence, it needs a separate selected-candidate write path with a fresh readonly preview, database backup, duplicate checks, privacy gates, and explicit approval. This phase does not call Naver, does not write local data, does not change Codex1, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-11A - Selected New-Order Write Path Plan
+
+The selected Naver new-order write path is documented in `PHASE_NAVER_ERP_11A_SELECTED_NEW_ORDER_WRITE_PATH_PLAN.md`.
+
+11A keeps the existing 24-hour write gate unchanged and defines a separate future selected-candidate path for any manually approved older new-order candidate. The future path must re-run a fresh readonly preview, recompute safe hashes server-side, match exactly one selected candidate, pass duplicate and privacy gates, back up the database, write at most one order, and keep `products`, `SyncLog`, and `tested_success` unchanged. This phase does not call Naver, does not write local data, does not change Codex1, and does not open formal Naver order sync.
