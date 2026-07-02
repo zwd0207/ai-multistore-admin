@@ -290,3 +290,9 @@ The Products page and Dashboard classify local Naver products as out of stock, l
 Codex2 now separates local inventory alerts from Naver product price / stock change hints. See `PHASE_NAVER_ERP_6B_PRODUCT_PRICE_STOCK_CHANGE_HINTS.md`.
 
 The Products page and Dashboard show that the latest known Naver product dry-run has no price or stock business-field changes, while still showing local out-of-stock or low-stock alerts separately. Future safe changed-field names such as `price`, `currency`, or `stock_quantity` can be surfaced as manual review hints, but this phase does not call Naver, does not write products, and does not open formal Naver product batch sync.
+
+## Phase Naver-ERP-7A - Delivery Status Dashboard Summary
+
+Codex2 Dashboard now has a dedicated Naver delivery status summary. See `PHASE_NAVER_ERP_7A_DELIVERY_STATUS_DASHBOARD_SUMMARY.md`.
+
+The summary uses local Naver operational orders only and separates pending delivery, in-delivery, delivered, and unknown delivery states. It does not call Naver, does not write orders, does not execute dispatch/cancel/return/exchange writes, and does not open formal Naver order sync.

@@ -18,7 +18,10 @@ import {
   getNaverProductPreviewStatus,
 } from '../utils/capabilityStatusMapper';
 import { buildNaverInventorySummary } from '../utils/naverInventory';
-import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
+import {
+  buildNaverDeliveryStatusSummary,
+  buildNaverOrderFulfillmentSummary,
+} from '../utils/naverOrderFulfillment';
 import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
 import { buildNaverProductChangeHints } from '../utils/naverProductChangeHints';
 import {
@@ -76,6 +79,7 @@ function SellerTodoOverview({
   inventorySummary,
   orderFulfillmentSummary,
   productChangeHints,
+  deliverySummary,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
@@ -128,12 +132,21 @@ function SellerTodoOverview({
       description: `${orderFulfillmentSummary.businessMessage}发货、取消、退货、换货写操作仍未开放。`,
       status: orderFulfillmentSummary.actionNeededCount > 0 ? 'warning' : 'success',
     };
+  const naverDeliveryTodo = !isNaverStore || !deliverySummary
+    ? null
+    : {
+      id: 'naver-delivery',
+      title: '配送状态摘要',
+      description: `${deliverySummary.businessMessage}${deliverySummary.nextAction}`,
+      status: deliverySummary.deliveryAttentionCount > 0 ? 'warning' : 'success',
+    };
   const naverStatusTodos = [
     naverConnectionTodo,
     naverProductTodo,
     naverProductChangeTodo,
     naverOrderTodo,
     naverInventoryTodo,
+    naverDeliveryTodo,
     naverFulfillmentTodo,
   ].filter(Boolean);
   const priorityItems = [
@@ -444,6 +457,87 @@ function NaverErpWorkbenchSection({
   );
 }
 
+function NaverDeliveryStatusSummarySection({ selectedStore, deliverySummary }) {
+  const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+  if (!isNaverStore || !deliverySummary) return null;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>Naver 配送状态摘要</h2>
+          <p>基于本地 Naver 运营订单汇总待发货、配送中、配送完成和异常状态。</p>
+        </div>
+        <span className="period-chip">只读展示</span>
+      </div>
+      <div className="business-capability-grid compact">
+        <article className={`business-capability-card ${deliverySummary.tone}`}>
+          <div className="business-capability-head">
+            <strong>配送总览</strong>
+            <span>{deliverySummary.statusLabel}</span>
+          </div>
+          <p>{deliverySummary.businessMessage}</p>
+          <small>{deliverySummary.nextAction}</small>
+        </article>
+        <article className={deliverySummary.pendingDelivery > 0 ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>待发货</strong>
+            <span>{deliverySummary.pendingDelivery} 条</span>
+          </div>
+          <p>包含已付款新订单和已确认待发货订单。</p>
+          <small>当前不执行 Naver 发货写入。</small>
+        </article>
+        <article className={deliverySummary.inDelivery > 0 ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>配送中</strong>
+            <span>{deliverySummary.inDelivery} 条</span>
+          </div>
+          <p>用于观察已发货后的物流进度。</p>
+          <small>配送状态只来自本地订单摘要。</small>
+        </article>
+        <article className={deliverySummary.delivered > 0 ? 'business-capability-card success' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>配送完成</strong>
+            <span>{deliverySummary.delivered} 条</span>
+          </div>
+          <p>订单已进入配送完成或等价状态。</p>
+          <small>不等于平台结算完成或利润确认。</small>
+        </article>
+        <article className={deliverySummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>配送异常 / 未识别</strong>
+            <span>{deliverySummary.unknown} 条</span>
+          </div>
+          <p>{deliverySummary.unknown > 0 ? '存在未识别配送或订单状态，需要人工复核。' : '当前没有未识别配送状态。'}</p>
+          <small>未知状态不会自动写入平台处理。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>配送写入</strong>
+            <span>未开放</span>
+          </div>
+          <p>发货、配送变更、取消、退货和换货写操作仍需单独批准。</p>
+          <small>本阶段不调用 Naver 配送写接口。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        description="配送技术字段仅供管理员排查，主页面不展示订单原始响应或平台写入参数。"
+        items={[
+          { label: 'delivery.source', value: deliverySummary.source },
+          { label: 'delivery.total', value: deliverySummary.total },
+          { label: 'delivery.pending_delivery', value: deliverySummary.pendingDelivery },
+          { label: 'delivery.in_delivery', value: deliverySummary.inDelivery },
+          { label: 'delivery.delivered', value: deliverySummary.delivered },
+          { label: 'delivery.unknown', value: deliverySummary.unknown },
+          { label: 'delivery.delivery_attention_count', value: deliverySummary.deliveryAttentionCount },
+          { label: 'delivery.platform_delivery_write_enabled', value: deliverySummary.platformDeliveryWriteEnabled },
+          { label: 'delivery.formal_order_sync_open', value: deliverySummary.formalOrderSyncOpen },
+        ]}
+      />
+    </section>
+  );
+}
+
 function PlatformBusinessStatusSection({
   selectedStore,
   capabilities,
@@ -704,6 +798,11 @@ export default function Dashboard() {
     selectedStoreId,
   ]);
 
+  const naverDeliveryStatusSummary = useMemo(() => {
+    if (!isSelectedNaverStore || !naverOrderFulfillmentSummary) return null;
+    return buildNaverDeliveryStatusSummary(naverOrderFulfillmentSummary);
+  }, [isSelectedNaverStore, naverOrderFulfillmentSummary]);
+
   const stats = useMemo(() => {
     if (!sellerDisplaySummary) return [];
     const orderDetail = isSelectedNaverStore ? 'Naver 运营订单' : '当前范围内订单';
@@ -762,6 +861,11 @@ export default function Dashboard() {
         productChangeHints={naverProductChangeHints}
       />
 
+      <NaverDeliveryStatusSummarySection
+        selectedStore={selectedStore}
+        deliverySummary={naverDeliveryStatusSummary}
+      />
+
       <section className="panel-grid">
         <SellerTodoOverview
           summary={sellerDisplaySummary}
@@ -772,6 +876,7 @@ export default function Dashboard() {
           inventorySummary={naverInventorySummary}
           orderFulfillmentSummary={naverOrderFulfillmentSummary}
           productChangeHints={naverProductChangeHints}
+          deliverySummary={naverDeliveryStatusSummary}
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>

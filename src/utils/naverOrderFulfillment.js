@@ -217,3 +217,56 @@ export function buildNaverOrderFulfillmentSummary(orders = [], {
     formalOrderSyncOpen: false,
   };
 }
+
+export function buildNaverDeliveryStatusSummary(fulfillmentSummary = {}) {
+  const total = fulfillmentSummary.total ?? 0;
+  const pendingDelivery = (fulfillmentSummary.newOrders ?? 0) + (fulfillmentSummary.pendingDispatch ?? 0);
+  const inDelivery = fulfillmentSummary.inDelivery ?? 0;
+  const delivered = fulfillmentSummary.delivered ?? 0;
+  const unknown = fulfillmentSummary.unknown ?? 0;
+  const canceled = fulfillmentSummary.canceled ?? 0;
+  const deliveryAttentionCount = pendingDelivery + inDelivery + unknown;
+  const statusLabel = total === 0
+    ? '暂无配送订单'
+    : unknown > 0
+      ? '配送状态需复核'
+      : pendingDelivery > 0
+        ? '有待发货订单'
+        : inDelivery > 0
+          ? '配送中'
+          : '配送状态稳定';
+  const tone = unknown > 0
+    ? 'warning'
+    : pendingDelivery > 0 || inDelivery > 0
+      ? 'info'
+      : total > 0
+        ? 'success'
+        : 'muted';
+  const businessMessage = total === 0
+    ? '当前没有可用于配送状态汇总的 Naver 运营订单。'
+    : `已只读汇总 ${total} 条 Naver 运营订单：待发货 ${pendingDelivery} 条，配送中 ${inDelivery} 条，配送完成 ${delivered} 条，配送异常 / 未识别 ${unknown} 条。`;
+  const nextAction = unknown > 0
+    ? '先人工复核未识别订单状态；当前不执行发货、取消、退货或换货写操作。'
+    : pendingDelivery > 0
+      ? '优先处理待发货订单；发货写入 Naver 仍未开放。'
+      : inDelivery > 0
+        ? '继续关注配送中订单；当前只做只读展示。'
+        : '配送状态暂无阻断；继续按本地订单摘要观察。';
+
+  return {
+    total,
+    pendingDelivery,
+    inDelivery,
+    delivered,
+    unknown,
+    canceled,
+    deliveryAttentionCount,
+    statusLabel,
+    tone,
+    businessMessage,
+    nextAction,
+    source: 'local_orders_only',
+    platformDeliveryWriteEnabled: false,
+    formalOrderSyncOpen: false,
+  };
+}
