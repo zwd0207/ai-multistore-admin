@@ -352,3 +352,9 @@ Backend mode used the existing 3-day complete-field readonly preview with `real_
 Naver order refresh writing is formally deferred because the real readonly preview does not match the selected local operational order. See `PHASE_NAVER_ERP_9F_ORDER_REFRESH_WRITE_DEFERRAL_AND_NEXT_CANDIDATE_PLAN.md`.
 
 The current local operational order remains `PAYED / 499000 KRW`, while the latest controlled readonly preview observed `DELIVERED / 配送完成` with `330000 KRW`. Since the product-order safe hash mismatches, the previewed detail must not update the existing local row. The safer next path is to classify the previewed detail as a possible new order candidate under a separate phase, still with preview-first, duplicate checks, one-order limits, and formal sync closed.
+
+## Phase Naver-ERP-10A - New Order Candidate Classification Plan
+
+The mismatched Naver readonly preview is now treated only as a possible new-order candidate, not as a refresh payload for the existing local order. See `PHASE_NAVER_ERP_10A_NEW_ORDER_CANDIDATE_CLASSIFICATION_PLAN.md`.
+
+10A defines candidate states such as `no_candidate`, `candidate_new`, `candidate_duplicate`, `candidate_ambiguous`, `candidate_blocked_privacy`, and `candidate_stale_preview`. A future new-order write can only be considered after a fresh readonly preview, safe product-order hash duplicate checks across local Naver orders, one-order limits, database backup, explicit approval, and privacy/raw-response gates. This phase does not call Naver, does not write local data, and does not open formal Naver order sync.
