@@ -1155,6 +1155,7 @@ export const adapters = {
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
   coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,
+  naverOrderCompletePreview: adaptNaverOrderCompletePreview,
   toBackendStorePayload,
   toBackendDeviceEnvironmentPayload,
   toBackendEmailAccountPayload,
