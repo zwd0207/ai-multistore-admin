@@ -370,3 +370,9 @@ The 3-day KST window returned HTTP 200 with `preview_status=success` and classif
 The controlled one-order Naver local write gate was executed after a database backup. See `PHASE_NAVER_ERP_10C_SINGLE_NEW_ORDER_WRITE_GATE.md`.
 
 Codex1 caps `real_sync=true` order writes to a 24-hour window. The 10C write gate returned HTTP 200 and `preview_status=success`, but the 24-hour detail matched an existing local Naver order, so `local_sync_result.status=already_exists`, `no_duplicate_created=true`, and `orders_written=false`. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. The 3-day `candidate_new` from 10B was not force-written, and formal Naver order sync remains closed.
+
+## Phase Naver-ERP-10D - New-Order Write Window Decision
+
+The Naver new-order write window decision is documented in `PHASE_NAVER_ERP_10D_NEW_ORDER_WRITE_WINDOW_DECISION.md`.
+
+10D keeps the existing Codex1 `real_sync=true` order write gate capped to a 24-hour window. The 3-day `candidate_new` from 10B must not be forced through the current 24-hour gate or reused from a stale readonly response. If that candidate should be considered for persistence, it needs a separate selected-candidate write path with a fresh readonly preview, database backup, duplicate checks, privacy gates, and explicit approval. This phase does not call Naver, does not write local data, does not change Codex1, and does not open formal Naver order sync.
