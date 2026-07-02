@@ -284,3 +284,9 @@ Codex2 preserves the backend `test_orders_excluded` metadata for technical/statu
 Codex2 now shows basic Naver inventory alerts from local product records only. See `PHASE_NAVER_ERP_6A_INVENTORY_BASIC_ALERTS.md`.
 
 The Products page and Dashboard classify local Naver products as out of stock, low stock, normal, or invalid stock. The low-stock rule is `0 < stock < 5`, so stock equal to 5 remains normal. This phase does not call Naver, does not compare platform inventory, does not write products or orders, and does not open formal Naver product batch sync.
+
+## Phase Naver-ERP-6B - Product Price / Stock Change Hints
+
+Codex2 now separates local inventory alerts from Naver product price / stock change hints. See `PHASE_NAVER_ERP_6B_PRODUCT_PRICE_STOCK_CHANGE_HINTS.md`.
+
+The Products page and Dashboard show that the latest known Naver product dry-run has no price or stock business-field changes, while still showing local out-of-stock or low-stock alerts separately. Future safe changed-field names such as `price`, `currency`, or `stock_quantity` can be surfaced as manual review hints, but this phase does not call Naver, does not write products, and does not open formal Naver product batch sync.

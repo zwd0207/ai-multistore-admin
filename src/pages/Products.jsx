@@ -12,6 +12,7 @@ import {
   buildNaverInventorySummary,
   getInventoryStatusForStock,
 } from '../utils/naverInventory';
+import { buildNaverProductChangeHints } from '../utils/naverProductChangeHints';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const api = {
@@ -366,6 +367,12 @@ function NaverProductPreviewStatusPanel() {
     selectedStore,
     selectedStoreId,
   });
+  const productChangeHints = buildNaverProductChangeHints(inventoryProducts, {
+    selectedStore,
+    selectedStoreId,
+    productStatus: status,
+    results,
+  });
 
   return (
     <section className="content-card naver-preview-status-panel">
@@ -429,6 +436,25 @@ function NaverProductPreviewStatusPanel() {
           </div>
           <p>本阶段只基于本地商品库存生成提醒，没有请求 Naver，也没有执行库存写入。</p>
           <small>低库存规则：{inventorySummary.thresholdRule}；正式商品批量同步仍未开放。</small>
+        </article>
+        <article className={`business-capability-card ${productChangeHints.tone}`}>
+          <div className="business-capability-head">
+            <strong>价格 / 库存变化</strong>
+            <span>{productChangeHints.statusLabel}</span>
+          </div>
+          <p>{productChangeHints.businessMessage}</p>
+          <small>{productChangeHints.nextAction}</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>本地价格 / 库存覆盖</strong>
+            <span>{productChangeHints.total} 条</span>
+          </div>
+          <p>
+            当前本地可展示价格 {productChangeHints.priceVisibleCount} 条，
+            可展示库存 {productChangeHints.stockVisibleCount} 条。
+          </p>
+          <small>缺失或异常价格 {productChangeHints.missingOrInvalidPriceCount} 条，缺失或异常库存 {productChangeHints.missingOrInvalidStockCount} 条。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
@@ -498,6 +524,17 @@ function NaverProductPreviewStatusPanel() {
           { label: 'inventory.history_available', value: inventorySummary.inventoryHistoryAvailable },
           { label: 'inventory.raw_response_saved', value: inventorySummary.rawResponseSaved },
           { label: 'inventory.latest_updated_at', value: formatKstDateTimeWithLabel(inventorySummary.latestUpdatedAt) },
+          { label: 'product_change_hints.source', value: productChangeHints.source },
+          { label: 'product_change_hints.would_update', value: productChangeHints.wouldUpdate },
+          { label: 'product_change_hints.would_refresh_only', value: productChangeHints.wouldRefreshOnly },
+          { label: 'product_change_hints.changed_fields', value: productChangeHints.changedFields.length ? productChangeHints.changedFields.join(', ') : '[]' },
+          { label: 'product_change_hints.price_change_observed', value: productChangeHints.priceChangeObserved },
+          { label: 'product_change_hints.stock_change_observed', value: productChangeHints.stockChangeObserved },
+          { label: 'product_change_hints.price_visible_count', value: productChangeHints.priceVisibleCount },
+          { label: 'product_change_hints.stock_visible_count', value: productChangeHints.stockVisibleCount },
+          { label: 'product_change_hints.platform_read_performed_this_phase', value: productChangeHints.platformReadPerformedThisPhase },
+          { label: 'product_change_hints.platform_write_enabled', value: productChangeHints.platformWriteEnabled },
+          { label: 'product_change_hints.raw_response_saved', value: productChangeHints.rawResponseSaved },
           { label: 'batch_sync_status', value: 'not_open' },
           ...(activeIssue
             ? activeIssue.technicalItems.map((item) => ({

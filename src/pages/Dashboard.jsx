@@ -20,6 +20,7 @@ import {
 import { buildNaverInventorySummary } from '../utils/naverInventory';
 import { buildNaverOrderFulfillmentSummary } from '../utils/naverOrderFulfillment';
 import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
+import { buildNaverProductChangeHints } from '../utils/naverProductChangeHints';
 import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
@@ -74,6 +75,7 @@ function SellerTodoOverview({
   results,
   inventorySummary,
   orderFulfillmentSummary,
+  productChangeHints,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
@@ -93,6 +95,14 @@ function SellerTodoOverview({
       title: '商品小批量写入测试',
       description: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
       status: 'success',
+    };
+  const naverProductChangeTodo = !isNaverStore || !productChangeHints
+    ? null
+    : {
+      id: 'naver-product-price-stock',
+      title: '价格 / 库存变化提示',
+      description: `${productChangeHints.businessMessage}${productChangeHints.nextAction}`,
+      status: productChangeHints.businessChangeObserved ? 'warning' : 'success',
     };
   const naverOrderTodo = !isNaverStore
     ? null
@@ -121,6 +131,7 @@ function SellerTodoOverview({
   const naverStatusTodos = [
     naverConnectionTodo,
     naverProductTodo,
+    naverProductChangeTodo,
     naverOrderTodo,
     naverInventoryTodo,
     naverFulfillmentTodo,
@@ -300,6 +311,7 @@ function NaverErpWorkbenchSection({
   inventorySummary,
   orderFulfillmentSummary,
   orderSalesSummary,
+  productChangeHints,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   if (!isNaverStore) return null;
@@ -333,6 +345,14 @@ function NaverErpWorkbenchSection({
       tone: 'success',
       reason: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
       nextAction: '正式商品批量同步仍未开放。',
+    },
+    {
+      key: 'product_changes',
+      title: '价格 / 库存变化',
+      statusLabel: productChangeHints?.statusLabel || '读取本地商品',
+      tone: productChangeHints?.tone || 'muted',
+      reason: productChangeHints?.businessMessage || '等待本地商品和 dry-run 摘要支撑价格 / 库存变化提示。',
+      nextAction: productChangeHints?.nextAction || '不执行平台商品写入，正式商品批量同步仍未开放。',
     },
     {
       key: 'orders',
@@ -397,6 +417,13 @@ function NaverErpWorkbenchSection({
           { label: 'naver_connection_issue', value: Boolean(activeIssue) },
           { label: 'product_small_batch_completed', value: true },
           { label: 'product_formal_batch_sync_open', value: false },
+          { label: 'product_change_hints_status', value: productChangeHints?.statusLabel || '-' },
+          { label: 'product_change_hints_would_update', value: productChangeHints?.wouldUpdate ?? 0 },
+          { label: 'product_change_hints_changed_fields', value: productChangeHints?.changedFields?.length ? productChangeHints.changedFields.join(', ') : '[]' },
+          { label: 'product_change_hints_price_change_observed', value: productChangeHints?.priceChangeObserved ?? false },
+          { label: 'product_change_hints_stock_change_observed', value: productChangeHints?.stockChangeObserved ?? false },
+          { label: 'product_change_hints_platform_read_performed_this_phase', value: productChangeHints?.platformReadPerformedThisPhase ?? false },
+          { label: 'product_change_hints_platform_write_enabled', value: productChangeHints?.platformWriteEnabled ?? false },
           { label: 'order_single_write_completed', value: true },
           { label: 'order_formal_batch_sync_open', value: false },
           { label: 'inventory_attention_count', value: inventoryAttentionCount },
@@ -484,6 +511,7 @@ export default function Dashboard() {
   const [trend, setTrend] = useState([]);
   const [error, setError] = useState('');
   const [platformStatusData, setPlatformStatusData] = useState({ capabilities: [], results: [], readiness: null });
+  const [naverProductRows, setNaverProductRows] = useState([]);
   const [naverInventorySummary, setNaverInventorySummary] = useState(null);
   const [naverOrderFulfillmentSummary, setNaverOrderFulfillmentSummary] = useState(null);
   const [naverOrderSalesSummary, setNaverOrderSalesSummary] = useState(null);
@@ -576,6 +604,7 @@ export default function Dashboard() {
   useEffect(() => {
     const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
     if (storeLoading || storeError || !selectedStoreId || !isNaverStore) {
+      setNaverProductRows([]);
       setNaverInventorySummary(null);
       return undefined;
     }
@@ -588,13 +617,18 @@ export default function Dashboard() {
     })
       .then((productResponse) => {
         if (cancelled) return;
+        const productRows = productResponse.data || productResponse.items || [];
+        setNaverProductRows(productRows);
         setNaverInventorySummary(buildNaverInventorySummary(
-          productResponse.data || productResponse.items || [],
+          productRows,
           { selectedStore, selectedStoreId },
         ));
       })
       .catch(() => {
-        if (!cancelled) setNaverInventorySummary(null);
+        if (!cancelled) {
+          setNaverProductRows([]);
+          setNaverInventorySummary(null);
+        }
       });
     return () => { cancelled = true; };
   }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.products]);
@@ -649,6 +683,26 @@ export default function Dashboard() {
       },
     };
   }, [isSelectedNaverStore, naverOrderSalesSummary, summary]);
+
+  const naverProductChangeHints = useMemo(() => {
+    if (!isSelectedNaverStore) return null;
+    return buildNaverProductChangeHints(naverProductRows, {
+      selectedStore,
+      selectedStoreId,
+      productStatus: getNaverProductPreviewStatus({
+        capabilities: platformStatusData.capabilities,
+        results: platformStatusData.results,
+      }),
+      results: platformStatusData.results,
+    });
+  }, [
+    isSelectedNaverStore,
+    naverProductRows,
+    platformStatusData.capabilities,
+    platformStatusData.results,
+    selectedStore,
+    selectedStoreId,
+  ]);
 
   const stats = useMemo(() => {
     if (!sellerDisplaySummary) return [];
@@ -705,6 +759,7 @@ export default function Dashboard() {
         inventorySummary={naverInventorySummary}
         orderFulfillmentSummary={naverOrderFulfillmentSummary}
         orderSalesSummary={naverOrderSalesSummary}
+        productChangeHints={naverProductChangeHints}
       />
 
       <section className="panel-grid">
@@ -716,6 +771,7 @@ export default function Dashboard() {
           results={platformStatusData.results}
           inventorySummary={naverInventorySummary}
           orderFulfillmentSummary={naverOrderFulfillmentSummary}
+          productChangeHints={naverProductChangeHints}
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>
