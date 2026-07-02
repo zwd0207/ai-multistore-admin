@@ -3516,12 +3516,17 @@ def verify_sync_preview_schema_and_security() -> None:
 
                 status_cases = {
                     "PAYED": "已付款 / 新订单",
+                    "READY": "待发货",
                     "DISPATCHED": "已发货 / 配送中",
+                    "DELIVERING": "已发货 / 配送中",
+                    "DELIVERED": "配送完成",
+                    "DELIVERY_COMPLETED": "配送完成",
                     "CANCEL_REQUEST": "取消请求",
                     "RETURN_REQUEST": "退货请求",
                     "EXCHANGE_REQUEST": "换货请求",
                     "PURCHASE_DECIDED": "已确认购买",
                     "결제완료": "已付款 / 新订单",
+                    "배송완료": "配送完成",
                     "구매확정": "已确认购买",
                 }
                 for raw_status, label_zh in status_cases.items():
@@ -3547,6 +3552,42 @@ def verify_sync_preview_schema_and_security() -> None:
                         "status-must-not-leak-address",
                     ]:
                         assert forbidden not in mapped_text, mapped_text
+
+                delivered_fallback_preview = sync_service._build_naver_order_detail_preview({
+                    "productOrderId": "DELIVERED-FALLBACK-PRODUCT-ORDER-ID-MUST-NOT-LEAK",
+                    "orderId": "DELIVERED-FALLBACK-ORDER-ID-MUST-NOT-LEAK",
+                    "orderStatus": "DELIVERED",
+                    "deliveryStatus": "UNEXPECTED_DELIVERY_STATUS",
+                    "buyerName": "delivered-fallback-must-not-leak-name",
+                    "buyerTelNo": "010-7777-8888",
+                    "receiverAddress": "delivered-fallback-must-not-leak-address",
+                }, store_id=8)
+                assert delivered_fallback_preview["order_status"]["label_zh"] == "配送完成", delivered_fallback_preview
+                assert delivered_fallback_preview["delivery_status"]["label_zh"] == "配送完成", delivered_fallback_preview
+                assert delivered_fallback_preview["delivery_status"]["derived_from_order_status"] is True, delivered_fallback_preview
+                assert delivered_fallback_preview["delivery_status_label_zh"] == "配送完成", delivered_fallback_preview
+                assert delivered_fallback_preview["unknown_status_observed"] is False, delivered_fallback_preview
+                delivered_complete_preview = sync_service._build_naver_order_complete_field_preview({
+                    "productOrderId": "DISPLAY-PRODUCT-ORDER-ID",
+                    "orderId": "DISPLAY-ORDER-ID",
+                    "orderStatus": "DELIVERED",
+                    "deliveryStatus": "UNEXPECTED_DELIVERY_STATUS",
+                    "productName": "safe display product",
+                }, store_id=8, requested=True)
+                delivered_complete_fields = delivered_complete_preview["complete_fields"]
+                assert delivered_complete_preview["available"] is True, delivered_complete_preview
+                assert delivered_complete_fields["order_status_label_zh"] == "配送完成", delivered_complete_fields
+                assert delivered_complete_fields["delivery_status_label_zh"] == "配送完成", delivered_complete_fields
+                assert delivered_complete_fields["delivery_status_derived_from_order_status"] is True, delivered_complete_fields
+                delivered_fallback_text = json.dumps(delivered_fallback_preview, ensure_ascii=False).lower()
+                for forbidden in [
+                    "delivered-fallback-product-order-id-must-not-leak",
+                    "delivered-fallback-order-id-must-not-leak",
+                    "delivered-fallback-must-not-leak-name",
+                    "010-7777-8888",
+                    "delivered-fallback-must-not-leak-address",
+                ]:
+                    assert forbidden not in delivered_fallback_text, delivered_fallback_text
 
                 unknown_preview = sync_service._build_naver_order_detail_preview({
                     "productOrderId": "UNKNOWN-PRODUCT-ORDER-ID-MUST-NOT-LEAK",

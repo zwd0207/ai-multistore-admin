@@ -3534,9 +3534,18 @@ NAVER_ORDER_STATUS_LABELS_ZH = {
     "결제완료": "已付款 / 新订单",
     "PLACE_PRODUCT_ORDER": "已确认订单",
     "발주확인": "已确认订单",
+    "READY": "待发货",
+    "DELIVERY_READY": "待发货",
     "DISPATCHED": "已发货 / 配送中",
+    "DELIVERING": "已发货 / 配送中",
+    "SHIPPING": "已发货 / 配送中",
+    "IN_DELIVERY": "已发货 / 配送中",
     "배송중": "已发货 / 配送中",
     "DELIVERED": "配送完成",
+    "DELIVERY_COMPLETED": "配送完成",
+    "DELIVERY_COMPLETE": "配送完成",
+    "COMPLETED_DELIVERY": "配送完成",
+    "SHIPPING_COMPLETED": "配送完成",
     "배송완료": "配送完成",
     "CANCELED": "已取消",
     "CANCELLED": "已取消",
@@ -3593,6 +3602,23 @@ def _order_status_summary(raw_value: str | None) -> dict:
     }
 
 
+def _delivery_status_summary(raw_value: str | None, order_value: str | None = None) -> dict:
+    delivery_summary = _order_status_summary(raw_value)
+    order_summary = _order_status_summary(order_value)
+    if delivery_summary.get("label_zh") in {None, "未识别状态，需人工确认"}:
+        if order_summary.get("label_zh") in {"待发货", "已确认订单", "已发货 / 配送中", "配送完成"}:
+            return {
+                "raw": delivery_summary.get("raw") or order_summary.get("raw"),
+                "label_zh": order_summary.get("label_zh"),
+                "unknown_status_observed": False,
+                "derived_from_order_status": True,
+            }
+    return {
+        **delivery_summary,
+        "derived_from_order_status": False,
+    }
+
+
 def _payload_has_key_token(payload: object, tokens: tuple[str, ...]) -> bool:
     if isinstance(payload, dict):
         for key, value in payload.items():
@@ -3629,7 +3655,7 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
     receiver_name = _extract_scalar_by_keys(payload, ("receiverName", "recipientName"))
     receiver_phone = _extract_scalar_by_keys(payload, ("receiverTelNo", "receiverTelNo1", "receiverPhone", "recipientPhone"))
     order_summary = _order_status_summary(order_status)
-    delivery_summary = _order_status_summary(delivery_status)
+    delivery_summary = _delivery_status_summary(delivery_status, order_status)
     claim_summary = _order_status_summary(claim_status)
     product_order_id_hash = _mask_external_identifier(product_order_id) if product_order_id else None
     order_id_hash = _mask_external_identifier(order_id) if order_id else None
@@ -3733,6 +3759,9 @@ def _build_naver_order_complete_field_preview(
         "productOrderAmount",
         "salePrice",
     ))
+    order_status = _extract_scalar_by_keys(payload, ("orderStatus", "productOrderStatus", "status"))
+    delivery_status = _extract_scalar_by_keys(payload, ("deliveryStatus", "shippingStatus", "deliveryState"))
+    delivery_summary = _delivery_status_summary(delivery_status, order_status)
     complete_fields = {
         "store_id": store_id,
         "platform": "naver",
@@ -3751,11 +3780,12 @@ def _build_naver_order_complete_field_preview(
         "quantity": _extract_int_by_keys(payload, ("quantity", "orderQuantity", "productOrderQuantity", "count")),
         "order_amount": _decimal_to_plain_string(order_amount) if order_amount is not None else None,
         "currency": "KRW",
-        "order_status": _complete_order_field_value(payload, ("orderStatus", "productOrderStatus", "status"), 40),
-        "order_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("orderStatus", "productOrderStatus", "status")))[0],
+        "order_status": _bounded_text(order_status, 40),
+        "order_status_label_zh": _status_label_zh(order_status)[0],
         "payment_status": _complete_order_field_value(payload, ("paymentStatus", "payStatus", "paymentState"), 40),
-        "delivery_status": _complete_order_field_value(payload, ("deliveryStatus", "shippingStatus", "deliveryState"), 40),
-        "delivery_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("deliveryStatus", "shippingStatus", "deliveryState")))[0],
+        "delivery_status": _bounded_text(delivery_status, 40),
+        "delivery_status_label_zh": delivery_summary.get("label_zh"),
+        "delivery_status_derived_from_order_status": delivery_summary.get("derived_from_order_status"),
         "claim_status": _complete_order_field_value(payload, ("claimStatus", "claimType", "claimRequestStatus", "claimStatusType"), 40),
         "claim_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("claimStatus", "claimType", "claimRequestStatus", "claimStatusType")))[0],
         "buyer_name": _complete_order_field_value(payload, ("buyerName", "ordererName"), 120),
