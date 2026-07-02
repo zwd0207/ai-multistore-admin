@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
 import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
+import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
@@ -20,7 +21,7 @@ const statusOptions = ['待发货', '配送中', '已完成', '取消/退款'];
 const columns = [
   { key: 'orderNo', title: '订单编号', render: (value) => <strong>{value}</strong> },
   { key: 'product', title: '商品' },
-  { key: 'store', title: '所属店铺' },
+  { key: 'store', title: '店铺' },
   { key: 'customer', title: '客户' },
   { key: 'phone', title: '联系电话' },
   { key: 'amount', title: '订单金额', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
@@ -29,10 +30,10 @@ const columns = [
 ];
 const fields = [
   { key: 'orderNo', label: '订单编号', required: true },
-  { key: 'product', label: '商品名称', required: true },
-  { key: 'store', label: '所属店铺', required: true },
+  { key: 'product', label: '商品名', required: true },
+  { key: 'store', label: '店铺', required: true },
   { key: 'customer', label: '客户', required: true },
-  { key: 'amount', label: '订单金额（韩元）', type: 'number', required: true },
+  { key: 'amount', label: '订单金额（KRW）', type: 'number', required: true },
   { key: 'status', label: '订单状态', type: 'select', required: true, options: statusOptions },
   { key: 'createdAt', label: '下单时间', required: true, placeholder: '2026-06-29 15:00' },
 ];
@@ -44,59 +45,56 @@ function normalizePlatform(value) {
 function formatError(error) {
   const code = error?.errorCode || error?.data?.error_code || '';
   const messages = {
-    REAL_API_TEST_DISABLED: '真实只读检测开关未启用，后端已拒绝发起外部请求。',
-    real_api_test_disabled: '真实只读检测开关未启用，后端已拒绝发起外部请求。',
-    ip_not_allowed: '当前服务器公网 IP 不在 Coupang OpenAPI allowlist 中。',
-    auth_failed: 'Coupang 认证失败，请检查凭证、vendorId、权限或 IP allowlist。',
-    CREDENTIAL_DECRYPT_FAILED: '本地凭证解密失败，请在当前加密 key 环境下重新保存凭证。',
-    decrypt_failed: '本地凭证解密失败，请在当前加密 key 环境下重新保存凭证。',
+    REAL_API_TEST_DISABLED: '后端真实只读开关未开启，本次没有访问平台。',
+    real_api_test_disabled: '后端真实只读开关未开启，本次没有访问平台。',
+    ip_not_allowed: '服务器 IP 不在平台白名单内，请联系管理员处理。',
+    auth_failed: '平台授权失败，请检查连接资料、权限或 IP 白名单。',
+    CREDENTIAL_DECRYPT_FAILED: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
+    decrypt_failed: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
   };
-  return messages[code] || error?.message || '订单同步请求失败，请检查 Codex1 后端状态。';
+  return messages[code] || error?.message || '订单请求失败，请检查后端服务状态。';
 }
 
 function validateWindow(startDate, endDate, maxPages) {
-  if (!startDate || !endDate) return '请选择 start_date 和 end_date。';
+  if (!startDate || !endDate) return '请选择开始日期和结束日期。';
   const start = new Date(`${startDate}T00:00:00`);
   const end = new Date(`${endDate}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '日期格式无效。';
-  if (start > end) return 'start_date 不能晚于 end_date。';
+  if (start > end) return '开始日期不能晚于结束日期。';
   const daySpan = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
-  if (daySpan > 3) return '单次日期窗口最多 3 天。';
-  if (Number(maxPages) < 1 || Number(maxPages) > 3) return 'max_pages 必须在 1 到 3 之间。';
+  if (daySpan > 3) return '单次订单查询窗口最多 3 天。';
+  if (Number(maxPages) < 1 || Number(maxPages) > 3) return '单次最多读取 3 页。';
   return '';
 }
 
 function ResultGrid({ result, mode }) {
   if (!result) return null;
   const isPreview = mode === 'preview';
-  const emptyCount = isPreview
-    ? Number(result.wouldCreate || 0) + Number(result.wouldUpdate || 0)
-    : Number(result.createdCount || 0) + Number(result.updatedCount || 0);
-  const emptyMessage = emptyCount === 0 ? '同步成功，无符合条件订单。' : '';
+  const createCount = Number(isPreview ? result.wouldCreate : result.createdCount || 0);
+  const updateCount = Number(isPreview ? result.wouldUpdate : result.updatedCount || 0);
+  const skippedCount = Number(result.skippedCount || 0);
 
   return (
     <div className="coupang-sync-result">
-      <div className="sync-result-banner">{emptyMessage || '请求完成，结果如下。'}</div>
-      <div className="sync-result-grid">
-        {isPreview ? (
-          <>
-            <span>would_create</span><strong>{result.wouldCreate}</strong>
-            <span>would_update</span><strong>{result.wouldUpdate}</strong>
-          </>
-        ) : (
-          <>
-            <span>created_count</span><strong>{result.createdCount}</strong>
-            <span>updated_count</span><strong>{result.updatedCount}</strong>
-            <span>skipped_count</span><strong>{result.skippedCount}</strong>
-          </>
-        )}
-        <span>page_count</span><strong>{result.pageCount}</strong>
-        <span>next_cursor_exists</span><strong>{result.nextCursorExists ? 'true' : 'false'}</strong>
-        <span>date window</span><strong>{result.startDate} ~ {result.endDate}</strong>
-        <span>KST window</span>
-        <strong>{formatKstDateTimeWithLabel(result.windowStartAt)} / {formatKstDateTimeWithLabel(result.windowEndAt)}</strong>
-        <span>sample_ids</span><strong>{result.sampleIds?.length ? result.sampleIds.join(', ') : '[]'}</strong>
+      <div className="sync-result-banner">
+        {isPreview
+          ? `订单预览完成：预计新增 ${createCount} 条，预计更新 ${updateCount} 条。`
+          : `本地订单写入完成：新增 ${createCount} 条，更新 ${updateCount} 条，跳过 ${skippedCount} 条。`}
       </div>
+      <TechnicalDetails
+        items={[
+          { label: 'would_create', value: result.wouldCreate },
+          { label: 'would_update', value: result.wouldUpdate },
+          { label: 'created_count', value: result.createdCount },
+          { label: 'updated_count', value: result.updatedCount },
+          { label: 'skipped_count', value: result.skippedCount },
+          { label: 'page_count', value: result.pageCount },
+          { label: 'next_cursor_exists', value: result.nextCursorExists },
+          { label: 'date_window', value: `${result.startDate} ~ ${result.endDate}` },
+          { label: 'KST_window', value: `${formatKstDateTimeWithLabel(result.windowStartAt)} / ${formatKstDateTimeWithLabel(result.windowEndAt)}` },
+          { label: 'sample_ids', value: result.sampleIds?.length ? result.sampleIds.join(', ') : '[]' },
+        ]}
+      />
     </div>
   );
 }
@@ -130,7 +128,7 @@ function CoupangOrderSyncPanel() {
     setMode(action);
 
     if (!isBackendSource) {
-      setMessage('mock 模式不执行 Coupang 真实只读订单检测，请切换 backend 模式使用该入口。');
+      setMessage('mock 模式只展示页面效果，不执行真实平台订单读取。');
       return;
     }
     if (validationError) {
@@ -151,8 +149,8 @@ function CoupangOrderSyncPanel() {
         : await dataProvider.syncCoupangOrders(payload);
       setResult(nextResult);
       setMessage(action === 'preview'
-        ? 'Preview 完成：只读取 Coupang 只读接口，未写入 orders。'
-        : 'Sync 完成：只写入本地 orders，不会对 Coupang 平台做写操作。');
+        ? '订单预览已完成，本次只估算影响，不写入本地订单。'
+        : '订单已写入本地数据库，不会对 Coupang 平台做写操作。');
       if (action === 'sync') markSynced('orders');
     } catch (requestError) {
       setError(formatError(requestError));
@@ -165,34 +163,34 @@ function CoupangOrderSyncPanel() {
     <section className="content-card coupang-order-sync-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Coupang 订单只读同步</h2>
-          <p>这是 Coupang 只读接口；Sync 只写本地数据库，不会对 Coupang 平台做写操作。</p>
+          <h2>Coupang 订单读取</h2>
+          <p>先查看指定日期内是否有订单，再按需写入本地。不会修改 Coupang 平台订单。</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
 
       <div className="sync-control-grid">
         <label>
-          <span>start_date</span>
+          <span>开始日期</span>
           <input type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} />
         </label>
         <label>
-          <span>end_date</span>
+          <span>结束日期</span>
           <input type="date" value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} />
         </label>
         <label>
-          <span>max_pages</span>
+          <span>最多读取页数</span>
           <input type="number" min="1" max="3" value={form.maxPages} onChange={(event) => setForm({ ...form, maxPages: Number(event.target.value) })} />
         </label>
         <div className="sync-action-row">
-          <button className="button ghost" onClick={() => run('preview')} disabled={Boolean(loadingAction)}>Preview</button>
-          <button className="button primary" onClick={() => run('sync')} disabled={Boolean(loadingAction)}>Sync</button>
+          <button className="button ghost" onClick={() => run('preview')} disabled={Boolean(loadingAction)}>预览订单</button>
+          <button className="button primary" onClick={() => run('sync')} disabled={Boolean(loadingAction)}>写入本地</button>
         </div>
       </div>
 
-      <p className="mock-sync-note">单次日期窗口最多 3 天，max_pages 最大 3。不会显示或保存平台密钥、临时授权凭证或请求签名。</p>
+      <p className="mock-sync-note">单次日期窗口最多 3 天，最多读取 3 页。页面不会显示平台密钥、临时授权、请求签名或订单原始响应。</p>
       {validationError && <div className="sync-inline-warning">{validationError}</div>}
-      {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? 'Preview 请求中...' : 'Sync 请求中...'}</div>}
+      {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? '正在预览订单...' : '正在写入本地订单...'}</div>}
       {message && <div className="mock-sync-success">{message}</div>}
       {error && <div className="mock-sync-error">{error}</div>}
       <ResultGrid result={result} mode={mode} />
@@ -210,19 +208,19 @@ function NaverOrderPreviewStatusPanel() {
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Naver 订单读取状态</h2>
-          <p>订单 preview 已准备，但正式订单同步仍未开放。</p>
+          <h2>Naver 订单状态</h2>
+          <p>{status.feed.reason}</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
       <div className="business-capability-grid">
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>订单变更检测</strong>
+            <strong>订单接口</strong>
             <span>{status.feed.statusLabel}</span>
           </div>
-          <p>{status.feed.reason}</p>
-          <small>{status.feed.nextAction}</small>
+          <p>当前时间范围内没有新的订单变更。</p>
+          <small>暂时不需要处理订单同步。</small>
         </article>
         <article className="business-capability-card muted">
           <div className="business-capability-head">
@@ -238,10 +236,19 @@ function NaverOrderPreviewStatusPanel() {
             <span>未开放</span>
           </div>
           <p>{status.sync.reason}</p>
-          <small>当前不会写入本地 orders，也不会保存订单原始响应。</small>
+          <small>{status.sync.nextAction}</small>
         </article>
       </div>
-      <p className="mock-sync-note">页面不会展示完整订单标识、客户、收件人、电话、地址、配送、付款原始内容、平台密钥、临时授权凭证或请求签名。</p>
+      <TechnicalDetails
+        description="技术状态仅供管理员排查，普通卖家页面默认不展示。"
+        items={[
+          { label: 'preview_status', value: 'success_empty' },
+          { label: 'detail_query', value: 'not_executed_without_order_change' },
+          { label: 'raw_response_saved', value: false },
+          { label: 'batch_sync_status', value: 'not_open' },
+        ]}
+      />
+      <p className="mock-sync-note">页面不会展示完整订单标识、客户隐私、收件信息、平台密钥、临时授权、请求签名或订单原始响应。</p>
     </section>
   );
 }
@@ -255,7 +262,7 @@ export default function Orders() {
       <CoupangOrderSyncPanel />
       <ResourcePage
         title="订单管理"
-        description="跟踪各店铺订单履约、配送与退款状态。"
+        description="查看订单履约、发货、退款和异常处理状态。"
         resourceName="订单"
         api={api}
         columns={columns}

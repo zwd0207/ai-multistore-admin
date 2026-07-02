@@ -11,8 +11,8 @@ const api = {
   remove: mockApi.deleteStore,
 };
 
-const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
-const statusOptions = ['正常运营', '정상 운영', '审核中', '심사중', '申诉中', '판매중지'];
+const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
+const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用'];
 const columns = [
   { key: 'name', title: '店铺名称', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
@@ -38,7 +38,7 @@ export default function Stores() {
   return (
     <ResourcePage
       title="店铺管理"
-      description="统一管理多平台店铺及其运营状态"
+      description="统一管理 Naver、Coupang 等平台店铺和运营状态。"
       resourceName="店铺"
       api={api}
       columns={columns}

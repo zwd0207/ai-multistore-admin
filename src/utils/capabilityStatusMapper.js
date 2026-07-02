@@ -1,75 +1,76 @@
 const STATUS_LABELS = {
-  tested_success: '已通过检测',
-  tested_failed: '检测失败',
+  tested_success: '已通过',
+  tested_failed: '需要检查',
   not_tested: '暂未检测',
   planned: '计划中',
   unavailable: '暂不可用',
   permission_required: '需要平台权限',
-  docs_pending: '接口文档确认中 / 暂未开放真实测试',
-  credential_not_ready: '凭证未配置完整',
-  auth_failed: '授权失败，请检查 API 凭证或权限',
+  docs_pending: '等待确认',
+  credential_not_ready: '连接资料未配齐',
+  auth_failed: '授权失败',
   token_auth_failed: '平台授权失败',
-  readonly_request_failed: '只读请求失败',
-  ip_not_allowed: '平台 IP 白名单限制',
-  guardrail_blocked: '保护中，暂未开放真实测试',
-  success_empty: '检测成功，但当前暂无数据',
+  readonly_request_failed: '读取失败',
+  ip_not_allowed: '服务器 IP 受限',
+  guardrail_blocked: '保护中',
+  success_empty: '已连接，暂无新数据',
+  preview_success: '预览已完成',
 };
 
 const CAPABILITY_LABELS = {
-  'naver.token_auth': '平台授权检测',
-  'naver.seller_account_read': '卖家账号信息读取',
-  'naver.seller_channels_read': '店铺频道信息读取',
+  'naver.token_auth': '平台授权',
+  'naver.seller_account_read': '卖家账号',
+  'naver.seller_channels_read': '店铺连接',
   'naver.product_read': '商品读取',
-  'naver.order_read': '订单变更检测',
+  'naver.order_read': '订单读取',
   'naver.order_detail_preview': '订单详情',
-  'naver.sales_read': '销售读取',
+  'naver.sales_read': '销售额读取',
   'naver.settlement_read': '结算读取',
-  'naver.customer_inquiry_read': '客户咨询读取',
-  'naver.shipping_delivery_read': '配送读取',
+  'naver.customer_inquiry_read': '客户咨询',
+  'naver.shipping_delivery_read': '发货配送',
   'coupang.auth_read': '平台连接',
-  'coupang.product_read': '商品读取/同步',
-  'coupang.order_read': '订单读取/同步',
-  'coupang.sales_read': '销售明细',
-  'coupang.settlement_read': '结算明细',
-  'coupang.cs_read': 'CS/咨询读取',
+  'coupang.product_read': '商品管理',
+  'coupang.order_read': '订单管理',
+  'coupang.sales_read': '销售额',
+  'coupang.settlement_read': '结算',
+  'coupang.cs_read': '客服咨询',
 };
 
-const NaverProtectedMessage = '为避免误触真实业务数据，商品/订单接口当前仍处于保护状态，暂未开放正式同步。';
+const NaverProtectedMessage = '当前仍处于保护阶段：主页面只展示业务状态，正式批量同步需要单独确认后才会开放。';
 
 const NAVER_PRODUCT_PREVIEW_STATUS = {
-  statusLabel: '单条微测通过',
-  reason: 'Naver 商品只读 preview 已完成，且已完成 1 条本地商品写库微测；这只代表最小链路通过。',
-  nextAction: '继续保持小流量审查，批量同步必须单独确认后再开放。',
+  statusLabel: '小批量预览已完成',
+  reason: 'Naver 商品小批量预览已完成。预计新增 4 条，预计更新 1 条，预计跳过 0 条。当前还没有执行批量写入，需要确认后才会进行最多 5 条商品写入测试。',
+  nextAction: '请先核对预览结果和字段映射，正式批量同步未开放。',
 };
 
 const NAVER_PRODUCT_LOCAL_SYNC_STATUS = {
   statusLabel: '已完成 1 条微测',
-  reason: '本地 products 已写入 1 条 Naver 商品微测记录，本次未保存平台原始响应。',
-  nextAction: '保留回滚预案；后续批量同步需要单独评审字段映射、跳过规则和审计策略。',
+  reason: '本地已写入 1 条 Naver 商品微测记录，本次未保存平台原始响应。',
+  nextAction: '后续批量写入需要单独确认，不会自动扩大范围。',
 };
 
 const NAVER_PRODUCT_BATCH_SYNC_STATUS = {
   statusLabel: '未开放',
-  reason: '当前仅完成 1 条 Naver 商品本地写库微测，不能视为正式批量商品同步可用。',
-  nextAction: '正式批量同步需进入后续阶段并由运营/开发单独确认。',
+  reason: '正式批量同步未开放。当前展示的是预览和微测结果，不代表已经可以批量写入商品。',
+  nextAction: '进入下一阶段前，需要人工确认最多 5 条商品写入测试。',
 };
 
 const NAVER_ORDER_PREVIEW_STATUS = {
-  statusLabel: '订单变更 feed 可访问',
-  reason: '系统已完成一次 Naver 订单只读微量检测，订单变更 feed 返回 HTTP 200；当前 KST 时间窗口暂无订单变更。',
-  nextAction: '等店铺出现订单变更后，执行 1 条订单详情脱敏预览。',
+  statusLabel: '接口已连接',
+  reason: 'Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。',
+  nextAction: '出现新订单变更后，再检测订单详情并确认后续同步策略。',
 };
 
 const NAVER_ORDER_DETAIL_STATUS = {
-  statusLabel: '待有订单变更后检测',
-  reason: '当前没有可查询的订单变更编号，因此订单详情暂未检测；这不代表订单详情已打通。',
-  nextAction: '出现订单变更后，只查询 1 条详情并仅展示脱敏字段观察摘要。',
+  statusLabel: '等待新订单后检测',
+  reason: '当前没有新的订单变更，因此暂时没有需要查看的订单详情。',
+  nextAction: '等店铺出现新订单后，再查看单条订单详情预览。',
 };
 
 const NAVER_SYNC_PROTECTION_STATUS = {
-  statusLabel: '商品/订单同步未开放',
-  reason: '当前不会写入本地商品或订单数据，也不会保存 Naver 原始响应。',
-  nextAction: '完成商品 preview 与订单详情脱敏预览后，再单独评审正式同步开关。',
+  statusLabel: '正式批量同步未开放',
+  reason: '当前不会批量写入商品或订单，也不会保存平台原始响应。',
+  nextAction: '批量同步必须单独确认后才会执行。',
 };
 
 function normalizePlatform(value) {
@@ -162,8 +163,8 @@ function cardFromResult(key, result, successReason, successNextAction, fallback 
       key,
       status,
       errorCode,
-      reason: '授权失败，请检查 API 凭证或平台权限。',
-      nextAction: '请核对 Client ID / Client Secret，或确认 Naver Commerce API Center 权限。',
+      reason: '平台授权失败，请检查连接资料和平台权限。',
+      nextAction: '请到平台连接资料页面核对 Client ID、Secret 或权限配置。',
       details: result,
     });
   }
@@ -172,8 +173,8 @@ function cardFromResult(key, result, successReason, successNextAction, fallback 
       key,
       status,
       errorCode,
-      reason: '凭证未配置完整。',
-      nextAction: '请先在 API 凭证管理页补齐必填配置。',
+      reason: '平台连接资料还没有配齐。',
+      nextAction: '请先补齐当前店铺的平台连接资料。',
       details: result,
     });
   }
@@ -181,8 +182,8 @@ function cardFromResult(key, result, successReason, successNextAction, fallback 
     key,
     status,
     errorCode,
-    reason: fallback.reason || '当前还没有完成真实只读检测。',
-    nextAction: fallback.nextAction || '请先完成前置凭证配置，再按阶段开放真实只读检测。',
+    reason: fallback.reason || '当前还没有完成这项业务能力确认。',
+    nextAction: fallback.nextAction || '请按阶段继续完成连接资料和只读预览确认。',
     details: result,
   });
 }
@@ -201,34 +202,21 @@ function buildNaverCards({ capabilities, results, readiness }) {
     cardFromResult(
       'naver.token_auth',
       token,
-      '平台授权检测已通过，可以继续进行账号与频道读取检测。',
-      '下一步可查看卖家账号与店铺频道读取状态。',
+      '平台授权正常，可以继续读取卖家账号和店铺连接状态。',
+      '下一步请确认商品、订单预览状态。',
     ),
     cardFromResult(
       'naver.seller_account_read',
       sellerAccount,
-      '卖家账号信息读取成功，系统已确认该 Naver 凭证可用于账号级只读检测。',
-      '可继续确认店铺频道信息，作为后续商品/订单同步前置条件。',
+      '卖家账号信息读取正常。',
+      '可继续确认店铺频道和商品订单读取状态。',
     ),
     cardFromResult(
       'naver.seller_channels_read',
       sellerChannels,
-      '店铺频道信息读取成功，系统已确认该 Naver 凭证可读取频道信息。',
-      channelConfigured ? '店铺频道编号已识别，后续可作为商品/订单 preview 的前置状态。' : '请继续识别或补充店铺频道编号。',
+      '店铺连接成功，系统已识别店铺频道状态。',
+      channelConfigured ? '店铺连接资料已准备好，页面不会显示完整频道编号。' : '请先完成店铺频道识别。',
     ),
-    resultCard({
-      key: 'naver.channel_no',
-      title: '店铺频道编号',
-      status: channelConfigured ? 'tested_success' : 'not_tested',
-      statusLabel: channelConfigured ? '已识别' : '暂未识别',
-      tone: channelConfigured ? 'success' : 'warning',
-      reason: channelConfigured
-        ? '已识别店铺频道编号，但页面不会显示完整编号。'
-        : '暂未识别到店铺频道编号，后续商品/订单同步可能需要补充。',
-      nextAction: channelConfigured
-        ? '后续商品/订单 preview 可以使用该前置状态。'
-        : '请先完成 seller/channels 只读识别，或由运营人员确认 channel_no。',
-    }),
     resultCard({
       key: 'naver.product_read',
       status: 'preview_success',
@@ -273,7 +261,7 @@ function buildNaverCards({ capabilities, results, readiness }) {
     }),
     resultCard({
       key: 'naver.sync_protection',
-      title: '正式同步状态',
+      title: '同步保护',
       status: 'guardrail_blocked',
       statusLabel: NAVER_SYNC_PROTECTION_STATUS.statusLabel,
       tone: 'warning',
@@ -290,36 +278,36 @@ function buildCoupangCards({ financialSummary }) {
     resultCard({
       key: 'coupang.auth_read',
       status: 'tested_success',
-      reason: '平台连接已通过检测，当前 Coupang 真实只读链路已完成阶段验收。',
-      nextAction: '可继续通过商品、订单、销售与结算页面查看本地同步结果。',
+      reason: 'Coupang 店铺连接正常。',
+      nextAction: '可在商品、订单、销售额页面继续核对业务数据。',
     }),
     resultCard({
       key: 'coupang.product_read',
       status: 'tested_success',
-      statusLabel: '可用',
-      reason: '商品读取/同步入口可用，当前本地 products 已按 Coupang 状态同步。',
-      nextAction: '可在商品页按 APPROVED / DELETED 等状态核对。',
+      statusLabel: '可使用',
+      reason: '商品读取和本地同步入口可用。',
+      nextAction: '请在商品页按状态核对商品和库存。',
     }),
     resultCard({
       key: 'coupang.order_read',
       status: 'tested_success',
-      statusLabel: '可用',
-      reason: '订单读取/同步入口可用。',
-      nextAction: '可在订单页核对当前查询窗口内是否有订单。',
+      statusLabel: '可使用',
+      reason: '订单读取和本地同步入口可用。',
+      nextAction: '请在订单页核对待发货和异常订单。',
     }),
     resultCard({
       key: 'coupang.sales_read',
       status: 'tested_success',
-      statusLabel: salesRows > 0 ? '可查询' : '可查询，本地暂无明细数据',
-      reason: salesRows > 0 ? '销售明细已有本地持久化数据。' : '销售明细链路可查询，当前本地暂无明细数据。',
-      nextAction: '等真实 sales 有非 0 样本后再做抽检，不要与结算金额混算。',
+      statusLabel: salesRows > 0 ? '可查询' : '可查询，暂无本地明细',
+      reason: salesRows > 0 ? '销售明细已有本地数据。' : '销售明细查询链路可用，当前本地暂无明细。',
+      nextAction: '请在销售额页面查看销售和结算口径。',
     }),
     resultCard({
       key: 'coupang.settlement_read',
       status: 'tested_success',
-      statusLabel: settlementRows > 0 ? '可用，已有本地结算数据' : '可用，暂无本地结算数据',
-      reason: settlementRows > 0 ? `结算明细已有 ${settlementRows} 行本地数据。` : '结算明细链路可用。',
-      nextAction: '结算金额按结算口径展示，不等同于销售额或利润。',
+      statusLabel: settlementRows > 0 ? '已有结算数据' : '可查询，暂无本地结算',
+      reason: settlementRows > 0 ? `本地已有 ${settlementRows} 条结算明细。` : '结算明细查询链路可用。',
+      nextAction: '结算金额不等同于利润或可提现余额，请按页面说明核对。',
     }),
   ];
 }
@@ -339,9 +327,9 @@ export function buildPlatformBusinessStatus({
 
 export function businessCapabilityTitle(platform) {
   const normalized = normalizePlatform(platform);
-  if (normalized === 'naver') return 'Naver SmartStore 能力状态';
-  if (normalized === 'coupang') return 'Coupang 能力状态';
-  return '平台能力状态';
+  if (normalized === 'naver') return 'Naver 店铺连接状态';
+  if (normalized === 'coupang') return 'Coupang 店铺连接状态';
+  return '平台连接状态';
 }
 
 export function statusLabel(value, errorCode) {

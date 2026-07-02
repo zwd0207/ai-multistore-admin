@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
 import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
+import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
@@ -29,25 +30,36 @@ const coupangStatusOptions = [
   'all',
 ];
 
+function sourceLabel(value) {
+  const labels = {
+    naver_real_sync: 'Naver 单条写入微测',
+    naver_product_preview: 'Naver 商品预览',
+    naver_product_preview_dry_run: 'Naver 商品预览',
+    coupang_real_sync: 'Coupang 本地同步',
+    coupang_product_sync: 'Coupang 本地同步',
+  };
+  return labels[value] || value || '-';
+}
+
 const columns = [
-  { key: 'name', title: '商品名称', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.sku}</small></div> },
-  { key: 'store', title: '所属店铺' },
+  { key: 'name', title: '商品名', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.sku || '平台商品编号已脱敏'}</small></div> },
+  { key: 'store', title: '店铺' },
   { key: 'platform', title: '平台' },
   { key: 'price', title: '售价', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
   { key: 'stock', title: '库存' },
-  { key: 'status', title: '销售状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'sourceType', title: '来源', render: (value) => value || '-' },
-  { key: 'updatedAt', title: '最近同步' },
+  { key: 'status', title: '平台状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'sourceType', title: '来源', render: sourceLabel },
+  { key: 'updatedAt', title: '最近更新' },
 ];
 
 const fields = [
-  { key: 'name', label: '商品名称', required: true },
+  { key: 'name', label: '商品名', required: true },
   { key: 'sku', label: 'SKU', required: true },
-  { key: 'store', label: '所属店铺', required: true },
+  { key: 'store', label: '店铺', required: true },
   { key: 'platform', label: '平台', type: 'select', required: true, options: platformOptions },
   { key: 'price', label: '售价（KRW）', type: 'number', required: true },
   { key: 'stock', label: '库存', type: 'number', required: true },
-  { key: 'status', label: '销售状态', type: 'select', required: true, options: statusOptions },
+  { key: 'status', label: '平台状态', type: 'select', required: true, options: statusOptions },
 ];
 
 function normalizePlatform(value) {
@@ -57,19 +69,19 @@ function normalizePlatform(value) {
 function formatError(error) {
   const code = error?.errorCode || error?.data?.error_code || '';
   const messages = {
-    REAL_API_TEST_DISABLED: '真实只读检测开关未启用，后端已拒绝发起外部请求。',
-    real_api_test_disabled: '真实只读检测开关未启用，后端已拒绝发起外部请求。',
-    ip_not_allowed: '当前服务器公网 IP 不在 Coupang OpenAPI allowlist 中。',
-    auth_failed: 'Coupang 认证失败，请检查凭证、vendorId、权限或 IP allowlist。',
-    CREDENTIAL_DECRYPT_FAILED: '本地凭证解密失败，请在当前加密 key 环境下重新保存凭证。',
-    decrypt_failed: '本地凭证解密失败，请在当前加密 key 环境下重新保存凭证。',
+    REAL_API_TEST_DISABLED: '后端真实只读开关未开启，本次没有访问平台。',
+    real_api_test_disabled: '后端真实只读开关未开启，本次没有访问平台。',
+    ip_not_allowed: '服务器 IP 不在平台白名单内，请联系管理员处理。',
+    auth_failed: '平台授权失败，请检查连接资料、权限或 IP 白名单。',
+    CREDENTIAL_DECRYPT_FAILED: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
+    decrypt_failed: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
   };
-  return messages[code] || error?.message || '商品同步请求失败，请检查 Codex1 后端状态。';
+  return messages[code] || error?.message || '商品请求失败，请检查后端服务状态。';
 }
 
 function validateForm(status, maxPages) {
   if (!coupangStatusOptions.includes(status)) return '请选择有效的 Coupang 商品状态。';
-  if (Number(maxPages) < 1 || Number(maxPages) > 3) return 'max_pages 必须在 1 到 3 之间。';
+  if (Number(maxPages) < 1 || Number(maxPages) > 3) return '单次最多读取 3 页。';
   return '';
 }
 
@@ -80,13 +92,9 @@ function clampMaxPages(value) {
 }
 
 function PerStatusSummary({ rows = [] }) {
-  if (!rows.length) {
-    return <div className="empty-state compact">暂无 per_status 明细。mock 模式不会伪造真实商品检测结果。</div>;
-  }
-
+  if (!rows.length) return null;
   return (
-    <div className="per-status-summary">
-      <h3>per_status summary</h3>
+    <TechnicalDetails title="查看按状态统计" description="这里保留平台返回状态的诊断摘要，默认不占用主页面。">
       <div className="table-wrap">
         <table>
           <thead>
@@ -104,7 +112,7 @@ function PerStatusSummary({ rows = [] }) {
           <tbody>
             {rows.map((item) => (
               <tr key={item.status}>
-                <td><strong>{item.status}</strong><small className="cell-subtitle">{item.statusSemantic || 'Coupang API 商品审核/刊登状态'}</small></td>
+                <td><strong>{item.status}</strong><small className="cell-subtitle">{item.statusSemantic || '平台商品状态'}</small></td>
                 <td>{item.itemCount}</td>
                 <td>{item.wouldCreate}</td>
                 <td>{item.wouldUpdate}</td>
@@ -117,41 +125,53 @@ function PerStatusSummary({ rows = [] }) {
           </tbody>
         </table>
       </div>
-    </div>
+    </TechnicalDetails>
   );
 }
 
 function ResultGrid({ result, mode }) {
   if (!result) return null;
   const isPreview = mode === 'preview';
-  const emptyCount = isPreview
-    ? Number(result.wouldCreate || 0) + Number(result.wouldUpdate || 0)
-    : Number(result.createdCount || 0) + Number(result.updatedCount || 0) + Number(result.skippedCount || 0);
-  const emptyMessage = emptyCount === 0 ? '同步成功，无符合条件商品。' : '';
+  const createCount = Number(isPreview ? result.wouldCreate : result.createdCount || 0);
+  const updateCount = Number(isPreview ? result.wouldUpdate : result.updatedCount || 0);
+  const skippedCount = Number(result.skippedCount || 0);
 
   return (
     <div className="coupang-sync-result">
-      <div className="sync-result-banner">{emptyMessage || '请求完成，结果如下。'}</div>
-      <div className="sync-result-grid">
-        {isPreview ? (
-          <>
-            <span>would_create</span><strong>{result.wouldCreate}</strong>
-            <span>would_update</span><strong>{result.wouldUpdate}</strong>
-          </>
-        ) : (
-          <>
-            <span>created_count</span><strong>{result.createdCount}</strong>
-            <span>updated_count</span><strong>{result.updatedCount}</strong>
-            <span>skipped_count</span><strong>{result.skippedCount}</strong>
-          </>
-        )}
-        <span>status_filter</span><strong>{result.statusFilter}</strong>
-        <span>page_count</span><strong>{result.pageCount}</strong>
-        <span>next_cursor_exists</span><strong>{result.nextCursorExists ? 'true' : 'false'}</strong>
-        <span>max_pages</span><strong>{result.maxPages}</strong>
-        <span>last_synced_at</span><strong>{formatKstDateTimeWithLabel(result.lastSyncedAt)}</strong>
-        <span>sample_ids</span><strong>{result.sampleIds?.length ? result.sampleIds.join(', ') : '[]'}</strong>
+      <div className="sync-result-banner">
+        {isPreview
+          ? `预览完成：预计新增 ${createCount} 条，预计更新 ${updateCount} 条，预计跳过 ${skippedCount} 条。`
+          : `本地写入完成：新增 ${createCount} 条，更新 ${updateCount} 条，跳过 ${skippedCount} 条。`}
       </div>
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card info">
+          <div className="business-capability-head"><strong>预计新增</strong><span>{createCount} 条</span></div>
+          <p>本地暂未找到相同平台商品编号的商品。</p>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head"><strong>预计更新</strong><span>{updateCount} 条</span></div>
+          <p>本地已有同一平台商品编号的商品。</p>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head"><strong>跳过</strong><span>{skippedCount} 条</span></div>
+          <p>字段不完整或规则不允许时会跳过。</p>
+        </article>
+      </div>
+      <TechnicalDetails
+        items={[
+          { label: 'would_create', value: result.wouldCreate },
+          { label: 'would_update', value: result.wouldUpdate },
+          { label: 'created_count', value: result.createdCount },
+          { label: 'updated_count', value: result.updatedCount },
+          { label: 'skipped_count', value: result.skippedCount },
+          { label: 'status_filter', value: result.statusFilter },
+          { label: 'page_count', value: result.pageCount },
+          { label: 'next_cursor_exists', value: result.nextCursorExists },
+          { label: 'max_pages', value: result.maxPages },
+          { label: 'last_synced_at', value: formatKstDateTimeWithLabel(result.lastSyncedAt) },
+          { label: 'sample_ids', value: result.sampleIds?.length ? result.sampleIds.join(', ') : '[]' },
+        ]}
+      />
       <PerStatusSummary rows={result.perStatus || []} />
     </div>
   );
@@ -197,13 +217,9 @@ function CoupangProductSyncPanel() {
         ? await dataProvider.previewCoupangProducts(payload)
         : await dataProvider.syncCoupangProducts(payload);
       setResult(nextResult);
-      if (!isBackendSource) {
-        setMessage('mock 模式仅显示空态说明，不会伪造 Coupang 商品只读检测结果。');
-      } else {
-        setMessage(action === 'preview'
-          ? 'Preview 完成：只读取 Coupang 商品只读接口，未写入 products。'
-          : 'Sync 完成：只写入本地 products，不会对 Coupang 平台做写操作。');
-      }
+      setMessage(action === 'preview'
+        ? '商品预览已完成，本次只估算影响，不写入本地商品。'
+        : '商品已写入本地数据库，不会对 Coupang 平台做写操作。');
       if (action === 'sync') markSynced('products');
     } catch (requestError) {
       setError(formatError(requestError));
@@ -216,21 +232,21 @@ function CoupangProductSyncPanel() {
     <section className="content-card coupang-product-sync-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Coupang 商品只读同步</h2>
-          <p>这是 Coupang 商品只读接口；Sync 只写本地数据库，不会对 Coupang 平台做写操作。</p>
+          <h2>Coupang 商品读取</h2>
+          <p>先预览会影响多少本地商品，再按需写入本地。不会修改 Coupang 平台商品。</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
 
       <div className="sync-control-grid product-sync-control-grid">
         <label>
-          <span>status</span>
+          <span>商品状态</span>
           <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
             {coupangStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
         </label>
         <label>
-          <span>max_pages</span>
+          <span>最多读取页数</span>
           <input
             type="number"
             min="1"
@@ -240,17 +256,17 @@ function CoupangProductSyncPanel() {
           />
         </label>
         <div className="sync-action-row">
-          <button className="button ghost" onClick={() => run('preview')} disabled={Boolean(loadingAction)}>Preview</button>
-          <button className="button primary" onClick={() => run('sync')} disabled={Boolean(loadingAction)}>Sync</button>
+          <button className="button ghost" onClick={() => run('preview')} disabled={Boolean(loadingAction)}>预览影响</button>
+          <button className="button primary" onClick={() => run('sync')} disabled={Boolean(loadingAction)}>写入本地</button>
         </div>
       </div>
 
-      <p className="mock-sync-note">max_pages 默认 1，最大 3。不会显示平台密钥、临时授权凭证或请求签名，也不会新增 API key 输入逻辑。</p>
+      <p className="mock-sync-note">单次最多读取 3 页。页面不会显示平台密钥、临时授权、请求签名或完整平台商品编号。</p>
       {form.status === 'APPROVED' && (
-        <div className="sync-inline-warning">APPROVED 是 Coupang API 商品审核/刊登状态，不一定完全等于后台“销售中”。</div>
+        <div className="sync-inline-warning">APPROVED 是 Coupang 平台状态，不一定完全等于后台“销售中”。</div>
       )}
       {validationError && <div className="sync-inline-warning">{validationError}</div>}
-      {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? 'Preview 请求中...' : 'Sync 请求中...'}</div>}
+      {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? '正在预览商品影响...' : '正在写入本地商品...'}</div>}
       {message && <div className="mock-sync-success">{message}</div>}
       {error && <div className="mock-sync-error">{error}</div>}
       <ResultGrid result={result} mode={mode} />
@@ -268,23 +284,23 @@ function NaverProductPreviewStatusPanel() {
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Naver 商品读取状态</h2>
-          <p>单条商品写库微测已完成；当前仅完成 1 条 Naver 商品本地写库微测，后续批量同步需单独确认。</p>
+          <h2>Naver 商品状态</h2>
+          <p>{status.productRead.reason}</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
       <div className="business-capability-grid">
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>商品读取</strong>
-            <span>{status.productRead.statusLabel}</span>
+            <strong>商品预览</strong>
+            <span>已完成</span>
           </div>
-          <p>{status.productRead.reason}</p>
-          <small>{status.productRead.nextAction}</small>
+          <p>已完成 5 条以内的小批量预览，用于判断未来写入影响。</p>
+          <small>预计新增 4 条，预计更新 1 条，预计跳过 0 条。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>本地写库</strong>
+            <strong>本地写库微测</strong>
             <span>{status.localSync.statusLabel}</span>
           </div>
           <p>{status.localSync.reason}</p>
@@ -299,7 +315,18 @@ function NaverProductPreviewStatusPanel() {
           <small>{status.batchSync.nextAction}</small>
         </article>
       </div>
-      <p className="mock-sync-note">已写入 1 条本地商品；正式批量同步未开放；本次未保存平台原始响应。页面不会展示 raw_data 原文、完整平台商品编号、平台密钥、临时授权凭证、请求签名或完整店铺频道编号。</p>
+      <TechnicalDetails
+        description="技术字段仅供管理员排查，主页面不直接展示这些字段。"
+        items={[
+          { label: 'real_preview', value: 'true' },
+          { label: 'real_sync', value: 'false' },
+          { label: 'dry_run_diff.would_create', value: 4 },
+          { label: 'dry_run_diff.would_update', value: 1 },
+          { label: 'dry_run_diff.would_skip', value: 0 },
+          { label: 'batch_sync_status', value: 'not_open' },
+        ]}
+      />
+      <p className="mock-sync-note">本次未保存平台原始响应。页面不展示技术原文、完整平台商品编号、完整店铺频道编号、平台密钥、临时授权或请求签名。</p>
     </section>
   );
 }
@@ -313,7 +340,7 @@ export default function Products() {
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"
-        description="查看并维护跨平台商品、价格和库存信息"
+        description="查看各平台商品、价格、库存和来源。技术编号已默认脱敏。"
         resourceName="商品"
         api={api}
         columns={columns}

@@ -9,27 +9,26 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
-const modules = ['店铺管理', '商品管理', '订单管理', '客服管理', '销售数据', '设备管理', '邮箱管理', '申诉管理', '环境管理', '账号管理', '系统设置'];
+const modules = ['店铺管理', '商品管理', '订单管理', '客服管理', '销售数据', '设备管理', '邮箱管理', '申诉管理', '账号管理', '系统设置'];
 const actionTypes = ['新增', '编辑', '删除', '状态变更', '绑定', '解绑', '回复', '提交', '登录', '风险检测', '配置修改'];
-const statuses = ['성공', '실패', '대기', '경고', '위험'];
-const riskLevels = ['낮음', '보통', '높음', '긴급'];
+const statuses = ['成功', '失败', '待处理', '已忽略', '需复核'];
+const riskLevels = ['低', '中', '高', '紧急'];
 const operators = ['系统管理员', 'Coupang 申诉处理账号', '韩国本土运营账号', '系统检测器'];
 
 const columns = [
   { key: 'logNo', title: '日志编号', render: (value) => <strong>{value}</strong> },
   { key: 'time', title: '操作时间' },
-  { key: 'module', title: '操作模块' },
+  { key: 'module', title: '模块' },
   { key: 'actionType', title: '操作类型' },
   { key: 'operator', title: '操作人' },
   { key: 'objectName', title: '关联对象' },
-  { key: 'summary', title: '操作摘要' },
-  { key: 'ipAddress', title: 'IP 地址' },
-  { key: 'device', title: '设备' },
+  { key: 'summary', title: '摘要' },
   { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'riskLevel', title: '风险等级', render: (value) => <StatusBadge value={value} /> },
 ];
@@ -38,7 +37,7 @@ const syncColumns = [
   { key: 'logNo', title: '同步日志编号', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
   { key: 'type', title: '同步类型' },
-  { key: 'message', title: '同步消息' },
+  { key: 'message', title: '摘要' },
   { key: 'startedAt', title: '开始时间' },
   { key: 'finishedAt', title: '结束时间' },
   { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
@@ -84,7 +83,7 @@ export default function Logs() {
       setSyncLogs(await dataProvider.getSyncLogs({ storeId: selectedStoreId, page: 1, pageSize: 10 }));
     } catch (error) {
       setSyncLogs({ data: [], total: 0 });
-      setSyncError(error.message || '同步日志加载失败');
+      setSyncError(error.message || '同步日志加载失败。');
     } finally {
       setSyncLoading(false);
     }
@@ -100,23 +99,40 @@ export default function Logs() {
   };
 
   const markRisk = async (row) => {
-    await mockApi.markLogRisk(row.id, { riskLevel: '긴급', status: '위험', riskNote: '人工标记为重点风险日志' });
+    await mockApi.markLogRisk(row.id, { riskLevel: '紧急', status: '需复核', riskNote: '人工标记为重点风险日志。' });
     if (detail?.id === row.id) setDetail(await mockApi.getOperationLogDetail(row.id));
     await load();
   };
 
   return (
     <>
-      <PageHeader title="操作日志" description="审计后台操作、配置修改、绑定行为和风险检测记录。" actions={isBackendSource ? <button className="button ghost" onClick={loadSyncLogs}>刷新同步日志</button> : null} />
+      <PageHeader
+        title="高级日志与审计"
+        description="给管理员排查用的日志页面。普通卖家日常操作不需要查看这里的技术细节。"
+        actions={isBackendSource ? <button className="button ghost" onClick={loadSyncLogs}>刷新同步日志</button> : null}
+      />
 
-      {isBackendSource && <section className="content-card">
-        <div className="card-title">
-          <div><h2>Codex1 同步日志</h2><p>读取 `/api/v1/sync-logs`，原操作审计日志继续保留。</p></div>
-          <span className="period-chip">共 {syncLogs.total} 条</span>
-        </div>
-        <MockSyncPanel onSynced={loadSyncLogs} />
-        {syncError ? <EmptyState title="同步日志加载失败" description={syncError} /> : <DataTable columns={syncColumns} rows={syncLogs.data || []} loading={syncLoading} />}
-      </section>}
+      {isBackendSource && (
+        <section className="content-card">
+          <div className="card-title">
+            <div>
+              <h2>同步审计摘要</h2>
+              <p>只展示同步任务摘要；技术细节默认折叠。</p>
+            </div>
+            <span className="period-chip">共 {syncLogs.total} 条</span>
+          </div>
+          <MockSyncPanel onSynced={loadSyncLogs} />
+          {syncError ? <EmptyState title="同步日志加载失败" description={syncError} /> : <DataTable columns={syncColumns} rows={syncLogs.data || []} loading={syncLoading} />}
+          <TechnicalDetails
+            description="这里是管理员审计区，允许保留 SyncLog 等技术字段，但不放到普通运营页面。"
+            items={[
+              { label: 'selected_store_id', value: selectedStoreId || '-' },
+              { label: 'sync_log_total', value: syncLogs.total },
+              { label: 'technical_page', value: true },
+            ]}
+          />
+        </section>
+      )}
 
       <FilterPanel>
         <SearchBar
@@ -163,7 +179,6 @@ export default function Logs() {
           renderActions={(row) => (
             <>
               <button onClick={() => openDetail(row)}>详情</button>
-              <button onClick={() => openDetail(row)}>关联对象</button>
               <button onClick={() => markRisk(row)}>风险标记</button>
             </>
           )}
@@ -178,21 +193,23 @@ export default function Logs() {
               <h3>基础日志信息</h3>
               <InfoGrid items={[
                 { label: '操作时间', value: detail.time },
-                { label: '操作模块', value: detail.module },
+                { label: '模块', value: detail.module },
                 { label: '操作类型', value: detail.actionType },
                 { label: '操作人', value: detail.operator },
                 { label: '状态', value: <StatusBadge value={detail.status} /> },
                 { label: '风险等级', value: <StatusBadge value={detail.riskLevel} /> },
               ]} />
             </section>
-            <section className="detail-section">
-              <h3>操作前数据</h3>
-              <pre>{JSON.stringify(detail.beforeData, null, 2)}</pre>
-            </section>
-            <section className="detail-section">
-              <h3>操作后数据</h3>
-              <pre>{JSON.stringify(detail.afterData, null, 2)}</pre>
-            </section>
+            <TechnicalDetails title="查看变更前后数据" description="JSON 详情只在高级日志中保留，默认折叠。">
+              <section className="detail-section">
+                <h3>操作前数据</h3>
+                <pre>{JSON.stringify(detail.beforeData, null, 2)}</pre>
+              </section>
+              <section className="detail-section">
+                <h3>操作后数据</h3>
+                <pre>{JSON.stringify(detail.afterData, null, 2)}</pre>
+              </section>
+            </TechnicalDetails>
             <section className="detail-section">
               <h3>操作来源</h3>
               <InfoGrid items={[

@@ -42,4 +42,7 @@
 .business-capability-card small { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .developer-details { margin-top: 12px; color: var(--muted); font-size: 12px; }
 .developer-details summary { cursor: pointer; color: #516173; }
+.technical-details { border: 1px dashed #d8e0ec; border-radius: 8px; padding: 10px 12px; background: #fbfcfe; }
+.technical-details[open] summary { margin-bottom: 10px; }
+.technical-details pre { max-height: 260px; overflow: auto; margin: 10px 0 0; padding: 12px; border-radius: 8px; background: #f4f6fa; color: #334155; }
 @media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list, .business-capability-grid, .business-capability-grid.compact { grid-template-columns: 1fr; } }

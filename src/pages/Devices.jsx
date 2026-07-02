@@ -6,8 +6,8 @@ export default function Devices() {
   if (isBackendSource) {
     return (
       <BackendDeviceEnvironmentPage
-        title="设备管理"
-        description="读取并维护当前店铺的设备与环境标签。"
+        title="设备与账号"
+        description="查看当前店铺的设备环境、登录状态和账号风险提醒。"
         resourceName="设备环境"
       />
     );

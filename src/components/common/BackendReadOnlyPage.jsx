@@ -75,7 +75,7 @@ export default function BackendReadOnlyPage({
         {loadError ? (
           <EmptyState title={`${resourceName}数据加载失败`} description={loadError} />
         ) : !selectedStoreId && !storeLoading ? (
-          <EmptyState title="暂无店铺数据" description="当前没有可用于读取后端数据的店铺。" />
+          <EmptyState title="暂无店铺数据" description="请先选择店铺后再查看该页面。" />
         ) : (
           <>
             <DataTable columns={columns} rows={result.data || []} loading={loading || storeLoading} />
