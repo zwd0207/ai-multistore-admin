@@ -1173,6 +1173,7 @@ def preview_naver_orders(
     size: int = 1,
     real_preview: bool = False,
     include_detail: bool = False,
+    complete_field_preview: bool = False,
     real_sync: bool = False,
 ) -> dict:
     normalized_status = _resolve_naver_order_preview_status(order_status)
@@ -1192,6 +1193,18 @@ def preview_naver_orders(
     if real_sync and not include_detail:
         raise ApiError(
             message="Naver order single local write requires include_detail=true",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if complete_field_preview and not include_detail:
+        raise ApiError(
+            message="Naver complete order field preview requires include_detail=true",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if real_sync and complete_field_preview:
+        raise ApiError(
+            message="Naver complete order field preview is readonly-only",
             error_code="guardrail_blocked",
             status_code=400,
         )
@@ -1236,6 +1249,7 @@ def preview_naver_orders(
         page=page,
         size=size,
         include_detail=include_detail,
+        complete_field_preview=complete_field_preview,
         field_observation=field_observation,
         real_sync=real_sync,
     )
@@ -3037,6 +3051,7 @@ def _run_naver_order_real_micro_preview(
     page: int,
     size: int,
     include_detail: bool,
+    complete_field_preview: bool,
     field_observation: dict,
     real_sync: bool = False,
 ) -> dict:
@@ -3148,6 +3163,11 @@ def _run_naver_order_real_micro_preview(
             detail_preview = _build_naver_order_detail_preview(detail_result["payload"], store_id=store_id)
             field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
             field_observation["detail_preview"] = detail_preview
+            field_observation["complete_field_preview"] = _build_naver_order_complete_field_preview(
+                detail_result["payload"],
+                store_id=store_id,
+                requested=complete_field_preview,
+            )
             local_sync_result = _sync_naver_order_detail_preview(
                 db,
                 detail_preview=detail_preview,
@@ -3658,6 +3678,127 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
     }
 
 
+def _complete_order_field_value(payload: object, keys: tuple[str, ...], max_length: int = 160) -> str | None:
+    value = _extract_scalar_by_keys(payload, keys)
+    return _bounded_text(value, max_length)
+
+
+def _default_naver_order_complete_field_preview(requested: bool = False) -> dict:
+    return {
+        "requested": bool(requested),
+        "preview_only": True,
+        "available": False,
+        "complete_fields": {},
+        "field_availability": {},
+        "save_plan": {
+            "phase": "Naver-ERP-5D",
+            "codex1_schema_write_enabled": False,
+            "requires_user_approval": True,
+            "requires_db_backup": True,
+            "store_id_limit": 8,
+            "one_order_limit": True,
+            "formal_order_sync_open": False,
+            "platform_writes_enabled": False,
+            "orders_written": False,
+            "sync_log_written": False,
+            "tested_success_written": False,
+            "raw_response_saved": False,
+        },
+        "blocked_destinations": [
+            "Dashboard summary cards",
+            "SyncLog",
+            "ApiCapabilityTestResult",
+            "error messages",
+            "technical logs",
+            "upstream payload storage",
+        ],
+    }
+
+
+def _build_naver_order_complete_field_preview(
+    payload: object,
+    *,
+    store_id: int | None = None,
+    requested: bool = False,
+) -> dict:
+    preview = _default_naver_order_complete_field_preview(requested)
+    if not requested:
+        return preview
+
+    order_amount = _extract_decimal_by_keys(payload, (
+        "totalPaymentAmount",
+        "paymentAmount",
+        "totalOrderAmount",
+        "orderAmount",
+        "productOrderAmount",
+        "salePrice",
+    ))
+    complete_fields = {
+        "store_id": store_id,
+        "platform": "naver",
+        "external_order_id": _complete_order_field_value(payload, ("orderId", "orderNo", "orderNumber"), 120),
+        "external_product_order_id": _complete_order_field_value(payload, ("productOrderId", "productOrderNo"), 120),
+        "platform_product_id": _complete_order_field_value(payload, (
+            "productId",
+            "productNo",
+            "productNumber",
+            "originProductNo",
+            "channelProductNo",
+            "sellerProductCode",
+        ), 120),
+        "product_name": _complete_order_field_value(payload, ("productName", "productOrderName", "itemName"), 160),
+        "option_name": _complete_order_field_value(payload, ("optionName", "productOption", "optionInfo"), 160),
+        "quantity": _extract_int_by_keys(payload, ("quantity", "orderQuantity", "productOrderQuantity", "count")),
+        "order_amount": _decimal_to_plain_string(order_amount) if order_amount is not None else None,
+        "currency": "KRW",
+        "order_status": _complete_order_field_value(payload, ("orderStatus", "productOrderStatus", "status"), 40),
+        "order_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("orderStatus", "productOrderStatus", "status")))[0],
+        "payment_status": _complete_order_field_value(payload, ("paymentStatus", "payStatus", "paymentState"), 40),
+        "delivery_status": _complete_order_field_value(payload, ("deliveryStatus", "shippingStatus", "deliveryState"), 40),
+        "delivery_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("deliveryStatus", "shippingStatus", "deliveryState")))[0],
+        "claim_status": _complete_order_field_value(payload, ("claimStatus", "claimType", "claimRequestStatus", "claimStatusType"), 40),
+        "claim_status_label_zh": _status_label_zh(_extract_scalar_by_keys(payload, ("claimStatus", "claimType", "claimRequestStatus", "claimStatusType")))[0],
+        "buyer_name": _complete_order_field_value(payload, ("buyerName", "ordererName"), 120),
+        "buyer_phone": _complete_order_field_value(payload, ("buyerTelNo", "buyerTelNo1", "buyerPhone", "ordererTelNo", "ordererPhone"), 40),
+        "receiver_name": _complete_order_field_value(payload, ("receiverName", "recipientName"), 120),
+        "receiver_phone": _complete_order_field_value(payload, ("receiverTelNo", "receiverTelNo1", "receiverPhone", "recipientPhone"), 40),
+        "receiver_address": _complete_order_field_value(payload, (
+            "receiverAddress",
+            "recipientAddress",
+            "shippingAddress",
+            "baseAddress",
+            "roadNameAddress",
+            "detailedAddress",
+        ), 240),
+        "zip_code": _complete_order_field_value(payload, ("zipCode", "zipcode", "postalCode", "postal_code"), 20),
+        "ordered_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("orderedAt", "orderDate", "orderedDate"))),
+        "paid_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("paidAt", "paymentDate", "payDate"))),
+        "last_changed_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("lastChangedAt", "lastChangedDate", "lastChangeDate"))),
+        "raw_response_saved": False,
+        "mapping_version": "naver_order_complete_field_preview_v1",
+    }
+    complete_fields = {key: value for key, value in complete_fields.items() if value is not None}
+    preview.update({
+        "available": bool(complete_fields.get("external_order_id") or complete_fields.get("external_product_order_id")),
+        "complete_fields": complete_fields,
+        "field_availability": {
+            key: key in complete_fields and complete_fields.get(key) not in {None, ""}
+            for key in (
+                "external_order_id",
+                "external_product_order_id",
+                "platform_product_id",
+                "buyer_name",
+                "buyer_phone",
+                "receiver_name",
+                "receiver_phone",
+                "receiver_address",
+                "zip_code",
+            )
+        },
+    })
+    return preview
+
+
 def _parse_preview_iso_datetime(value: object) -> datetime | None:
     if value is None:
         return None
@@ -3961,6 +4102,8 @@ def _build_naver_order_preview_result(
         "sample_ids": sample_ids,
         "field_observation": field_observation,
         "detail_preview": field_observation.get("detail_preview"),
+        "complete_field_preview": field_observation.get("complete_field_preview")
+        or _default_naver_order_complete_field_preview(False),
         "business_message": _build_naver_order_preview_business_message(preview_status),
         "business_status_summary": _build_naver_order_preview_business_status_summary(preview_status),
         "semantic_notice": "Readonly micro preview only. No local order rows were written.",

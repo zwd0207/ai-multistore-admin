@@ -3104,6 +3104,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 detail_called = False
                 feed_called = False
                 calls = []
+                detail_payload = None
                 response_sequence = []
 
                 def __init__(self, *args, **kwargs) -> None:
@@ -3146,33 +3147,30 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert url.endswith("/v1/pay-order/seller/product-orders/query"), url
                     assert json == {"productOrderIds": ["PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890"]}, json
                     FakeNaverOrderHttpClient.detail_called = True
-                    return FakeNaverOrderResponse(200, {
-                        "data": [
-                            {
-                                "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
-                                "orderId": "ORDER-ID-MUST-NOT-LEAK-1234567890",
-                                "orderStatus": "PAYED",
-                                "paymentStatus": "PAYED",
-                                "deliveryStatus": "DISPATCHED",
-                                "claimStatus": "UNEXPECTED_CLAIM_STATUS",
-                                "productName": "safe-field-presence-only",
-                                "optionName": "safe-option-presence-only",
-                                "quantity": 2,
-                                "totalPaymentAmount": "12345",
-                                "orderedAt": "2026-07-01T00:10:00+09:00",
-                                "paymentDate": "2026-07-01T00:11:00+09:00",
-                                "lastChangedDate": "2026-07-01T00:12:00+09:00",
-                                "buyerName": "must-not-leak-buyer",
-                                "buyerId": "BUYER-ID-MUST-NOT-LEAK-1234567890",
-                                "buyerTelNo": "010-1111-2222",
-                                "receiverName": "must-not-leak-receiver",
-                                "receiverTelNo1": "010-1111-2222",
-                                "receiverAddress": "must-not-leak-address",
-                                "zipCode": "ZIP-MUST-NOT-LEAK",
-                                "paymentDetail": {"raw": "must-not-leak-payment"},
-                            }
-                        ]
-                    })
+                    detail_payload = FakeNaverOrderHttpClient.detail_payload or {
+                        "productOrderId": "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890",
+                        "orderId": "ORDER-ID-MUST-NOT-LEAK-1234567890",
+                        "orderStatus": "PAYED",
+                        "paymentStatus": "PAYED",
+                        "deliveryStatus": "DISPATCHED",
+                        "claimStatus": "UNEXPECTED_CLAIM_STATUS",
+                        "productName": "safe-field-presence-only",
+                        "optionName": "safe-option-presence-only",
+                        "quantity": 2,
+                        "totalPaymentAmount": "12345",
+                        "orderedAt": "2026-07-01T00:10:00+09:00",
+                        "paymentDate": "2026-07-01T00:11:00+09:00",
+                        "lastChangedDate": "2026-07-01T00:12:00+09:00",
+                        "buyerName": "must-not-leak-buyer",
+                        "buyerId": "BUYER-ID-MUST-NOT-LEAK-1234567890",
+                        "buyerTelNo": "010-1111-2222",
+                        "receiverName": "must-not-leak-receiver",
+                        "receiverTelNo1": "010-1111-2222",
+                        "receiverAddress": "must-not-leak-address",
+                        "zipCode": "ZIP-MUST-NOT-LEAK",
+                        "paymentDetail": {"raw": "must-not-leak-payment"},
+                    }
+                    return FakeNaverOrderResponse(200, {"data": [detail_payload]})
 
             sync_service.httpx.Client = FakeNaverOrderHttpClient
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-order-token", 200)
@@ -3396,6 +3394,125 @@ def verify_sync_preview_schema_and_security() -> None:
                     "paymentdetail",
                 ]:
                     assert forbidden not in detail_text, detail_text
+
+                complete_preview_without_detail = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": False,
+                    "complete_field_preview": True,
+                })
+                assert complete_preview_without_detail.status_code == 400, complete_preview_without_detail.text
+                assert complete_preview_without_detail.json()["error_code"] == "guardrail_blocked", complete_preview_without_detail.text
+
+                complete_preview_write_blocked = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                    "complete_field_preview": True,
+                    "real_sync": True,
+                })
+                assert complete_preview_write_blocked.status_code == 400, complete_preview_write_blocked.text
+                assert complete_preview_write_blocked.json()["error_code"] == "guardrail_blocked", complete_preview_write_blocked.text
+
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = []
+                FakeNaverOrderHttpClient.detail_called = False
+                FakeNaverOrderHttpClient.detail_payload = {
+                    "productOrderId": "NPO-20260702-851430",
+                    "orderId": "NV-20260702-000918",
+                    "productId": "NP-8842017715",
+                    "orderStatus": "PAYED",
+                    "paymentStatus": "PAID",
+                    "deliveryStatus": "READY",
+                    "claimStatus": "NONE",
+                    "productName": "PXG 휠 캐디백 여성 바퀴형 골프백",
+                    "optionName": "화이트 / 여성용 바퀴형",
+                    "quantity": 1,
+                    "totalPaymentAmount": "499000",
+                    "orderedAt": "2026-07-02T23:38:00+09:00",
+                    "paymentDate": "2026-07-02T23:38:00+09:00",
+                    "lastChangedDate": "2026-07-02T23:39:00+09:00",
+                    "buyerName": "김민준",
+                    "buyerTelNo": "010-4821-7745",
+                    "receiverName": "김민준",
+                    "receiverTelNo1": "010-4821-7745",
+                    "receiverAddress": "서울특별시 강남구 테헤란로 152 12층 1203호",
+                    "zipCode": "06236",
+                }
+                complete_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                    "complete_field_preview": True,
+                    "real_sync": False,
+                })
+                assert complete_preview.status_code == 200, complete_preview.text
+                complete_data = complete_preview.json()["data"]
+                assert complete_data["preview_status"] == "success", complete_data
+                assert complete_data["local_sync_result"]["status"] == "not_requested", complete_data
+                assert complete_data["field_observation"]["orders_written"] is False, complete_data
+                assert complete_data["detail_preview"]["buyer_name_masked"] != "김민준", complete_data
+                complete_field_preview = complete_data["complete_field_preview"]
+                assert complete_field_preview["requested"] is True, complete_field_preview
+                assert complete_field_preview["preview_only"] is True, complete_field_preview
+                assert complete_field_preview["available"] is True, complete_field_preview
+                assert complete_field_preview["save_plan"]["codex1_schema_write_enabled"] is False, complete_field_preview
+                assert complete_field_preview["save_plan"]["orders_written"] is False, complete_field_preview
+                assert complete_field_preview["save_plan"]["sync_log_written"] is False, complete_field_preview
+                assert complete_field_preview["save_plan"]["tested_success_written"] is False, complete_field_preview
+                assert complete_field_preview["save_plan"]["raw_response_saved"] is False, complete_field_preview
+                complete_fields = complete_field_preview["complete_fields"]
+                assert complete_fields["external_order_id"] == "NV-20260702-000918", complete_fields
+                assert complete_fields["external_product_order_id"] == "NPO-20260702-851430", complete_fields
+                assert complete_fields["platform_product_id"] == "NP-8842017715", complete_fields
+                assert complete_fields["buyer_name"] == "김민준", complete_fields
+                assert complete_fields["buyer_phone"] == "010-4821-7745", complete_fields
+                assert complete_fields["receiver_name"] == "김민준", complete_fields
+                assert complete_fields["receiver_phone"] == "010-4821-7745", complete_fields
+                assert complete_fields["receiver_address"] == "서울특별시 강남구 테헤란로 152 12층 1203호", complete_fields
+                assert complete_fields["zip_code"] == "06236", complete_fields
+                assert complete_fields["product_name"] == "PXG 휠 캐디백 여성 바퀴형 골프백", complete_fields
+                assert complete_fields["option_name"] == "화이트 / 여성용 바퀴형", complete_fields
+                assert complete_fields["order_amount"] == "499000", complete_fields
+                assert complete_fields["raw_response_saved"] is False, complete_fields
+                assert complete_field_preview["field_availability"]["buyer_name"] is True, complete_field_preview
+                assert complete_field_preview["field_availability"]["receiver_address"] is True, complete_field_preview
+                complete_preview_text = json.dumps(complete_preview.json(), ensure_ascii=False).lower()
+                for forbidden in [
+                    "fake-order-token",
+                    "fake-client-secret",
+                    "authorization",
+                    "headers",
+                    "signature",
+                    "bcrypt",
+                    "raw response",
+                ]:
+                    assert forbidden not in complete_preview_text, complete_preview_text
+                with SessionLocal() as db:
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_real_preview_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_real_preview_cap_success
+                FakeNaverOrderHttpClient.detail_payload = None
 
                 status_cases = {
                     "PAYED": "已付款 / 新订单",

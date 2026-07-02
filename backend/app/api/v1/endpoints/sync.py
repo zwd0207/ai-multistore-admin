@@ -175,6 +175,7 @@ def preview_naver_orders(
         size=payload.size,
         real_preview=payload.real_preview,
         include_detail=payload.include_detail,
+        complete_field_preview=payload.complete_field_preview,
         real_sync=payload.real_sync,
     )
     return success_response(data=result, message="naver readonly order micro preview completed")

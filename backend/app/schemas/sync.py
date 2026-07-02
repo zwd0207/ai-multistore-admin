@@ -48,6 +48,7 @@ class NaverOrderPreviewRequest(BaseModel):
     size: int = Field(default=1, ge=1, le=1)
     real_preview: bool = False
     include_detail: bool = False
+    complete_field_preview: bool = False
     real_sync: bool = False
 
     @model_validator(mode="after")

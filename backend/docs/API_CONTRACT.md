@@ -492,6 +492,8 @@ Phase Naver-ERP-1C still does not write `products`, `SyncLog`, or `ApiCapability
 
 Phase Naver-ERP-1D is the post-write verification contract. It performs local readback plus a 24-hour `real_sync=false` feed-to-detail preview only. The expected verified state is `orders_store8=1`, `products_store8=5`, `sync_logs_store8=0`, and unchanged `tested_success_store8`. The stored order must use a hashed product-order key as `orders.external_order_id`, `source_type=naver_real_order_sync`, `raw_response_saved=false`, `privacy_fields_redacted=true`, `address_saved=false`, `currency=KRW`, and safe order status labels. A follow-up preview may confirm that the current product-order hash matches the existing local hash, but it must keep `local_sync_result.requested=false`, `local_sync_result.status=not_requested`, and must not create a duplicate. 1D does not execute `real_sync=true`, does not write another order, and does not open formal Naver order sync.
 
+Phase Naver-ERP-5D adds `complete_field_preview` to `POST /api/v1/sync/orders/naver/preview` for explicit operator review of complete Naver order fields. The request must keep `real_preview=true`, `include_detail=true`, and `real_sync=false`; `complete_field_preview=true` without detail returns `guardrail_blocked`, and combining it with `real_sync=true` also returns `guardrail_blocked`. When requested and a single detail payload is available, the response includes `complete_field_preview.requested=true`, `preview_only=true`, and a `complete_fields` object that may contain the full order id, product order id, platform product id, buyer/receiver names, buyer/receiver phones, receiver address, zip code, safe product/option text, quantity, order amount, status fields, and timestamps. This is display-only. The existing sanitized `detail_preview` remains unchanged and is still the only payload shape allowed by the current 1C write path. 5D does not write `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`; does not save raw responses, token values, `Authorization`, request headers, signatures, bcrypt output, or client secrets; does not change schema; and does not open formal Naver order sync.
+
 ### Planned Naver ERP v1 Contract
 
 Phase Naver-ERP-MasterPlan keeps the current Naver focus on normal ERP operations: products -> orders -> inventory -> delivery/claims -> order-based sales -> Dashboard. Mail, appeals, AI reply generation, AI mail recognition, and deep customer-service automation are intentionally outside this contract until the core ERP loop is stable.
@@ -527,7 +529,7 @@ Naver product v1 contract:
 Naver order v1 contract:
 
 - Next executable step is `Naver-ERP-1`: call the existing order preview only with `real_preview=true`, approved store/credential, `page=1`, `size=1`, a recent 24-hour default window or one bounded 7-day fallback probe, and `include_detail` only for a single feed-produced product order id.
-- Detail preview may expose only safe booleans/counts/field names and seller-facing status summaries. It must not expose full order ids, full product order ids, buyer/receiver names, full phones, addresses, delivery raw payloads, payment raw payloads, raw response bodies, headers, tokens, signatures, or full channel numbers.
+- Default sanitized detail preview may expose only safe booleans/counts/field names and seller-facing status summaries. It must not expose full order ids, full product order ids, buyer/receiver names, full phones, addresses, delivery raw payloads, payment raw payloads, raw response bodies, headers, tokens, signatures, or full channel numbers. The explicit 5D `complete_field_preview=true` path is the only readonly display exception for complete order/product/buyer fields, and its response is never a persistence payload.
 - A future single-order write may persist only sanitized business fields: `store_id`, `platform`, masked or hashed external order key, `product_name`, `quantity`, `order_amount`, `currency`, `order_status`, `paid_at`, `ordered_at`, `source_type`, `last_synced_at`, and sanitized metadata. Full buyer privacy fields and raw detail remain forbidden.
 - Order status mapping must be seller-facing Chinese labels for new order, paid/ready-to-ship, shipped, in delivery, delivered, cancellation requested, return requested, exchange requested, refunded, and abnormal/unknown.
 
@@ -548,8 +550,9 @@ Single-row order write before multi-row order write
 Manual approval before any broader write
 No token / Authorization / headers / signature / bcrypt persistence
 No raw response persistence
-No full channel_no, full product id, full order id, or full productOrderId output
-Buyer privacy is masked or suppressed
+No full channel_no, full product id, full order id, or full productOrderId output by default
+Buyer privacy is masked or suppressed by default
+Full order/product/buyer fields are display-only in explicit 5D complete-field readonly preview
 Every business row is bound to store_id and platform
 Formal batch sync requires a separately approved phase
 ```
