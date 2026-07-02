@@ -204,7 +204,7 @@ Response example:
 
 Naver readiness requires only `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, and `NAVER_API_BASE` (default: `https://api.commerce.naver.com/external`). `NAVER_CHANNEL_NO`, `NAVER_ACCESS_TOKEN`, `NAVER_REFRESH_TOKEN`, and `NAVER_TOKEN_EXPIRES_AT` are not manual readiness requirements. Coupang readiness requires `COUPANG_VENDOR_ID`, `COUPANG_ACCESS_KEY`, and `COUPANG_SECRET_KEY`.
 
-`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. The env fallback path is a developer fallback only and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. If `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/channel checks and returns only step statuses plus capability mapping metadata. Naver product and order readonly checks remain protected by guardrails and are not sent to the real API.
+`POST /api/v1/api-credentials/smoke-test` is a read-only smoke test endpoint. The env fallback path is a developer fallback only and does not write `ApiCapabilityTestResult`. The formal Naver path is store-bound and requires `store_id` plus an active credential. If `REAL_API_TEST_ENABLED=false`, the endpoint returns disabled results and does not create an external HTTP client or send any external request. The only accepted mode is `readonly`; write-like modes are rejected by validation. When testing is enabled, the endpoint may attempt minimal read-only token/account/channel checks and returns only step statuses plus capability mapping metadata. Naver product and order readonly checks remain protected by guardrails and are not sent to the real API. For Naver 401/403 responses, the backend now returns only safe classifications such as `ip_not_allowed`, `credential_invalid`, `permission_forbidden`, `product_api_not_allowed`, `token_auth_failed`, or `unknown_forbidden`; it does not return raw response bodies, headers, tokens, or signatures.
 
 ```text
 platform
@@ -218,6 +218,8 @@ order_read_test
 settlement_read_test
 error_code
 masked_message
+business_error_hint
+safe_keyword_flags
 tested_at
 capability_mapping
 ```
@@ -230,7 +232,7 @@ Naver Commerce API documentation is tracked against the current / 2.81.0 documen
 
 | Planned API | Current status | Naver reference route | Preview strategy |
 |---|---|---|---|
-| `POST /api/v1/sync/products/naver/preview` | Endpoint exists; default blocked; readonly small-batch preview requires explicit gate; `safe_to_real_test=false` | `POST /v1/products/search` | Defaults to `guardrail_blocked`; `real_preview=true` may call only the minimum `{"page":1,"size":N}` body, with `N<=5` for `real_sync=false` and `N=1` for `real_sync=true` |
+| `POST /api/v1/sync/products/naver/preview` | Endpoint exists; default blocked; readonly small-batch preview requires explicit gate; `safe_to_real_test=false` | `POST /v1/products/search` | Defaults to `guardrail_blocked`; `real_preview=true` may call only the minimum `{"page":P,"size":N}` body, with `P in {1,2}` and `N<=5` for `real_sync=false`, while `real_sync=true` remains limited to `page=1,size<=5` |
 | `POST /api/v1/sync/orders/naver/preview` | Scaffold endpoint exists; default blocked; real micro preview requires explicit gate | `GET /v1/pay-order/seller/product-orders/last-changed-statuses`, then `POST /v1/pay-order/seller/product-orders/query` | Read last-changed feed first, then optionally query one detail by `productOrderId` |
 
 The older direct order draft route `GET /v1/pay-order/seller/product-orders` is treated as `deprecated_or_unconfirmed` and must not be used for real readonly testing. Product and order preview, when implemented later, must be preview-only:
@@ -353,7 +355,20 @@ Phase 6D-6J is the write-design contract carried forward into the approved Naver
 
 Phase 6D-6K implements that approved small-batch test on the existing preview endpoint. The request must include `real_preview=true` and `real_sync=true`; `real_sync=true` without `real_preview=true` is blocked. The external Naver call is still readonly and remains `POST /v1/products/search` with body `{"page":1,"size":N}` where `1 <= N <= 5`. The local write path only runs after a successful preview response and only for up to 5 single-channel candidates on `page=1`. It creates or updates at most 5 `products` rows, returns a sanitized `local_sync_result`, and still does not write `SyncLog`, does not write `ApiCapabilityTestResult tested_success`, does not save tokens, and does not save raw Naver response payloads. This is not batch product sync and does not mark `naver.product_read.safe_to_real_test` as formally open.
 
-Phase 6D-6N completes the first controlled local sync small-batch test on `page=1,size=5`, with 4 creates and 1 update, while keeping `SyncLog` unwritten, `ApiCapabilityTestResult tested_success` unchanged, and `raw_response_saved=false`. Phase 6D-6Q then verifies the post-sync readonly semantics: the same batch now returns `matched_existing_count=5`, `would_create=0`, `would_update=0`, `would_refresh_only=5`, and `would_skip=0`. That confirms the current first page is stable without declaring formal batch sync open.
+Phase 6D-6N completes the first controlled local sync small-batch test on `page=1,size=5`, with 4 creates and 1 update, while keeping `SyncLog` unwritten, `ApiCapabilityTestResult tested_success` unchanged, and `raw_response_saved=false`. The local store now holds 5 Naver product rows for `store_id=8`. Phase 6D-6Q then verifies the post-sync readonly semantics: the same batch now returns `matched_existing_count=5`, `would_create=0`, `would_update=0`, `would_refresh_only=5`, and `would_skip=0`. That confirms the current first page is stable without declaring formal batch sync open.
+
+Phase 6D-6S then validates `page=2,size=5` as a real readonly dry-run and returns `preview_status=success_empty`. That means there is currently no second-page product candidate to preview or write. The result does not change `products`, does not write `SyncLog`, does not add `ApiCapabilityTestResult tested_success`, and does not justify `page=2` local sync approval. `size=10`, `page=3`, and formal batch sync remain blocked.
+
+Phase 6D-6T closes the current Naver product line by tightening safe error classification. Token or readonly 403 responses now surface only safe enums plus safe keyword flags:
+
+- `ip_not_allowed`: IP / allowlist / gateway-IP signal detected
+- `credential_invalid`: invalid client or client-secret style signal detected
+- `permission_forbidden`: permission or forbidden signal detected outside the product-specific path
+- `product_api_not_allowed`: token succeeded but the product API returned a permission-style 403
+- `token_auth_failed`: token exchange failed without a stronger safe classification
+- `unknown_forbidden`: readonly 403 without a stronger safe classification
+
+The response may include `http_status`, `error_code`, `business_error_hint`, and `safe_keyword_flags`, but it must not include raw response text, request headers, `Authorization`, token values, signatures, `bcrypt` output, full `channel_no`, or full product identifiers.
 
 `local_sync_result` response shape:
 

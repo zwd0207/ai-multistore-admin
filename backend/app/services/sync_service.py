@@ -1510,6 +1510,8 @@ def _build_naver_product_preview_field_observation(credential) -> dict:
         "credential_decryptable": True,
         "product_preview_called": False,
         "http_status": None,
+        "safe_keyword_flags": api_credential_readiness_service._empty_naver_safe_keyword_flags(),
+        "business_error_hint": None,
         "product_id_observed": False,
         "origin_product_no_observed": False,
         "group_product_no_observed": False,
@@ -1671,6 +1673,8 @@ def _run_naver_product_real_micro_preview(
         field_observation["http_status"] = product_result.get("http_status")
         if not product_result["success"]:
             error_code = product_result.get("error_code") or "readonly_request_failed"
+            field_observation["safe_keyword_flags"] = product_result.get("safe_keyword_flags") or api_credential_readiness_service._empty_naver_safe_keyword_flags()
+            field_observation["business_error_hint"] = api_credential_readiness_service._naver_business_error_hint(error_code)
             return _build_naver_product_preview_result(
                 store_id=store_id,
                 credential_id=credential.id,
@@ -1724,6 +1728,26 @@ def _run_naver_product_real_micro_preview(
         )
     except ApiError:
         raise
+    except api_credential_readiness_service.NaverReadonlyAuthError as exc:
+        return _build_naver_product_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            page=page,
+            size=size,
+            status=status,
+            guardrail_status="allowed",
+            preview_status="failed",
+            test_status="preview_failed",
+            error_code=exc.error_code,
+            field_observation={
+                **field_observation,
+                "http_status": exc.http_status,
+                "safe_keyword_flags": exc.safe_keyword_flags,
+                "business_error_hint": exc.business_error_hint,
+            },
+            sample_ids=[],
+            has_more=False,
+        )
     except Exception as exc:
         http_status = getattr(exc, "http_status", None)
         error_code = "auth_failed" if str(exc) == "token_auth_failed" else "readonly_request_failed"
@@ -1760,7 +1784,8 @@ def _request_naver_product_search(
         return {
             "success": False,
             "http_status": response.status_code,
-            "error_code": _naver_readonly_error_code(response),
+            "error_code": _naver_readonly_error_code(response, scope="product"),
+            "safe_keyword_flags": api_credential_readiness_service._naver_safe_keyword_flags_from_text(response.text),
         }
     return {
         "success": True,
@@ -2756,6 +2781,11 @@ def _build_naver_product_preview_result(
     safe_mapping_summary = mapping_summary or _summarize_naver_product_mapping(None)
     safe_dry_run_diff = dry_run_diff or _default_naver_product_dry_run_diff(page=page, size=size)
     safe_local_sync_result = local_sync_result or _default_naver_product_local_sync_result(False)
+    safe_keyword_flags = dict(
+        field_observation.get("safe_keyword_flags")
+        or api_credential_readiness_service._empty_naver_safe_keyword_flags()
+    )
+    business_error_hint = field_observation.get("business_error_hint") or api_credential_readiness_service._naver_business_error_hint(error_code)
     semantic_notice = "Readonly preview scaffold only. No local product rows were written."
     if safe_local_sync_result.get("products_written"):
         written_count = int(safe_local_sync_result.get("created_count") or 0) + int(safe_local_sync_result.get("updated_count") or 0)
@@ -2770,6 +2800,8 @@ def _build_naver_product_preview_result(
         "preview_status": preview_status,
         "test_status": test_status,
         "error_code": error_code,
+        "safe_keyword_flags": safe_keyword_flags,
+        "business_error_hint": business_error_hint,
         "product_preview_called": bool(field_observation.get("product_preview_called")),
         "http_status": field_observation.get("http_status"),
         "page": page,
@@ -2874,6 +2906,8 @@ def _build_naver_order_preview_field_observation(credential) -> dict:
         "feed_called": False,
         "detail_called": False,
         "detail_limit": 0,
+        "safe_keyword_flags": api_credential_readiness_service._empty_naver_safe_keyword_flags(),
+        "business_error_hint": None,
         "raw_response_saved": False,
         "orders_written": False,
         "safe_to_real_test": False,
@@ -3073,7 +3107,7 @@ def _run_naver_order_real_micro_preview(
         raise
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
-        error_code = _naver_readonly_error_code(exc.response)
+        error_code = _naver_readonly_error_code(exc.response, scope="order")
         return _build_naver_order_preview_result(
             store_id=store_id,
             credential_id=credential.id,
@@ -3086,7 +3120,36 @@ def _run_naver_order_real_micro_preview(
             preview_status="failed",
             test_status="preview_failed",
             error_code=error_code,
-            field_observation={**field_observation, "http_status": status_code},
+            field_observation={
+                **field_observation,
+                "http_status": status_code,
+                "safe_keyword_flags": api_credential_readiness_service._naver_safe_keyword_flags_from_text(exc.response.text),
+                "business_error_hint": api_credential_readiness_service._naver_business_error_hint(error_code),
+            },
+            sample_ids=[],
+            has_more=False,
+            would_create=0,
+            would_update=0,
+        )
+    except api_credential_readiness_service.NaverReadonlyAuthError as exc:
+        return _build_naver_order_preview_result(
+            store_id=store_id,
+            credential_id=credential.id,
+            start_datetime=start_kst.isoformat(),
+            end_datetime=end_kst.isoformat(),
+            page=page,
+            size=size,
+            order_status=order_status,
+            guardrail_status="allowed",
+            preview_status="failed",
+            test_status="preview_failed",
+            error_code=exc.error_code,
+            field_observation={
+                **field_observation,
+                "http_status": exc.http_status,
+                "safe_keyword_flags": exc.safe_keyword_flags,
+                "business_error_hint": exc.business_error_hint,
+            },
             sample_ids=[],
             has_more=False,
             would_create=0,
@@ -3379,12 +3442,13 @@ def _json_payload_has_record(payload: object) -> bool:
     return payload is not None
 
 
-def _naver_readonly_error_code(response: httpx.Response) -> str:
-    text = (response.text or "").lower()
-    if response.status_code in {401, 403} and any(token in text for token in ["ip", "whitelist", "white list", "allowed"]):
-        return "ip_not_allowed"
+def _naver_readonly_error_code(response: httpx.Response, *, scope: str | None = None) -> str:
     if response.status_code in {401, 403}:
-        return "auth_failed"
+        return api_credential_readiness_service._classify_naver_forbidden_response(
+            response,
+            stage="readonly",
+            scope=scope,
+        )[0]
     return "readonly_request_failed"
 
 
@@ -3436,6 +3500,11 @@ def _build_naver_order_preview_result(
     would_create: int,
     would_update: int,
 ) -> dict:
+    safe_keyword_flags = dict(
+        field_observation.get("safe_keyword_flags")
+        or api_credential_readiness_service._empty_naver_safe_keyword_flags()
+    )
+    business_error_hint = field_observation.get("business_error_hint") or api_credential_readiness_service._naver_business_error_hint(error_code)
     return {
         "store_id": store_id,
         "credential_id": credential_id,
@@ -3446,6 +3515,8 @@ def _build_naver_order_preview_result(
         "preview_status": preview_status,
         "test_status": test_status,
         "error_code": error_code,
+        "safe_keyword_flags": safe_keyword_flags,
+        "business_error_hint": business_error_hint,
         "start_datetime": start_datetime,
         "end_datetime": end_datetime,
         "order_status": order_status,

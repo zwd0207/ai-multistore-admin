@@ -514,6 +514,8 @@ def verify_api_credential_readiness() -> None:
                 "shipping_delivery_read_test",
                 "error_code",
                 "masked_message",
+                "business_error_hint",
+                "safe_keyword_flags",
                 "tested_at",
             }
             for item in smoke_data["results"]:
@@ -579,10 +581,10 @@ def verify_api_credential_readiness() -> None:
             }
 
             class FakeResponse:
-                def __init__(self, status_code: int, payload: dict | None = None) -> None:
+                def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
                     self.status_code = status_code
                     self._payload = payload or {}
-                    self.text = ""
+                    self.text = text
 
                 def json(self) -> dict:
                     return self._payload
@@ -684,6 +686,37 @@ def verify_api_credential_readiness() -> None:
 
                 def post(self, url: str, headers=None, params=None, data=None):
                     raise AssertionError(f"unexpected POST url: {url}")
+
+            ip_error_code, ip_flags = api_credential_readiness_service._classify_naver_forbidden_response(
+                FakeResponse(403, {"message": "gateway ip not allowed"}, text="gateway ip not allowed"),
+                stage="token",
+                scope="token",
+            )
+            assert ip_error_code == "ip_not_allowed", (ip_error_code, ip_flags)
+            assert ip_flags["ip_keyword"] is True and ip_flags["allowed_keyword"] is True and ip_flags["gateway_keyword"] is True, ip_flags
+
+            credential_error_code, credential_flags = api_credential_readiness_service._classify_naver_forbidden_response(
+                FakeResponse(403, {"message": "invalid client secret"}, text="invalid client secret"),
+                stage="token",
+                scope="token",
+            )
+            assert credential_error_code == "credential_invalid", (credential_error_code, credential_flags)
+            assert credential_flags["invalid_keyword"] is True and credential_flags["client_keyword"] is True, credential_flags
+
+            token_unknown_error_code, token_unknown_flags = api_credential_readiness_service._classify_naver_forbidden_response(
+                FakeResponse(403, {"message": "denied"}, text="denied"),
+                stage="token",
+                scope="token",
+            )
+            assert token_unknown_error_code == "token_auth_failed", (token_unknown_error_code, token_unknown_flags)
+
+            product_permission_error_code, product_permission_flags = api_credential_readiness_service._classify_naver_forbidden_response(
+                FakeResponse(403, {"message": "product api permission forbidden"}, text="product api permission forbidden"),
+                stage="readonly",
+                scope="product",
+            )
+            assert product_permission_error_code == "product_api_not_allowed", (product_permission_error_code, product_permission_flags)
+            assert product_permission_flags["permission_keyword"] is True and product_permission_flags["forbidden_keyword"] is True, product_permission_flags
 
             api_credential_readiness_service._request_naver_token = lambda settings: ("fake-env-token", 200)
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
@@ -998,7 +1031,56 @@ def verify_api_credential_readiness() -> None:
             api_credential_readiness_service.httpx.Client = EnvFallbackHttpClient
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-store-token", 200)
 
-            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(RuntimeError("token_auth_failed"))
+            ip_keyword_flags = api_credential_readiness_service._naver_safe_keyword_flags_from_text("gateway ip not allowed")
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                api_credential_readiness_service.NaverReadonlyAuthError(
+                    "ip_not_allowed",
+                    http_status=403,
+                    safe_keyword_flags=ip_keyword_flags,
+                )
+            )
+            token_ip_failed = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+            })
+            assert token_ip_failed.status_code == 200, token_ip_failed.text
+            token_ip_failed_result = token_ip_failed.json()["data"]["results"][0]
+            assert token_ip_failed_result["error_code"] == "ip_not_allowed", token_ip_failed_result
+            assert token_ip_failed_result["token_test"] == "failed", token_ip_failed_result
+            assert token_ip_failed_result["safe_keyword_flags"]["ip_keyword"] is True, token_ip_failed_result
+            assert "allowed ip" in token_ip_failed_result["business_error_hint"].lower(), token_ip_failed_result
+
+            credential_keyword_flags = api_credential_readiness_service._naver_safe_keyword_flags_from_text("invalid client secret")
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                api_credential_readiness_service.NaverReadonlyAuthError(
+                    "credential_invalid",
+                    http_status=403,
+                    safe_keyword_flags=credential_keyword_flags,
+                )
+            )
+            token_credential_failed = client.post("/api/v1/api-credentials/smoke-test", json={
+                "platform": "naver",
+                "mode": "readonly",
+                "store_id": store_id,
+                "credential_id": credential_data["id"],
+            })
+            assert token_credential_failed.status_code == 200, token_credential_failed.text
+            token_credential_failed_result = token_credential_failed.json()["data"]["results"][0]
+            assert token_credential_failed_result["error_code"] == "credential_invalid", token_credential_failed_result
+            assert token_credential_failed_result["token_test"] == "failed", token_credential_failed_result
+            assert token_credential_failed_result["safe_keyword_flags"]["client_keyword"] is True, token_credential_failed_result
+            assert "client id / client secret" in token_credential_failed_result["business_error_hint"].lower(), token_credential_failed_result
+
+            generic_token_flags = api_credential_readiness_service._naver_safe_keyword_flags_from_text("denied")
+            api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                api_credential_readiness_service.NaverReadonlyAuthError(
+                    "token_auth_failed",
+                    http_status=403,
+                    safe_keyword_flags=generic_token_flags,
+                )
+            )
             token_failed = client.post("/api/v1/api-credentials/smoke-test", json={
                 "platform": "naver",
                 "mode": "readonly",
@@ -1014,11 +1096,15 @@ def verify_api_credential_readiness() -> None:
                 "result": {
                     "masked_message": token_failed_result.get("masked_message"),
                     "error_code": token_failed_result.get("error_code"),
+                    "business_error_hint": token_failed_result.get("business_error_hint"),
+                    "safe_keyword_flags": token_failed_result.get("safe_keyword_flags"),
                     "business_status_summary": token_failed_result.get("business_status_summary"),
                 },
                 "capability_results": [
                     {
                         "error_code": item.get("error_code"),
+                        "business_error_hint": item.get("business_error_hint"),
+                        "safe_keyword_flags": item.get("safe_keyword_flags"),
                         "permission_result": item.get("permission_result"),
                         "response_fields_observed": item.get("response_fields_observed"),
                         "notes": item.get("notes"),
@@ -2739,6 +2825,31 @@ def verify_sync_preview_schema_and_security() -> None:
                 ]:
                     assert forbidden not in rule_text, rule_text
 
+                token_ip_preview_flags = api_credential_readiness_service._naver_safe_keyword_flags_from_text("gateway ip not allowed")
+                api_credential_readiness_service._request_naver_token_from_context = lambda context: (_ for _ in ()).throw(
+                    api_credential_readiness_service.NaverReadonlyAuthError(
+                        "ip_not_allowed",
+                        http_status=403,
+                        safe_keyword_flags=token_ip_preview_flags,
+                    )
+                )
+                fake_product_token_failed = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_token_failed.status_code == 200, fake_product_token_failed.text
+                fake_token_failed_data = fake_product_token_failed.json()["data"]
+                assert fake_token_failed_data["preview_status"] == "failed", fake_token_failed_data
+                assert fake_token_failed_data["error_code"] == "ip_not_allowed", fake_token_failed_data
+                assert fake_token_failed_data["http_status"] == 403, fake_token_failed_data
+                assert fake_token_failed_data["safe_keyword_flags"]["ip_keyword"] is True, fake_token_failed_data
+                assert "allowed ip" in fake_token_failed_data["business_error_hint"].lower(), fake_token_failed_data
+
+                api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-product-token", 200)
                 FakeNaverProductHttpClient.response_sequence = [
                     FakeNaverProductResponse(403, {"message": "ip whitelist blocked"}, text="ip whitelist blocked")
                 ]
@@ -2755,6 +2866,26 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert fake_failed_data["preview_status"] == "failed", fake_failed_data
                 assert fake_failed_data["error_code"] == "ip_not_allowed", fake_failed_data
                 assert fake_failed_data["http_status"] == 403, fake_failed_data
+                assert fake_failed_data["safe_keyword_flags"]["ip_keyword"] is True, fake_failed_data
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(403, {"message": "product api permission forbidden"}, text="product api permission forbidden")
+                ]
+                fake_product_permission_failed = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                })
+                assert fake_product_permission_failed.status_code == 200, fake_product_permission_failed.text
+                fake_permission_failed_data = fake_product_permission_failed.json()["data"]
+                assert fake_permission_failed_data["preview_status"] == "failed", fake_permission_failed_data
+                assert fake_permission_failed_data["error_code"] == "product_api_not_allowed", fake_permission_failed_data
+                assert fake_permission_failed_data["http_status"] == 403, fake_permission_failed_data
+                assert fake_permission_failed_data["safe_keyword_flags"]["permission_keyword"] is True, fake_permission_failed_data
+                assert "product api permission" in fake_permission_failed_data["business_error_hint"].lower(), fake_permission_failed_data
 
                 with SessionLocal() as db:
                     after_fake_product_count = len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all())
@@ -4131,6 +4262,8 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "Phase 6D-6M",
         "Phase 6D-6P",
         "Phase 6D-6R",
+        "Phase 6D-6S",
+        "Phase 6D-6T",
         "real_sync=true",
         "real_preview=true",
         "local_sync_result",
@@ -4160,6 +4293,14 @@ def verify_naver_product_local_sync_design_docs() -> None:
         "missing_optional_fields_block_write_approval",
         "missing_price_count",
         "missing_stock_count",
+        "success_empty",
+        "business_error_hint",
+        "safe_keyword_flags",
+        "ip_not_allowed",
+        "credential_invalid",
+        "permission_forbidden",
+        "product_api_not_allowed",
+        "unknown_forbidden",
         "backend/codex1.db",
         "ApiCapabilityTestResult tested_success",
     ]:

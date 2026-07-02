@@ -20,6 +20,23 @@ from app.services.encryption import decrypt_value
 
 NAVER_DEFAULT_API_BASE = "https://api.commerce.naver.com/external"
 NAVER_SUPPORTED_GRANT_TYPES = {"SELF", "SELLER"}
+
+
+class NaverReadonlyAuthError(RuntimeError):
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        http_status: int | None = None,
+        safe_keyword_flags: dict[str, bool] | None = None,
+    ) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
+        self.http_status = http_status
+        self.safe_keyword_flags = safe_keyword_flags or _empty_naver_safe_keyword_flags()
+        self.business_error_hint = _naver_business_error_hint(error_code)
+
+
 NAVER_CAPABILITY_MAP = {
     "naver.token_auth": {
         "capability_key": "naver.token_auth",
@@ -365,18 +382,19 @@ def _build_naver_business_status_summary(result: dict) -> dict:
     channel_observed = bool(result.get("channel_no_observed"))
     channel_persisted = bool(result.get("channel_no_persisted"))
     multiple_channels = bool(result.get("multiple_channels_observed"))
+    error_hint = result.get("business_error_hint") or _naver_business_error_hint(result.get("error_code"))
 
     if token_status == "success":
         auth_message = "Naver 平台授权检测成功。"
     elif token_status == "failed":
-        auth_message = "Naver 平台授权检测失败，请检查 Client ID / Client Secret 或 API 权限。"
+        auth_message = error_hint or "Naver 平台授权检测失败，请检查 Client ID / Client Secret 或 API 权限。"
     else:
         auth_message = "Naver 平台授权暂未检测。"
 
     if seller_status == "success":
         channels_message = "店铺频道信息读取成功，系统已确认该 Naver 凭证可读取频道信息。"
     elif seller_status == "failed":
-        channels_message = "店铺频道信息读取失败，请检查 API 权限或平台授权状态。"
+        channels_message = error_hint or "店铺频道信息读取失败，请检查 API 权限或平台授权状态。"
     else:
         channels_message = "店铺频道信息暂未读取。"
 
@@ -593,6 +611,8 @@ def _new_smoke_result(platform: str) -> dict:
         "http_status": None,
         "error_code": None,
         "masked_message": "",
+        "business_error_hint": None,
+        "safe_keyword_flags": _empty_naver_safe_keyword_flags(),
         "tested_at": get_utc_now().isoformat(),
     }
     for step in SMOKE_STEPS:
@@ -643,6 +663,7 @@ def _new_naver_env_fallback_result() -> dict:
 def _mark_failed(result: dict, error_code: str, message: str) -> dict:
     result["error_code"] = error_code
     result["masked_message"] = _mask_message(message)
+    result["business_error_hint"] = _naver_business_error_hint(error_code)
     return result
 
 
@@ -659,9 +680,97 @@ def _mask_message(message: str | None) -> str:
     return text[:300]
 
 
+def _empty_naver_safe_keyword_flags() -> dict[str, bool]:
+    return {
+        "ip_keyword": False,
+        "allowed_keyword": False,
+        "whitelist_keyword": False,
+        "gateway_keyword": False,
+        "invalid_keyword": False,
+        "client_keyword": False,
+        "client_secret_keyword": False,
+        "credential_keyword": False,
+        "permission_keyword": False,
+        "forbidden_keyword": False,
+        "not_allowed_keyword": False,
+        "product_keyword": False,
+    }
+
+
+def _naver_safe_keyword_flags_from_text(text: str | None) -> dict[str, bool]:
+    normalized = str(text or "").lower()
+    compact = normalized.replace("_", " ").replace("-", " ")
+    return {
+        "ip_keyword": "ip" in compact,
+        "allowed_keyword": "allowed" in compact,
+        "whitelist_keyword": any(token in compact for token in ["whitelist", "white list", "allowlist", "allow list"]),
+        "gateway_keyword": "gateway" in compact,
+        "invalid_keyword": "invalid" in compact,
+        "client_keyword": "client" in compact,
+        "client_secret_keyword": any(token in compact for token in ["client secret", "clientsecret", "client_secret", "secret key"]),
+        "credential_keyword": "credential" in compact,
+        "permission_keyword": "permission" in compact,
+        "forbidden_keyword": "forbidden" in compact,
+        "not_allowed_keyword": any(token in compact for token in ["not allowed", "not_allowed", "no permission"]),
+        "product_keyword": "product" in compact,
+    }
+
+
+def _classify_naver_forbidden_response(
+    response: httpx.Response,
+    *,
+    stage: str,
+    scope: str | None = None,
+) -> tuple[str, dict[str, bool]]:
+    flags = _naver_safe_keyword_flags_from_text(getattr(response, "text", ""))
+    if response.status_code not in {401, 403}:
+        return "readonly_request_failed", flags
+
+    ip_signal = flags["ip_keyword"] and (
+        flags["allowed_keyword"]
+        or flags["whitelist_keyword"]
+        or flags["gateway_keyword"]
+        or flags["not_allowed_keyword"]
+    )
+    if ip_signal:
+        return "ip_not_allowed", flags
+
+    credential_signal = flags["invalid_keyword"] and (
+        flags["client_keyword"] or flags["client_secret_keyword"] or flags["credential_keyword"]
+    )
+    if credential_signal:
+        return "credential_invalid", flags
+
+    permission_signal = flags["permission_keyword"] or flags["forbidden_keyword"] or flags["not_allowed_keyword"]
+    if scope == "product" and response.status_code == 403 and permission_signal:
+        return "product_api_not_allowed", flags
+    if permission_signal:
+        return "permission_forbidden", flags
+    if stage == "token":
+        return "token_auth_failed", flags
+    return "unknown_forbidden", flags
+
+
+def _naver_business_error_hint(error_code: str | None) -> str | None:
+    if error_code == "ip_not_allowed":
+        return "Naver API request IP is not allowed. Check API usage IP / allowed IP settings in Naver Commerce API Center."
+    if error_code == "credential_invalid":
+        return "Naver connection credentials may be invalid. Check Client ID / Client Secret."
+    if error_code == "permission_forbidden":
+        return "Naver API permission is insufficient. Check whether this app has the required API permission."
+    if error_code == "product_api_not_allowed":
+        return "Naver product API permission is not available. Check whether product API access is granted."
+    if error_code == "token_auth_failed":
+        return "Naver access validation failed. Check connection credentials or platform permission settings."
+    if error_code == "unknown_forbidden":
+        return "Naver access was rejected. Check IP allowlist and API permission settings."
+    if error_code == "auth_failed":
+        return "Naver access validation failed. Check connection credentials or platform permission settings."
+    return None
+
+
 def _is_ip_not_allowed(response: httpx.Response) -> bool:
-    text = response.text.lower()
-    return response.status_code in {401, 403} and any(token in text for token in ["ip", "whitelist", "white list", "allowed"])
+    return _classify_naver_forbidden_response(response, stage="readonly")[0] == "ip_not_allowed"
 
 
 def _step_from_response(result: dict, step: str, response: httpx.Response) -> bool:
@@ -676,6 +785,32 @@ def _step_from_response(result: dict, step: str, response: httpx.Response) -> bo
         _mark_failed(result, "auth_failed", f"{step} failed with authorization response")
     else:
         _mark_failed(result, "readonly_request_failed", f"{step} failed with HTTP {response.status_code}")
+    return False
+
+
+def _step_from_naver_response(
+    result: dict,
+    step: str,
+    response: httpx.Response,
+    *,
+    scope: str | None = None,
+) -> bool:
+    result["http_status"] = response.status_code
+    if 200 <= response.status_code < 300:
+        result[step] = "success"
+        result["safe_keyword_flags"] = _empty_naver_safe_keyword_flags()
+        return True
+    result[step] = "failed"
+    error_code, safe_keyword_flags = _classify_naver_forbidden_response(
+        response,
+        stage="readonly",
+        scope=scope,
+    )
+    result["safe_keyword_flags"] = safe_keyword_flags
+    if error_code == "readonly_request_failed":
+        _mark_failed(result, error_code, f"{step} failed with HTTP {response.status_code}")
+    else:
+        _mark_failed(result, error_code, f"{step} failed with classified readonly response")
     return False
 
 
@@ -771,15 +906,24 @@ def _request_naver_token_from_context(context: dict) -> tuple[str, int]:
     with httpx.Client(timeout=10.0) as client:
         response = client.post(f"{context['api_base']}/v1/oauth2/token", data=payload)
     if response.status_code in {401, 403}:
-        error = RuntimeError("token_auth_failed")
-        error.http_status = response.status_code
-        raise error
+        error_code, safe_keyword_flags = _classify_naver_forbidden_response(
+            response,
+            stage="token",
+            scope="token",
+        )
+        raise NaverReadonlyAuthError(
+            error_code,
+            http_status=response.status_code,
+            safe_keyword_flags=safe_keyword_flags,
+        )
     response.raise_for_status()
     token = response.json().get("access_token")
     if not token:
-        error = RuntimeError("token_auth_failed")
-        error.http_status = response.status_code
-        raise error
+        raise NaverReadonlyAuthError(
+            "token_auth_failed",
+            http_status=response.status_code,
+            safe_keyword_flags=_empty_naver_safe_keyword_flags(),
+        )
     return token, response.status_code
 
 
@@ -1112,6 +1256,17 @@ def _run_naver_store_bound_smoke_test(
             test_step="token_test",
             notes="Store-bound readonly token exchange requires bcrypt.",
         ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
+    except NaverReadonlyAuthError as exc:
+        result["http_status"] = exc.http_status
+        result["token_test"] = "failed"
+        result["safe_keyword_flags"] = exc.safe_keyword_flags
+        _mark_failed(result, exc.error_code, exc.business_error_hint or "Naver readonly token exchange failed")
+        capability_results.append(_build_naver_capability_record(
+            capability_key="naver.token_auth",
+            result=result,
+            test_step="token_test",
+            notes="Store-bound readonly token exchange failed.",
+        ) | {"store_id": context["store_id"], "credential_id": context["credential_id"]})
     except Exception as exc:
         result["http_status"] = getattr(exc, "http_status", result.get("http_status"))
         if str(exc) == "token_auth_failed":
@@ -1146,7 +1301,7 @@ def _request_naver_token(settings) -> tuple[str, int]:
 def _run_naver_seller_account_read(context: dict, result: dict, headers: dict[str, str]) -> dict:
     with httpx.Client(timeout=10.0) as client:
         response = client.get(f"{context['api_base']}/v1/seller/account", headers=headers)
-    _step_from_response(result, "seller_or_account_test", response)
+    _step_from_naver_response(result, "seller_or_account_test", response, scope="seller_account")
     if result["seller_or_account_test"] == "success":
         channel_no = _extract_channel_no(response.json())
         if channel_no:
@@ -1172,7 +1327,7 @@ def _run_naver_product_read(context: dict, result: dict, headers: dict[str, str]
         result["channel_no_source"] = result.get("channel_no_source") or "credential_extra_config"
     with httpx.Client(timeout=10.0) as client:
         response = client.post(f"{context['api_base']}/v1/products/search", headers=headers, params=params)
-    _step_from_response(result, "product_read_test", response)
+    _step_from_naver_response(result, "product_read_test", response, scope="product")
     return _build_naver_capability_record(
         capability_key="naver.product_read",
         result=result,
@@ -1205,7 +1360,7 @@ def _run_naver_seller_channels_read(
 ) -> dict:
     with httpx.Client(timeout=10.0) as client:
         response = client.get(f"{context['api_base']}/v1/seller/channels", headers=headers)
-    _step_from_response(result, "seller_or_account_test", response)
+    _step_from_naver_response(result, "seller_or_account_test", response, scope="seller_channels")
     if result["seller_or_account_test"] == "success":
         channel_numbers = _extract_channel_no_values(response.json())
         result["channel_no_observed"] = bool(channel_numbers)
@@ -1546,6 +1701,8 @@ def _build_capability_record(
         "test_status": forced_test_status or _step_status_from_result(result, test_step),
         "http_status": result.get("http_status"),
         "error_code": result.get("error_code"),
+        "business_error_hint": result.get("business_error_hint"),
+        "safe_keyword_flags": dict(result.get("safe_keyword_flags") or _empty_naver_safe_keyword_flags()),
         "permission_result": _permission_result(result),
         "rate_limit_summary": None,
         "response_fields_observed": _response_fields_observed(result),
@@ -1560,6 +1717,14 @@ def _build_capability_record(
 def _permission_result(result: dict) -> str:
     if result.get("error_code") == "ip_not_allowed":
         return "IP allowlist rejected the readonly request."
+    if result.get("error_code") == "credential_invalid":
+        return "Credential fields were rejected by the readonly authentication path."
+    if result.get("error_code") == "permission_forbidden":
+        return "Readonly request was rejected by the API permission layer."
+    if result.get("error_code") == "product_api_not_allowed":
+        return "Readonly product API request was rejected by the product permission layer."
+    if result.get("error_code") == "unknown_forbidden":
+        return "Readonly request returned a forbidden response without a stronger safe classification."
     if result.get("error_code") == "auth_failed":
         return "Authentication or permission rejected the readonly request."
     if result.get("error_code") == "token_auth_failed":
@@ -1569,6 +1734,11 @@ def _permission_result(result: dict) -> str:
 
 def _response_fields_observed(result: dict) -> str:
     statuses = [f"{step}={result.get(step, 'skipped')}" for step in SMOKE_STEPS]
+    safe_keyword_flags = [
+        key
+        for key, enabled in (result.get("safe_keyword_flags") or {}).items()
+        if enabled
+    ]
     statuses.extend([
         f"path_kind={result.get('path_kind', 'unknown')}",
         f"capability_scope={result.get('capability_scope', 'unknown')}",
@@ -1581,6 +1751,7 @@ def _response_fields_observed(result: dict) -> str:
         f"multiple_channels_observed={bool(result.get('multiple_channels_observed'))}",
         f"http_status={result.get('http_status')}",
         f"error_code={result.get('error_code')}",
+        f"safe_keyword_flags={','.join(safe_keyword_flags) if safe_keyword_flags else 'none'}",
     ])
     return "; ".join(statuses)
 
@@ -1590,8 +1761,10 @@ def _step_status_from_result(result: dict, step: str) -> str:
         return "not_tested"
     if result.get("error_code") in {"missing_credentials", "naver_api_not_implemented", "seller_account_id_missing", "guardrail_blocked"}:
         return "not_tested"
-    if result.get("error_code") in {"auth_failed", "ip_not_allowed"}:
+    if result.get("error_code") in {"auth_failed", "ip_not_allowed", "permission_forbidden", "product_api_not_allowed", "unknown_forbidden"}:
         return "permission_required"
+    if result.get("error_code") in {"credential_invalid", "token_auth_failed"}:
+        return "tested_failed"
     if result.get("error_code"):
         return "tested_failed"
     if result.get(step) == "success":
@@ -1636,7 +1809,7 @@ def _persist_real_readonly_capability_results(db: Session, results: list[dict]) 
                 test_status=result["test_status"],
                 test_mode="real_readonly",
                 response_fields_summary=result["response_fields_observed"],
-                error_codes_summary="real_api_test_disabled, credential_not_ready, credential_decrypt_failed, dependency_missing, token_auth_failed, auth_failed, ip_not_allowed, readonly_request_failed, guardrail_blocked, naver_api_not_implemented, seller_account_id_missing",
+                error_codes_summary="real_api_test_disabled, credential_not_ready, credential_decrypt_failed, dependency_missing, token_auth_failed, credential_invalid, permission_forbidden, product_api_not_allowed, unknown_forbidden, auth_failed, ip_not_allowed, readonly_request_failed, guardrail_blocked, naver_api_not_implemented, seller_account_id_missing",
                 data_usefulness="medium",
                 first_phase_candidate=False,
                 sales_source_type="not_applicable",
