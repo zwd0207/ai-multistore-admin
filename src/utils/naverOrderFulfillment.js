@@ -270,3 +270,48 @@ export function buildNaverDeliveryStatusSummary(fulfillmentSummary = {}) {
     formalOrderSyncOpen: false,
   };
 }
+
+export function buildNaverClaimReadonlySummary(fulfillmentSummary = {}) {
+  const cancelRequests = fulfillmentSummary.cancelRequests ?? 0;
+  const returnRequests = fulfillmentSummary.returnRequests ?? 0;
+  const exchangeRequests = fulfillmentSummary.exchangeRequests ?? 0;
+  const canceled = fulfillmentSummary.canceled ?? 0;
+  const unknown = fulfillmentSummary.unknown ?? 0;
+  const activeClaimRequestCount = cancelRequests + returnRequests + exchangeRequests;
+  const claimAttentionCount = activeClaimRequestCount + unknown;
+  const statusLabel = unknown > 0
+    ? '售后状态需复核'
+    : activeClaimRequestCount > 0
+      ? '有售后请求'
+      : canceled > 0
+        ? '有已取消订单'
+        : '暂无售后请求';
+  const tone = unknown > 0 || activeClaimRequestCount > 0
+    ? 'warning'
+    : canceled > 0
+      ? 'info'
+      : 'success';
+  const businessMessage = `已只读分类 Naver 售后状态：取消请求 ${cancelRequests} 条，退货请求 ${returnRequests} 条，换货请求 ${exchangeRequests} 条，已取消 ${canceled} 条，未识别 ${unknown} 条。`;
+  const nextAction = unknown > 0
+    ? '先人工复核未识别售后状态；当前不执行取消、退货或换货写操作。'
+    : activeClaimRequestCount > 0
+      ? '请人工查看售后请求；当前只做待办识别，不自动处理平台售后。'
+      : '当前暂无需要处理的售后请求；继续按本地订单状态观察。';
+
+  return {
+    cancelRequests,
+    returnRequests,
+    exchangeRequests,
+    canceled,
+    unknown,
+    activeClaimRequestCount,
+    claimAttentionCount,
+    statusLabel,
+    tone,
+    businessMessage,
+    nextAction,
+    source: 'local_orders_only',
+    platformClaimWriteEnabled: false,
+    formalOrderSyncOpen: false,
+  };
+}

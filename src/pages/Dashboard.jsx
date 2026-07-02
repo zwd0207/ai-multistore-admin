@@ -19,6 +19,7 @@ import {
 } from '../utils/capabilityStatusMapper';
 import { buildNaverInventorySummary } from '../utils/naverInventory';
 import {
+  buildNaverClaimReadonlySummary,
   buildNaverDeliveryStatusSummary,
   buildNaverOrderFulfillmentSummary,
 } from '../utils/naverOrderFulfillment';
@@ -80,6 +81,7 @@ function SellerTodoOverview({
   orderFulfillmentSummary,
   productChangeHints,
   deliverySummary,
+  claimSummary,
 }) {
   const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
   const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
@@ -140,6 +142,14 @@ function SellerTodoOverview({
       description: `${deliverySummary.businessMessage}${deliverySummary.nextAction}`,
       status: deliverySummary.deliveryAttentionCount > 0 ? 'warning' : 'success',
     };
+  const naverClaimTodo = !isNaverStore || !claimSummary
+    ? null
+    : {
+      id: 'naver-claims',
+      title: '取消 / 退货 / 换货',
+      description: `${claimSummary.businessMessage}${claimSummary.nextAction}`,
+      status: claimSummary.claimAttentionCount > 0 ? 'warning' : 'success',
+    };
   const naverStatusTodos = [
     naverConnectionTodo,
     naverProductTodo,
@@ -147,6 +157,7 @@ function SellerTodoOverview({
     naverOrderTodo,
     naverInventoryTodo,
     naverDeliveryTodo,
+    naverClaimTodo,
     naverFulfillmentTodo,
   ].filter(Boolean);
   const priorityItems = [
@@ -538,6 +549,88 @@ function NaverDeliveryStatusSummarySection({ selectedStore, deliverySummary }) {
   );
 }
 
+function NaverClaimReadonlySummarySection({ selectedStore, claimSummary }) {
+  const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+  if (!isNaverStore || !claimSummary) return null;
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>Naver 售后请求只读分类</h2>
+          <p>基于本地 Naver 运营订单识别取消、退货、换货和已取消状态。</p>
+        </div>
+        <span className="period-chip">只读识别</span>
+      </div>
+      <div className="business-capability-grid compact">
+        <article className={`business-capability-card ${claimSummary.tone}`}>
+          <div className="business-capability-head">
+            <strong>售后总览</strong>
+            <span>{claimSummary.statusLabel}</span>
+          </div>
+          <p>{claimSummary.businessMessage}</p>
+          <small>{claimSummary.nextAction}</small>
+        </article>
+        <article className={claimSummary.cancelRequests > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>取消请求</strong>
+            <span>{claimSummary.cancelRequests} 条</span>
+          </div>
+          <p>客户或平台发起的取消请求，进入人工待办。</p>
+          <small>不执行 Naver 取消写操作。</small>
+        </article>
+        <article className={claimSummary.returnRequests > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>退货请求</strong>
+            <span>{claimSummary.returnRequests} 条</span>
+          </div>
+          <p>退货请求仅做只读识别和首页提示。</p>
+          <small>不自动处理退款或退货流程。</small>
+        </article>
+        <article className={claimSummary.exchangeRequests > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>换货请求</strong>
+            <span>{claimSummary.exchangeRequests} 条</span>
+          </div>
+          <p>换货请求需要人工确认商品、库存和物流条件。</p>
+          <small>不执行 Naver 换货写操作。</small>
+        </article>
+        <article className={claimSummary.canceled > 0 ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>已取消</strong>
+            <span>{claimSummary.canceled} 条</span>
+          </div>
+          <p>已取消订单只用于状态观察，不等于退款金额已确认。</p>
+          <small>退款金额拆分仍待后续订单字段稳定。</small>
+        </article>
+        <article className={claimSummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>未识别售后状态</strong>
+            <span>{claimSummary.unknown} 条</span>
+          </div>
+          <p>{claimSummary.unknown > 0 ? '存在未识别售后或订单状态，需要人工复核。' : '当前没有未识别售后状态。'}</p>
+          <small>未知状态不会自动进入平台写操作。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        description="售后技术字段仅供管理员排查，主页面不展示订单原始响应或平台写入参数。"
+        items={[
+          { label: 'claim.source', value: claimSummary.source },
+          { label: 'claim.cancel_requests', value: claimSummary.cancelRequests },
+          { label: 'claim.return_requests', value: claimSummary.returnRequests },
+          { label: 'claim.exchange_requests', value: claimSummary.exchangeRequests },
+          { label: 'claim.canceled', value: claimSummary.canceled },
+          { label: 'claim.unknown', value: claimSummary.unknown },
+          { label: 'claim.active_request_count', value: claimSummary.activeClaimRequestCount },
+          { label: 'claim.attention_count', value: claimSummary.claimAttentionCount },
+          { label: 'claim.platform_claim_write_enabled', value: claimSummary.platformClaimWriteEnabled },
+          { label: 'claim.formal_order_sync_open', value: claimSummary.formalOrderSyncOpen },
+        ]}
+      />
+    </section>
+  );
+}
+
 function PlatformBusinessStatusSection({
   selectedStore,
   capabilities,
@@ -803,6 +896,11 @@ export default function Dashboard() {
     return buildNaverDeliveryStatusSummary(naverOrderFulfillmentSummary);
   }, [isSelectedNaverStore, naverOrderFulfillmentSummary]);
 
+  const naverClaimReadonlySummary = useMemo(() => {
+    if (!isSelectedNaverStore || !naverOrderFulfillmentSummary) return null;
+    return buildNaverClaimReadonlySummary(naverOrderFulfillmentSummary);
+  }, [isSelectedNaverStore, naverOrderFulfillmentSummary]);
+
   const stats = useMemo(() => {
     if (!sellerDisplaySummary) return [];
     const orderDetail = isSelectedNaverStore ? 'Naver 运营订单' : '当前范围内订单';
@@ -866,6 +964,11 @@ export default function Dashboard() {
         deliverySummary={naverDeliveryStatusSummary}
       />
 
+      <NaverClaimReadonlySummarySection
+        selectedStore={selectedStore}
+        claimSummary={naverClaimReadonlySummary}
+      />
+
       <section className="panel-grid">
         <SellerTodoOverview
           summary={sellerDisplaySummary}
@@ -877,6 +980,7 @@ export default function Dashboard() {
           orderFulfillmentSummary={naverOrderFulfillmentSummary}
           productChangeHints={naverProductChangeHints}
           deliverySummary={naverDeliveryStatusSummary}
+          claimSummary={naverClaimReadonlySummary}
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>

@@ -8,6 +8,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 import { getNaverOrderPreviewStatus } from '../utils/capabilityStatusMapper';
 import {
+  buildNaverClaimReadonlySummary,
   buildNaverOrderFulfillmentSummary,
   filterNaverOrdersForStore,
   isNaverMockSyncOrder,
@@ -343,6 +344,7 @@ function NaverOrderPreviewStatusPanel() {
     selectedStore,
     selectedStoreId,
   });
+  const claimSummary = buildNaverClaimReadonlySummary(fulfillmentSummary);
   const operationalOrderCount = fulfillmentSummary.total;
   const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount + orderListMeta.testOrdersExcluded;
 
@@ -388,13 +390,13 @@ function NaverOrderPreviewStatusPanel() {
           <p>配送中 {fulfillmentSummary.inDelivery} 条，配送完成 {fulfillmentSummary.delivered} 条。</p>
           <small>当前只读展示配送状态，不接入配送写接口。</small>
         </article>
-        <article className={fulfillmentSummary.claimRequestCount > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
+        <article className={`business-capability-card ${claimSummary.tone}`}>
           <div className="business-capability-head">
             <strong>取消 / 退货 / 换货</strong>
-            <span>{fulfillmentSummary.claimRequestCount} 条</span>
+            <span>{claimSummary.statusLabel}</span>
           </div>
-          <p>取消请求 {fulfillmentSummary.cancelRequests} 条，退货请求 {fulfillmentSummary.returnRequests} 条，换货请求 {fulfillmentSummary.exchangeRequests} 条。</p>
-          <small>售后请求只进入待办识别，不自动处理。</small>
+          <p>{claimSummary.businessMessage}</p>
+          <small>{claimSummary.nextAction}</small>
         </article>
         <article className={fulfillmentSummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
           <div className="business-capability-head">
@@ -452,6 +454,10 @@ function NaverOrderPreviewStatusPanel() {
           { label: 'fulfillment.return_requests', value: fulfillmentSummary.returnRequests },
           { label: 'fulfillment.exchange_requests', value: fulfillmentSummary.exchangeRequests },
           { label: 'fulfillment.unknown', value: fulfillmentSummary.unknown },
+          { label: 'claim.active_request_count', value: claimSummary.activeClaimRequestCount },
+          { label: 'claim.attention_count', value: claimSummary.claimAttentionCount },
+          { label: 'claim.canceled', value: claimSummary.canceled },
+          { label: 'claim.platform_claim_write_enabled', value: claimSummary.platformClaimWriteEnabled },
           { label: 'platform_writes_enabled', value: fulfillmentSummary.platformWritesEnabled },
           { label: 'formal_order_sync_status', value: 'not_open' },
         ]}

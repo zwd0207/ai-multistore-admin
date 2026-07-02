@@ -296,3 +296,9 @@ The Products page and Dashboard show that the latest known Naver product dry-run
 Codex2 Dashboard now has a dedicated Naver delivery status summary. See `PHASE_NAVER_ERP_7A_DELIVERY_STATUS_DASHBOARD_SUMMARY.md`.
 
 The summary uses local Naver operational orders only and separates pending delivery, in-delivery, delivered, and unknown delivery states. It does not call Naver, does not write orders, does not execute dispatch/cancel/return/exchange writes, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-7B - Claim Readonly Classification
+
+Codex2 now has a dedicated Naver claim readonly classification summary. See `PHASE_NAVER_ERP_7B_CLAIM_READONLY_CLASSIFICATION.md`.
+
+The Dashboard and Orders page classify local Naver operational orders into cancel requests, return requests, exchange requests, already canceled orders, and unknown claim/order states. This phase does not call Naver, does not write orders, does not execute cancel/return/exchange/refund writes, and does not open formal Naver order sync.
