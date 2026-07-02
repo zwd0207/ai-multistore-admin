@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
 import MockSyncPanel from '../components/common/MockSyncPanel';
 import StatusBadge from '../components/common/StatusBadge';
@@ -71,8 +71,13 @@ function formatError(error) {
   const messages = {
     REAL_API_TEST_DISABLED: '后端真实只读开关未开启，本次没有访问平台。',
     real_api_test_disabled: '后端真实只读开关未开启，本次没有访问平台。',
-    ip_not_allowed: '服务器 IP 不在平台白名单内，请联系管理员处理。',
-    auth_failed: '平台授权失败，请检查连接资料、权限或 IP 白名单。',
+    ip_not_allowed: 'Naver API 请求 IP 未被允许，请检查 Naver Commerce API Center 的允许 IP 设置。',
+    credential_invalid: 'Naver 连接资料可能无效，请检查 Client ID / Client Secret 是否正确。',
+    permission_forbidden: 'Naver API 权限不足，请检查该应用是否已开通对应接口权限。',
+    product_api_not_allowed: 'Naver 商品接口暂无权限或未开放，请检查商品 API 使用权限。',
+    token_auth_failed: 'Naver 授权失败，请检查连接资料、平台权限或 Naver API 设置。',
+    unknown_forbidden: 'Naver 请求被拒绝，请检查允许 IP、平台权限和连接资料。',
+    auth_failed: 'Naver 授权失败，请检查连接资料、平台权限或 Naver API 设置。',
     CREDENTIAL_DECRYPT_FAILED: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
     decrypt_failed: '本地连接资料解密失败，请联系管理员重新保存连接资料。',
   };
@@ -276,61 +281,130 @@ function CoupangProductSyncPanel() {
 
 function NaverProductPreviewStatusPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
+  const [capabilities, setCapabilities] = useState([]);
+  const [results, setResults] = useState([]);
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setCapabilities([]);
+      setResults([]);
+      return undefined;
+    }
+    let cancelled = false;
+    Promise.all([
+      dataProvider.getApiCapabilities({ page: 1, pageSize: 100 }),
+      dataProvider.getApiCapabilityResults({ storeId: selectedStoreId, page: 1, pageSize: 100 }),
+    ])
+      .then(([capabilityResponse, resultResponse]) => {
+        if (cancelled) return;
+        const capabilityRows = capabilityResponse.data || capabilityResponse.items || [];
+        const capabilityMap = new Map(capabilityRows.map((item) => [String(item.id), item]));
+        const resultRows = (resultResponse.data || resultResponse.items || []).map((item) => ({
+          ...item,
+          capabilityKey: capabilityMap.get(String(item.capabilityId))?.capabilityKey,
+        }));
+        setCapabilities(capabilityRows);
+        setResults(resultRows);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCapabilities([]);
+          setResults([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStoreId]);
+
   if (!isNaverStore) return null;
-  const status = getNaverProductPreviewStatus();
+
+  const status = getNaverProductPreviewStatus({ capabilities, results });
   const summary = status.summary;
+  const activeIssue = status.activeIssue;
 
   return (
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
           <h2>Naver 商品状态</h2>
-          <p>{status.productRead.reason}</p>
+          <p>{activeIssue ? activeIssue.title : status.productRead.reason}</p>
         </div>
         <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
       </div>
       <div className="business-capability-grid compact">
-        <article className="business-capability-card success">
-          <div className="business-capability-head">
-            <strong>已写入本地商品</strong>
-            <span>{summary.localSyncedCount} 条</span>
-          </div>
-          <p>5 条 Naver 商品小批量写入测试已经完成，当前本地记录稳定。</p>
-          <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
-        </article>
-        <article className="business-capability-card success">
-          <div className="business-capability-head">
-            <strong>当前需新增</strong>
-            <span>{summary.wouldCreate} 条</span>
-          </div>
-          <p>再次预览没有发现需要新增到本地的商品。</p>
-          <small>同一组商品已经存在于当前店铺本地记录中。</small>
-        </article>
-        <article className="business-capability-card success">
-          <div className="business-capability-head">
-            <strong>当前需更新</strong>
-            <span>{summary.wouldUpdate} 条</span>
-          </div>
-          <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
-          <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
-        </article>
-        <article className="business-capability-card info">
-          <div className="business-capability-head">
-            <strong>仅同步时间刷新</strong>
-            <span>{summary.wouldRefreshOnly} 条</span>
-          </div>
-          <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
-          <small>当前没有新的业务字段变化需要处理。</small>
-        </article>
-        <article className="business-capability-card muted">
-          <div className="business-capability-head">
-            <strong>跳过</strong>
-            <span>{summary.wouldSkip} 条</span>
-          </div>
-          <p>本次预览没有遇到需要跳过的异常商品。</p>
-          <small>没有重复编号、状态异常或数值格式异常。</small>
-        </article>
+        {activeIssue ? (
+          <article className={`business-capability-card ${activeIssue.tone}`}>
+            <div className="business-capability-head">
+              <strong>商品读取预览</strong>
+              <span>{activeIssue.statusLabel}</span>
+            </div>
+            <p>{activeIssue.title}</p>
+            <small>{activeIssue.description}</small>
+          </article>
+        ) : (
+          <>
+            <article className="business-capability-card success">
+              <div className="business-capability-head">
+                <strong>已写入本地商品</strong>
+                <span>{summary.localSyncedCount} 条</span>
+              </div>
+              <p>5 条 Naver 商品小批量写入测试已经完成，当前本地记录稳定。</p>
+              <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
+            </article>
+            <article className="business-capability-card success">
+              <div className="business-capability-head">
+                <strong>当前需新增</strong>
+                <span>{summary.wouldCreate} 条</span>
+              </div>
+              <p>再次预览没有发现需要新增到本地的商品。</p>
+              <small>同一组商品已经存在于当前店铺本地记录中。</small>
+            </article>
+            <article className="business-capability-card success">
+              <div className="business-capability-head">
+                <strong>当前需更新</strong>
+                <span>{summary.wouldUpdate} 条</span>
+              </div>
+              <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
+              <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
+            </article>
+            <article className="business-capability-card info">
+              <div className="business-capability-head">
+                <strong>仅同步时间刷新</strong>
+                <span>{summary.wouldRefreshOnly} 条</span>
+              </div>
+              <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
+              <small>当前没有新的业务字段变化需要处理。</small>
+            </article>
+            <article className="business-capability-card muted">
+              <div className="business-capability-head">
+                <strong>跳过</strong>
+                <span>{summary.wouldSkip} 条</span>
+              </div>
+              <p>本次预览没有遇到需要跳过的异常商品。</p>
+              <small>没有重复编号、状态异常或数值格式异常。</small>
+            </article>
+          </>
+        )}
+        {activeIssue ? (
+          <>
+            <article className="business-capability-card info">
+              <div className="business-capability-head">
+                <strong>已写入本地商品</strong>
+                <span>{summary.localSyncedCount} 条</span>
+              </div>
+              <p>5 条 Naver 商品小批量写入测试已经完成，本地商品记录仍然保留。</p>
+              <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
+            </article>
+            <article className="business-capability-card muted">
+              <div className="business-capability-head">
+                <strong>当前商品变更</strong>
+                <span>待恢复后确认</span>
+              </div>
+              <p>当前无法确认是否有新增、更新或仅同步时间刷新，需要先处理 Naver 连接异常。</p>
+              <small>恢复后再重新查看商品预览结果。</small>
+            </article>
+          </>
+        ) : null}
         <article className="business-capability-card warning">
           <div className="business-capability-head">
             <strong>正式批量同步</strong>
@@ -353,6 +427,12 @@ function NaverProductPreviewStatusPanel() {
           { label: 'dry_run_diff.would_refresh_only', value: summary.wouldRefreshOnly },
           { label: 'dry_run_diff.would_skip', value: summary.wouldSkip },
           { label: 'batch_sync_status', value: 'not_open' },
+          ...(activeIssue
+            ? activeIssue.technicalItems.map((item) => ({
+              label: `preview_issue.${item.label}`,
+              value: item.value,
+            }))
+            : []),
         ]}
       />
       <p className="mock-sync-note">本次未保存平台原始响应。页面不展示技术原文、完整平台商品编号、完整店铺频道编号、平台密钥、临时授权或请求签名。</p>

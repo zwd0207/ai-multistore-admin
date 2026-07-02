@@ -8,6 +8,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider from '../services/dataProvider';
+import { findLatestNaverCapabilityIssue } from '../utils/capabilityStatusMapper';
 
 const statusOptions = ['active', 'inactive'];
 const platformOptions = [
@@ -45,7 +46,12 @@ const columns = [
   { key: 'updatedAt', title: '最近更新' },
 ];
 
-function CredentialBusinessStatus({ selectedStoreId, readiness }) {
+function CredentialBusinessStatus({
+  selectedStoreId,
+  readiness,
+  capabilities,
+  results,
+}) {
   const storeBound = readiness?.storeBoundReadiness;
   const platform = String(storeBound?.rawPlatform || storeBound?.platform || '').toLowerCase();
   if (!selectedStoreId) return null;
@@ -55,6 +61,22 @@ function CredentialBusinessStatus({ selectedStoreId, readiness }) {
   const configured = Boolean(storeBound?.configured);
   const secretReady = Boolean(storeBound?.secretKeyConfigured && storeBound?.secretKeyDecryptable);
   const channelReady = Boolean(storeBound?.channelNoConfigured);
+  const connectionIssue = isNaver
+    ? findLatestNaverCapabilityIssue({
+      capabilities,
+      results,
+      capabilityKeys: ['naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+    })
+    : null;
+  const authTone = connectionIssue ? connectionIssue.tone : secretReady ? 'success' : 'warning';
+  const authStatus = connectionIssue ? connectionIssue.statusLabel : secretReady ? '正常' : '待确认';
+  const authReason = connectionIssue ? connectionIssue.title : '授权状态正常。';
+  const authNextAction = connectionIssue ? connectionIssue.description : '敏感连接信息已隐藏，不会在页面显示明文。';
+  const channelTone = connectionIssue ? 'warning' : channelReady ? 'success' : 'warning';
+  const channelStatus = connectionIssue ? '待确认' : channelReady ? '成功' : '待确认';
+  const channelReason = connectionIssue
+    ? '当前连接检测没有完成，暂时无法确认店铺频道状态。'
+    : '店铺频道只显示是否识别，不展示完整编号。';
 
   return (
     <section className="content-card">
@@ -72,20 +94,21 @@ function CredentialBusinessStatus({ selectedStoreId, readiness }) {
           </div>
           <p>{configured ? '当前店铺已有平台连接资料。' : '请联系管理员补齐平台连接资料。'}</p>
         </article>
-        <article className={`business-capability-card ${secretReady ? 'success' : 'warning'}`}>
+        <article className={`business-capability-card ${authTone}`}>
           <div className="business-capability-head">
             <strong>授权状态</strong>
-            <span>{secretReady ? '正常' : '待确认'}</span>
+            <span>{authStatus}</span>
           </div>
-          <p>敏感连接信息已隐藏，不会在页面显示明文。</p>
+          <p>{authReason}</p>
+          <small>{authNextAction}</small>
         </article>
         {isNaver ? (
-          <article className={`business-capability-card ${channelReady ? 'success' : 'warning'}`}>
+          <article className={`business-capability-card ${channelTone}`}>
             <div className="business-capability-head">
               <strong>店铺连接</strong>
-              <span>{channelReady ? '成功' : '待确认'}</span>
+              <span>{channelStatus}</span>
             </div>
-            <p>店铺频道只显示是否识别，不展示完整编号。</p>
+            <p>{channelReason}</p>
           </article>
         ) : (
           <article className="business-capability-card success">
@@ -105,6 +128,12 @@ function CredentialBusinessStatus({ selectedStoreId, readiness }) {
           { label: 'client_id_configured', value: Boolean(storeBound?.clientIdConfigured) },
           { label: 'secret_key_configured', value: Boolean(storeBound?.secretKeyConfigured) },
           { label: 'channel_no_configured', value: channelReady },
+          ...(connectionIssue
+            ? connectionIssue.technicalItems.map((item) => ({
+              label: `connection_issue.${item.label}`,
+              value: item.value,
+            }))
+            : []),
         ]}
       />
     </section>
@@ -134,6 +163,8 @@ export default function BackendCredentialPage({ embedded = false }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [readiness, setReadiness] = useState(null);
+  const [capabilities, setCapabilities] = useState([]);
+  const [capabilityResults, setCapabilityResults] = useState([]);
 
   const load = useCallback(async () => {
     if (storeLoading) return;
@@ -168,15 +199,34 @@ export default function BackendCredentialPage({ embedded = false }) {
   useEffect(() => {
     if (!selectedStoreId || storeLoading || storeError) {
       setReadiness(null);
+      setCapabilities([]);
+      setCapabilityResults([]);
       return;
     }
     let cancelled = false;
-    dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId })
-      .then((nextReadiness) => {
-        if (!cancelled) setReadiness(nextReadiness);
+    Promise.all([
+      dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId }),
+      dataProvider.getApiCapabilities({ page: 1, pageSize: 100 }),
+      dataProvider.getApiCapabilityResults({ storeId: selectedStoreId, page: 1, pageSize: 100 }),
+    ])
+      .then(([nextReadiness, capabilityResponse, resultResponse]) => {
+        if (cancelled) return;
+        const capabilityRows = capabilityResponse.data || capabilityResponse.items || [];
+        const capabilityMap = new Map(capabilityRows.map((item) => [String(item.id), item]));
+        const resultRows = (resultResponse.data || resultResponse.items || []).map((item) => ({
+          ...item,
+          capabilityKey: capabilityMap.get(String(item.capabilityId))?.capabilityKey,
+        }));
+        setReadiness(nextReadiness);
+        setCapabilities(capabilityRows);
+        setCapabilityResults(resultRows);
       })
       .catch(() => {
-        if (!cancelled) setReadiness(null);
+        if (!cancelled) {
+          setReadiness(null);
+          setCapabilities([]);
+          setCapabilityResults([]);
+        }
       });
     return () => { cancelled = true; };
   }, [selectedStoreId, storeError, storeLoading]);
@@ -221,7 +271,12 @@ export default function BackendCredentialPage({ embedded = false }) {
         />
       )}
 
-      <CredentialBusinessStatus selectedStoreId={selectedStoreId} readiness={readiness} />
+      <CredentialBusinessStatus
+        selectedStoreId={selectedStoreId}
+        readiness={readiness}
+        capabilities={capabilities}
+        results={capabilityResults}
+      />
 
       <section className="content-card">
         {embedded && (

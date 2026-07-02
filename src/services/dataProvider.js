@@ -132,6 +132,108 @@ const mockApiCapabilities = [
 ];
 
 function mockApiCapabilityResults(storeId) {
+  if (Number(storeId) === 5) {
+    return [
+      {
+        id: 9311,
+        storeId,
+        capabilityId: 9101,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_success',
+        httpStatus: 200,
+        responseFieldsObserved: 'token_test=success; capability_scope=token_auth; path_kind=store_bound',
+        testedAt: '2026-07-02T07:10:00+00:00',
+      },
+      {
+        id: 9312,
+        storeId,
+        capabilityId: 9102,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_success',
+        httpStatus: 200,
+        responseFieldsObserved: 'seller_or_account_test=success; capability_scope=seller_account; path_kind=store_bound',
+        testedAt: '2026-07-02T07:11:00+00:00',
+      },
+      {
+        id: 9313,
+        storeId,
+        capabilityId: 9103,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_success',
+        httpStatus: 200,
+        responseFieldsObserved: 'seller_or_account_test=success; capability_scope=seller_channels; path_kind=store_bound; channel_no_source=seller_channels; channel_no_configured=True; channel_no_persisted=True',
+        testedAt: '2026-07-02T07:12:00+00:00',
+      },
+      {
+        id: 9314,
+        storeId,
+        capabilityId: 9104,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_failed',
+        httpStatus: 403,
+        errorCode: 'product_api_not_allowed',
+        businessErrorHint: '请检查 Naver Commerce API Center 中商品 API 的使用权限。',
+        safeKeywordFlags: { permission: true, forbidden: true, ip: false, allowed: false },
+        capabilityScope: 'product_read',
+        pathKind: 'store_bound',
+        responseFieldsObserved: 'product_read_test=failed; capability_scope=product_read; path_kind=store_bound; http_status=403; error_code=product_api_not_allowed',
+        testedAt: '2026-07-02T07:13:00+00:00',
+      },
+      {
+        id: 9315,
+        storeId,
+        capabilityId: 9101,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_failed',
+        httpStatus: 403,
+        errorCode: 'ip_not_allowed',
+        businessErrorHint: '请在 Naver Commerce API Center 检查 API 使用 IP / 允许 IP 设置。',
+        safeKeywordFlags: { ip: true, allowed: true, gateway_ip: true },
+        capabilityScope: 'token_auth',
+        pathKind: 'store_bound',
+        responseFieldsObserved: 'token_test=failed; capability_scope=token_auth; path_kind=store_bound; http_status=403; error_code=ip_not_allowed',
+        testedAt: '2026-06-30T08:20:00+00:00',
+      },
+      {
+        id: 9316,
+        storeId,
+        capabilityId: 9101,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_failed',
+        httpStatus: 403,
+        errorCode: 'credential_invalid',
+        businessErrorHint: '请检查 Client ID / Client Secret 是否正确，或是否被重新生成。',
+        safeKeywordFlags: { invalid_client: true, client_secret: true },
+        capabilityScope: 'token_auth',
+        pathKind: 'store_bound',
+        responseFieldsObserved: 'token_test=failed; capability_scope=token_auth; path_kind=store_bound; http_status=403; error_code=credential_invalid',
+        testedAt: '2026-06-29T08:20:00+00:00',
+      },
+      {
+        id: 9317,
+        storeId,
+        capabilityId: 9101,
+        credentialId: 7,
+        testMode: 'real_readonly',
+        testStatus: 'tested_failed',
+        httpStatus: 403,
+        errorCode: 'token_auth_failed',
+        businessErrorHint: '请检查连接资料、平台权限或 Naver API 设置。',
+        safeKeywordFlags: { forbidden: true },
+        capabilityScope: 'token_auth',
+        pathKind: 'store_bound',
+        responseFieldsObserved: 'token_test=failed; capability_scope=token_auth; path_kind=store_bound; http_status=403; error_code=token_auth_failed',
+        testedAt: '2026-06-28T08:20:00+00:00',
+      },
+    ];
+  }
+
   const testedAt = '2026-07-01T13:35:04+00:00';
   return [
     { id: 9301, storeId, capabilityId: 9101, credentialId: 7, testMode: 'real_readonly', testStatus: 'tested_success', httpStatus: 200, responseFieldsObserved: 'token_test=success; capability_scope=token_auth; path_kind=store_bound', testedAt },
@@ -141,6 +243,7 @@ function mockApiCapabilityResults(storeId) {
 }
 
 function mockApiCredentialReadiness(params = {}) {
+  const targetStoreId = params?.storeId || params?.store_id || 8;
   return {
     semantic_notice: 'Mock mode shows seller-facing example states only.',
     real_api_test_enabled: false,
@@ -150,10 +253,10 @@ function mockApiCredentialReadiness(params = {}) {
       { platform: 'coupang', credential_status: 'configured', readiness_status: 'configured', fields: { vendor_id: 'configured', access_key: 'configured', secret_key: 'configured' } },
     ],
     store_bound_readiness: {
-      store_id: params?.storeId || params?.store_id || 8,
+      store_id: targetStoreId,
       platform: 'naver',
       credential_id: 7,
-      credential_name: 'Mock Naver credential',
+      credential_name: Number(targetStoreId) === 5 ? 'Mock Naver credential - permission review' : 'Mock Naver credential',
       configured: true,
       client_id_configured: true,
       secret_key_configured: true,
@@ -163,9 +266,11 @@ function mockApiCredentialReadiness(params = {}) {
       access_token_status: 'missing',
       refresh_token_configured: false,
       token_expires_at: null,
-      auth_status: 'configured',
+      auth_status: Number(targetStoreId) === 5 ? 'needs_test' : 'configured',
       missing_fields: [],
-      warnings: ['access_token_missing'],
+      warnings: Number(targetStoreId) === 5
+        ? ['access_token_missing', 'product_api_permission_check_required']
+        : ['access_token_missing'],
     },
   };
 }

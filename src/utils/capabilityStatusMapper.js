@@ -11,9 +11,14 @@ const STATUS_LABELS = {
   token_auth_failed: '平台授权失败',
   readonly_request_failed: '读取失败',
   ip_not_allowed: '服务器 IP 受限',
+  credential_invalid: '连接资料无效',
+  permission_forbidden: '权限不足',
+  product_api_not_allowed: '商品接口未开放',
+  unknown_forbidden: '请求被拒绝',
   guardrail_blocked: '保护中',
   success_empty: '已连接，暂无新数据',
   preview_success: '预览已完成',
+  dependency_missing: '运行环境待检查',
 };
 
 const CAPABILITY_LABELS = {
@@ -86,17 +91,141 @@ const NAVER_SYNC_PROTECTION_STATUS = {
   nextAction: '批量同步必须单独确认后才会执行。',
 };
 
+const NAVER_ERROR_PRESENTATIONS = {
+  ip_not_allowed: {
+    statusLabel: '需要处理',
+    title: 'Naver API 请求 IP 未被允许。',
+    description: '请在 Naver Commerce API Center 检查 API 使用 IP / 允许 IP 设置，确认当前运行系统的服务器公网 IP 已加入允许列表。',
+    tone: 'danger',
+  },
+  credential_invalid: {
+    statusLabel: '需要处理',
+    title: 'Naver 连接资料可能无效。',
+    description: '请检查 Client ID / Client Secret 是否正确，或是否被重新生成。',
+    tone: 'danger',
+  },
+  permission_forbidden: {
+    statusLabel: '需要处理',
+    title: 'Naver API 权限不足。',
+    description: '请检查该应用是否已开通对应接口权限。',
+    tone: 'danger',
+  },
+  product_api_not_allowed: {
+    statusLabel: '需要处理',
+    title: 'Naver 商品接口暂无权限或未开放。',
+    description: '请检查 Naver Commerce API Center 中商品 API 的使用权限。',
+    tone: 'danger',
+  },
+  token_auth_failed: {
+    statusLabel: '需要处理',
+    title: 'Naver 授权失败。',
+    description: '请检查连接资料、平台权限或 Naver API 设置。',
+    tone: 'danger',
+  },
+  unknown_forbidden: {
+    statusLabel: '需要处理',
+    title: 'Naver 请求被拒绝。',
+    description: '系统无法确认具体原因，请检查 Naver API 权限、允许 IP 和连接资料。',
+    tone: 'danger',
+  },
+  auth_failed: {
+    statusLabel: '需要处理',
+    title: 'Naver 授权失败。',
+    description: '请检查连接资料、平台权限或 Naver API 设置。',
+    tone: 'danger',
+  },
+  credential_not_ready: {
+    statusLabel: '待配置',
+    title: 'Naver 连接资料尚未配齐。',
+    description: '请先补齐 Client ID、Client Secret 和店铺绑定资料。',
+    tone: 'warning',
+  },
+  readonly_request_failed: {
+    statusLabel: '需要检查',
+    title: 'Naver 只读检测未完成。',
+    description: '请检查连接资料、平台权限或当前只读检测前置条件。',
+    tone: 'warning',
+  },
+  dependency_missing: {
+    statusLabel: '需要检查',
+    title: '当前运行环境暂时无法完成 Naver 检测。',
+    description: '请联系管理员检查后端依赖、签名组件和本地运行环境。',
+    tone: 'warning',
+  },
+  guardrail_blocked: {
+    statusLabel: '未开放',
+    title: '当前仍处于保护阶段。',
+    description: '该能力还没有进入普通卖家的正式使用范围，需要继续按阶段确认。',
+    tone: 'warning',
+  },
+  REAL_API_TEST_DISABLED: {
+    statusLabel: '未开启',
+    title: 'Naver 真实只读检测未开启。',
+    description: '当前环境没有打开真实只读检测开关，本次没有访问平台。',
+    tone: 'warning',
+  },
+  real_api_test_disabled: {
+    statusLabel: '未开启',
+    title: 'Naver 真实只读检测未开启。',
+    description: '当前环境没有打开真实只读检测开关，本次没有访问平台。',
+    tone: 'warning',
+  },
+  CREDENTIAL_DECRYPT_FAILED: {
+    statusLabel: '需要处理',
+    title: 'Naver 连接资料暂时无法读取。',
+    description: '请联系管理员重新保存连接资料后再试。',
+    tone: 'danger',
+  },
+  decrypt_failed: {
+    statusLabel: '需要处理',
+    title: 'Naver 连接资料暂时无法读取。',
+    description: '请联系管理员重新保存连接资料后再试。',
+    tone: 'danger',
+  },
+};
+
 function normalizePlatform(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeErrorCode(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized || normalized.toLowerCase() === 'none') return null;
+  return normalized;
+}
+
+function normalizeHttpStatus(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? String(value) : parsed;
+}
+
+function parseSafeKeywordFlags(value) {
+  if (!value) return null;
+  if (Array.isArray(value)) return value.length ? value : null;
+  if (typeof value === 'object') return value;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
 function labelForStatus(status, errorCode) {
-  if (errorCode && STATUS_LABELS[errorCode]) return STATUS_LABELS[errorCode];
+  const normalizedErrorCode = normalizeErrorCode(errorCode);
+  if (normalizedErrorCode && STATUS_LABELS[normalizedErrorCode]) return STATUS_LABELS[normalizedErrorCode];
   return STATUS_LABELS[status] || status || '暂未检测';
 }
 
 function toneForStatus(status, errorCode) {
-  if (errorCode || status === 'tested_failed') return 'danger';
+  const normalizedErrorCode = normalizeErrorCode(errorCode);
+  if (normalizedErrorCode) return NAVER_ERROR_PRESENTATIONS[normalizedErrorCode]?.tone || 'danger';
+  if (status === 'tested_failed') return 'danger';
   if (status === 'tested_success' || status === 'preview_success' || status === 'success_empty') return 'success';
   if (status === 'permission_required' || status === 'guardrail_blocked') return 'warning';
   if (status === 'not_tested' || status === 'planned') return 'muted';
@@ -120,6 +249,9 @@ function latestResultForKey(results = [], capabilities = [], capabilityKey) {
     'naver.token_auth': 'token_auth',
     'naver.seller_account_read': 'seller_account',
     'naver.seller_channels_read': 'seller_channels',
+    'naver.product_read': 'product_read',
+    'naver.order_read': 'order_read',
+    'naver.order_detail_preview': 'order_detail_preview',
   };
   const expectedScope = scopeAliases[capabilityKey];
   const capabilityIds = new Set(
@@ -158,6 +290,152 @@ function resultCard({
   };
 }
 
+function getNaverErrorPresentation(errorCode, businessErrorHint = null) {
+  const normalizedErrorCode = normalizeErrorCode(errorCode);
+  if (!normalizedErrorCode) return null;
+  const fallback = {
+    statusLabel: '需要处理',
+    title: 'Naver 请求需要检查。',
+    description: businessErrorHint || '请检查连接资料、权限设置和当前店铺连接状态。',
+    tone: 'danger',
+  };
+  const current = NAVER_ERROR_PRESENTATIONS[normalizedErrorCode] || fallback;
+  return {
+    errorCode: normalizedErrorCode,
+    statusLabel: current.statusLabel,
+    title: current.title,
+    description: businessErrorHint || current.description,
+    tone: current.tone,
+  };
+}
+
+export function getNaverBusinessError(source = {}) {
+  const observed = parseObservedFields(source.responseFieldsObserved || source.response_fields_observed || '');
+  const errorCode = normalizeErrorCode(
+    source.errorCode
+    || source.error_code
+    || observed.error_code
+    || source.data?.error_code,
+  );
+  if (!errorCode) return null;
+
+  const businessErrorHint = source.businessErrorHint
+    || source.business_error_hint
+    || source.data?.business_error_hint
+    || observed.business_error_hint
+    || null;
+  const presentation = getNaverErrorPresentation(errorCode, businessErrorHint);
+  const httpStatus = normalizeHttpStatus(
+    source.httpStatus
+    || source.http_status
+    || source.status
+    || observed.http_status
+    || source.data?.http_status,
+  );
+  const capabilityScope = source.capabilityScope
+    || source.capability_scope
+    || observed.capability_scope
+    || source.data?.capability_scope
+    || null;
+  const pathKind = source.pathKind
+    || source.path_kind
+    || observed.path_kind
+    || source.data?.path_kind
+    || null;
+  const safeKeywordFlags = parseSafeKeywordFlags(
+    source.safeKeywordFlags
+    || source.safe_keyword_flags
+    || source.data?.safe_keyword_flags
+    || observed.safe_keyword_flags,
+  );
+
+  return {
+    ...presentation,
+    httpStatus,
+    businessErrorHint,
+    safeKeywordFlags,
+    capabilityScope,
+    pathKind,
+    technicalItems: [
+      { label: 'error_code', value: presentation.errorCode },
+      { label: 'http_status', value: httpStatus },
+      { label: 'business_error_hint', value: businessErrorHint },
+      { label: 'safe_keyword_flags', value: safeKeywordFlags },
+      { label: 'capability_scope', value: capabilityScope },
+      { label: 'path_kind', value: pathKind },
+    ],
+  };
+}
+
+export function findLatestNaverCapabilityIssue({
+  capabilities = [],
+  results = [],
+  capabilityKeys = [],
+} = {}) {
+  const issues = capabilityKeys
+    .map((capabilityKey) => {
+      const result = latestResultForKey(results, capabilities, capabilityKey);
+      const issue = getNaverBusinessError(result);
+      if (!issue) return null;
+      const testedAt = result?.testedAt || result?.tested_at || result?.createdAt || result?.created_at || null;
+      return {
+        ...issue,
+        capabilityKey,
+        result,
+        testedAt,
+      };
+    })
+    .filter(Boolean);
+
+  if (!issues.length) return null;
+
+  return issues.sort((left, right) => {
+    const leftTime = left.testedAt ? Date.parse(left.testedAt) : 0;
+    const rightTime = right.testedAt ? Date.parse(right.testedAt) : 0;
+    return rightTime - leftTime;
+  })[0];
+}
+
+export function buildTechnicalItemsFromCards(cards = [], baseItems = []) {
+  const issueItems = cards.flatMap((card) => {
+    if (!card?.details) return [];
+    const issue = getNaverBusinessError(card.details);
+    if (!issue) return [];
+    return issue.technicalItems.map((item) => ({
+      label: `${card.key}.${item.label}`,
+      value: item.value,
+    }));
+  });
+  return [...baseItems, ...issueItems];
+}
+
+function buildErrorCard({
+  key,
+  title,
+  issue,
+  details,
+}) {
+  return resultCard({
+    key,
+    title,
+    status: 'tested_failed',
+    statusLabel: issue.statusLabel,
+    errorCode: issue.errorCode,
+    reason: issue.title,
+    nextAction: issue.description,
+    tone: issue.tone,
+    details: {
+      ...details,
+      errorCode: issue.errorCode,
+      httpStatus: issue.httpStatus,
+      businessErrorHint: issue.businessErrorHint,
+      safeKeywordFlags: issue.safeKeywordFlags,
+      capabilityScope: issue.capabilityScope,
+      pathKind: issue.pathKind,
+    },
+  });
+}
+
 function cardFromResult(key, result, successReason, successNextAction, fallback = {}) {
   const status = result?.testStatus || fallback.status || 'not_tested';
   const errorCode = result?.errorCode || fallback.errorCode || null;
@@ -171,28 +449,20 @@ function cardFromResult(key, result, successReason, successNextAction, fallback 
       details: result,
     });
   }
-  if (errorCode === 'auth_failed' || errorCode === 'token_auth_failed') {
-    return resultCard({
+
+  const issue = getNaverBusinessError(result || fallback);
+  if (issue) {
+    return buildErrorCard({
       key,
-      status,
-      errorCode,
-      reason: '平台授权失败，请检查连接资料和平台权限。',
-      nextAction: '请到平台连接资料页面核对 Client ID、Secret 或权限配置。',
-      details: result,
+      title: fallback.title,
+      issue,
+      details: result || fallback,
     });
   }
-  if (errorCode === 'credential_not_ready') {
-    return resultCard({
-      key,
-      status,
-      errorCode,
-      reason: '平台连接资料还没有配齐。',
-      nextAction: '请先补齐当前店铺的平台连接资料。',
-      details: result,
-    });
-  }
+
   return resultCard({
     key,
+    title: fallback.title,
     status,
     errorCode,
     reason: fallback.reason || '当前还没有完成这项业务能力确认。',
@@ -206,31 +476,38 @@ function buildNaverCards({ capabilities, results, readiness }) {
   const token = latestResultForKey(results, capabilities, 'naver.token_auth');
   const sellerAccount = latestResultForKey(results, capabilities, 'naver.seller_account_read');
   const sellerChannels = latestResultForKey(results, capabilities, 'naver.seller_channels_read');
+  const productRead = latestResultForKey(results, capabilities, 'naver.product_read');
+  const orderRead = latestResultForKey(results, capabilities, 'naver.order_read');
   const channelObserved = parseObservedFields(sellerChannels?.responseFieldsObserved || '');
   const channelConfigured = Boolean(storeReadiness.channelNoConfigured)
     || channelObserved.channel_no_configured === 'True'
     || channelObserved.channel_no_persisted === 'True';
+  const upstreamIssue = findLatestNaverCapabilityIssue({
+    capabilities,
+    results,
+    capabilityKeys: ['naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+  });
+  const productReadIssue = findLatestNaverCapabilityIssue({
+    capabilities,
+    results,
+    capabilityKeys: ['naver.product_read', 'naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+  });
+  const orderReadIssue = findLatestNaverCapabilityIssue({
+    capabilities,
+    results,
+    capabilityKeys: ['naver.order_read', 'naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+  });
 
-  return [
-    cardFromResult(
-      'naver.token_auth',
-      token,
-      '平台授权正常，可以继续读取卖家账号和店铺连接状态。',
-      '下一步请确认商品、订单预览状态。',
-    ),
-    cardFromResult(
-      'naver.seller_account_read',
-      sellerAccount,
-      '卖家账号信息读取正常。',
-      '可继续确认店铺频道和商品订单读取状态。',
-    ),
-    cardFromResult(
-      'naver.seller_channels_read',
-      sellerChannels,
-      '店铺连接成功，系统已识别店铺频道状态。',
-      channelConfigured ? '店铺连接资料已准备好，页面不会显示完整频道编号。' : '请先完成店铺频道识别。',
-    ),
-    resultCard({
+  const productReadCard = (() => {
+    if (productReadIssue) {
+      return buildErrorCard({
+        key: 'naver.product_read',
+        title: '商品读取预览',
+        issue: productReadIssue,
+        details: productReadIssue.result,
+      });
+    }
+    return resultCard({
       key: 'naver.product_read',
       title: '商品业务字段变化',
       status: 'success_empty',
@@ -238,7 +515,68 @@ function buildNaverCards({ capabilities, results, readiness }) {
       tone: 'success',
       reason: NAVER_PRODUCT_PREVIEW_STATUS.reason,
       nextAction: NAVER_PRODUCT_PREVIEW_STATUS.nextAction,
-    }),
+    });
+  })();
+
+  const orderReadCard = (() => {
+    if (orderReadIssue) {
+      return buildErrorCard({
+        key: 'naver.order_read',
+        title: '订单接口',
+        issue: orderReadIssue,
+        details: orderReadIssue.result,
+      });
+    }
+    return resultCard({
+      key: 'naver.order_read',
+      title: '订单接口',
+      status: 'success_empty',
+      statusLabel: NAVER_ORDER_PREVIEW_STATUS.statusLabel,
+      tone: 'success',
+      reason: NAVER_ORDER_PREVIEW_STATUS.reason,
+      nextAction: NAVER_ORDER_PREVIEW_STATUS.nextAction,
+    });
+  })();
+
+  const orderDetailCard = upstreamIssue
+    ? buildErrorCard({
+      key: 'naver.order_detail_preview',
+      title: '订单详情预览',
+      issue: upstreamIssue,
+      details: upstreamIssue.result,
+    })
+    : resultCard({
+      key: 'naver.order_detail_preview',
+      status: 'not_tested',
+      statusLabel: NAVER_ORDER_DETAIL_STATUS.statusLabel,
+      tone: 'muted',
+      reason: NAVER_ORDER_DETAIL_STATUS.reason,
+      nextAction: NAVER_ORDER_DETAIL_STATUS.nextAction,
+    });
+
+  return [
+    cardFromResult(
+      'naver.token_auth',
+      token,
+      '平台授权正常，可以继续读取卖家账号和店铺连接状态。',
+      '下一步请确认商品、订单预览状态。',
+      { title: '平台授权' },
+    ),
+    cardFromResult(
+      'naver.seller_account_read',
+      sellerAccount,
+      '卖家账号信息读取正常。',
+      '可继续确认店铺频道和商品订单读取状态。',
+      { title: '卖家账号' },
+    ),
+    cardFromResult(
+      'naver.seller_channels_read',
+      sellerChannels,
+      '店铺连接成功，系统已识别店铺频道状态。',
+      channelConfigured ? '店铺连接资料已准备好，页面不会显示完整频道编号。' : '请先完成店铺频道识别。',
+      { title: '店铺连接' },
+    ),
+    productReadCard,
     resultCard({
       key: 'naver.product_local_sync',
       title: '商品小批量写入测试',
@@ -250,29 +588,15 @@ function buildNaverCards({ capabilities, results, readiness }) {
     }),
     resultCard({
       key: 'naver.product_batch_sync',
-      title: '批量同步',
+      title: '正式批量同步',
       status: 'guardrail_blocked',
       statusLabel: NAVER_PRODUCT_BATCH_SYNC_STATUS.statusLabel,
       tone: 'warning',
       reason: NAVER_PRODUCT_BATCH_SYNC_STATUS.reason,
       nextAction: NAVER_PRODUCT_BATCH_SYNC_STATUS.nextAction,
     }),
-    resultCard({
-      key: 'naver.order_read',
-      status: 'success_empty',
-      statusLabel: NAVER_ORDER_PREVIEW_STATUS.statusLabel,
-      tone: 'success',
-      reason: NAVER_ORDER_PREVIEW_STATUS.reason,
-      nextAction: NAVER_ORDER_PREVIEW_STATUS.nextAction,
-    }),
-    resultCard({
-      key: 'naver.order_detail_preview',
-      status: 'not_tested',
-      statusLabel: NAVER_ORDER_DETAIL_STATUS.statusLabel,
-      tone: 'muted',
-      reason: NAVER_ORDER_DETAIL_STATUS.reason,
-      nextAction: NAVER_ORDER_DETAIL_STATUS.nextAction,
-    }),
+    orderReadCard,
+    orderDetailCard,
     resultCard({
       key: 'naver.sync_protection',
       title: '同步保护',
@@ -350,20 +674,32 @@ export function statusLabel(value, errorCode) {
   return labelForStatus(value, errorCode);
 }
 
-export function getNaverProductPreviewStatus() {
+export function getNaverProductPreviewStatus({ capabilities = [], results = [] } = {}) {
+  const activeIssue = findLatestNaverCapabilityIssue({
+    capabilities,
+    results,
+    capabilityKeys: ['naver.product_read', 'naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+  });
   return {
     productRead: NAVER_PRODUCT_PREVIEW_STATUS,
     localSync: NAVER_PRODUCT_LOCAL_SYNC_STATUS,
     batchSync: NAVER_PRODUCT_BATCH_SYNC_STATUS,
     summary: NAVER_PRODUCT_SMALL_BATCH_SUMMARY,
+    activeIssue,
   };
 }
 
-export function getNaverOrderPreviewStatus() {
+export function getNaverOrderPreviewStatus({ capabilities = [], results = [] } = {}) {
+  const activeIssue = findLatestNaverCapabilityIssue({
+    capabilities,
+    results,
+    capabilityKeys: ['naver.order_read', 'naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+  });
   return {
     feed: NAVER_ORDER_PREVIEW_STATUS,
     detail: NAVER_ORDER_DETAIL_STATUS,
     sync: NAVER_SYNC_PROTECTION_STATUS,
+    activeIssue,
   };
 }
 

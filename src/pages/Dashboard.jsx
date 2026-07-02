@@ -10,7 +10,12 @@ import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
-import { buildPlatformBusinessStatus, businessCapabilityTitle } from '../utils/capabilityStatusMapper';
+import {
+  buildPlatformBusinessStatus,
+  buildTechnicalItemsFromCards,
+  businessCapabilityTitle,
+  getNaverProductPreviewStatus,
+} from '../utils/capabilityStatusMapper';
 import {
   BUSINESS_TIME_LABEL,
   BUSINESS_TIME_ZONE,
@@ -57,7 +62,30 @@ function createEmptyFinancialSummary() {
   };
 }
 
-function SellerTodoOverview({ summary, todos = [] }) {
+function SellerTodoOverview({
+  summary,
+  todos = [],
+  selectedStore,
+  capabilities,
+  results,
+}) {
+  const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+  const naverProductStatus = isNaverStore ? getNaverProductPreviewStatus({ capabilities, results }) : null;
+  const naverProductTodo = !isNaverStore
+    ? null
+    : naverProductStatus?.activeIssue
+      ? {
+        id: 'naver-products',
+        title: '商品预览结果',
+        description: `${naverProductStatus.activeIssue.title} ${naverProductStatus.activeIssue.description}`,
+        status: naverProductStatus.activeIssue.tone,
+      }
+      : {
+        id: 'naver-products',
+        title: '商品预览结果',
+        description: 'Naver 商品小批量写入测试已完成，当前 5 条商品状态稳定。正式批量同步未开放。',
+        status: 'success',
+      };
   const priorityItems = [
     {
       id: 'orders',
@@ -89,13 +117,16 @@ function SellerTodoOverview({ summary, todos = [] }) {
       description: summary.riskEnvironments > 0 ? `${summary.riskEnvironments} 个设备或账号环境需要检查。` : '设备环境暂无明显风险。',
       status: summary.riskEnvironments > 0 ? 'danger' : 'success',
     },
-    {
-      id: 'naver-products',
-      title: '商品预览结果',
-      description: 'Naver 商品小批量写入测试已完成，当前 5 条商品状态稳定。正式批量同步未开放。',
-      status: 'success',
-    },
+    ...(naverProductTodo ? [naverProductTodo] : []),
   ];
+  const displayItems = todos.length
+    ? [
+      ...todos,
+      ...(naverProductTodo && !todos.some((item) => String(item.id || item.title || '') === 'naver-products' || item.title === '商品预览结果')
+        ? [naverProductTodo]
+        : []),
+    ]
+    : priorityItems;
 
   return (
     <article className="content-card">
@@ -105,7 +136,7 @@ function SellerTodoOverview({ summary, todos = [] }) {
           <p>按卖家日常处理顺序展示订单、客服、邮件、申诉、设备和商品预览。</p>
         </div>
       </div>
-      <TodoList items={todos.length ? todos : priorityItems} />
+      <TodoList items={displayItems} />
     </article>
   );
 }
@@ -176,6 +207,12 @@ function PlatformBusinessStatusSection({
     readiness,
     financialSummary,
   });
+  const technicalItems = buildTechnicalItemsFromCards(cards, [
+    { label: 'capability_count', value: capabilities.length },
+    { label: 'result_count', value: results.length },
+    { label: 'readiness_available', value: Boolean(readiness) },
+    { label: 'data_source', value: DATA_SOURCE },
+  ]);
   if (!cards.length) return null;
 
   return (
@@ -201,12 +238,7 @@ function PlatformBusinessStatusSection({
       </div>
       <TechnicalDetails
         description="连接检查记录仍保留给管理员排查，普通工作台不直接展示技术字段。"
-        items={[
-          { label: 'capability_count', value: capabilities.length },
-          { label: 'result_count', value: results.length },
-          { label: 'readiness_available', value: Boolean(readiness) },
-          { label: 'data_source', value: DATA_SOURCE },
-        ]}
+        items={technicalItems}
       />
     </section>
   );
@@ -261,18 +293,28 @@ export default function Dashboard() {
     const params = isBackendSource ? { storeId: selectedStoreId } : {};
     setSummary(null);
     setError('');
-    Promise.all([
-      dataProvider.getDashboardData(params),
-      dataProvider.getDashboardSalesTrend(),
-    ])
-      .then(([dashboardData, trendData]) => {
+    let cancelled = false;
+    dataProvider.getDashboardData(params)
+      .then((dashboardData) => {
+        if (cancelled) return;
         setSummary(dashboardData.summary);
         setRisks(dashboardData.risks);
         setTodos(dashboardData.todos);
         setActivities(dashboardData.activities);
-        setTrend(trendData);
       })
-      .catch((requestError) => setError(requestError.message || '工作台数据加载失败。'));
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError.message || '工作台数据加载失败。');
+      });
+
+    dataProvider.getDashboardSalesTrend()
+      .then((trendData) => {
+        if (!cancelled) setTrend(trendData);
+      })
+      .catch(() => {
+        if (!cancelled) setTrend([]);
+      });
+
+    return () => { cancelled = true; };
   }, [selectedStoreId, storeError, storeLoading, versions.dashboard]);
 
   useEffect(() => {
@@ -349,7 +391,13 @@ export default function Dashboard() {
       <StatGrid items={stats} />
 
       <section className="panel-grid">
-        <SellerTodoOverview summary={summary} todos={todos} />
+        <SellerTodoOverview
+          summary={summary}
+          todos={todos}
+          selectedStore={selectedStore}
+          capabilities={platformStatusData.capabilities}
+          results={platformStatusData.results}
+        />
         <RiskPanel title="风险提醒" items={risks} />
       </section>
 

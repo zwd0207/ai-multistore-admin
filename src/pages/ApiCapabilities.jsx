@@ -7,6 +7,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
   buildPlatformBusinessStatus,
   businessCapabilityTitle,
+  findLatestNaverCapabilityIssue,
   CAPABILITY_LABELS,
   statusLabel,
 } from '../utils/capabilityStatusMapper';
@@ -104,13 +105,31 @@ function ResultTechnicalTable({ results = [] }) {
   );
 }
 
-function ReadinessSummary({ readiness }) {
+function ReadinessSummary({ readiness, capabilities, results }) {
   const storeBound = readiness?.storeBoundReadiness;
   const platform = String(storeBound?.rawPlatform || storeBound?.platform || '').toLowerCase();
   const isNaver = platform === 'naver';
   const title = isNaver ? 'Naver 连接资料' : platform === 'coupang' ? 'Coupang 连接资料' : '平台连接资料';
   const configured = Boolean(storeBound?.configured);
   const channelReady = Boolean(storeBound?.channelNoConfigured);
+  const connectionIssue = isNaver
+    ? findLatestNaverCapabilityIssue({
+      capabilities,
+      results,
+      capabilityKeys: ['naver.token_auth', 'naver.seller_channels_read', 'naver.seller_account_read'],
+    })
+    : null;
+  const authTone = connectionIssue ? connectionIssue.tone : configured ? 'success' : 'warning';
+  const authStatus = connectionIssue ? connectionIssue.statusLabel : configured ? '正常' : '待确认';
+  const authReason = connectionIssue ? connectionIssue.title : '授权状态正常。';
+  const authNextAction = connectionIssue ? connectionIssue.description : '敏感连接信息已隐藏。';
+  const channelTone = connectionIssue ? 'warning' : isNaver && channelReady ? 'success' : 'info';
+  const channelStatus = connectionIssue ? '待确认' : isNaver ? (channelReady ? '成功' : '待确认') : '正常';
+  const channelReason = connectionIssue
+    ? '当前连接检测没有完成，暂时无法确认店铺频道状态。'
+    : isNaver
+      ? 'Naver 店铺频道状态只显示是否识别，不展示完整编号。'
+      : 'Coupang 店铺连接资料已进入业务页面使用。';
 
   return (
     <section className="content-card">
@@ -123,17 +142,25 @@ function ReadinessSummary({ readiness }) {
       <div className="business-capability-grid compact">
         <article className={`business-capability-card ${configured ? 'success' : 'warning'}`}>
           <div className="business-capability-head">
-            <strong>平台授权</strong>
+            <strong>{title}</strong>
             <span>{configured ? '已配置' : '待配置'}</span>
           </div>
           <p>{configured ? '平台连接资料已配置。' : '请先补齐平台连接资料。'}</p>
         </article>
-        <article className={`business-capability-card ${isNaver && channelReady ? 'success' : 'info'}`}>
+        <article className={`business-capability-card ${authTone}`}>
+          <div className="business-capability-head">
+            <strong>授权状态</strong>
+            <span>{authStatus}</span>
+          </div>
+          <p>{authReason}</p>
+          <small>{authNextAction}</small>
+        </article>
+        <article className={`business-capability-card ${channelTone}`}>
           <div className="business-capability-head">
             <strong>店铺连接</strong>
-            <span>{isNaver ? (channelReady ? '成功' : '待确认') : '正常'}</span>
+            <span>{channelStatus}</span>
           </div>
-          <p>{isNaver ? 'Naver 店铺频道状态只显示是否识别，不展示完整编号。' : 'Coupang 店铺连接资料已进入业务页面使用。'}</p>
+          <p>{channelReason}</p>
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
@@ -150,6 +177,12 @@ function ReadinessSummary({ readiness }) {
           { label: 'real_api_test_enabled', value: readiness?.realApiTestEnabled },
           { label: 'real_api_write_enabled', value: readiness?.realApiWriteEnabled },
           { label: 'channel_no_configured', value: channelReady },
+          ...(connectionIssue
+            ? connectionIssue.technicalItems.map((item) => ({
+              label: `connection_issue.${item.label}`,
+              value: item.value,
+            }))
+            : []),
         ]}
       />
     </section>
@@ -246,7 +279,7 @@ export default function ApiCapabilities() {
             <BusinessCards cards={cards} />
           </section>
 
-          <ReadinessSummary readiness={readiness} />
+          <ReadinessSummary readiness={readiness} capabilities={capabilities} results={results} />
 
           <CapabilityTechnicalTable capabilities={capabilities} />
           <ResultTechnicalTable results={results} />

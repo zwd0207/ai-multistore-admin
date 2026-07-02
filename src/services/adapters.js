@@ -555,6 +555,10 @@ export function adaptApiCapabilityResult(item = {}) {
     testStatus: item.test_status,
     httpStatus: item.http_status,
     errorCode: item.error_code,
+    businessErrorHint: item.business_error_hint || null,
+    safeKeywordFlags: item.safe_keyword_flags || null,
+    capabilityScope: item.capability_scope || null,
+    pathKind: item.path_kind || null,
     permissionResult: item.permission_result,
     rateLimitSummary: item.rate_limit_summary,
     responseFieldsObserved: item.response_fields_observed,
@@ -655,6 +659,10 @@ export function toBackendApiCapabilityResultPayload(item = {}, storeId) {
   if ('testStatus' in item) payload.test_status = item.testStatus || 'planned';
   if ('httpStatus' in item) payload.http_status = item.httpStatus ? Number(item.httpStatus) : null;
   if ('errorCode' in item) payload.error_code = item.errorCode ? String(item.errorCode).trim() : null;
+  if ('businessErrorHint' in item) payload.business_error_hint = item.businessErrorHint || null;
+  if ('safeKeywordFlags' in item) payload.safe_keyword_flags = item.safeKeywordFlags || null;
+  if ('capabilityScope' in item) payload.capability_scope = item.capabilityScope || null;
+  if ('pathKind' in item) payload.path_kind = item.pathKind || null;
   if ('permissionResult' in item) payload.permission_result = item.permissionResult || null;
   if ('rateLimitSummary' in item) payload.rate_limit_summary = item.rateLimitSummary || null;
   if ('responseFieldsObserved' in item) payload.response_fields_observed = item.responseFieldsObserved || null;
