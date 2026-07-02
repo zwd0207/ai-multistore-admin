@@ -293,6 +293,123 @@ function NaverOrderSalesSummarySection({ selectedStore, orderSalesSummary }) {
   );
 }
 
+function NaverErpWorkbenchSection({
+  selectedStore,
+  capabilities,
+  results,
+  inventorySummary,
+  orderFulfillmentSummary,
+  orderSalesSummary,
+}) {
+  const isNaverStore = String(selectedStore?.rawPlatform || selectedStore?.platform || '').toLowerCase() === 'naver';
+  if (!isNaverStore) return null;
+
+  const productStatus = getNaverProductPreviewStatus({ capabilities, results });
+  const orderStatus = getNaverOrderPreviewStatus({ capabilities, results });
+  const activeIssue = productStatus?.activeIssue || orderStatus?.activeIssue;
+  const hasConnectionEvidence = Boolean(capabilities.length || results.length);
+  const claimRequestCount = orderFulfillmentSummary?.claimRequestCount ?? 0;
+  const orderActionCount = orderFulfillmentSummary?.actionNeededCount ?? 0;
+  const inventoryAttentionCount = inventorySummary?.attentionCount ?? 0;
+  const totalOrderAmount = orderSalesSummary?.totalOrderAmount ?? 0;
+
+  const cards = [
+    {
+      key: 'connection',
+      title: '店铺连接',
+      statusLabel: activeIssue ? '需要检查' : hasConnectionEvidence ? '只读检测无阻断' : '等待检测结果',
+      tone: activeIssue ? activeIssue.tone || 'warning' : hasConnectionEvidence ? 'success' : 'muted',
+      reason: activeIssue
+        ? 'Naver 当前连接异常，请检查平台连接资料或 API 设置。'
+        : hasConnectionEvidence
+          ? '当前没有检测到阻断 Naver 基础 ERP 只读展示的连接异常。'
+          : '正在读取本地连接检测结果，暂不判断平台授权是否正常。',
+      nextAction: activeIssue?.description || '继续保持只读预览优先，正式同步仍需单独批准。',
+    },
+    {
+      key: 'products',
+      title: '商品管理',
+      statusLabel: '5 条小批量完成',
+      tone: 'success',
+      reason: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
+      nextAction: '正式商品批量同步仍未开放。',
+    },
+    {
+      key: 'orders',
+      title: '订单管理',
+      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条本地订单` : '单条测试完成',
+      tone: orderActionCount > 0 ? 'info' : 'success',
+      reason: orderFulfillmentSummary?.businessMessage || 'Naver 单条订单本地写入测试已完成。',
+      nextAction: '正式订单批量同步仍未开放。',
+    },
+    {
+      key: 'inventory',
+      title: '库存提醒',
+      statusLabel: inventorySummary ? inventorySummary.statusLabel : '读取本地商品',
+      tone: inventoryAttentionCount > 0 ? 'warning' : inventorySummary?.tone || 'muted',
+      reason: inventorySummary?.businessMessage || '库存提醒只基于本地 Naver 商品记录。',
+      nextAction: '低库存和缺货只做提醒，不执行平台库存写入。',
+    },
+    {
+      key: 'fulfillment',
+      title: '配送 / 售后',
+      statusLabel: claimRequestCount > 0 ? `${claimRequestCount} 条售后请求` : '只读识别',
+      tone: claimRequestCount > 0 ? 'warning' : orderFulfillmentSummary?.tone || 'muted',
+      reason: orderFulfillmentSummary
+        ? `新订单 ${orderFulfillmentSummary.newOrders} 条，待发货 ${orderFulfillmentSummary.pendingDispatch} 条，配送中 ${orderFulfillmentSummary.inDelivery} 条，售后请求 ${claimRequestCount} 条。`
+        : '配送和售后状态等待本地订单数据支撑。',
+      nextAction: '发货、取消、退货、换货写操作仍未开放。',
+    },
+    {
+      key: 'sales',
+      title: '订单金额',
+      statusLabel: `${formatWon(totalOrderAmount)}`,
+      tone: orderSalesSummary?.totalOrders ? 'info' : 'muted',
+      reason: orderSalesSummary?.businessMessage || '当前没有可用于金额统计的 Naver 本地订单。',
+      nextAction: '该金额只来自本地订单，不是平台结算金额、利润或账户可提取资金。',
+    },
+  ];
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>Naver ERP 工作台摘要</h2>
+          <p>围绕商品、订单、库存、配送 / 售后和订单金额展示当前店铺要处理的事项。</p>
+        </div>
+        <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
+      </div>
+      <div className="business-capability-grid">
+        {cards.map((card) => (
+          <article className={`business-capability-card ${card.tone || 'info'}`} key={card.key}>
+            <div className="business-capability-head">
+              <strong>{card.title}</strong>
+              <span>{card.statusLabel}</span>
+            </div>
+            <p>{card.reason}</p>
+            <small>{card.nextAction}</small>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        description="技术字段继续折叠展示，主工作台只呈现卖家能直接理解的业务摘要。"
+        items={[
+          { label: 'naver_connection_issue', value: Boolean(activeIssue) },
+          { label: 'product_small_batch_completed', value: true },
+          { label: 'product_formal_batch_sync_open', value: false },
+          { label: 'order_single_write_completed', value: true },
+          { label: 'order_formal_batch_sync_open', value: false },
+          { label: 'inventory_attention_count', value: inventoryAttentionCount },
+          { label: 'order_action_needed_count', value: orderActionCount },
+          { label: 'claim_request_count', value: claimRequestCount },
+          { label: 'local_order_amount', value: totalOrderAmount },
+          { label: 'order_amount_scope', value: orderSalesSummary?.scope || 'local_orders_only' },
+        ]}
+      />
+    </section>
+  );
+}
+
 function PlatformBusinessStatusSection({
   selectedStore,
   capabilities,
@@ -548,6 +665,15 @@ export default function Dashboard() {
         )}
       />
       <StatGrid items={stats} />
+
+      <NaverErpWorkbenchSection
+        selectedStore={selectedStore}
+        capabilities={platformStatusData.capabilities}
+        results={platformStatusData.results}
+        inventorySummary={naverInventorySummary}
+        orderFulfillmentSummary={naverOrderFulfillmentSummary}
+        orderSalesSummary={naverOrderSalesSummary}
+      />
 
       <section className="panel-grid">
         <SellerTodoOverview
