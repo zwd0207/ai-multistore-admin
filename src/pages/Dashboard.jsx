@@ -92,8 +92,8 @@ function SellerTodoOverview({ summary, todos = [] }) {
     {
       id: 'naver-products',
       title: '商品预览结果',
-      description: 'Naver 商品小批量预览已完成，预计新增 4 条、更新 1 条。正式批量同步未开放。',
-      status: 'warning',
+      description: 'Naver 商品小批量写入测试已完成，当前 5 条商品状态稳定。正式批量同步未开放。',
+      status: 'success',
     },
   ];
 

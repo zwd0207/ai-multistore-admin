@@ -37,22 +37,35 @@ const CAPABILITY_LABELS = {
 
 const NaverProtectedMessage = '当前仍处于保护阶段：主页面只展示业务状态，正式批量同步需要单独确认后才会开放。';
 
+const NAVER_PRODUCT_SMALL_BATCH_SUMMARY = {
+  localSyncedCount: 5,
+  createdInLocalSync: 4,
+  updatedInLocalSync: 1,
+  matchedExistingCount: 5,
+  wouldCreate: 0,
+  wouldUpdate: 0,
+  wouldRefreshOnly: 5,
+  wouldSkip: 0,
+  storeId: 8,
+  credentialId: 7,
+};
+
 const NAVER_PRODUCT_PREVIEW_STATUS = {
-  statusLabel: '小批量预览已完成',
-  reason: 'Naver 商品小批量预览已完成。预计新增 4 条，预计更新 1 条，预计跳过 0 条。当前还没有执行批量写入，需要确认后才会进行最多 5 条商品写入测试。',
-  nextAction: '请先核对预览结果和字段映射，正式批量同步未开放。',
+  statusLabel: '暂无',
+  reason: 'Naver 已完成 5 条商品小批量写入测试。再次预览时没有发现需要新增或更新的商品，仅同步时间需要刷新。正式批量同步仍未开放。',
+  nextAction: '当前 5 条本地商品状态稳定；如需继续扩大范围，必须先单独确认。',
 };
 
 const NAVER_PRODUCT_LOCAL_SYNC_STATUS = {
-  statusLabel: '已完成 1 条微测',
-  reason: '本地已写入 1 条 Naver 商品微测记录，本次未保存平台原始响应。',
-  nextAction: '后续批量写入需要单独确认，不会自动扩大范围。',
+  statusLabel: '已完成',
+  reason: '本地已写入 5 条 Naver 商品，其中新增 4 条、更新 1 条，本次未保存平台原始响应。',
+  nextAction: '当前只完成最多 5 条的小批量写入测试，不会自动扩大为正式批量同步。',
 };
 
 const NAVER_PRODUCT_BATCH_SYNC_STATUS = {
   statusLabel: '未开放',
-  reason: '正式批量同步未开放。当前展示的是预览和微测结果，不代表已经可以批量写入商品。',
-  nextAction: '进入下一阶段前，需要人工确认最多 5 条商品写入测试。',
+  reason: '正式批量同步未开放。当前仅完成最多 5 条商品的小批量写入测试，不代表商品同步已全面可用。',
+  nextAction: '如需继续扩大范围，必须再次人工确认。',
 };
 
 const NAVER_ORDER_PREVIEW_STATUS = {
@@ -219,7 +232,8 @@ function buildNaverCards({ capabilities, results, readiness }) {
     ),
     resultCard({
       key: 'naver.product_read',
-      status: 'preview_success',
+      title: '商品业务字段变化',
+      status: 'success_empty',
       statusLabel: NAVER_PRODUCT_PREVIEW_STATUS.statusLabel,
       tone: 'success',
       reason: NAVER_PRODUCT_PREVIEW_STATUS.reason,
@@ -227,7 +241,7 @@ function buildNaverCards({ capabilities, results, readiness }) {
     }),
     resultCard({
       key: 'naver.product_local_sync',
-      title: '本地写库',
+      title: '商品小批量写入测试',
       status: 'preview_success',
       statusLabel: NAVER_PRODUCT_LOCAL_SYNC_STATUS.statusLabel,
       tone: 'success',
@@ -341,6 +355,7 @@ export function getNaverProductPreviewStatus() {
     productRead: NAVER_PRODUCT_PREVIEW_STATUS,
     localSync: NAVER_PRODUCT_LOCAL_SYNC_STATUS,
     batchSync: NAVER_PRODUCT_BATCH_SYNC_STATUS,
+    summary: NAVER_PRODUCT_SMALL_BATCH_SUMMARY,
   };
 }
 

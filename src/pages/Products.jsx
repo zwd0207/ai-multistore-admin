@@ -32,7 +32,7 @@ const coupangStatusOptions = [
 
 function sourceLabel(value) {
   const labels = {
-    naver_real_sync: 'Naver 单条写入微测',
+    naver_real_sync: 'Naver 小批量写入测试',
     naver_product_preview: 'Naver 商品预览',
     naver_product_preview_dry_run: 'Naver 商品预览',
     coupang_real_sync: 'Coupang 本地同步',
@@ -279,6 +279,7 @@ function NaverProductPreviewStatusPanel() {
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
   if (!isNaverStore) return null;
   const status = getNaverProductPreviewStatus();
+  const summary = status.summary;
 
   return (
     <section className="content-card naver-preview-status-panel">
@@ -287,28 +288,52 @@ function NaverProductPreviewStatusPanel() {
           <h2>Naver 商品状态</h2>
           <p>{status.productRead.reason}</p>
         </div>
-        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+        <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
       </div>
-      <div className="business-capability-grid">
+      <div className="business-capability-grid compact">
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>商品预览</strong>
-            <span>已完成</span>
+            <strong>已写入本地商品</strong>
+            <span>{summary.localSyncedCount} 条</span>
           </div>
-          <p>已完成 5 条以内的小批量预览，用于判断未来写入影响。</p>
-          <small>预计新增 4 条，预计更新 1 条，预计跳过 0 条。</small>
+          <p>5 条 Naver 商品小批量写入测试已经完成，当前本地记录稳定。</p>
+          <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>本地写库微测</strong>
-            <span>{status.localSync.statusLabel}</span>
+            <strong>当前需新增</strong>
+            <span>{summary.wouldCreate} 条</span>
           </div>
-          <p>{status.localSync.reason}</p>
-          <small>{status.localSync.nextAction}</small>
+          <p>再次预览没有发现需要新增到本地的商品。</p>
+          <small>同一组商品已经存在于当前店铺本地记录中。</small>
+        </article>
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>当前需更新</strong>
+            <span>{summary.wouldUpdate} 条</span>
+          </div>
+          <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
+          <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>仅同步时间刷新</strong>
+            <span>{summary.wouldRefreshOnly} 条</span>
+          </div>
+          <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
+          <small>当前没有新的业务字段变化需要处理。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>跳过</strong>
+            <span>{summary.wouldSkip} 条</span>
+          </div>
+          <p>本次预览没有遇到需要跳过的异常商品。</p>
+          <small>没有重复编号、状态异常或数值格式异常。</small>
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
-            <strong>批量同步</strong>
+            <strong>正式批量同步</strong>
             <span>{status.batchSync.statusLabel}</span>
           </div>
           <p>{status.batchSync.reason}</p>
@@ -318,11 +343,15 @@ function NaverProductPreviewStatusPanel() {
       <TechnicalDetails
         description="技术字段仅供管理员排查，主页面不直接展示这些字段。"
         items={[
+          { label: 'store_id', value: summary.storeId },
+          { label: 'credential_id', value: summary.credentialId },
           { label: 'real_preview', value: 'true' },
           { label: 'real_sync', value: 'false' },
-          { label: 'dry_run_diff.would_create', value: 4 },
-          { label: 'dry_run_diff.would_update', value: 1 },
-          { label: 'dry_run_diff.would_skip', value: 0 },
+          { label: 'matched_existing_count', value: summary.matchedExistingCount },
+          { label: 'dry_run_diff.would_create', value: summary.wouldCreate },
+          { label: 'dry_run_diff.would_update', value: summary.wouldUpdate },
+          { label: 'dry_run_diff.would_refresh_only', value: summary.wouldRefreshOnly },
+          { label: 'dry_run_diff.would_skip', value: summary.wouldSkip },
           { label: 'batch_sync_status', value: 'not_open' },
         ]}
       />
