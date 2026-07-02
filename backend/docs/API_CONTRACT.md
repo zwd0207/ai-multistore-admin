@@ -427,9 +427,46 @@ Future `products.raw_data` must be sanitized metadata only:
 
 Future local sync must skip multiple `channelProducts`, missing external IDs, and missing names. Missing price or stock records `missing_optional_fields`, increments `missing_price_count` or `missing_stock_count`, and now blocks write approval through `write_safety_summary.missing_optional_fields_block_write_approval=true`. For `page>1` readonly preview, any matched existing record must trigger `pagination_overlap_summary.recommended_action=stop_and_review_pagination` before another stage is considered. Before every approved write, back up `backend/codex1.db`; after writing, read back `products where store_id=8 and platform='naver'`. If field mapping is wrong, recover by deleting the affected small batch or restoring the backup. A future sanitized `SyncLog` may use `sync_type=naver_product_local_sync`, `requested_size`, created/updated/skipped counts, skip reasons, and `raw_response_saved=false`. It must not contain raw Naver responses, HTML, image-detail content, tokens, headers, signatures, client secrets, complete channel numbers, or long descriptions. `ApiCapabilityTestResult tested_success` remains unwritten until a separate capability decision explicitly changes that.
 
-`POST /api/v1/sync/orders/naver/preview` is a readonly micro preview scaffold. The default `real_preview=false` returns `guardrail_status=blocked` before token/HTTP. `real_preview=true` is allowed only for the approved local Naver store/credential, with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, `page=1`, `size=1`, KST window <= 1 day, and `order_status` null/ALL. It still does not mean Naver order sync is open, and `naver.order_read.safe_to_real_test` remains false.
+`POST /api/v1/sync/orders/naver/preview` is a readonly micro preview scaffold. The default `real_preview=false` returns `guardrail_status=blocked` before token/HTTP. `real_preview=true` is allowed only for the approved local Naver store/credential, with `REAL_API_TEST_ENABLED=true`, `REAL_API_WRITE_ENABLED=false`, `page=1`, `size=1`, KST window <= 7 days, and `order_status` null/ALL. It still does not mean Naver order sync is open, and `naver.order_read.safe_to_real_test` remains false.
 
 Phase 6D-6D-Fix2 fixes the feed request to the verified parameter shape: `lastChangedFrom` formatted with milliseconds plus `limitCount=1`, with `lastChangedTo` omitted. Page, size, and order_status remain local preview controls and are not passed through to the Naver feed. When `include_detail=true`, detail lookup runs only if the feed produced a productOrderId, and it queries at most one ID with `POST /v1/pay-order/seller/product-orders/query`. If the feed is empty, detail is skipped with `detail_skipped_reason=no_changed_orders` and the time window is not expanded. Detail responses are reduced to field-observation booleans and sanitized field-name summaries such as `detail_record_observed`, status/product-name presence, buyer/receiver presence booleans, `privacy_fields_suppressed=true`, `raw_response_saved=false`, and `orders_written=false`. It never returns a full URL, query values, raw error body, full order IDs, full productOrderIds, buyer/receiver names, phone numbers, addresses, delivery detail, payment raw payload, raw response bodies, tokens, authorization headers, signatures, or full channel numbers. It does not write `orders`, does not write `SyncLog`, and does not write `ApiCapabilityTestResult tested_success`.
+
+Phase Naver-ERP-1A extends that readonly preview response with a sanitized `detail_preview` when and only when the feed returns a product order id and `include_detail=true`. The feed call still sends only `lastChangedFrom` and `limitCount=1`; it does not send `lastChangedTo`, page, size, or order status to Naver. The recommended operational sequence is one recent-24-hour feed probe, then at most one bounded recent-7-day feed probe if the first result is `success_empty`. If both are empty, stop without detail. `success_empty` returns `business_message="Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。"` and keeps `detail_called=false`, `orders_written=false`, `raw_response_saved=false`.
+
+Allowed `detail_preview` fields:
+
+```json
+{
+  "product_order_id_hash": "id-hash-*",
+  "order_id_hash": "id-hash-*",
+  "platform": "naver",
+  "order_status": {"raw": "PAYED", "label_zh": "已付款 / 新订单", "unknown_status_observed": false},
+  "payment_status": "PAYED",
+  "product_name": "safe product text",
+  "option_name": "safe option text",
+  "quantity": 1,
+  "order_amount": "1000",
+  "currency": "KRW",
+  "ordered_at": "UTC-aware ISO timestamp or null",
+  "paid_at": "UTC-aware ISO timestamp or null",
+  "last_changed_at": "UTC-aware ISO timestamp or null",
+  "delivery_status": {"raw": "DISPATCHED", "label_zh": "已发货 / 配送中", "unknown_status_observed": false},
+  "claim_status": {"raw": "RETURN_REQUEST", "label_zh": "退货请求", "unknown_status_observed": false},
+  "buyer_name_masked": "masked-or-null",
+  "buyer_phone_masked": "****1234",
+  "address_saved": false,
+  "raw_response_saved": false,
+  "privacy_fields_redacted": true,
+  "orders_written": false,
+  "mapping_version": "naver_order_detail_preview_v1",
+  "unknown_status_observed": false,
+  "safe_status_samples": ["PAYED"]
+}
+```
+
+Known status labels include `PAYED` / `결제완료` -> `已付款 / 新订单`, `PLACE_PRODUCT_ORDER` / `발주확인` -> `已确认订单`, `DISPATCHED` / `배송중` -> `已发货 / 配送中`, `DELIVERED` -> `配送完成`, `CANCELED` / `취소` -> `已取消`, `CANCEL_REQUEST` / `취소요청` -> `取消请求`, `RETURN_REQUEST` / `반품요청` -> `退货请求`, and `EXCHANGE_REQUEST` / `교환요청` -> `换货请求`. Unknown enums must set `unknown_status_observed=true` and use `未识别状态，需人工确认`; do not infer a business meaning.
+
+Phase Naver-ERP-1A does not write `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`; does not save raw responses, token values, `Authorization`, request headers, signatures, bcrypt output, or client secrets; does not output full `channel_no`, full product order ids, full order ids, full buyer names, full phones, or addresses; and does not open dispatch, cancel, return, exchange, delivery write, sales, settlement, customer-service, or formal order sync flows.
 
 ### Planned Naver ERP v1 Contract
 
@@ -465,7 +502,7 @@ Naver product v1 contract:
 
 Naver order v1 contract:
 
-- Next executable step is `Naver-ERP-1`: call the existing order preview only with `real_preview=true`, approved store/credential, `page=1`, `size=1`, one KST-day-or-smaller window, and `include_detail` only for a single feed-produced product order id.
+- Next executable step is `Naver-ERP-1`: call the existing order preview only with `real_preview=true`, approved store/credential, `page=1`, `size=1`, a recent 24-hour default window or one bounded 7-day fallback probe, and `include_detail` only for a single feed-produced product order id.
 - Detail preview may expose only safe booleans/counts/field names and seller-facing status summaries. It must not expose full order ids, full product order ids, buyer/receiver names, full phones, addresses, delivery raw payloads, payment raw payloads, raw response bodies, headers, tokens, signatures, or full channel numbers.
 - A future single-order write may persist only sanitized business fields: `store_id`, `platform`, masked or hashed external order key, `product_name`, `quantity`, `order_amount`, `currency`, `order_status`, `paid_at`, `ordered_at`, `source_type`, `last_synced_at`, and sanitized metadata. Full buyer privacy fields and raw detail remain forbidden.
 - Order status mapping must be seller-facing Chinese labels for new order, paid/ready-to-ship, shipped, in delivery, delivered, cancellation requested, return requested, exchange requested, refunded, and abnormal/unknown.

@@ -3019,7 +3019,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 "store_id": naver_store_id,
                 "credential_id": naver_credential_id,
                 "start_datetime": "2026-07-01T00:00:00+09:00",
-                "end_datetime": "2026-07-02T00:00:01+09:00",
+                "end_datetime": "2026-07-08T00:00:01+09:00",
                 "real_preview": True,
             })
             assert naver_order_long_window.status_code == 400, naver_order_long_window.text
@@ -3153,9 +3153,17 @@ def verify_sync_preview_schema_and_security() -> None:
                                 "orderId": "ORDER-ID-MUST-NOT-LEAK-1234567890",
                                 "orderStatus": "PAYED",
                                 "paymentStatus": "PAYED",
-                                "deliveryStatus": "READY",
+                                "deliveryStatus": "DISPATCHED",
+                                "claimStatus": "UNEXPECTED_CLAIM_STATUS",
                                 "productName": "safe-field-presence-only",
+                                "optionName": "safe-option-presence-only",
+                                "quantity": 2,
+                                "totalPaymentAmount": "12345",
+                                "orderedAt": "2026-07-01T00:10:00+09:00",
+                                "paymentDate": "2026-07-01T00:11:00+09:00",
+                                "lastChangedDate": "2026-07-01T00:12:00+09:00",
                                 "buyerName": "must-not-leak-buyer",
+                                "buyerTelNo": "010-1111-2222",
                                 "receiverName": "must-not-leak-receiver",
                                 "receiverTelNo1": "010-1111-2222",
                                 "receiverAddress": "must-not-leak-address",
@@ -3167,6 +3175,12 @@ def verify_sync_preview_schema_and_security() -> None:
             sync_service.httpx.Client = FakeNaverOrderHttpClient
             api_credential_readiness_service._request_naver_token_from_context = lambda context: ("fake-order-token", 200)
             try:
+                with SessionLocal() as db:
+                    before_real_preview_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_real_preview_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
+                    before_real_preview_cap_success = len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all())
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = []
                 FakeNaverOrderHttpClient.detail_called = False
@@ -3190,6 +3204,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert feed_data["field_observation"]["detail_called"] is False, feed_data
                 assert feed_data["field_observation"]["raw_response_saved"] is False, feed_data
                 assert feed_data["field_observation"]["orders_written"] is False, feed_data
+                assert feed_data["detail_preview"] is None, feed_data
                 assert len(feed_data["field_observation"]["feed_attempts"]) == 1, feed_data
                 feed_attempt = feed_data["field_observation"]["feed_attempts"][0]
                 assert feed_attempt["attempt"] == "fixed_attempt_b", feed_attempt
@@ -3218,6 +3233,28 @@ def verify_sync_preview_schema_and_security() -> None:
                     "https://",
                 ]:
                     assert forbidden not in feed_text, feed_text
+
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = [
+                    FakeNaverOrderResponse(200, {"data": {"lastChangeStatuses": [], "hasMore": False}}),
+                ]
+                seven_day_feed_preview = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-08T00:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                })
+                assert seven_day_feed_preview.status_code == 200, seven_day_feed_preview.text
+                seven_day_data = seven_day_feed_preview.json()["data"]
+                assert seven_day_data["preview_status"] == "success_empty", seven_day_data
+                assert seven_day_data["field_observation"]["detail_called"] is False, seven_day_data
+                assert FakeNaverOrderHttpClient.calls[0]["lastChangedFrom"].startswith("2026-07-01T00:00:00.000"), FakeNaverOrderHttpClient.calls
+                assert "lastChangedTo" not in FakeNaverOrderHttpClient.calls[0], FakeNaverOrderHttpClient.calls
 
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = []
@@ -3251,6 +3288,34 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_observed["privacy_fields_suppressed"] is True, detail_observed
                 assert detail_observed["raw_response_saved"] is False, detail_observed
                 assert detail_observed["orders_written"] is False, detail_observed
+                detail_summary = detail_data["detail_preview"]
+                assert detail_summary["product_order_id_hash"].startswith("id-hash-"), detail_summary
+                assert detail_summary["order_id_hash"].startswith("id-hash-"), detail_summary
+                assert detail_summary["platform"] == "naver", detail_summary
+                assert detail_summary["order_status"]["raw"] == "PAYED", detail_summary
+                assert detail_summary["order_status"]["label_zh"] == "已付款 / 新订单", detail_summary
+                assert detail_summary["order_status"]["unknown_status_observed"] is False, detail_summary
+                assert detail_summary["delivery_status"]["raw"] == "DISPATCHED", detail_summary
+                assert detail_summary["delivery_status"]["label_zh"] == "已发货 / 配送中", detail_summary
+                assert detail_summary["claim_status"]["raw"] == "UNEXPECTED_CLAIM_STATUS", detail_summary
+                assert detail_summary["claim_status"]["label_zh"] == "未识别状态，需人工确认", detail_summary
+                assert detail_summary["unknown_status_observed"] is True, detail_summary
+                assert detail_summary["payment_status"] == "PAYED", detail_summary
+                assert detail_summary["product_name"] == "safe-field-presence-only", detail_summary
+                assert detail_summary["option_name"] == "safe-option-presence-only", detail_summary
+                assert detail_summary["quantity"] == 2, detail_summary
+                assert detail_summary["order_amount"] == "12345", detail_summary
+                assert detail_summary["currency"] == "KRW", detail_summary
+                assert detail_summary["ordered_at"].endswith("+00:00"), detail_summary
+                assert detail_summary["paid_at"].endswith("+00:00"), detail_summary
+                assert detail_summary["last_changed_at"].endswith("+00:00"), detail_summary
+                assert detail_summary["buyer_name_masked"] != "must-not-leak-buyer", detail_summary
+                assert detail_summary["buyer_phone_masked"] == "****2222", detail_summary
+                assert detail_summary["address_saved"] is False, detail_summary
+                assert detail_summary["raw_response_saved"] is False, detail_summary
+                assert detail_summary["privacy_fields_redacted"] is True, detail_summary
+                assert detail_summary["orders_written"] is False, detail_summary
+                assert detail_summary["mapping_version"] == "naver_order_detail_preview_v1", detail_summary
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
                 assert FakeNaverOrderHttpClient.detail_called is True, detail_data
                 detail_text = str(detail_preview.json()).lower()
@@ -3290,8 +3355,11 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert empty_detail_preview.status_code == 200, empty_detail_preview.text
                 empty_detail_data = empty_detail_preview.json()["data"]
                 assert empty_detail_data["preview_status"] == "success_empty", empty_detail_data
+                assert empty_detail_data["business_message"] == "Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。", empty_detail_data
                 assert empty_detail_data["field_observation"]["detail_called"] is False, empty_detail_data
                 assert empty_detail_data["field_observation"]["detail_skipped_reason"] == "no_changed_orders", empty_detail_data
+                assert empty_detail_data["field_observation"]["orders_written"] is False, empty_detail_data
+                assert empty_detail_data["detail_preview"] is None, empty_detail_data
                 assert FakeNaverOrderHttpClient.detail_called is False, empty_detail_data
                 assert len(empty_detail_data["field_observation"]["feed_attempts"]) == 1, empty_detail_data
                 empty_attempt = empty_detail_data["field_observation"]["feed_attempts"][0]
@@ -3334,6 +3402,12 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert failed_data["field_observation"]["http_status"] == 400, failed_data
                 assert failed_data["field_observation"]["detail_called"] is False, failed_data
                 assert len(failed_data["field_observation"]["feed_attempts"]) == 1, failed_data
+                with SessionLocal() as db:
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_real_preview_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_real_preview_cap_success
                 assert failed_data["field_observation"]["feed_attempts"][0]["attempt"] == "fixed_attempt_b", failed_data
                 failed_text = str(failed_preview.json()).lower()
                 for forbidden in [

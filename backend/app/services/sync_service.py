@@ -52,6 +52,7 @@ COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
 COUPANG_ORDER_PREVIEW_MAX_DAYS = 3
 COUPANG_FINANCIAL_PREVIEW_MAX_DAYS = 7
+NAVER_ORDER_PREVIEW_MAX_DAYS = 7
 COUPANG_ORDER_PREVIEW_MAX_PAGES = 3
 COUPANG_ORDER_PREVIEW_PAGE_SIZE = 50
 COUPANG_PRODUCT_MAX_PAGES = 3
@@ -2885,15 +2886,15 @@ def _resolve_naver_order_preview_window(start_datetime: datetime, end_datetime: 
             error_code="date_range_invalid",
             status_code=400,
         )
-    if end_kst - start_kst > timedelta(days=1):
+    if end_kst - start_kst > timedelta(days=NAVER_ORDER_PREVIEW_MAX_DAYS):
         raise ApiError(
-            message="Naver order micro preview window must be 1 KST day or less",
+            message="Naver order micro preview window must be 7 KST days or less",
             error_code="date_range_invalid",
             status_code=400,
             detail={
                 "start_datetime": start_kst.isoformat(),
                 "end_datetime": end_kst.isoformat(),
-                "max_window": "P1D",
+                "max_window": f"P{NAVER_ORDER_PREVIEW_MAX_DAYS}D",
             },
         )
     return start_kst, end_kst
@@ -2944,9 +2945,9 @@ def _ensure_naver_order_real_preview_allowed(
             status_code=400,
             detail={"page": page, "size": size},
         )
-    if end_kst - start_kst > timedelta(days=1):
+    if end_kst - start_kst > timedelta(days=NAVER_ORDER_PREVIEW_MAX_DAYS):
         raise ApiError(
-            message="Naver order micro preview window must be 1 KST day or less",
+            message="Naver order micro preview window must be 7 KST days or less",
             error_code="date_range_invalid",
             status_code=400,
         )
@@ -3082,7 +3083,9 @@ def _run_naver_order_real_micro_preview(
                     would_create=0,
                     would_update=0,
                 )
+            detail_preview = _build_naver_order_detail_preview(detail_result["payload"])
             field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
+            field_observation["detail_preview"] = detail_preview
         else:
             field_observation["detail_skipped_reason"] = "detail_not_requested"
         return _build_naver_order_preview_result(
@@ -3397,7 +3400,22 @@ def _summarize_naver_order_detail_fields(payload: object) -> dict:
     safe_field_names = [
         name
         for name in field_names
-        if not any(token in name.lower() for token in ("buyer", "receiver", "address", "phone", "tel", "delivery", "payment"))
+        if not any(token in name.lower() for token in (
+            "buyer",
+            "receiver",
+            "recipient",
+            "address",
+            "phone",
+            "tel",
+            "delivery",
+            "payment",
+            "orderer",
+            "memo",
+            "channel",
+            "productorderid",
+            "orderid",
+            "originalproductid",
+        ))
     ][:30]
     return {
         "detail_record_observed": _json_payload_has_record(payload),
@@ -3411,6 +3429,123 @@ def _summarize_naver_order_detail_fields(payload: object) -> dict:
         "privacy_fields_suppressed": True,
         "raw_response_saved": False,
         "orders_written": False,
+    }
+
+
+NAVER_ORDER_STATUS_LABELS_ZH = {
+    "PAYED": "已付款 / 新订单",
+    "결제완료": "已付款 / 新订单",
+    "PLACE_PRODUCT_ORDER": "已确认订单",
+    "발주확인": "已确认订单",
+    "DISPATCHED": "已发货 / 配送中",
+    "배송중": "已发货 / 配送中",
+    "DELIVERED": "配送完成",
+    "배송완료": "配送完成",
+    "CANCELED": "已取消",
+    "CANCELLED": "已取消",
+    "취소": "已取消",
+    "CANCEL_REQUEST": "取消请求",
+    "취소요청": "取消请求",
+    "RETURN_REQUEST": "退货请求",
+    "반품요청": "退货请求",
+    "EXCHANGE_REQUEST": "换货请求",
+    "교환요청": "换货请求",
+}
+
+
+def _status_label_zh(value: str | None) -> tuple[str | None, bool]:
+    if not value:
+        return None, False
+    text = str(value).strip()
+    label = NAVER_ORDER_STATUS_LABELS_ZH.get(text) or NAVER_ORDER_STATUS_LABELS_ZH.get(text.upper())
+    if label:
+        return label, False
+    return "未识别状态，需人工确认", True
+
+
+def _mask_person_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= 1:
+        return "*"
+    return text[0] + "*" * min(len(text) - 1, 4)
+
+
+def _safe_order_text(value: str | None, max_length: int = 120) -> str | None:
+    if not value:
+        return None
+    text = _sanitize_naver_error_text(str(value), max_length=max_length)
+    return text or None
+
+
+def _datetime_to_iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _order_status_summary(raw_value: str | None) -> dict:
+    label, unknown = _status_label_zh(raw_value)
+    return {
+        "raw": _safe_order_text(raw_value, max_length=40),
+        "label_zh": label,
+        "unknown_status_observed": unknown,
+    }
+
+
+def _build_naver_order_detail_preview(payload: object) -> dict:
+    product_order_id = _extract_scalar_by_keys(payload, ("productOrderId", "productOrderNo"))
+    order_id = _extract_scalar_by_keys(payload, ("orderId", "orderNo", "orderNumber"))
+    order_status = _extract_scalar_by_keys(payload, ("orderStatus", "productOrderStatus", "status"))
+    payment_status = _extract_scalar_by_keys(payload, ("paymentStatus", "payStatus", "paymentState"))
+    delivery_status = _extract_scalar_by_keys(payload, ("deliveryStatus", "shippingStatus", "deliveryState"))
+    claim_status = _extract_scalar_by_keys(payload, ("claimStatus", "claimType", "claimRequestStatus", "claimStatusType"))
+    product_name = _extract_scalar_by_keys(payload, ("productName", "productOrderName", "itemName"))
+    option_name = _extract_scalar_by_keys(payload, ("optionName", "productOption", "optionInfo"))
+    amount = _extract_decimal_by_keys(payload, (
+        "totalPaymentAmount",
+        "paymentAmount",
+        "totalOrderAmount",
+        "orderAmount",
+        "productOrderAmount",
+        "salePrice",
+    ))
+    buyer_name = _extract_scalar_by_keys(payload, ("buyerName", "ordererName"))
+    buyer_phone = _extract_scalar_by_keys(payload, ("buyerTelNo", "buyerTelNo1", "buyerPhone", "ordererTelNo", "ordererPhone"))
+    order_summary = _order_status_summary(order_status)
+    delivery_summary = _order_status_summary(delivery_status)
+    claim_summary = _order_status_summary(claim_status)
+    safe_status_samples = [
+        item["raw"]
+        for item in (order_summary, delivery_summary, claim_summary)
+        if item.get("raw")
+    ]
+    return {
+        "product_order_id_hash": _mask_external_identifier(product_order_id) if product_order_id else None,
+        "order_id_hash": _mask_external_identifier(order_id) if order_id else None,
+        "platform": "naver",
+        "order_status": order_summary,
+        "payment_status": _safe_order_text(payment_status, max_length=40),
+        "product_name": _safe_order_text(product_name, max_length=160),
+        "option_name": _safe_order_text(option_name, max_length=160),
+        "quantity": _extract_int_by_keys(payload, ("quantity", "orderQuantity", "productOrderQuantity", "count")),
+        "order_amount": _decimal_to_plain_string(amount) if amount is not None else None,
+        "currency": "KRW",
+        "ordered_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("orderedAt", "orderDate", "orderedDate"))),
+        "paid_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("paidAt", "paymentDate", "payDate"))),
+        "last_changed_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("lastChangedAt", "lastChangedDate", "lastChangeDate"))),
+        "delivery_status": delivery_summary,
+        "claim_status": claim_summary,
+        "buyer_name_masked": _mask_person_name(buyer_name),
+        "buyer_phone_masked": _mask_phone(buyer_phone),
+        "address_saved": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "orders_written": False,
+        "mapping_version": "naver_order_detail_preview_v1",
+        "unknown_status_observed": any(item.get("unknown_status_observed") for item in (order_summary, delivery_summary, claim_summary)),
+        "safe_status_samples": sorted(dict.fromkeys(safe_status_samples)),
     }
 
 
@@ -3481,6 +3616,16 @@ def _build_naver_order_preview_business_status_summary(preview_status: str) -> l
     ]
 
 
+def _build_naver_order_preview_business_message(preview_status: str) -> str:
+    if preview_status == "success_empty":
+        return "Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。"
+    if preview_status == "success":
+        return "Naver 订单接口已连接。本次只完成订单只读预览，没有写入本地订单。"
+    if preview_status == "failed":
+        return "Naver 订单只读预览失败，请检查 Naver API 权限、允许 IP 或连接资料。"
+    return "Naver 订单只读预览尚未开放真实请求。"
+
+
 def _build_naver_order_preview_result(
     *,
     store_id: int,
@@ -3527,6 +3672,8 @@ def _build_naver_order_preview_result(
         "would_update": would_update,
         "sample_ids": sample_ids,
         "field_observation": field_observation,
+        "detail_preview": field_observation.get("detail_preview"),
+        "business_message": _build_naver_order_preview_business_message(preview_status),
         "business_status_summary": _build_naver_order_preview_business_status_summary(preview_status),
         "semantic_notice": "Readonly micro preview only. No local order rows were written.",
     }
