@@ -120,7 +120,7 @@ function paginateRows(rows = [], page = 1, pageSize = 5) {
 }
 
 function getCompleteOrderFields(order = {}, previewFields = {}) {
-  const rawData = order.raw_data || {};
+  const rawData = order.rawData || order.raw_data || {};
   const complete = previewFields || {};
   return {
     orderNo: displayText(complete.externalOrderId, complete.external_order_id, order.fullOrderNo, order.orderNo, order.external_order_id),
@@ -148,6 +148,99 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
   };
 }
 
+function isUsableOrderIdentity(value) {
+  const text = String(value || '').trim();
+  return Boolean(text && text !== '待接入' && text !== '订单编号已脱敏');
+}
+
+function normalizeOrderIdentity(value) {
+  return String(value || '').trim();
+}
+
+function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
+  const rawData = activeOrder?.rawData || activeOrder?.raw_data || {};
+  const previewFields = previewResult?.completeFields || {};
+  const detailPreview = previewResult?.detailPreview || {};
+  const localProductOrderHash = normalizeOrderIdentity(
+    activeOrder?.productOrderHash
+    || rawData.external_product_order_id_hash
+    || activeOrder?.orderHash
+    || rawData.external_order_id_hash,
+  );
+  const previewProductOrderHash = normalizeOrderIdentity(
+    detailPreview.externalProductOrderIdHash
+    || detailPreview.productOrderIdHash,
+  );
+  const localProductOrderNo = normalizeOrderIdentity(
+    activeOrder?.productOrderNo
+    || activeOrder?.external_product_order_id
+    || rawData.external_product_order_id,
+  );
+  const previewProductOrderNo = normalizeOrderIdentity(
+    previewFields.externalProductOrderId
+    || previewFields.external_product_order_id,
+  );
+
+  if (!previewResult) {
+    return {
+      state: 'pending',
+      matched: false,
+      comparable: false,
+      method: 'none',
+      label: '待只读预览',
+      detail: '需要先读取完整字段只读预览，才能确认是否命中当前选中的本地订单。',
+    };
+  }
+
+  if (!previewResult.available) {
+    return {
+      state: 'blocked',
+      matched: false,
+      comparable: false,
+      method: 'none',
+      label: '预览不可用',
+      detail: '完整字段只读预览不可用，不能确认订单身份。',
+    };
+  }
+
+  if (localProductOrderHash && previewProductOrderHash) {
+    const matched = localProductOrderHash === previewProductOrderHash;
+    return {
+      state: matched ? 'ready' : 'blocked',
+      matched,
+      comparable: true,
+      method: 'hash',
+      label: matched ? '身份匹配' : '身份不匹配',
+      detail: matched
+        ? '只读预览的商品订单安全哈希与当前本地运营订单一致。'
+        : '只读预览的商品订单安全哈希与当前本地运营订单不一致，禁止进入刷新写库审核。',
+    };
+  }
+
+  if (isUsableOrderIdentity(localProductOrderNo) && isUsableOrderIdentity(previewProductOrderNo)) {
+    const matched = localProductOrderNo === previewProductOrderNo;
+    return {
+      state: matched ? 'ready' : 'blocked',
+      matched,
+      comparable: true,
+      method: 'full_product_order_id',
+      label: matched ? '身份匹配' : '身份不匹配',
+      detail: matched
+        ? '只读预览的商品订单号与当前本地运营订单一致。'
+        : '只读预览的商品订单号与当前本地运营订单不一致，禁止进入刷新写库审核。',
+    };
+  }
+
+  return {
+    state: 'blocked',
+    matched: false,
+    comparable: false,
+    method: 'unresolved',
+    label: '身份无法确认',
+    detail: '缺少可比较的商品订单安全哈希或完整商品订单号，禁止进入刷新写库审核。',
+  };
+}
+
 const orderRefreshGateStateLabels = {
   ready: '已满足',
   pending: '待准备',
@@ -165,6 +258,7 @@ function buildNaverOrderRefreshGatePlan({
   const hasPreviewResult = Boolean(previewResult);
   const previewAvailable = Boolean(previewResult?.available);
   const selectedOperationalOrder = Boolean(activeOrder && !isNaverMockSyncOrder(activeOrder));
+  const identityMatch = buildNaverOrderIdentityMatch(activeOrder, previewResult);
   const savePlan = previewResult?.savePlan || {};
   const noLocalWrites = !savePlan.ordersWritten && !savePlan.syncLogWritten && !savePlan.testedSuccessWritten;
   const noPlatformWrites = !savePlan.platformWritesEnabled && !savePlan.formalOrderSyncOpen;
@@ -190,13 +284,17 @@ function buildNaverOrderRefreshGatePlan({
     statusKind = 'blocked';
     statusLabel = '不可写库';
     message = '完整字段只读预览当前不可用，不能进入刷新写库审核。';
+  } else if (previewAvailable && !identityMatch.matched) {
+    statusKind = 'blocked';
+    statusLabel = '不可写库';
+    message = `${identityMatch.label}：${identityMatch.detail}`;
   } else if (previewAvailable) {
     statusKind = 'review';
     statusLabel = '可进入人工审核，不会自行写库';
-    message = '只读预览可用，但本阶段只完成门禁计划展示；后续写库必须单独批准并先备份数据库。';
+    message = '只读预览可用且订单身份匹配，但本阶段只完成门禁计划展示；后续写库必须单独批准并先备份数据库。';
   }
 
-  const canEnterManualReview = statusKind === 'review' && noLocalWrites && noPlatformWrites && rawResponseClosed;
+  const canEnterManualReview = statusKind === 'review' && identityMatch.matched && noLocalWrites && noPlatformWrites && rawResponseClosed;
 
   return {
     statusKind,
@@ -220,6 +318,11 @@ function buildNaverOrderRefreshGatePlan({
         detail: previewAvailable
           ? `已取得${previewResult.previewWindowLabel || previewWindowLabel}只读预览。`
           : `尚未取得可用只读预览，当前窗口为${previewWindowLabel}。`,
+      },
+      {
+        label: '订单身份匹配',
+        state: identityMatch.state,
+        detail: identityMatch.detail,
       },
       {
         label: '数据库备份',
@@ -253,10 +356,14 @@ function buildNaverOrderRefreshGatePlan({
       },
     ],
     technical: {
-      phase: 'Naver-ERP-9A',
+      phase: 'Naver-ERP-9D',
       plannedOnly: true,
       selectedOperationalOrder,
       previewAvailable,
+      identityMatchState: identityMatch.state,
+      identityMatched: identityMatch.matched,
+      identityComparable: identityMatch.comparable,
+      identityMatchMethod: identityMatch.method,
       previewWindow: previewResult?.previewWindow || previewWindow,
       requiresUserApproval: true,
       requiresDbBackup: true,
@@ -802,7 +909,7 @@ function NaverOrderCompleteDetailPanel() {
                 />
               ))}
             </div>
-            <p className="mock-sync-note">Phase 9A 只整理后续刷新写库审核门槛；当前不新增写库按钮，不改后端，不开放正式订单同步。</p>
+            <p className="mock-sync-note">Phase 9D 加入订单身份匹配门禁；当前不新增写库按钮，不改后端，不开放正式订单同步。</p>
             <TechnicalDetails
               description="刷新写库门禁只保留执行边界，不展示订单原始响应。"
               items={[
@@ -812,6 +919,10 @@ function NaverOrderCompleteDetailPanel() {
                 { label: 'credential_id', value: 7 },
                 { label: 'selected_operational_order', value: refreshGatePlan.technical.selectedOperationalOrder },
                 { label: 'preview_available', value: refreshGatePlan.technical.previewAvailable },
+                { label: 'identity_match_state', value: refreshGatePlan.technical.identityMatchState },
+                { label: 'identity_matched', value: refreshGatePlan.technical.identityMatched },
+                { label: 'identity_comparable', value: refreshGatePlan.technical.identityComparable },
+                { label: 'identity_match_method', value: refreshGatePlan.technical.identityMatchMethod },
                 { label: 'preview_window', value: refreshGatePlan.technical.previewWindow },
                 { label: 'can_enter_manual_review', value: refreshGatePlan.canEnterManualReview },
                 { label: 'requires_user_approval', value: refreshGatePlan.technical.requiresUserApproval },

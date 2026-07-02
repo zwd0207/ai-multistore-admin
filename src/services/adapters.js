@@ -288,6 +288,7 @@ export function adaptOrder(item = {}) {
   const displayPhone = isNaver && !item.buyer_masked_phone ? '未保存' : emptyText(item.buyer_masked_phone);
   const fullOrderNo = item.external_order_id || rawData.external_order_id || '';
   const productOrderNo = item.external_product_order_id || rawData.external_product_order_id || '';
+  const productOrderHash = rawData.external_product_order_id_hash || (isNaver && isHashOrderId ? item.external_order_id : null);
   const platformProductId = item.platform_product_id || item.external_product_id || rawData.platform_product_id || rawData.external_product_id || '';
   const statusLabel = isNaver
     ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
@@ -308,6 +309,7 @@ export function adaptOrder(item = {}) {
     fullOrderNo,
     orderHash: isNaver && isHashOrderId ? item.external_order_id : null,
     productOrderNo,
+    productOrderHash,
     platformProductId,
     product: item.product_name,
     productName: item.product_name,
@@ -348,6 +350,7 @@ export function adaptOrder(item = {}) {
 export function adaptNaverOrderCompletePreview(data = {}) {
   const preview = data.complete_field_preview || {};
   const completeFields = preview.complete_fields || {};
+  const detailPreview = data.detail_preview || {};
   const savePlan = preview.save_plan || {};
 
   return {
@@ -365,6 +368,18 @@ export function adaptNaverOrderCompletePreview(data = {}) {
     previewOnly: preview.preview_only !== false,
     available: Boolean(preview.available),
     fieldAvailability: preview.field_availability || {},
+    detailPreview: {
+      externalOrderIdHash: detailPreview.external_order_id_hash || detailPreview.order_id_hash,
+      externalProductOrderIdHash: detailPreview.external_product_order_id_hash || detailPreview.product_order_id_hash,
+      orderStatus: detailPreview.order_status?.raw || detailPreview.order_status,
+      orderStatusLabelZh: detailPreview.order_status_label_zh || detailPreview.order_status?.label_zh,
+      orderAmount: detailPreview.order_amount,
+      currency: detailPreview.currency,
+      rawResponseSaved: Boolean(detailPreview.raw_response_saved),
+      privacyFieldsRedacted: detailPreview.privacy_fields_redacted !== false,
+      addressSaved: Boolean(detailPreview.address_saved),
+      mappingVersion: detailPreview.mapping_version,
+    },
     savePlan: {
       codex1SchemaWriteEnabled: Boolean(savePlan.codex1_schema_write_enabled),
       requiresUserApproval: Boolean(savePlan.requires_user_approval),

@@ -334,3 +334,9 @@ The controlled Naver order complete-field readonly preview was repeated through 
 The 3-day KST window returned HTTP 200 with `preview_status=success`, feed and detail both called, and complete-field preview available. The observed readonly detail status was `DELIVERED / 配送完成` with amount `330000 KRW`. No local counters changed: `orders_store8=4`, operational Naver orders remain 1, mock/test Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`.
 
 This success does not approve refresh writing. The local operational Naver order currently remains `PAYED` with amount `499000 KRW`, so the next gate must prove that the previewed product-order identity matches the selected local operational order before any future one-row refresh write is considered.
+
+## Phase Naver-ERP-9D - Order Refresh Candidate Match Gate
+
+Codex2 now requires the complete-field readonly preview identity to match the selected local operational Naver order before the refresh gate can enter manual review. See `PHASE_NAVER_ERP_9D_ORDER_REFRESH_CANDIDATE_MATCH_GATE.md`.
+
+The gate prefers safe product-order hash matching from `detail_preview`; it falls back to full product order number comparison only when both sides have comparable full values. If the identity differs or cannot be confirmed, the Orders page blocks refresh-write review. This phase does not call Naver, does not change Codex1, does not write local data, and does not open formal Naver order sync.
