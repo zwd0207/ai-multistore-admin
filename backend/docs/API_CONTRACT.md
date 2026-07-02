@@ -846,7 +846,7 @@ Response example:
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
 | GET | `/api/v1/products` | `store_id` required, `platform` optional | None | Required | No |
-| GET | `/api/v1/orders` | `store_id` required, `platform` optional | None | Required | Only `buyer_masked_phone` |
+| GET | `/api/v1/orders` | `store_id` required, `platform` optional, `include_test_orders` optional default `false` | None | Required | Only `buyer_masked_phone` |
 | GET | `/api/v1/customer-inquiries` | `store_id` required, `platform` optional | None | Required | No |
 
 Product response item:
@@ -876,15 +876,23 @@ Order response item:
   "id": 1,
   "store_id": 1,
   "platform": "naver",
-  "external_order_id": "naver-1-order-cn",
-  "buyer_name": "中文测试买家",
-  "buyer_masked_phone": "010-****-1234",
-  "product_name": "SK-II 神仙水测试商品",
-  "order_amount": "129000.00",
-  "source_type": "mock_sync",
+  "external_order_id": "id-hash-56fb9c2a46",
+  "buyer_name": "김**",
+  "buyer_masked_phone": null,
+  "product_name": "PXG 휠 캐디백 여성 바퀴형 골프백",
+  "order_amount": "499000.00",
+  "source_type": "naver_real_order_sync",
   "last_synced_at": "2026-07-01T00:00:00+00:00"
 }
 ```
+
+Phase Naver-ERP-5J default order-list behavior:
+
+- Seller-facing `/api/v1/orders`, sales stats, and Dashboard summaries exclude local order test rows by default.
+- Excluded local test source types are `mock_sync` and `local_frontend_mock`.
+- The rows are not deleted. They can be inspected with `include_test_orders=true`.
+- `/api/v1/orders` returns `include_test_orders` and `test_orders_excluded` metadata so Codex2 can show that test rows were isolated without loading them into the main list.
+- The diagnostic flag is readonly and must not be described as formal Naver order sync.
 
 Inquiry response item:
 
@@ -962,11 +970,11 @@ Preview rules:
 
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
-| GET | `/api/v1/stats/sales` | `store_id`, `platform`, `start_date`, `end_date` | None | Optional | No |
-| GET | `/api/v1/stats/sales/by-platform` | `store_id`, `start_date`, `end_date` | None | Optional | No |
-| GET | `/api/v1/stats/sales/by-date` | `store_id`, `platform`, `start_date`, `end_date` | None | Optional | No |
+| GET | `/api/v1/stats/sales` | `store_id`, `platform`, `start_date`, `end_date`, `include_test_orders` optional default `false` | None | Optional | No |
+| GET | `/api/v1/stats/sales/by-platform` | `store_id`, `start_date`, `end_date`, `include_test_orders` optional default `false` | None | Optional | No |
+| GET | `/api/v1/stats/sales/by-date` | `store_id`, `platform`, `start_date`, `end_date`, `include_test_orders` optional default `false` | None | Optional | No |
 
-Date filters are interpreted as KST business dates. `/stats/sales/by-date` groups orders after converting `ordered_at` to KST.
+Date filters are interpreted as KST business dates. `/stats/sales/by-date` groups orders after converting `ordered_at` to KST. By default, local test orders with `source_type in {"mock_sync", "local_frontend_mock"}` are excluded from sales stats; `include_test_orders=true` is a readonly diagnostic override.
 
 Response example:
 
@@ -994,7 +1002,7 @@ Common errors: `STORE_NOT_FOUND`, `PLATFORM_NOT_SUPPORTED`, `INVALID_DATE_FORMAT
 
 | Method | Path | Query | Body | store_id | Sensitive Fields |
 |---|---|---|---|---:|---|
-| GET | `/api/v1/dashboard/summary` | `store_id`, `platform`, `start_date`, `end_date` | None | Optional | Masked orders only |
+| GET | `/api/v1/dashboard/summary` | `store_id`, `platform`, `start_date`, `end_date`, `include_test_orders` optional default `false` | None | Optional | Masked orders only |
 
 Response example:
 

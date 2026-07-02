@@ -121,8 +121,13 @@ def verify_query_payloads(client: TestClient, store_id: int) -> None:
     assert "한글 상품 데이터" in str(products), products
 
     orders = assert_success(client.get(f"/api/v1/orders?store_id={store_id}&platform=naver"))
+    assert orders["data"]["total"] == 0, orders
+    assert orders["data"]["test_orders_excluded"] == 3, orders
+
+    orders = assert_success(client.get(f"/api/v1/orders?store_id={store_id}&platform=naver&include_test_orders=true"))
     order_names = [item["product_name"] for item in orders["data"]["items"]]
     assert orders["data"]["total"] == 3, orders
+    assert orders["data"]["include_test_orders"] is True, orders
     assert "SK-II 神仙水测试商品" in order_names, orders
     assert "타이틀리스트 캐디백 테스트" in order_names, orders
     assert "ECCO 골프화 / 中文运营测试" in order_names, orders

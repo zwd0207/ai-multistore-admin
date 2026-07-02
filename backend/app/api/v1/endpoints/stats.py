@@ -15,6 +15,7 @@ def get_sales_stats(
     platform: str | None = Query(default=None),
     start_date: str | None = Query(default=None),
     end_date: str | None = Query(default=None),
+    include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
     result = stats_service.get_sales_stats(
@@ -23,6 +24,7 @@ def get_sales_stats(
         platform=platform,
         start_date=stats_service.parse_date(start_date, "start_date"),
         end_date=stats_service.parse_date(end_date, "end_date"),
+        include_test_orders=include_test_orders,
     )
     return success_response(data=result)
 
@@ -32,6 +34,7 @@ def get_sales_by_platform(
     store_id: int | None = Query(default=None),
     start_date: str | None = Query(default=None),
     end_date: str | None = Query(default=None),
+    include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
     result = stats_service.get_sales_by_platform(
@@ -39,6 +42,7 @@ def get_sales_by_platform(
         store_id=store_id,
         start_date=stats_service.parse_date(start_date, "start_date"),
         end_date=stats_service.parse_date(end_date, "end_date"),
+        include_test_orders=include_test_orders,
     )
     return success_response(data={"items": result, "total": len(result)})
 
@@ -49,6 +53,7 @@ def get_sales_by_date(
     platform: str | None = Query(default=None),
     start_date: str | None = Query(default=None),
     end_date: str | None = Query(default=None),
+    include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
     result = stats_service.get_sales_by_date(
@@ -57,5 +62,6 @@ def get_sales_by_date(
         platform=platform,
         start_date=stats_service.parse_date(start_date, "start_date"),
         end_date=stats_service.parse_date(end_date, "end_date"),
+        include_test_orders=include_test_orders,
     )
     return success_response(data={"items": result, "total": len(result)})

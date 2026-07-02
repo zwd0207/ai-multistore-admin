@@ -4669,6 +4669,136 @@ def verify_kst_business_timezone() -> None:
     print("KST business timezone: ok")
 
 
+def verify_naver_order_local_list_cleanup() -> None:
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models.order import Order
+
+    with TestClient(app) as client:
+        suffix = uuid.uuid4().hex[:8]
+        store = client.post("/api/v1/stores", json={
+            "name": f"Phase Naver ERP 5J Store {suffix}",
+            "platform": "naver",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        })
+        assert store.status_code == 201, store.text
+        store_id = store.json()["data"]["id"]
+
+        with SessionLocal() as db:
+            db.add_all([
+                Order(
+                    store_id=store_id,
+                    platform="naver",
+                    external_order_id=f"real-order-{suffix}",
+                    buyer_name="Real Buyer",
+                    buyer_masked_phone="010-****-1111",
+                    product_name="Naver operational order",
+                    quantity=1,
+                    order_amount=Decimal("499000.00"),
+                    currency="KRW",
+                    order_status="PAYED",
+                    paid_at=datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc),
+                    source_type="naver_real_order_sync",
+                    last_synced_at=datetime(2026, 7, 2, 1, 0, tzinfo=timezone.utc),
+                    raw_data={"raw_response_saved": False, "privacy_fields_redacted": True},
+                ),
+                Order(
+                    store_id=store_id,
+                    platform="naver",
+                    external_order_id=f"mock-sync-{suffix}",
+                    buyer_name="Mock Buyer",
+                    buyer_masked_phone="010-****-2222",
+                    product_name="Naver mock sync order",
+                    quantity=1,
+                    order_amount=Decimal("100000.00"),
+                    currency="KRW",
+                    order_status="paid",
+                    paid_at=datetime(2026, 7, 2, 0, 5, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 7, 2, 0, 5, tzinfo=timezone.utc),
+                    source_type="mock_sync",
+                    last_synced_at=datetime(2026, 7, 2, 1, 5, tzinfo=timezone.utc),
+                    raw_data={"source": "verify_naver_order_local_list_cleanup"},
+                ),
+                Order(
+                    store_id=store_id,
+                    platform="naver",
+                    external_order_id=f"frontend-mock-{suffix}",
+                    buyer_name="Frontend Mock Buyer",
+                    buyer_masked_phone="010-****-3333",
+                    product_name="Naver frontend mock order",
+                    quantity=1,
+                    order_amount=Decimal("200000.00"),
+                    currency="KRW",
+                    order_status="paid",
+                    paid_at=datetime(2026, 7, 2, 0, 10, tzinfo=timezone.utc),
+                    ordered_at=datetime(2026, 7, 2, 0, 10, tzinfo=timezone.utc),
+                    source_type="local_frontend_mock",
+                    last_synced_at=datetime(2026, 7, 2, 1, 10, tzinfo=timezone.utc),
+                    raw_data={"source": "verify_naver_order_local_list_cleanup"},
+                ),
+            ])
+            db.commit()
+
+        default_orders = client.get(f"/api/v1/orders?store_id={store_id}&platform=naver")
+        assert default_orders.status_code == 200, default_orders.text
+        default_data = default_orders.json()["data"]
+        assert default_data["total"] == 1, default_data
+        assert default_data["test_orders_excluded"] == 2, default_data
+        assert default_data["items"][0]["source_type"] == "naver_real_order_sync", default_data
+        assert all(item["source_type"] not in {"mock_sync", "local_frontend_mock"} for item in default_data["items"])
+
+        diagnostic_orders = client.get(f"/api/v1/orders?store_id={store_id}&platform=naver&include_test_orders=true")
+        assert diagnostic_orders.status_code == 200, diagnostic_orders.text
+        diagnostic_data = diagnostic_orders.json()["data"]
+        assert diagnostic_data["total"] == 3, diagnostic_data
+        assert diagnostic_data["test_orders_excluded"] == 0, diagnostic_data
+        assert {item["source_type"] for item in diagnostic_data["items"]} == {
+            "naver_real_order_sync",
+            "mock_sync",
+            "local_frontend_mock",
+        }
+
+        sales = client.get(f"/api/v1/stats/sales?store_id={store_id}&platform=naver")
+        assert sales.status_code == 200, sales.text
+        sales_data = sales.json()["data"]
+        assert sales_data["total_orders"] == 1, sales_data
+        assert sales_data["total_sales_amount"] == "499000.00", sales_data
+
+        sales_with_tests = client.get(
+            f"/api/v1/stats/sales?store_id={store_id}&platform=naver&include_test_orders=true"
+        )
+        assert sales_with_tests.status_code == 200, sales_with_tests.text
+        sales_with_tests_data = sales_with_tests.json()["data"]
+        assert sales_with_tests_data["total_orders"] == 3, sales_with_tests_data
+        assert sales_with_tests_data["total_sales_amount"] == "799000.00", sales_with_tests_data
+
+        dashboard = client.get(f"/api/v1/dashboard/summary?store_id={store_id}")
+        assert dashboard.status_code == 200, dashboard.text
+        dashboard_data = dashboard.json()["data"]
+        assert dashboard_data["order_count"] == 1, dashboard_data
+        assert dashboard_data["total_sales_amount"] == "499000.00", dashboard_data
+        assert len(dashboard_data["recent_orders"]) == 1, dashboard_data
+        assert dashboard_data["recent_orders"][0]["product_name"] == "Naver operational order", dashboard_data
+        assert dashboard_data["recent_orders"][0]["order_amount"] == "499000.00", dashboard_data
+        assert dashboard_data["financial_summary"]["order_sales_summary"]["total_orders"] == 1, dashboard_data
+
+        dashboard_with_tests = client.get(f"/api/v1/dashboard/summary?store_id={store_id}&include_test_orders=true")
+        assert dashboard_with_tests.status_code == 200, dashboard_with_tests.text
+        assert dashboard_with_tests.json()["data"]["order_count"] == 3, dashboard_with_tests.text
+
+        with SessionLocal() as db:
+            stored_orders = db.scalars(select(Order).where(Order.store_id == store_id)).all()
+            assert len(stored_orders) == 3, stored_orders
+
+    print("Naver order local list cleanup: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -4685,6 +4815,9 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/router.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
+        " M backend/app/api/v1/endpoints/dashboard.py",
+        " M backend/app/api/v1/endpoints/orders.py",
+        " M backend/app/api/v1/endpoints/stats.py",
         " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
         " M backend/app/database.py",
@@ -4703,6 +4836,7 @@ def verify_git_tracking() -> None:
         " M backend/app/services/api_capability_service.py",
         " M backend/app/services/api_credential_readiness_service.py",
         " M backend/app/services/credential_service.py",
+        " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
         " M backend/requirements.txt",
@@ -4847,6 +4981,7 @@ def main() -> None:
         verify_api_capabilities()
         verify_sync_preview_schema_and_security()
         verify_kst_business_timezone()
+        verify_naver_order_local_list_cleanup()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()

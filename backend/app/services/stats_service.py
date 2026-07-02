@@ -15,6 +15,7 @@ from app.models.product import Product
 from app.models.store import Store
 from app.models.sync_log import SyncLog
 from app.services.api_capability_service import get_api_capability_summary
+from app.services.order_service import TEST_ORDER_SOURCE_TYPES
 from app.services.store_service import ensure_store_exists, normalize_platform
 
 
@@ -43,12 +44,15 @@ def _order_filters(
     platform: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_test_orders: bool = False,
 ) -> list:
     filters = []
     if store_id is not None:
         filters.append(Order.store_id == store_id)
     if platform is not None:
         filters.append(Order.platform == platform)
+    if not include_test_orders:
+        filters.append(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
     if start_date is not None:
         start, _ = get_business_day_range(start_date)
         filters.append(Order.ordered_at >= start)
@@ -256,13 +260,20 @@ def get_sales_stats(
     platform: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_test_orders: bool = False,
 ) -> dict:
     if store_id is not None:
         ensure_store_exists(db, store_id)
     if platform is not None:
         platform = normalize_platform(platform)
 
-    orders = db.scalars(select(Order).where(*_order_filters(store_id, platform, start_date, end_date))).all()
+    orders = db.scalars(select(Order).where(*_order_filters(
+        store_id,
+        platform,
+        start_date,
+        end_date,
+        include_test_orders=include_test_orders,
+    ))).all()
     paid_statuses = {"paid", "completed", "shipped", "delivered"}
     canceled_statuses = {"canceled", "cancelled", "failed", "refunded"}
 
@@ -290,10 +301,17 @@ def get_sales_by_platform(
     store_id: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_test_orders: bool = False,
 ) -> list[dict]:
     if store_id is not None:
         ensure_store_exists(db, store_id)
-    orders = db.scalars(select(Order).where(*_order_filters(store_id, None, start_date, end_date))).all()
+    orders = db.scalars(select(Order).where(*_order_filters(
+        store_id,
+        None,
+        start_date,
+        end_date,
+        include_test_orders=include_test_orders,
+    ))).all()
     grouped: dict[str, dict[str, Any]] = {}
     for order in orders:
         item = grouped.setdefault(
@@ -319,12 +337,19 @@ def get_sales_by_date(
     platform: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_test_orders: bool = False,
 ) -> list[dict]:
     if store_id is not None:
         ensure_store_exists(db, store_id)
     if platform is not None:
         platform = normalize_platform(platform)
-    orders = db.scalars(select(Order).where(*_order_filters(store_id, platform, start_date, end_date))).all()
+    orders = db.scalars(select(Order).where(*_order_filters(
+        store_id,
+        platform,
+        start_date,
+        end_date,
+        include_test_orders=include_test_orders,
+    ))).all()
     grouped: dict[date, dict[str, Any]] = defaultdict(lambda: {"total_orders": 0, "total_sales_amount": Decimal("0")})
     for order in orders:
         order_date = to_business_timezone(order.ordered_at).date()
@@ -386,8 +411,15 @@ def get_recent_orders(
     start_date: date | None = None,
     end_date: date | None = None,
     limit: int = 5,
+    include_test_orders: bool = False,
 ) -> list[dict]:
-    statement = select(Order).where(*_order_filters(store_id, platform, start_date, end_date)).order_by(
+    statement = select(Order).where(*_order_filters(
+        store_id,
+        platform,
+        start_date,
+        end_date,
+        include_test_orders=include_test_orders,
+    )).order_by(
         Order.ordered_at.desc(),
         Order.id.desc(),
     )
@@ -434,7 +466,7 @@ def build_risk_flags(
             }
         )
 
-    latest_order_statement = select(Order).order_by(Order.ordered_at.desc())
+    latest_order_statement = select(Order).where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES)).order_by(Order.ordered_at.desc())
     if store_id is not None:
         latest_order_statement = latest_order_statement.where(Order.store_id == store_id)
     if platform is not None:
@@ -470,13 +502,21 @@ def get_dashboard_summary(
     platform: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    include_test_orders: bool = False,
 ) -> dict:
     if store_id is not None:
         ensure_store_exists(db, store_id)
     if platform is not None:
         platform = normalize_platform(platform)
 
-    sales = get_sales_stats(db, store_id=store_id, platform=platform, start_date=start_date, end_date=end_date)
+    sales = get_sales_stats(
+        db,
+        store_id=store_id,
+        platform=platform,
+        start_date=start_date,
+        end_date=end_date,
+        include_test_orders=include_test_orders,
+    )
     financial_summary = _build_financial_summary(
         db,
         order_sales_summary=_build_order_sales_summary(sales),
@@ -494,7 +534,13 @@ def get_dashboard_summary(
         "currency": sales["currency"],
         "latest_sync_logs": get_latest_sync_logs(db, store_id=store_id, platform=platform, limit=5),
         "open_customer_inquiries": _count_open_customer_inquiries(db, store_id=store_id, platform=platform),
-        "recent_orders": get_recent_orders(db, store_id=store_id, platform=platform, limit=5),
+        "recent_orders": get_recent_orders(
+            db,
+            store_id=store_id,
+            platform=platform,
+            limit=5,
+            include_test_orders=include_test_orders,
+        ),
         "risk_flags": build_risk_flags(db, store_id=store_id, platform=platform),
         "financial_summary": financial_summary,
         "api_capability_summary": get_api_capability_summary(db, store_id=store_id, platform=platform),

@@ -319,6 +319,7 @@ Module decisions:
 - Delivery and claim v1 is readonly classification only. Shipment write APIs, dispatch actions, cancellation approval, return approval, and exchange actions require separate later approval.
 - Sales v1 uses local order amounts only. Settlement or final amount must not be displayed as profit or withdrawable balance.
 - Dashboard v1 should use seller-facing language only. Technical fields such as `error_code`, `http_status`, `store_id`, `credential_id`, `real_preview`, `real_sync`, full channel numbers, and full platform IDs belong only in technical detail views.
+- Phase Naver-ERP-5J cleans seller-facing local order list semantics: local test rows with `source_type in {"mock_sync", "local_frontend_mock"}` remain stored for audit/testing but are excluded by default from `/orders`, order sales stats, Dashboard order counts, recent orders, and local order amount summaries. Use the readonly diagnostic flag `include_test_orders=true` only when intentionally inspecting local test rows.
 
 Global ERP safety gates:
 

@@ -134,36 +134,51 @@ def main() -> None:
         prepare_data(client, store_id)
 
         sales = assert_success(client.get(f"/api/v1/stats/sales?store_id={store_id}"))
-        assert sales["data"]["total_orders"] == 3, sales
-        assert sales["data"]["paid_orders"] == 3, sales
-        assert sales["data"]["total_sales_amount"] == "916000.00", sales
+        assert sales["data"]["total_orders"] == 0, sales
+        assert sales["data"]["paid_orders"] == 0, sales
+        assert sales["data"]["total_sales_amount"] == "0.00", sales
         assert sales["data"]["currency"] == "KRW", sales
 
+        sales_with_tests = assert_success(client.get(f"/api/v1/stats/sales?store_id={store_id}&include_test_orders=true"))
+        assert sales_with_tests["data"]["total_orders"] == 3, sales_with_tests
+        assert sales_with_tests["data"]["paid_orders"] == 3, sales_with_tests
+        assert sales_with_tests["data"]["total_sales_amount"] == "916000.00", sales_with_tests
+
         by_platform = assert_success(client.get(f"/api/v1/stats/sales/by-platform?store_id={store_id}"))
+        assert by_platform["data"]["total"] == 0, by_platform
+        by_platform = assert_success(client.get(f"/api/v1/stats/sales/by-platform?store_id={store_id}&include_test_orders=true"))
         assert by_platform["data"]["total"] == 1, by_platform
         assert by_platform["data"]["items"][0]["platform"] == "naver", by_platform
 
         by_date = assert_success(client.get(f"/api/v1/stats/sales/by-date?store_id={store_id}"))
+        assert by_date["data"]["total"] == 0, by_date
+        by_date = assert_success(client.get(f"/api/v1/stats/sales/by-date?store_id={store_id}&include_test_orders=true"))
         assert by_date["data"]["total"] >= 1, by_date
 
         dashboard = assert_success(client.get(f"/api/v1/dashboard/summary?store_id={store_id}"))
         data = dashboard["data"]
         assert data["store_count"] == 1, dashboard
         assert data["product_count"] == 3, dashboard
-        assert data["order_count"] == 3, dashboard
+        assert data["order_count"] == 0, dashboard
         assert data["customer_inquiry_count"] == 3, dashboard
         assert data["open_customer_inquiries"] == 3, dashboard
-        assert data["total_sales_amount"] == "916000.00", dashboard
+        assert data["total_sales_amount"] == "0.00", dashboard
         assert len(data["latest_sync_logs"]) <= 5, dashboard
-        assert len(data["recent_orders"]) <= 5, dashboard
+        assert data["recent_orders"] == [], dashboard
         risk_codes = {item["code"] for item in data["risk_flags"]}
         assert "FAILED_SYNC_LOG" in risk_codes, dashboard
         assert "OPEN_CUSTOMER_INQUIRIES" in risk_codes, dashboard
+        assert "NO_RECENT_ORDERS" in risk_codes, dashboard
         assert "한글 실패 로그" in str(dashboard), dashboard
-        assert "ECCO 골프화 / 中文运营测试" in str(dashboard), dashboard
-        assert "010-****-1234" in str(dashboard), dashboard
-        assert "010-****-5678" in str(dashboard), dashboard
-        assert "010-****-9012" in str(dashboard), dashboard
+        assert "ECCO 골프화 / 中文运营测试" not in str(dashboard), dashboard
+        assert "010-****-1234" not in str(dashboard), dashboard
+        assert "010-****-5678" not in str(dashboard), dashboard
+        assert "010-****-9012" not in str(dashboard), dashboard
+
+        dashboard_with_tests = assert_success(client.get(f"/api/v1/dashboard/summary?store_id={store_id}&include_test_orders=true"))
+        assert dashboard_with_tests["data"]["order_count"] == 3, dashboard_with_tests
+        assert dashboard_with_tests["data"]["total_sales_amount"] == "916000.00", dashboard_with_tests
+        assert "010-****-1234" in str(dashboard_with_tests), dashboard_with_tests
 
         business_date = get_business_date().isoformat()
         context = assert_success(client.get(f"/api/v1/ai/daily-context?store_id={store_id}&date={business_date}"))
@@ -171,17 +186,18 @@ def main() -> None:
         assert context_data["date"] == business_date, context
         assert context_data["business_timezone"] == "Asia/Seoul", context
         assert context_data["scope"]["store_id"] == store_id, context
-        assert context_data["sales_summary"]["total_orders"] == 3, context
-        assert context_data["order_summary"]["recent_orders"], context
+        assert context_data["sales_summary"]["total_orders"] == 0, context
+        assert context_data["order_summary"]["recent_orders"] == [], context
         assert context_data["customer_inquiry_summary"]["open"] == 3, context
         assert context_data["sync_summary"]["failed_count"] >= 1, context
         focus_codes = {item["code"] for item in context_data["recommended_focus"]}
         assert "CHECK_OPEN_INQUIRIES" in focus_codes, context
         assert "CHECK_SYNC_FAILURES" in focus_codes, context
+        assert "CHECK_ORDER_DROP" in focus_codes, context
         assert "AUTHENTICITY_INQUIRIES" in focus_codes, context
         assert "检查未处理客服咨询" in str(context), context
         assert "정품 소명 문의 처리" in str(context), context
-        assert "010-****-1234" in str(context), context
+        assert "010-****-1234" not in str(context), context
 
         missing_store = client.get("/api/v1/dashboard/summary?store_id=999999")
         assert missing_store.status_code == 404, missing_store.text
@@ -215,8 +231,8 @@ def main() -> None:
         assert empty_context["data"]["order_summary"]["total_orders"] == 0, empty_context
 
     print("stage 1E verification ok")
-    print("GET /api/v1/stats/sales: total_orders=3 total_sales_amount=916000.00")
-    print("GET /api/v1/dashboard/summary: product/order/inquiry/sales counts ok")
+    print("GET /api/v1/stats/sales: default excludes local test orders; diagnostic include_test_orders ok")
+    print("GET /api/v1/dashboard/summary: product/inquiry counts ok; test orders excluded by default")
     print("dashboard latest_sync_logs <= 5 and recent_orders <= 5: ok")
     print("risk_flags: FAILED_SYNC_LOG and OPEN_CUSTOMER_INQUIRIES generated")
     print("GET /api/v1/ai/daily-context: structured context ok, no model call")
