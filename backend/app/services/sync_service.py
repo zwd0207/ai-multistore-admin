@@ -47,12 +47,14 @@ COUPANG_SETTLEMENT_CHECKPOINT_SYNC_TYPE = "settlements"
 NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
 NAVER_PRODUCT_SYNC_SOURCE_TYPE = "naver_real_sync"
 NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
+NAVER_ORDER_SYNC_SOURCE_TYPE = "naver_real_order_sync"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
 COUPANG_ORDER_PREVIEW_MAX_DAYS = 3
 COUPANG_FINANCIAL_PREVIEW_MAX_DAYS = 7
 NAVER_ORDER_PREVIEW_MAX_DAYS = 7
+NAVER_ORDER_SINGLE_WRITE_MAX_DAYS = 1
 COUPANG_ORDER_PREVIEW_MAX_PAGES = 3
 COUPANG_ORDER_PREVIEW_PAGE_SIZE = 50
 COUPANG_PRODUCT_MAX_PAGES = 3
@@ -1171,6 +1173,7 @@ def preview_naver_orders(
     size: int = 1,
     real_preview: bool = False,
     include_detail: bool = False,
+    real_sync: bool = False,
 ) -> dict:
     normalized_status = _resolve_naver_order_preview_status(order_status)
     start_kst, end_kst = _resolve_naver_order_preview_window(start_datetime, end_datetime)
@@ -1180,6 +1183,18 @@ def preview_naver_orders(
         credential_id=credential_id,
     )
     field_observation = _build_naver_order_preview_field_observation(credential)
+    if real_sync and not real_preview:
+        raise ApiError(
+            message="Naver order single local write requires real_preview=true",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if real_sync and not include_detail:
+        raise ApiError(
+            message="Naver order single local write requires include_detail=true",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
     if not real_preview:
         return _build_naver_order_preview_result(
             store_id=store_id,
@@ -1198,6 +1213,7 @@ def preview_naver_orders(
             has_more=False,
             would_create=0,
             would_update=0,
+            local_sync_result=_default_naver_order_local_sync_result(real_sync),
         )
 
     _ensure_naver_order_real_preview_allowed(
@@ -1208,8 +1224,10 @@ def preview_naver_orders(
         start_kst=start_kst,
         end_kst=end_kst,
         field_observation=field_observation,
+        real_sync=real_sync,
     )
     return _run_naver_order_real_micro_preview(
+        db=db,
         credential=credential,
         store_id=store_id,
         start_kst=start_kst,
@@ -1219,6 +1237,7 @@ def preview_naver_orders(
         size=size,
         include_detail=include_detail,
         field_observation=field_observation,
+        real_sync=real_sync,
     )
 
 
@@ -2915,6 +2934,28 @@ def _build_naver_order_preview_field_observation(credential) -> dict:
     }
 
 
+def _default_naver_order_local_sync_result(real_sync: bool = False) -> dict:
+    return {
+        "requested": bool(real_sync),
+        "status": "not_requested" if not real_sync else "blocked",
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_count": 0,
+        "already_exists": False,
+        "no_duplicate_created": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "write_limit": 1,
+        "skip_reason": None,
+        "sample_ids": [],
+    }
+
+
 def _ensure_naver_order_real_preview_allowed(
     *,
     store_id: int,
@@ -2924,6 +2965,7 @@ def _ensure_naver_order_real_preview_allowed(
     start_kst: datetime,
     end_kst: datetime,
     field_observation: dict,
+    real_sync: bool = False,
 ) -> None:
     settings = get_settings()
     if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
@@ -2950,6 +2992,13 @@ def _ensure_naver_order_real_preview_allowed(
             message="Naver order micro preview window must be 7 KST days or less",
             error_code="date_range_invalid",
             status_code=400,
+        )
+    if real_sync and end_kst - start_kst > timedelta(days=NAVER_ORDER_SINGLE_WRITE_MAX_DAYS):
+        raise ApiError(
+            message="Naver order single local write window must be 24 hours or less",
+            error_code="date_range_invalid",
+            status_code=400,
+            detail={"max_window": f"P{NAVER_ORDER_SINGLE_WRITE_MAX_DAYS}D"},
         )
     if not field_observation.get("channel_no_configured"):
         raise ApiError(
@@ -2979,6 +3028,7 @@ def _build_naver_token_context_from_credential(credential) -> dict:
 
 def _run_naver_order_real_micro_preview(
     *,
+    db: Session,
     credential,
     store_id: int,
     start_kst: datetime,
@@ -2988,8 +3038,10 @@ def _run_naver_order_real_micro_preview(
     size: int,
     include_detail: bool,
     field_observation: dict,
+    real_sync: bool = False,
 ) -> dict:
     context = _build_naver_token_context_from_credential(credential)
+    local_sync_result = _default_naver_order_local_sync_result(real_sync)
     try:
         access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
         field_observation["token_http_status"] = token_status
@@ -3029,11 +3081,16 @@ def _run_naver_order_real_micro_preview(
                 has_more=False,
                 would_create=0,
                 would_update=0,
+                local_sync_result=local_sync_result,
             )
         feed_payload = feed_result["payload"]
         product_order_ids = _extract_naver_product_order_ids(feed_payload)
         sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:1]]
         if not product_order_ids:
+            if real_sync:
+                local_sync_result["status"] = "skipped"
+                local_sync_result["skipped_count"] = 1
+                local_sync_result["skip_reason"] = "no_changed_orders"
             field_observation["detail_skipped_reason"] = "no_changed_orders" if include_detail else "detail_not_requested"
             return _build_naver_order_preview_result(
                 store_id=store_id,
@@ -3052,6 +3109,7 @@ def _run_naver_order_real_micro_preview(
                 has_more=_naver_order_feed_has_more(feed_payload),
                 would_create=0,
                 would_update=0,
+                local_sync_result=local_sync_result,
             )
         if include_detail:
             field_observation["detail_called"] = True
@@ -3064,6 +3122,9 @@ def _run_naver_order_real_micro_preview(
             field_observation["detail_http_status"] = detail_result["http_status"]
             if not detail_result["success"]:
                 error_code = detail_result.get("error_code") or "readonly_request_failed"
+                if real_sync:
+                    local_sync_result["status"] = "blocked"
+                    local_sync_result["skip_reason"] = "detail_request_failed"
                 field_observation["detail_error"] = detail_result["diagnostics"]
                 return _build_naver_order_preview_result(
                     store_id=store_id,
@@ -3082,10 +3143,19 @@ def _run_naver_order_real_micro_preview(
                     has_more=_naver_order_feed_has_more(feed_payload),
                     would_create=0,
                     would_update=0,
+                    local_sync_result=local_sync_result,
                 )
             detail_preview = _build_naver_order_detail_preview(detail_result["payload"], store_id=store_id)
             field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
             field_observation["detail_preview"] = detail_preview
+            local_sync_result = _sync_naver_order_detail_preview(
+                db,
+                detail_preview=detail_preview,
+                real_sync=real_sync,
+            )
+            field_observation["privacy_gate"] = local_sync_result.get("privacy_gate")
+            field_observation["orders_written"] = bool(local_sync_result.get("orders_written"))
+            field_observation["local_sync_status"] = local_sync_result.get("status")
         else:
             field_observation["detail_skipped_reason"] = "detail_not_requested"
         return _build_naver_order_preview_result(
@@ -3103,8 +3173,9 @@ def _run_naver_order_real_micro_preview(
             field_observation=field_observation,
             sample_ids=sample_ids,
             has_more=_naver_order_feed_has_more(feed_payload),
-            would_create=0,
+            would_create=int(local_sync_result.get("created_count") or 0),
             would_update=0,
+            local_sync_result=local_sync_result,
         )
     except ApiError:
         raise
@@ -3133,6 +3204,7 @@ def _run_naver_order_real_micro_preview(
             has_more=False,
             would_create=0,
             would_update=0,
+            local_sync_result=local_sync_result,
         )
     except api_credential_readiness_service.NaverReadonlyAuthError as exc:
         return _build_naver_order_preview_result(
@@ -3157,6 +3229,7 @@ def _run_naver_order_real_micro_preview(
             has_more=False,
             would_create=0,
             would_update=0,
+            local_sync_result=local_sync_result,
         )
     except Exception as exc:
         http_status = getattr(exc, "http_status", None)
@@ -3178,6 +3251,7 @@ def _run_naver_order_real_micro_preview(
             has_more=False,
             would_create=0,
             would_update=0,
+            local_sync_result=local_sync_result,
         )
 
 
@@ -3584,6 +3658,183 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
     }
 
 
+def _parse_preview_iso_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_hash_identifier(value: object) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"id-hash-[0-9a-f]{10}", value))
+
+
+def _is_masked_name(value: object) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    return not text or "*" in text
+
+
+def _is_masked_phone(value: object) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    return not text or bool(re.fullmatch(r"\*{4}\d{0,4}", text))
+
+
+def _validate_naver_order_detail_preview_for_local_write(detail_preview: dict | None) -> dict:
+    reasons: list[str] = []
+    if not isinstance(detail_preview, dict):
+        return {"passed": False, "reasons": ["missing_detail_preview"]}
+    if detail_preview.get("store_id") != 8:
+        reasons.append("invalid_store_id")
+    if detail_preview.get("platform") != "naver":
+        reasons.append("invalid_platform")
+    if not _is_hash_identifier(detail_preview.get("external_product_order_id_hash")):
+        reasons.append("missing_external_product_order_id_hash")
+    if not _is_hash_identifier(detail_preview.get("external_order_id_hash")):
+        reasons.append("missing_external_order_id_hash")
+    if detail_preview.get("raw_response_saved") is not False:
+        reasons.append("raw_response_not_suppressed")
+    if detail_preview.get("privacy_fields_redacted") is not True:
+        reasons.append("privacy_fields_not_redacted")
+    if detail_preview.get("address_saved") is not False:
+        reasons.append("address_saved_not_allowed")
+    if not _is_masked_name(detail_preview.get("buyer_name_masked")):
+        reasons.append("buyer_name_not_masked")
+    if not _is_masked_name(detail_preview.get("receiver_name_masked")):
+        reasons.append("receiver_name_not_masked")
+    if not _is_masked_phone(detail_preview.get("buyer_phone_masked")):
+        reasons.append("buyer_phone_not_masked")
+    if not _is_masked_phone(detail_preview.get("receiver_phone_masked")):
+        reasons.append("receiver_phone_not_masked")
+    if detail_preview.get("buyer_id_hash") is not None and not _is_hash_identifier(detail_preview.get("buyer_id_hash")):
+        reasons.append("buyer_id_not_hashed")
+
+    serialized = json.dumps(detail_preview, ensure_ascii=False, default=str).lower()
+    for forbidden in ("authorization", "client_secret", "signature", "bcrypt", "raw response"):
+        if forbidden in serialized:
+            reasons.append(f"forbidden_text_{forbidden.replace(' ', '_')}")
+    return {"passed": not reasons, "reasons": sorted(dict.fromkeys(reasons))}
+
+
+def _naver_order_sanitized_raw_data(detail_preview: dict) -> dict:
+    allowed_keys = (
+        "external_order_id_hash",
+        "external_product_order_id_hash",
+        "order_status",
+        "order_status_label_zh",
+        "payment_status",
+        "option_name",
+        "delivery_status",
+        "delivery_status_label_zh",
+        "claim_status",
+        "claim_status_label_zh",
+        "buyer_id_hash",
+        "receiver_name_masked",
+        "receiver_phone_masked",
+        "address_observed",
+        "address_saved",
+        "source_type",
+        "last_synced_at",
+        "mapping_version",
+        "unknown_status_observed",
+        "safe_status_samples",
+        "raw_response_saved",
+        "privacy_fields_redacted",
+    )
+    raw_data = {key: detail_preview.get(key) for key in allowed_keys if key in detail_preview}
+    raw_data.update({
+        "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+        "synced_from": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        "orders_written": True,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+    })
+    return raw_data
+
+
+def _sync_naver_order_detail_preview(
+    db: Session,
+    *,
+    detail_preview: dict | None,
+    real_sync: bool,
+) -> dict:
+    result = _default_naver_order_local_sync_result(real_sync)
+    if not real_sync:
+        return result
+
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(detail_preview)
+    result["privacy_gate"] = privacy_gate
+    if not privacy_gate["passed"]:
+        result["status"] = "blocked"
+        result["skip_reason"] = "privacy_gate_failed"
+        return result
+
+    assert detail_preview is not None
+    external_order_id = str(detail_preview["external_product_order_id_hash"])
+    existing = db.scalar(
+        select(Order).where(
+            Order.store_id == 8,
+            Order.platform == "naver",
+            Order.external_order_id == external_order_id,
+        )
+    )
+    if existing is not None:
+        result["status"] = "already_exists"
+        result["already_exists"] = True
+        result["no_duplicate_created"] = True
+        result["skip_reason"] = "duplicate_external_product_order_id_hash"
+        result["sample_ids"] = [external_order_id]
+        return result
+
+    synced_at = _parse_preview_iso_datetime(detail_preview.get("last_synced_at")) or get_utc_now()
+    ordered_at = _parse_preview_iso_datetime(detail_preview.get("ordered_at")) or synced_at
+    paid_at = _parse_preview_iso_datetime(detail_preview.get("paid_at"))
+    amount = _to_decimal(detail_preview.get("order_amount")) or Decimal("0")
+    order_status = (detail_preview.get("order_status") or {}).get("raw") if isinstance(detail_preview.get("order_status"), dict) else None
+    order = Order(
+        store_id=8,
+        platform="naver",
+        external_order_id=external_order_id,
+        buyer_name=_bounded_text(detail_preview.get("buyer_name_masked"), 120),
+        buyer_masked_phone=_bounded_text(detail_preview.get("buyer_phone_masked"), 30),
+        product_name=_bounded_text(detail_preview.get("product_name"), 300) or f"Naver order {external_order_id}",
+        quantity=_extract_int_by_keys(detail_preview, ("quantity",)) or 1,
+        order_amount=amount,
+        currency="KRW",
+        order_status=_bounded_text(order_status or "UNKNOWN", 30) or "UNKNOWN",
+        paid_at=paid_at,
+        ordered_at=ordered_at,
+        source_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+        last_synced_at=synced_at,
+        raw_data=_naver_order_sanitized_raw_data(detail_preview),
+    )
+    db.add(order)
+    db.commit()
+
+    result.update({
+        "status": "success",
+        "created_count": 1,
+        "orders_written": True,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "sample_ids": [external_order_id],
+    })
+    return result
+
+
 def _collect_json_field_names(payload: object) -> list[str]:
     names: list[str] = []
     if isinstance(payload, dict):
@@ -3679,6 +3930,7 @@ def _build_naver_order_preview_result(
     has_more: bool,
     would_create: int,
     would_update: int,
+    local_sync_result: dict | None = None,
 ) -> dict:
     safe_keyword_flags = dict(
         field_observation.get("safe_keyword_flags")
@@ -3705,6 +3957,7 @@ def _build_naver_order_preview_result(
         "has_more": has_more,
         "would_create": would_create,
         "would_update": would_update,
+        "local_sync_result": local_sync_result or _default_naver_order_local_sync_result(False),
         "sample_ids": sample_ids,
         "field_observation": field_observation,
         "detail_preview": field_observation.get("detail_preview"),

@@ -3179,6 +3179,7 @@ def verify_sync_preview_schema_and_security() -> None:
             try:
                 with SessionLocal() as db:
                     before_real_preview_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_real_preview_product_count = len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all())
                     before_real_preview_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
                     before_real_preview_cap_success = len(db.execute(text(
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
@@ -3452,6 +3453,145 @@ def verify_sync_preview_schema_and_security() -> None:
                 ]:
                     assert forbidden not in unknown_text, unknown_text
 
+                real_sync_without_detail = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": False,
+                    "real_sync": True,
+                })
+                assert real_sync_without_detail.status_code == 400, real_sync_without_detail.text
+                assert real_sync_without_detail.json()["error_code"] == "guardrail_blocked", real_sync_without_detail.text
+
+                FakeNaverOrderHttpClient.calls = []
+                FakeNaverOrderHttpClient.response_sequence = []
+                FakeNaverOrderHttpClient.detail_called = False
+                single_write = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                    "real_sync": True,
+                })
+                assert single_write.status_code == 200, single_write.text
+                single_write_data = single_write.json()["data"]
+                assert single_write_data["preview_status"] == "success", single_write_data
+                assert single_write_data["field_observation"]["detail_called"] is True, single_write_data
+                assert single_write_data["field_observation"]["orders_written"] is True, single_write_data
+                single_sync = single_write_data["local_sync_result"]
+                assert single_sync["requested"] is True, single_sync
+                assert single_sync["status"] == "success", single_sync
+                assert single_sync["created_count"] == 1, single_sync
+                assert single_sync["orders_written"] is True, single_sync
+                assert single_sync["products_written"] is False, single_sync
+                assert single_sync["sync_log_written"] is False, single_sync
+                assert single_sync["capability_tested_success_written"] is False, single_sync
+                assert single_sync["raw_response_saved"] is False, single_sync
+                assert single_sync["privacy_fields_redacted"] is True, single_sync
+                assert single_sync["address_saved"] is False, single_sync
+                assert single_sync["privacy_gate"]["passed"] is True, single_sync
+                written_external_order_id = single_sync["sample_ids"][0]
+                assert written_external_order_id.startswith("id-hash-"), single_sync
+                with SessionLocal() as db:
+                    after_single_write_orders = db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()
+                    assert len(after_single_write_orders) == before_real_preview_order_count + 1
+                    written_order = db.scalar(select(Order).where(
+                        Order.store_id == naver_store_id,
+                        Order.platform == "naver",
+                        Order.external_order_id == written_external_order_id,
+                    ))
+                    assert written_order is not None
+                    assert written_order.platform == "naver"
+                    assert written_order.external_order_id.startswith("id-hash-")
+                    assert written_order.buyer_name != "must-not-leak-buyer"
+                    assert written_order.buyer_masked_phone == "****2222"
+                    assert written_order.product_name == "safe-field-presence-only"
+                    assert written_order.quantity == 2
+                    assert str(written_order.order_amount) in {"12345.00", "12345"}
+                    assert written_order.currency == "KRW"
+                    assert written_order.order_status == "PAYED"
+                    assert written_order.source_type == "naver_real_order_sync"
+                    assert written_order.raw_data["raw_response_saved"] is False
+                    assert written_order.raw_data["privacy_fields_redacted"] is True
+                    assert written_order.raw_data["address_saved"] is False
+                    assert written_order.raw_data["address_observed"] is True
+                    assert written_order.raw_data["external_product_order_id_hash"].startswith("id-hash-")
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_real_preview_product_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_real_preview_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_real_preview_cap_success
+                    written_db_text = json.dumps({
+                        "external_order_id": written_order.external_order_id,
+                        "buyer_name": written_order.buyer_name,
+                        "buyer_masked_phone": written_order.buyer_masked_phone,
+                        "product_name": written_order.product_name,
+                        "raw_data": written_order.raw_data,
+                    }, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "must-not-leak-payment",
+                        "fake-order-token",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in written_db_text, written_db_text
+
+                duplicate_write = client.post("/api/v1/sync/orders/naver/preview", json={
+                    "store_id": 8,
+                    "credential_id": 7,
+                    "start_datetime": "2026-07-01T00:00:00+09:00",
+                    "end_datetime": "2026-07-01T01:00:00+09:00",
+                    "order_status": "ALL",
+                    "page": 1,
+                    "size": 1,
+                    "real_preview": True,
+                    "include_detail": True,
+                    "real_sync": True,
+                })
+                assert duplicate_write.status_code == 200, duplicate_write.text
+                duplicate_sync = duplicate_write.json()["data"]["local_sync_result"]
+                assert duplicate_sync["status"] == "already_exists", duplicate_sync
+                assert duplicate_sync["already_exists"] is True, duplicate_sync
+                assert duplicate_sync["no_duplicate_created"] is True, duplicate_sync
+                assert duplicate_sync["created_count"] == 0, duplicate_sync
+                with SessionLocal() as db:
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count + 1
+
+                bad_privacy_preview = dict(detail_summary)
+                bad_privacy_preview["buyer_name_masked"] = "must-not-leak-buyer"
+                with SessionLocal() as db:
+                    privacy_blocked = sync_service._sync_naver_order_detail_preview(
+                        db,
+                        detail_preview=bad_privacy_preview,
+                        real_sync=True,
+                    )
+                    assert privacy_blocked["status"] == "blocked", privacy_blocked
+                    assert privacy_blocked["skip_reason"] == "privacy_gate_failed", privacy_blocked
+                    assert privacy_blocked["privacy_gate"]["passed"] is False, privacy_blocked
+                    assert "buyer_name_not_masked" in privacy_blocked["privacy_gate"]["reasons"], privacy_blocked
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count + 1
+
                 FakeNaverOrderHttpClient.calls = []
                 FakeNaverOrderHttpClient.response_sequence = [
                     FakeNaverOrderResponse(200, {"data": {"lastChangeStatuses": [], "hasMore": False}}),
@@ -3467,10 +3607,14 @@ def verify_sync_preview_schema_and_security() -> None:
                     "size": 1,
                     "real_preview": True,
                     "include_detail": True,
+                    "real_sync": True,
                 })
                 assert empty_detail_preview.status_code == 200, empty_detail_preview.text
                 empty_detail_data = empty_detail_preview.json()["data"]
                 assert empty_detail_data["preview_status"] == "success_empty", empty_detail_data
+                assert empty_detail_data["local_sync_result"]["requested"] is True, empty_detail_data
+                assert empty_detail_data["local_sync_result"]["status"] == "skipped", empty_detail_data
+                assert empty_detail_data["local_sync_result"]["skip_reason"] == "no_changed_orders", empty_detail_data
                 assert empty_detail_data["business_message"] == "Naver 订单接口已连接。当前时间范围内没有新的订单变更，暂时不需要处理订单同步。", empty_detail_data
                 assert empty_detail_data["field_observation"]["detail_called"] is False, empty_detail_data
                 assert empty_detail_data["field_observation"]["detail_skipped_reason"] == "no_changed_orders", empty_detail_data
@@ -3519,7 +3663,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert failed_data["field_observation"]["detail_called"] is False, failed_data
                 assert len(failed_data["field_observation"]["feed_attempts"]) == 1, failed_data
                 with SessionLocal() as db:
-                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count + 1
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_real_preview_product_count
                     assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_real_preview_logs
                     assert len(db.execute(text(
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
