@@ -240,3 +240,11 @@ Naver ERP Dashboard summary is in place, and the next order-detail boundary is d
 This strategy allows complete order number, product number, buyer information, receiver information, and address to appear in controlled internal order-detail views. Dashboard remains summary-only and should not expand complete buyer phone or address into top-level cards.
 
 This phase is documentation-only. It does not call Naver, does not write Codex1 data, does not change database schema, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-5C - Order Detail Mock Display
+
+Codex2 Orders now includes a Naver order detail section for controlled internal display of complete mock business fields. See `PHASE_NAVER_ERP_5C_ORDER_DETAIL_MOCK_DISPLAY.md`.
+
+The `pxg球包店` mock order includes complete order number, product order number, platform product number, buyer information, receiver information, address, payment status, delivery status, and claim status. Dashboard remains summary-only.
+
+This phase still does not call Naver, does not write Codex1 data, does not change database schema, and does not open formal Naver order sync. Backend mode remains tolerant when complete fields are not yet present.

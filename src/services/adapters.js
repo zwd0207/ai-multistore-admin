@@ -282,6 +282,9 @@ export function adaptOrder(item = {}) {
   const displayOrderNo = isNaver && isHashOrderId ? '订单编号已脱敏' : item.external_order_id;
   const displayCustomer = isNaver ? (item.buyer_name || '买家信息已脱敏') : item.buyer_name;
   const displayPhone = isNaver && !item.buyer_masked_phone ? '未保存' : emptyText(item.buyer_masked_phone);
+  const fullOrderNo = item.external_order_id || rawData.external_order_id || '';
+  const productOrderNo = item.external_product_order_id || rawData.external_product_order_id || '';
+  const platformProductId = item.platform_product_id || item.external_product_id || rawData.platform_product_id || rawData.external_product_id || '';
   const statusLabel = isNaver
     ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
     : adaptStatus(item.order_status, {
@@ -298,18 +301,33 @@ export function adaptOrder(item = {}) {
     platform: adaptPlatform(item.platform),
     rawPlatform,
     orderNo: displayOrderNo,
+    fullOrderNo,
     orderHash: isNaver && isHashOrderId ? item.external_order_id : null,
+    productOrderNo,
+    platformProductId,
     product: item.product_name,
     productName: item.product_name,
+    optionName: item.option_name || rawData.option_name,
     customer: displayCustomer,
     customerName: displayCustomer,
+    buyerName: item.buyer_name || rawData.buyer_name,
+    buyerPhone: item.buyer_phone || rawData.buyer_phone,
     maskedPhone: item.buyer_masked_phone,
     phone: displayPhone,
+    receiverName: item.receiver_name || rawData.receiver_name,
+    receiverPhone: item.receiver_phone || rawData.receiver_phone,
+    receiverAddress: item.receiver_address || rawData.receiver_address,
+    zipCode: item.zip_code || rawData.zip_code,
     quantity: item.quantity,
     amount: numberValue(item.order_amount),
     currency: item.currency,
     rawStatus: item.order_status,
     status: statusLabel,
+    paymentStatus: item.payment_status || rawData.payment_status,
+    deliveryStatus: item.delivery_status || rawData.delivery_status,
+    deliveryStatusLabelZh: item.delivery_status_label_zh || rawData.delivery_status_label_zh,
+    claimStatus: item.claim_status || rawData.claim_status,
+    claimStatusLabelZh: item.claim_status_label_zh || rawData.claim_status_label_zh,
     sourceType: item.source_type,
     rawResponseSaved: rawData.raw_response_saved,
     privacyFieldsRedacted: rawData.privacy_fields_redacted,
