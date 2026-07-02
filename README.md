@@ -232,3 +232,11 @@ Implemented:
 - Test connection remains a local-only notice and does not claim real API validation.
 
 Codex1 uses an idempotent SQLite schema upgrade script for existing local databases. This phase still excludes real Naver/Coupang API calls, token refresh, and real API connection tests.
+
+## Phase Naver-ERP-5B - Order Detail Complete Field Strategy
+
+Naver ERP Dashboard summary is in place, and the next order-detail boundary is documented in `PHASE_NAVER_ERP_5B_ORDER_DETAIL_FIELD_STRATEGY.md`.
+
+This strategy allows complete order number, product number, buyer information, receiver information, and address to appear in controlled internal order-detail views. Dashboard remains summary-only and should not expand complete buyer phone or address into top-level cards.
+
+This phase is documentation-only. It does not call Naver, does not write Codex1 data, does not change database schema, and does not open formal Naver order sync.
