@@ -1583,11 +1583,11 @@ def _ensure_naver_product_real_preview_allowed(
                 "real_api_write_enabled": bool(settings.real_api_write_enabled),
             },
         )
-    max_size = 1 if real_sync else 5
+    max_size = 5
     if page != 1 or size < 1 or size > max_size:
         raise ApiError(
             message=(
-                "Naver product local sync micro test only allows page=1 and size=1"
+                "Naver product local sync small-batch test only allows page=1 and size<=5"
                 if real_sync
                 else "Naver product real preview only allows page=1 and size<=5"
             ),
@@ -2388,7 +2388,7 @@ def _default_naver_product_local_sync_result(real_sync: bool = False) -> dict:
         "sync_log_written": False,
         "capability_tested_success_written": False,
         "raw_response_saved": False,
-        "write_limit": 1,
+        "write_limit": 5,
     }
 
 
@@ -2405,43 +2405,61 @@ def _sync_naver_product_preview_candidate(
         return result
 
     candidates, skip_reasons = _extract_naver_product_sync_candidates(payload)
-    if len(candidates) != 1 or any(
-        int(skip_reasons.get(reason, 0)) > 0
-        for reason in ("multiple_channel_products", "missing_external_product_id", "missing_product_name")
+    hard_skip_reasons = (
+        "multiple_channel_products",
+        "missing_external_product_id",
+        "missing_product_name",
+        "duplicate_external_product_id_in_same_batch",
+        "invalid_status_shape",
+        "invalid_numeric_shape_for_price",
+        "invalid_numeric_shape_for_stock",
+    )
+    dry_run_skip_reasons = dry_run_diff.get("skip_reasons") or {}
+    if any(
+        int(skip_reasons.get(reason, 0)) > 0 or int(dry_run_skip_reasons.get(reason, 0)) > 0
+        for reason in hard_skip_reasons
     ):
         result["status"] = "skipped"
-        result["skipped_count"] = max(
-            int(dry_run_diff.get("would_skip") or 0),
-            1 if len(candidates) != 1 else 0,
-        )
-        result["skip_reasons"] = skip_reasons
+        result["skipped_count"] = int(dry_run_diff.get("would_skip") or 0)
+        result["skip_reasons"] = {
+            reason: max(int(skip_reasons.get(reason, 0)), int(dry_run_skip_reasons.get(reason, 0)))
+            for reason in _empty_naver_product_skip_reasons()
+        }
         return result
 
-    candidate = candidates[0]
-    product = db.scalar(
-        select(Product).where(
-            Product.store_id == store_id,
-            Product.platform == "naver",
-            Product.external_product_id == candidate["external_product_id"],
+    created_count = 0
+    updated_count = 0
+    sample_ids: list[str] = []
+    update_fields = set(_naver_product_update_whitelist()) | {"raw_data"}
+    for candidate in candidates[:5]:
+        product = db.scalar(
+            select(Product).where(
+                Product.store_id == store_id,
+                Product.platform == "naver",
+                Product.external_product_id == candidate["external_product_id"],
+            )
         )
-    )
-    payload_fields = {
-        "store_id": store_id,
-        "platform": "naver",
-        **candidate,
-    }
-    if product is None:
-        db.add(Product(**payload_fields))
-        result["created_count"] = 1
-    else:
-        for field, value in payload_fields.items():
-            setattr(product, field, value)
-        result["updated_count"] = 1
+        if product is None:
+            db.add(Product(
+                store_id=store_id,
+                platform="naver",
+                external_product_id=candidate["external_product_id"],
+                **{field: value for field, value in candidate.items() if field != "external_product_id"},
+            ))
+            created_count += 1
+        else:
+            for field, value in candidate.items():
+                if field in update_fields:
+                    setattr(product, field, value)
+            updated_count += 1
+        sample_ids.append(_mask_external_identifier(candidate["external_product_id"]))
     db.commit()
 
     result["status"] = "success"
     result["products_written"] = True
-    result["sample_ids"] = [_mask_external_identifier(candidate["external_product_id"])]
+    result["created_count"] = created_count
+    result["updated_count"] = updated_count
+    result["sample_ids"] = sample_ids[:5]
     result["skip_reasons"] = skip_reasons
     return result
 
@@ -2500,7 +2518,7 @@ def _extract_naver_product_sync_candidates(payload: object | None) -> tuple[list
                 "raw_response_saved": False,
             },
         })
-    return candidates[:1], skip_reasons
+    return candidates[:5], skip_reasons
 
 
 def _iter_naver_product_contents(payload: object | None) -> list[dict]:
