@@ -568,3 +568,9 @@ ERP-Backup-1B is planning-only. It defines future backup manifest metadata, rete
 The restore verification dry-run is documented in `PHASE_ERP_BACKUP_1C_RESTORE_VERIFICATION_DRY_RUN.md`.
 
 ERP-Backup-1C adds private `verify_all.py` coverage for a future restore verification workflow. It creates a temporary SQLite fixture, temporary backup copy, safe manifest, and temporary restore target, then verifies SHA-256, file size, retention class, safety flags, sensitive-field rejection, `PRAGMA integrity_check`, expected tables, and restored row counts. It blocks the production database path as a restore target and confirms the real `backend/codex1.db` is unchanged. It does not create production backups, restore the real database, delete backups, modify schema, write business data, call platform APIs, modify runtime UI, or open any formal sync.
+
+## Phase ERP-UX-1A - Frontend Production Usability Plan
+
+The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
+
+ERP-UX-1A is planning-only. It defines how the frontend should become usable for non-technical operators by making Dashboard, Orders, Products, Credentials, API status, Logs, Audit, Backup, and Restore screens business-first. Main pages should show Chinese business copy, daily tasks, safe next actions, and formal-sync status without exposing raw enums, safe hashes, guardrail wording, `real_sync`, `store_id`, `credential_id`, HTTP details, or other technical fields. Those fields belong only in collapsed `TechnicalDetails` or diagnostic views. This phase does not modify runtime frontend code, Codex1, database schema, local data, platform APIs, or formal sync gates.
