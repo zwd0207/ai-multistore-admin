@@ -412,3 +412,9 @@ The selected candidate real write approval plan is documented in `PHASE_NAVER_ER
 The selected candidate single local write is documented in `PHASE_NAVER_ERP_11E_SELECTED_CANDIDATE_SINGLE_LOCAL_WRITE.md`.
 
 11E backed up `backend/codex1.db`, re-ran a fresh readonly sanitized preview, confirmed candidate `id-hash-ab176f5db1` still matched `candidate_new` with duplicate count 0, and wrote exactly one sanitized local Naver order. `orders_store8` moved from 4 to 5, real Naver local orders moved from 1 to 2, mock Naver orders remained 3, `products_store8` stayed 5, `sync_logs_store8` stayed 1, and `tested_success_store8` stayed 8. The row keeps `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Formal Naver order sync remains closed.
+
+## Phase Naver-ERP-11F - Selected Candidate Post-Write Verification
+
+The selected candidate post-write verification is documented in `PHASE_NAVER_ERP_11F_SELECTED_CANDIDATE_POST_WRITE_VERIFICATION.md`.
+
+11F performed local database readback only. It did not call Naver, did not write local data, did not modify Codex1 or Codex2 runtime behavior, and did not open formal Naver order sync. The selected candidate `id-hash-ab176f5db1` exists exactly once with `source_type=naver_real_order_sync`, `order_status=DELIVERED`, `quantity=1`, `order_amount=330000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Current counts remain `orders_store8=5`, real Naver local orders 2, mock Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`.
