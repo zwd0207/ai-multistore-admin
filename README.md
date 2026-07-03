@@ -436,3 +436,9 @@ The Orders UI manual approval affordance plan is documented in `PHASE_NAVER_ERP_
 The Naver order local refresh mock gate is documented in `PHASE_NAVER_ERP_13A_ORDER_LOCAL_REFRESH_MOCK_GATE.md`.
 
 13A adds a private Codex1 mock-testable gate for future local order refresh planning. It is not wired to a public endpoint and does not call Naver. `verify_all.py` covers readonly not-requested, stale preview, identity mismatch, missing local order, privacy-blocked, manual-approval-required, one-row temporary mock refresh success, no-change repeat refresh, and sensitive field scanning while keeping products, SyncLog, tested_success, raw response saving, platform writes, and formal order sync closed.
+
+## Phase Naver-ERP-13B - Naver Order Readonly Refresh Repeat
+
+The Naver order readonly refresh repeat is documented in `PHASE_NAVER_ERP_13B_ORDER_READONLY_REFRESH_REPEAT.md`.
+
+13B re-ran the existing Codex1 order preview endpoint with `real_preview=true`, `include_detail=true`, `complete_field_preview=true`, and `real_sync=false` over a recent 3-day KST window. The backend returned HTTP 200 with `preview_status=success`, feed/detail HTTP 200, and safe hash `id-hash-ab176f5db1`, which matched an existing real local Naver order. The observed status is `DELIVERED / 配送完成`, amount is `330000 KRW`, and quantity is 1. Local counts stayed unchanged: `orders_store8=5`, real Naver local orders 2, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. This is not refresh write approval; formal Naver order sync and all platform write operations remain closed.
