@@ -556,3 +556,9 @@ ERP-Audit-1C adds private `verify_all.py` coverage for the future `operation_aud
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
 
 ERP-Backup-1A is planning-only. It defines the future backup filename and manifest convention, SHA-256 verification, SQLite integrity checks, temporary restore drill workflow, real restore approval boundary, and phases that must require a backup before writes or migrations. It does not create a backup, restore a database, modify `backend/codex1.db`, change schema, write business data, call platform APIs, modify runtime UI, or change backup/restore behavior.
+
+## Phase ERP-Backup-1B - Backup Metadata and Retention Plan
+
+The backup metadata and retention plan is documented in `PHASE_ERP_BACKUP_1B_BACKUP_METADATA_RETENTION_PLAN.md`.
+
+ERP-Backup-1B is planning-only. It defines future backup manifest metadata, retention classes, retention windows, protected-from-auto-delete rules, cleanup approval gates, restore metadata checks, and future audit-log relationships. It does not create backups, delete backups, restore a database, modify `backend/codex1.db`, change schema, write business data, call platform APIs, modify runtime UI, or change backup/restore behavior. The first cleanup implementation must be report-only and must not delete files automatically.
