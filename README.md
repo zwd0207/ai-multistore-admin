@@ -569,6 +569,12 @@ The current 24-hour candidate write approval plan is documented in `PHASE_NAVER_
 
 16C2 is approval and documentation only. It does not call Naver, execute `real_sync=true`, back up or write `backend/codex1.db`, change schema, modify runtime UI, or open formal order sync. It exists because the stopped 16D gate saw the 3-day readonly candidate `id-hash-67b5fc1c97`, but the writeable 24-hour guardrail returned a different current candidate, `id-hash-bc5528d093`. Since the 24-hour candidate was not approved by 16C, no order was written. 16C2 approves only the plan for a later one-row retry targeting `id-hash-bc5528d093`; that retry must still back up the database, rerun fresh readonly preview, confirm duplicate counts are zero, pass privacy and required-field gates, write no products/SyncLog/tested_success/timeline rows, and keep all Naver platform write operations plus formal order sync closed.
 
+## Phase Naver-ERP-16D-Retry - Approved Current Candidate Single Local Write
+
+The approved current candidate single local write is documented in `PHASE_NAVER_ERP_16D_RETRY_APPROVED_CURRENT_CANDIDATE_SINGLE_LOCAL_WRITE.md`.
+
+16D-Retry performed one controlled local write for safe hash `id-hash-bc5528d093` after backing up `backend/codex1.db` and rerunning the 24-hour readonly preview. The fresh gate returned HTTP 200 with token/feed/detail HTTP 200, the approved safe hash, zero local duplicate matches, privacy gate passed, and required fields present. Post-write counts are `orders_store8=6`, real Naver local orders 3, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, and `order_status_events_rows=0`. The written row is sanitized with `source_type=naver_real_order_sync`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Formal Naver order sync, batch writes, timeline insertion, and all Naver platform write operations remain closed.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
