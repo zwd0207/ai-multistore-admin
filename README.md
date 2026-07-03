@@ -502,3 +502,9 @@ The order status timeline schema migration is documented in `PHASE_NAVER_ERP_14G
 The timeline event single local write mock gate is documented in `PHASE_NAVER_ERP_14H_TIMELINE_EVENT_SINGLE_LOCAL_WRITE_MOCK_GATE.md`.
 
 14H adds a private Codex1 helper and verify_all coverage for a single timeline event write gate in the temporary verification database only. It checks fresh preview, selected hash identity, exactly one planned event, local order uniqueness, known event type, dedupe key, safety booleans, sensitive fields, and manual approval before a mock event row can be inserted. It does not write the real event table, call Naver, modify runtime UI, or open formal order sync.
+
+## Phase Naver-ERP-14I - Post-Refresh Timeline Verification
+
+The post-refresh timeline verification is documented in `PHASE_NAVER_ERP_14I_POST_REFRESH_TIMELINE_VERIFICATION.md`.
+
+14I is local readback only after the blocked 13D refresh attempt. It confirms selected hash `id-hash-ab176f5db1` remains `DELIVERED`, `orders_refreshed=false`, `order_status_events_rows=0`, and selected-hash timeline events `0`. Because 13D did not pass the fresh selected-hash gate, no timeline event should exist. Formal Naver order sync and real timeline event writes remain closed.
