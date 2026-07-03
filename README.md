@@ -472,3 +472,9 @@ The Orders UI status timeline display plan is documented in `PHASE_NAVER_ERP_14C
 The order status events schema proposal is documented in `PHASE_NAVER_ERP_14D_ORDER_STATUS_EVENTS_SCHEMA_PROPOSAL.md`.
 
 14D is proposal-only. It recommends a future `order_status_events` table linked to `orders.id`, with safe order hashes, event type, status labels, observed time, source metadata, a dedupe key, and safety booleans. It defines unique/index strategy, forbidden privacy/raw-response fields, migration and rollback direction, and future read API boundaries. It does not modify models, run migrations, write data, or open formal order sync.
+
+## Phase Naver-ERP-14E - Order Status Events Mock Schema Gate
+
+The order status events mock schema gate is documented in `PHASE_NAVER_ERP_14E_ORDER_STATUS_EVENTS_MOCK_SCHEMA_GATE.md`.
+
+14E adds mock-only verification in Codex1 `verify_all.py` using the temporary verification SQLite database. It creates a temporary `order_status_events` table shape, verifies proposed columns, required indexes, the `store_id/platform/dedupe_key` uniqueness boundary, safe metadata, one-row mock insertion, duplicate rejection, and sensitive-field scanning. It does not modify the real database schema, add a model or migration, call Naver, write real orders, modify Codex2 runtime UI, or open formal order sync. Real schema approval remains deferred to a later 14F plan.
