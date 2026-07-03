@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
+import Timeline from '../components/common/Timeline';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
@@ -146,6 +147,116 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
     mappingVersion: displayText(complete.mappingVersion, complete.mapping_version, order.mappingVersion, rawData.mapping_version),
     rawResponseSaved: complete.rawResponseSaved ?? complete.raw_response_saved ?? order.rawResponseSaved ?? rawData.raw_response_saved ?? false,
   };
+}
+
+function normalizeTimelineSource(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function getOrderTimelineSource(order = {}) {
+  const rawData = order.rawData || order.raw_data || {};
+  const candidates = [
+    order.statusEvents,
+    order.status_events,
+    order.orderStatusEvents,
+    order.order_status_events,
+    order.timelineEvents,
+    order.timeline_events,
+    rawData.status_events,
+    rawData.order_status_events,
+    rawData.timeline_events,
+    rawData.timeline,
+  ];
+  const source = candidates.find((item) => Array.isArray(item) && item.length)
+    || candidates.find((item) => Array.isArray(item));
+  return normalizeTimelineSource(source);
+}
+
+function buildTimelineDescription(event = {}) {
+  const orderLabel = firstText(event.order_status_label_zh, event.status_label_zh, event.statusLabelZh, event.status);
+  const deliveryLabel = firstText(event.delivery_status_label_zh, event.deliveryStatusLabelZh);
+  const claimLabel = firstText(event.claim_status_label_zh, event.claimStatusLabelZh);
+  const parts = [
+    orderLabel && `订单状态：${orderLabel}`,
+    deliveryLabel && `配送：${deliveryLabel}`,
+    claimLabel && `售后：${claimLabel}`,
+  ].filter(Boolean);
+  return firstText(event.description, event.business_message, event.message, parts.join('；')) || '已记录一条订单状态变化。';
+}
+
+function normalizeOrderStatusTimelineEvents(order = {}) {
+  return getOrderTimelineSource(order)
+    .map((event, index) => {
+      const title = firstText(
+        event.title,
+        event.event_label_zh,
+        event.eventLabelZh,
+        event.order_status_label_zh,
+        event.status_label_zh,
+        event.statusLabelZh,
+        '订单状态记录',
+      );
+      return {
+        id: firstText(event.id, event.event_id, event.dedupe_key, event.dedupeKey, `order-status-event-${index}`),
+        title,
+        status: firstText(event.status_label_zh, event.order_status_label_zh, event.statusLabelZh, event.status),
+        description: buildTimelineDescription(event),
+        time: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
+        technical: {
+          eventType: firstText(event.event_type, event.eventType),
+          orderStatusRaw: firstText(event.order_status_raw, event.orderStatusRaw, event.order_status, event.status_raw, event.statusRaw),
+          deliveryStatusRaw: firstText(event.delivery_status_raw, event.deliveryStatusRaw, event.delivery_status),
+          claimStatusRaw: firstText(event.claim_status_raw, event.claimStatusRaw, event.claim_status),
+          observedAt: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
+          sourcePhase: firstText(event.source_phase, event.sourcePhase),
+          sourceType: firstText(event.source_type, event.sourceType),
+          mappingVersion: firstText(event.mapping_version, event.mappingVersion),
+          dedupeKey: firstText(event.dedupe_key, event.dedupeKey),
+          rawResponseSaved: event.raw_response_saved ?? event.rawResponseSaved ?? false,
+          privacyFieldsRedacted: event.privacy_fields_redacted ?? event.privacyFieldsRedacted ?? true,
+        },
+      };
+    });
+}
+
+function buildOrderTimelineTechnicalItems(activeOrder = {}, fields = {}, timelineEvents = []) {
+  const rawData = activeOrder.rawData || activeOrder.raw_data || {};
+  const selectedProductOrderHash = firstText(
+    activeOrder.productOrderHash,
+    rawData.external_product_order_id_hash,
+    rawData.product_order_id_hash,
+  );
+  const selectedOrderHash = firstText(activeOrder.orderHash, rawData.external_order_id_hash, rawData.order_id_hash);
+  const eventItems = timelineEvents.flatMap((event, index) => ([
+    { label: `event_${index + 1}_event_type`, value: event.technical.eventType },
+    { label: `event_${index + 1}_order_status_raw`, value: event.technical.orderStatusRaw },
+    { label: `event_${index + 1}_delivery_status_raw`, value: event.technical.deliveryStatusRaw },
+    { label: `event_${index + 1}_claim_status_raw`, value: event.technical.claimStatusRaw },
+    { label: `event_${index + 1}_observed_at`, value: event.technical.observedAt },
+    { label: `event_${index + 1}_source_phase`, value: event.technical.sourcePhase },
+    { label: `event_${index + 1}_source_type`, value: event.technical.sourceType },
+    { label: `event_${index + 1}_mapping_version`, value: event.technical.mappingVersion },
+    { label: `event_${index + 1}_dedupe_key`, value: event.technical.dedupeKey },
+    { label: `event_${index + 1}_raw_response_saved`, value: event.technical.rawResponseSaved },
+    { label: `event_${index + 1}_privacy_fields_redacted`, value: event.technical.privacyFieldsRedacted },
+  ]));
+
+  return [
+    { label: 'timeline_display_phase', value: 'Naver-ERP-14J' },
+    { label: 'display_only', value: true },
+    { label: 'order_status_events_rendered', value: timelineEvents.length },
+    { label: 'selected_order_status_raw', value: activeOrder.rawStatus || activeOrder.order_status || rawData.order_status },
+    { label: 'selected_delivery_status_raw', value: activeOrder.deliveryStatus || activeOrder.delivery_status || rawData.delivery_status },
+    { label: 'selected_claim_status_raw', value: activeOrder.claimStatus || activeOrder.claim_status || rawData.claim_status },
+    { label: 'selected_product_order_hash', value: selectedProductOrderHash },
+    { label: 'selected_order_hash', value: selectedOrderHash },
+    { label: 'current_mapping_version', value: fields.mappingVersion },
+    { label: 'raw_response_saved', value: fields.rawResponseSaved },
+    { label: 'event_write_enabled', value: false },
+    { label: 'orders_write_enabled', value: false },
+    { label: 'formal_order_sync_open', value: false },
+    ...eventItems,
+  ];
 }
 
 function isUsableOrderIdentity(value) {
@@ -850,6 +961,8 @@ function NaverOrderCompleteDetailPanel() {
     previewWindowLabel,
   });
   const manualApprovalAffordance = buildNaverManualApprovalAffordance(refreshGatePlan);
+  const timelineEvents = activeOrder ? normalizeOrderStatusTimelineEvents(activeOrder) : [];
+  const timelineTechnicalItems = activeOrder ? buildOrderTimelineTechnicalItems(activeOrder, fields, timelineEvents) : [];
 
   const runCompleteFieldPreview = async () => {
     if (previewLoading || !activeOrder || !previewAllowed) return;
@@ -970,6 +1083,28 @@ function NaverOrderCompleteDetailPanel() {
               </div>
             </section>
           </div>
+          <section className="detail-section">
+            <h3>订单状态时间线</h3>
+            <div className="detail-grid">
+              <DetailItem label="当前本地订单状态" value={fields.orderStatus} />
+              <DetailItem label="当前配送状态" value={fields.deliveryStatus} />
+              <DetailItem label="当前售后状态" value={fields.claimStatus} />
+              <DetailItem label="最近订单时间" value={displayText(fields.paidAt, fields.orderedAt)} />
+            </div>
+            {timelineEvents.length ? (
+              <Timeline items={timelineEvents} />
+            ) : (
+              <div className="empty-state compact">当前暂无已记录的订单状态历史。</div>
+            )}
+            <p className="mock-sync-note">
+              状态时间线当前只读展示。没有历史记录时，只表示本地尚未生成状态事件；正式订单同步、自动刷新和事件写入仍未开放。
+            </p>
+            <TechnicalDetails
+              title="查看状态时间线技术详情"
+              description="原始状态枚举、来源阶段和去重信息仅放在折叠详情中；页面主区域只展示卖家可读状态。"
+              items={timelineTechnicalItems}
+            />
+          </section>
           <section className="detail-section">
             <h3>Naver 订单刷新写库门禁计划</h3>
             <div className={refreshGatePlan.statusKind === 'blocked' ? 'mock-sync-error' : 'sync-inline-warning'}>

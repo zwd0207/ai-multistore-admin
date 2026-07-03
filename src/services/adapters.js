@@ -290,6 +290,13 @@ export function adaptOrder(item = {}) {
   const productOrderNo = item.external_product_order_id || rawData.external_product_order_id || '';
   const productOrderHash = rawData.external_product_order_id_hash || (isNaver && isHashOrderId ? item.external_order_id : null);
   const platformProductId = item.platform_product_id || item.external_product_id || rawData.platform_product_id || rawData.external_product_id || '';
+  const statusEvents = item.status_events
+    || item.statusEvents
+    || item.order_status_events
+    || item.orderStatusEvents
+    || rawData.status_events
+    || rawData.order_status_events
+    || [];
   const statusLabel = isNaver
     ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
     : adaptStatus(item.order_status, {
@@ -334,6 +341,8 @@ export function adaptOrder(item = {}) {
     deliveryStatusLabelZh: item.delivery_status_label_zh || rawData.delivery_status_label_zh,
     claimStatus: item.claim_status || rawData.claim_status,
     claimStatusLabelZh: item.claim_status_label_zh || rawData.claim_status_label_zh,
+    statusEvents,
+    orderStatusEvents: statusEvents,
     sourceType: item.source_type,
     rawResponseSaved: rawData.raw_response_saved,
     privacyFieldsRedacted: rawData.privacy_fields_redacted,

@@ -508,3 +508,9 @@ The timeline event single local write mock gate is documented in `PHASE_NAVER_ER
 The post-refresh timeline verification is documented in `PHASE_NAVER_ERP_14I_POST_REFRESH_TIMELINE_VERIFICATION.md`.
 
 14I is local readback only after the blocked 13D refresh attempt. It confirms selected hash `id-hash-ab176f5db1` remains `DELIVERED`, `orders_refreshed=false`, `order_status_events_rows=0`, and selected-hash timeline events `0`. Because 13D did not pass the fresh selected-hash gate, no timeline event should exist. Formal Naver order sync and real timeline event writes remain closed.
+
+## Phase Naver-ERP-14J - Orders UI Timeline Readonly Display
+
+The Orders UI timeline readonly display is documented in `PHASE_NAVER_ERP_14J_ORDERS_UI_TIMELINE_READONLY_DISPLAY.md`.
+
+14J adds a read-only Naver order status timeline section to Codex2 Orders detail. The main panel shows the current local order status snapshot and safe future timeline events when present; if no event rows are available, it explicitly shows that no local status history has been recorded yet. Raw enums, source phase, dedupe key, mapping version, and safe hashes stay in TechnicalDetails. This phase does not call Naver, does not write local data, does not modify Codex1 schema or APIs, and does not open formal Naver order sync.
