@@ -545,6 +545,12 @@ The Naver order refresh readonly expansion approval plan is documented in `PHASE
 
 15E is planning-only. It does not call Naver, does not change the current public `page=1,size=1` guardrail, does not write local data, and does not open formal order sync. It decides that the 15C safe hash `id-hash-67b5fc1c97` remains a new-order candidate, not an existing-order refresh candidate, so no batch refresh write is approved. A future readonly expansion would require a separate guarded implementation phase, first limited to `page=1,size=2`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`, with strict candidate classification and stop conditions. The recommended next stage is the new-order candidate approval path.
 
+## Phase Naver-ERP-16A - New-Order Candidate Approval Plan
+
+The Naver new-order candidate approval plan is documented in `PHASE_NAVER_ERP_16A_NEW_ORDER_CANDIDATE_APPROVAL_PLAN.md`.
+
+16A is planning-only. It does not call Naver, does not write local data, does not change schema or runtime UI, and does not open formal order sync. It routes the 15C safe hash `id-hash-67b5fc1c97` into the selected new-order path, not the existing-order refresh batch path. A later write still requires a fresh 16B readonly repeat, duplicate checks, privacy/status gates, explicit write approval, database backup, one-order limit, no products/SyncLog/tested_success/timeline writes, and no Naver platform write action.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
