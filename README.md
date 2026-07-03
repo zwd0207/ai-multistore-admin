@@ -604,3 +604,9 @@ ERP-UX-1E updates Codex2 Products runtime UI so Naver product summaries are busi
 The Credentials and API status wording cleanup is documented in `PHASE_ERP_UX_1F_CREDENTIALS_API_STATUS_WORDING_CLEANUP.md`.
 
 ERP-UX-1F updates Codex2 API Credentials and API Capabilities runtime UI so connection status, authorization issues, IP allowlist problems, product/order access, and formal-sync boundaries are shown in business Chinese. Main pages no longer surface raw technical enums such as `ip_not_allowed`, `token_auth_failed`, `product_api_not_allowed`, `http_status`, `safe_keyword_flags`, `credential_id`, or channel identifiers; those diagnostics remain folded in `TechnicalDetails`. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal product/order sync.
+
+## Phase ERP-UX-1G - Logs and Audit Readability Plan
+
+The Logs and Audit readability plan is documented in `PHASE_ERP_UX_1G_LOGS_AUDIT_READABILITY_PLAN.md`.
+
+ERP-UX-1G is planning-only. It defines how Logs and Audit should read for production operators: main pages should explain what happened, who did it, whether it succeeded, whether backup/restore evidence exists, and what to do next. Sync logs should be framed as `同步记录`, future audit logs should focus on accountability and recoverability, and raw ids, hashes, JSON payloads, backend enums, SHA-256 values, and other technical details should stay in folded advanced details. This phase does not modify runtime frontend code, Codex1, platform APIs, local data, database schema, or formal sync gates.
