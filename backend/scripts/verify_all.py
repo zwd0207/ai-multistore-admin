@@ -54,6 +54,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/platform-logins",
     "/api/v1/platform-logins/{login_id}",
     "/api/v1/sync-logs",
+    "/api/v1/operation-audit-logs",
+    "/api/v1/operation-audit-logs/summary",
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/customer-inquiries",
@@ -975,12 +977,16 @@ def verify_openapi() -> None:
         assert docs.status_code == 200, docs.text[:100]
         openapi = client.get("/openapi.json")
         assert openapi.status_code == 200, openapi.text[:100]
-        paths = set(openapi.json()["paths"].keys())
+        openapi_json = openapi.json()
+        paths = set(openapi_json["paths"].keys())
 
     missing = sorted(EXPECTED_API_PATHS - paths)
     assert not missing, f"Missing OpenAPI paths: {missing}"
     assert "/api/v1/credentials/{credential_id}/decrypt" not in paths
     assert all(path.startswith("/api/v1") or path in {"/", "/health"} for path in paths), sorted(paths)
+    for audit_path in ["/api/v1/operation-audit-logs", "/api/v1/operation-audit-logs/summary"]:
+        methods = set(openapi_json["paths"][audit_path].keys())
+        assert methods == {"get"}, {audit_path: methods}
     print("openapi/docs: ok")
 
 
@@ -8290,6 +8296,174 @@ def verify_operation_audit_logs_readonly_mock_gate() -> None:
     print("operation audit logs readonly mock gate: ok")
 
 
+def verify_operation_audit_logs_readonly_local_api() -> None:
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.main import app
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+    with TestClient(app) as client:
+        empty_response = client.get("/api/v1/operation-audit-logs", params={"store_id": 999999})
+        assert empty_response.status_code == 200, empty_response.text
+        empty_data = empty_response.json()["data"]
+        assert empty_data["phase"] == "ERP-Audit-1L", empty_data
+        assert empty_data["status"] == "audit_read_empty", empty_data
+        assert empty_data["items"] == [], empty_data
+        assert empty_data["total"] == 0, empty_data
+        assert "当前还没有操作审计记录" in empty_data["business_message"], empty_data
+        assert empty_data["public_endpoint_enabled"] is True, empty_data
+        assert empty_data["readonly_local_route"] is True, empty_data
+
+        list_response = client.get(
+            "/api/v1/operation-audit-logs",
+            params={"correlation_id": "audit-corr-1j-chain", "limit": 200},
+        )
+        assert list_response.status_code == 200, list_response.text
+        list_data = list_response.json()["data"]
+        assert list_data["phase"] == "ERP-Audit-1L", list_data
+        assert list_data["status"] == "audit_read_success", list_data
+        assert list_data["total"] == 2, list_data
+        assert list_data["limit"] == 50, list_data
+        assert list_data["limit_was_capped"] is True, list_data
+        assert "advanced_details" not in list_data["items"][0], list_data
+        assert list_data["rows_written"] == 0, list_data
+        assert list_data["orders_written"] is False, list_data
+        assert list_data["products_written"] is False, list_data
+        assert list_data["sync_log_written"] is False, list_data
+        assert list_data["real_api_called"] is False, list_data
+
+        advanced_response = client.get(
+            "/api/v1/operation-audit-logs",
+            params={
+                "correlation_id": "audit-corr-1j-chain",
+                "status": "success",
+                "action": "audit_logs_readonly_mock_success",
+                "include_advanced": "true",
+            },
+        )
+        assert advanced_response.status_code == 200, advanced_response.text
+        advanced_data = advanced_response.json()["data"]
+        assert advanced_data["total"] == 1, advanced_data
+        advanced_item = advanced_data["items"][0]
+        assert "advanced_details" in advanced_item, advanced_item
+        assert "before_summary" not in advanced_item["advanced_details"], advanced_item
+        assert "after_summary" not in advanced_item["advanced_details"], advanced_item
+        assert "counts_summary" not in advanced_item["advanced_details"], advanced_item
+        assert "safety_flags" not in advanced_item["advanced_details"], advanced_item
+        assert advanced_item["advanced_details"]["target_hash_abbrev"].endswith("..."), advanced_item
+
+        summary_response = client.get(
+            "/api/v1/operation-audit-logs/summary",
+            params={"correlation_id": "audit-corr-1j-chain"},
+        )
+        assert summary_response.status_code == 200, summary_response.text
+        summary_data = summary_response.json()["data"]
+        assert summary_data["phase"] == "ERP-Audit-1L", summary_data
+        assert summary_data["status"] == "audit_summary_success", summary_data
+        assert summary_data["total"] == 2, summary_data
+        assert summary_data["audit_runtime_status"] == "needs_attention", summary_data
+        assert summary_data["needs_attention_count"] == 1, summary_data
+
+        empty_summary_response = client.get(
+            "/api/v1/operation-audit-logs/summary",
+            params={"store_id": 999999},
+        )
+        assert empty_summary_response.status_code == 200, empty_summary_response.text
+        empty_summary_data = empty_summary_response.json()["data"]
+        assert empty_summary_data["audit_runtime_status"] == "empty", empty_summary_data
+        assert empty_summary_data["total"] == 0, empty_summary_data
+
+        unsupported_response = client.get("/api/v1/operation-audit-logs", params={"raw_response": "x"})
+        assert unsupported_response.status_code == 400, unsupported_response.text
+        unsupported_text = unsupported_response.text.lower()
+        assert "unsupported_audit_log_filter" in unsupported_text, unsupported_text
+        assert "raw_response" not in unsupported_text, unsupported_text
+        assert "unsupported_filter_count" in unsupported_text, unsupported_text
+
+        unsafe_response = client.get(
+            "/api/v1/operation-audit-logs",
+            params={"action": "audit; DROP TABLE operation_audit_logs"},
+        )
+        assert unsafe_response.status_code == 400, unsafe_response.text
+        assert "unsafe_action" in unsafe_response.text, unsafe_response.text
+
+        wide_window_response = client.get(
+            "/api/v1/operation-audit-logs",
+            params={
+                "date_from": (datetime.now(timezone.utc) - timedelta(days=120)).isoformat(),
+                "date_to": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        assert wide_window_response.status_code == 400, wide_window_response.text
+        assert "date_window_too_large" in wide_window_response.text, wide_window_response.text
+
+        for method_name in ["post", "put", "patch", "delete"]:
+            method_response = getattr(client, method_name)("/api/v1/operation-audit-logs")
+            assert method_response.status_code == 405, {method_name: method_response.text}
+
+        response_text = json.dumps(
+            {
+                "empty": empty_data,
+                "list": list_data,
+                "advanced": advanced_data,
+                "summary": summary_data,
+                "empty_summary": empty_summary_data,
+            },
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in response_text, response_text
+        for forbidden_key in [
+            "raw_response",
+            "raw_request",
+            "client_secret",
+            "authorization:",
+            "access_token",
+            "refresh_token",
+            "buyer_phone",
+            "receiver_phone",
+            "detailed_address",
+            "zip_code",
+        ]:
+            assert forbidden_key not in response_text, response_text
+
+    with SessionLocal() as db:
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+    assert business_counts_after == business_counts_before, {
+        "before": business_counts_before,
+        "after": business_counts_after,
+    }
+    assert audit_count_after == audit_count_before, {
+        "before": audit_count_before,
+        "after": audit_count_after,
+    }
+
+    print("operation audit logs readonly local api: ok")
+
+
 def verify_backup_restore_verification_dry_run() -> None:
     production_db_path = BACKEND_DIR / "codex1.db"
     production_before = None
@@ -8498,6 +8672,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
+        "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/financial.py",
         "?? backend/app/models/order_status_event.py",
@@ -8642,6 +8817,7 @@ def main() -> None:
         verify_operation_audit_writer_service_mock_gate()
         verify_operation_audit_writer_local_implementation()
         verify_operation_audit_logs_readonly_mock_gate()
+        verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()
         verify_git_tracking()
         verify_docs_no_real_secrets()

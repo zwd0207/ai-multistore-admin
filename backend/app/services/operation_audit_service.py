@@ -12,6 +12,7 @@ from app.models.operation_audit_log import OperationAuditLog
 VERIFICATION_SCOPE = "verify_all_temp_db"
 LOCAL_WRITER_SCOPE = "local_runtime_approved"
 READONLY_MOCK_SCOPE = VERIFICATION_SCOPE
+READONLY_LOCAL_SCOPE = "local_readonly_route"
 
 DEFAULT_AUDIT_READ_LIMIT = 20
 MAX_AUDIT_READ_LIMIT = 50
@@ -155,11 +156,11 @@ def _base_result(*, phase: str = "ERP-Audit-1G", runtime_writer_enabled: bool = 
     }
 
 
-def _base_read_result() -> dict[str, Any]:
+def _base_read_result(*, phase: str = "ERP-Audit-1J", public_endpoint_enabled: bool = False) -> dict[str, Any]:
     return {
-        "phase": "ERP-Audit-1J",
+        "phase": phase,
         "status": "audit_read_not_enabled",
-        "public_endpoint_enabled": False,
+        "public_endpoint_enabled": public_endpoint_enabled,
         "audit_rows_written": False,
         "rows_written": 0,
         "real_api_called": False,
@@ -527,26 +528,15 @@ def _apply_read_filters(query: Any, filters: dict[str, Any]) -> Any:
     return query
 
 
-def list_operation_audit_logs_readonly_mock_gate(
+def _list_operation_audit_logs_readonly(
     db: Session,
     *,
     filters: dict[str, Any] | None = None,
-    verification_scope: str | None = None,
+    phase: str,
+    public_endpoint_enabled: bool,
+    gate_label: str,
 ) -> dict[str, Any]:
-    """Private mock gate for the future read-only audit API.
-
-    1J verifies response shape only. It intentionally does not create a public
-    route, does not enable frontend readers, and never writes rows.
-    """
-
-    result = _base_read_result()
-    if verification_scope != READONLY_MOCK_SCOPE:
-        result.update({
-            "status": "audit_read_blocked",
-            "skip_reason": "readonly_mock_scope_required",
-        })
-        return result
-
+    result = _base_read_result(phase=phase, public_endpoint_enabled=public_endpoint_enabled)
     cleaned_filters, filter_error = _validate_read_filters(filters or {})
     if cleaned_filters is None:
         result.update({
@@ -582,28 +572,21 @@ def list_operation_audit_logs_readonly_mock_gate(
         "limit_was_capped": cleaned_filters["limit_was_capped"],
         "include_advanced": include_advanced,
         "business_message": business_message,
-        "readonly_mock_gate": True,
-        "public_endpoint_enabled": False,
+        gate_label: True,
+        "public_endpoint_enabled": public_endpoint_enabled,
     })
     return result
 
 
-def summarize_operation_audit_logs_readonly_mock_gate(
+def _summarize_operation_audit_logs_readonly(
     db: Session,
     *,
     filters: dict[str, Any] | None = None,
-    verification_scope: str | None = None,
+    phase: str,
+    public_endpoint_enabled: bool,
+    gate_label: str,
 ) -> dict[str, Any]:
-    """Private mock gate for a future audit summary card."""
-
-    result = _base_read_result()
-    if verification_scope != READONLY_MOCK_SCOPE:
-        result.update({
-            "status": "audit_read_blocked",
-            "skip_reason": "readonly_mock_scope_required",
-        })
-        return result
-
+    result = _base_read_result(phase=phase, public_endpoint_enabled=public_endpoint_enabled)
     cleaned_filters, filter_error = _validate_read_filters(filters or {})
     if cleaned_filters is None:
         result.update({
@@ -654,10 +637,98 @@ def summarize_operation_audit_logs_readonly_mock_gate(
         "needs_attention_count": needs_attention_count,
         "latest_audit_time": latest_created_at,
         "business_message": business_message,
-        "readonly_mock_gate": True,
-        "public_endpoint_enabled": False,
+        gate_label: True,
+        "public_endpoint_enabled": public_endpoint_enabled,
     })
     return result
+
+
+def list_operation_audit_logs_readonly_mock_gate(
+    db: Session,
+    *,
+    filters: dict[str, Any] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private mock gate for the future read-only audit API.
+
+    1J verifies response shape only. It intentionally does not create a public
+    route, does not enable frontend readers, and never writes rows.
+    """
+
+    if verification_scope != READONLY_MOCK_SCOPE:
+        result = _base_read_result()
+        result.update({
+            "status": "audit_read_blocked",
+            "skip_reason": "readonly_mock_scope_required",
+        })
+        return result
+    return _list_operation_audit_logs_readonly(
+        db,
+        filters=filters,
+        phase="ERP-Audit-1J",
+        public_endpoint_enabled=False,
+        gate_label="readonly_mock_gate",
+    )
+
+
+def summarize_operation_audit_logs_readonly_mock_gate(
+    db: Session,
+    *,
+    filters: dict[str, Any] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private mock gate for a future audit summary card."""
+
+    if verification_scope != READONLY_MOCK_SCOPE:
+        result = _base_read_result()
+        result.update({
+            "status": "audit_read_blocked",
+            "skip_reason": "readonly_mock_scope_required",
+        })
+        return result
+    return _summarize_operation_audit_logs_readonly(
+        db,
+        filters=filters,
+        phase="ERP-Audit-1J",
+        public_endpoint_enabled=False,
+        gate_label="readonly_mock_gate",
+    )
+
+
+def list_operation_audit_logs_readonly_local(
+    db: Session,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Local read-only route helper for 1L.
+
+    This reads sanitized audit metadata only. It does not write audit rows,
+    business rows, or platform data.
+    """
+
+    return _list_operation_audit_logs_readonly(
+        db,
+        filters=filters,
+        phase="ERP-Audit-1L",
+        public_endpoint_enabled=True,
+        gate_label="readonly_local_route",
+    )
+
+
+def summarize_operation_audit_logs_readonly_local(
+    db: Session,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Local read-only summary route helper for 1L."""
+
+    return _summarize_operation_audit_logs_readonly(
+        db,
+        filters=filters,
+        phase="ERP-Audit-1L",
+        public_endpoint_enabled=True,
+        gate_label="readonly_local_route",
+    )
 
 
 def _validate_audit_row(audit_row: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
