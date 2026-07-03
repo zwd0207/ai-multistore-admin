@@ -4354,6 +4354,311 @@ def verify_sync_preview_schema_and_security() -> None:
                         "raw response",
                     ]:
                         assert forbidden not in sensitive_timeline_text, sensitive_timeline_text
+
+                    db.execute(text("""
+                        CREATE TABLE IF NOT EXISTS order_status_events (
+                            id INTEGER PRIMARY KEY,
+                            store_id INTEGER NOT NULL,
+                            order_id INTEGER NOT NULL,
+                            platform VARCHAR(50) NOT NULL,
+                            external_order_id_hash VARCHAR(120),
+                            external_product_order_id_hash VARCHAR(120) NOT NULL,
+                            event_type VARCHAR(50) NOT NULL,
+                            status_raw VARCHAR(60),
+                            status_label_zh VARCHAR(120),
+                            payment_status_raw VARCHAR(60),
+                            payment_status_label_zh VARCHAR(120),
+                            delivery_status_raw VARCHAR(60),
+                            delivery_status_label_zh VARCHAR(120),
+                            claim_status_raw VARCHAR(60),
+                            claim_status_label_zh VARCHAR(120),
+                            observed_at DATETIME,
+                            source_phase VARCHAR(80) NOT NULL,
+                            source_type VARCHAR(80) NOT NULL,
+                            mapping_version VARCHAR(100) NOT NULL,
+                            dedupe_key VARCHAR(320) NOT NULL,
+                            raw_response_saved BOOLEAN NOT NULL DEFAULT 0,
+                            privacy_fields_redacted BOOLEAN NOT NULL DEFAULT 1,
+                            address_saved BOOLEAN NOT NULL DEFAULT 0,
+                            safe_metadata JSON,
+                            created_at DATETIME NOT NULL,
+                            updated_at DATETIME NOT NULL,
+                            FOREIGN KEY(order_id) REFERENCES orders(id),
+                            FOREIGN KEY(store_id) REFERENCES stores(id)
+                        )
+                    """))
+                    db.execute(text("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_order_status_event_dedupe
+                        ON order_status_events (store_id, platform, dedupe_key)
+                    """))
+                    db.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_order_status_events_store_platform_observed
+                        ON order_status_events (store_id, platform, observed_at)
+                    """))
+                    db.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_order_status_events_order_observed
+                        ON order_status_events (order_id, observed_at)
+                    """))
+                    db.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_order_status_events_store_event_type
+                        ON order_status_events (store_id, platform, event_type)
+                    """))
+                    db.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_order_status_events_product_order_hash
+                        ON order_status_events (external_product_order_id_hash)
+                    """))
+                    db.commit()
+
+                    event_table_info = db.execute(text("PRAGMA table_info(order_status_events)")).all()
+                    event_columns = {row[1] for row in event_table_info}
+                    required_event_columns = {
+                        "id",
+                        "store_id",
+                        "order_id",
+                        "platform",
+                        "external_order_id_hash",
+                        "external_product_order_id_hash",
+                        "event_type",
+                        "status_raw",
+                        "status_label_zh",
+                        "payment_status_raw",
+                        "payment_status_label_zh",
+                        "delivery_status_raw",
+                        "delivery_status_label_zh",
+                        "claim_status_raw",
+                        "claim_status_label_zh",
+                        "observed_at",
+                        "source_phase",
+                        "source_type",
+                        "mapping_version",
+                        "dedupe_key",
+                        "raw_response_saved",
+                        "privacy_fields_redacted",
+                        "address_saved",
+                        "safe_metadata",
+                        "created_at",
+                        "updated_at",
+                    }
+                    assert not sorted(required_event_columns - event_columns), event_columns
+                    event_notnull = {row[1]: bool(row[3]) for row in event_table_info}
+                    for required_notnull in [
+                        "store_id",
+                        "order_id",
+                        "platform",
+                        "external_product_order_id_hash",
+                        "event_type",
+                        "source_phase",
+                        "source_type",
+                        "mapping_version",
+                        "dedupe_key",
+                        "raw_response_saved",
+                        "privacy_fields_redacted",
+                        "address_saved",
+                        "created_at",
+                        "updated_at",
+                    ]:
+                        assert event_notnull.get(required_notnull), event_notnull
+
+                    event_indexes = db.execute(text("PRAGMA index_list(order_status_events)")).all()
+                    event_index_names = {row[1] for row in event_indexes}
+                    unique_event_indexes = {row[1] for row in event_indexes if row[2]}
+                    assert "uq_order_status_event_dedupe" in unique_event_indexes, event_indexes
+                    for expected_index in [
+                        "ix_order_status_events_store_platform_observed",
+                        "ix_order_status_events_order_observed",
+                        "ix_order_status_events_store_event_type",
+                        "ix_order_status_events_product_order_hash",
+                    ]:
+                        assert expected_index in event_index_names, event_indexes
+
+                    def event_index_columns(index_name: str) -> list[str]:
+                        return [row[2] for row in db.execute(text(f"PRAGMA index_info({index_name})")).all()]
+
+                    assert event_index_columns("uq_order_status_event_dedupe") == ["store_id", "platform", "dedupe_key"]
+                    assert event_index_columns("ix_order_status_events_store_platform_observed") == ["store_id", "platform", "observed_at"]
+                    assert event_index_columns("ix_order_status_events_order_observed") == ["order_id", "observed_at"]
+                    assert event_index_columns("ix_order_status_events_store_event_type") == ["store_id", "platform", "event_type"]
+                    assert event_index_columns("ix_order_status_events_product_order_hash") == ["external_product_order_id_hash"]
+
+                    schema_gate_event = dict(delivered_event)
+                    schema_gate_event["source_phase"] = "Naver-ERP-14E"
+                    schema_gate_event["safe_metadata"] = {
+                        "source_window": "mock_schema_gate",
+                        "candidate_classification": "selected_local_refresh_candidate",
+                        "refresh_gate_phase": "Naver-ERP-13C",
+                        "timeline_mapper_phase": delivered_timeline_gate["phase"],
+                        "unknown_status_observed": False,
+                        "deduped_event_count": 0,
+                        "raw_response_saved": False,
+                        "privacy_fields_redacted": True,
+                        "address_saved": False,
+                    }
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    insert_event_sql = text("""
+                        INSERT INTO order_status_events (
+                            store_id,
+                            order_id,
+                            platform,
+                            external_order_id_hash,
+                            external_product_order_id_hash,
+                            event_type,
+                            status_raw,
+                            status_label_zh,
+                            payment_status_raw,
+                            payment_status_label_zh,
+                            delivery_status_raw,
+                            delivery_status_label_zh,
+                            claim_status_raw,
+                            claim_status_label_zh,
+                            observed_at,
+                            source_phase,
+                            source_type,
+                            mapping_version,
+                            dedupe_key,
+                            raw_response_saved,
+                            privacy_fields_redacted,
+                            address_saved,
+                            safe_metadata,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            :store_id,
+                            :order_id,
+                            :platform,
+                            :external_order_id_hash,
+                            :external_product_order_id_hash,
+                            :event_type,
+                            :status_raw,
+                            :status_label_zh,
+                            :payment_status_raw,
+                            :payment_status_label_zh,
+                            :delivery_status_raw,
+                            :delivery_status_label_zh,
+                            :claim_status_raw,
+                            :claim_status_label_zh,
+                            :observed_at,
+                            :source_phase,
+                            :source_type,
+                            :mapping_version,
+                            :dedupe_key,
+                            :raw_response_saved,
+                            :privacy_fields_redacted,
+                            :address_saved,
+                            :safe_metadata,
+                            :created_at,
+                            :updated_at
+                        )
+                    """)
+                    event_params = {
+                        "store_id": schema_gate_event["store_id"],
+                        "order_id": refreshed_order.id,
+                        "platform": schema_gate_event["platform"],
+                        "external_order_id_hash": schema_gate_event["external_order_id_hash"],
+                        "external_product_order_id_hash": schema_gate_event["external_product_order_id_hash"],
+                        "event_type": schema_gate_event["event_type"],
+                        "status_raw": schema_gate_event["status_raw"],
+                        "status_label_zh": schema_gate_event["status_label_zh"],
+                        "payment_status_raw": schema_gate_event["payment_status_raw"],
+                        "payment_status_label_zh": schema_gate_event["payment_status_label_zh"],
+                        "delivery_status_raw": schema_gate_event["delivery_status_raw"],
+                        "delivery_status_label_zh": schema_gate_event["delivery_status_label_zh"],
+                        "claim_status_raw": schema_gate_event["claim_status_raw"],
+                        "claim_status_label_zh": schema_gate_event["claim_status_label_zh"],
+                        "observed_at": schema_gate_event["observed_at"],
+                        "source_phase": schema_gate_event["source_phase"],
+                        "source_type": schema_gate_event["source_type"],
+                        "mapping_version": schema_gate_event["mapping_version"],
+                        "dedupe_key": schema_gate_event["dedupe_key"],
+                        "raw_response_saved": False,
+                        "privacy_fields_redacted": True,
+                        "address_saved": False,
+                        "safe_metadata": json.dumps(schema_gate_event["safe_metadata"], ensure_ascii=False),
+                        "created_at": now_iso,
+                        "updated_at": now_iso,
+                    }
+                    db.execute(insert_event_sql, event_params)
+                    db.commit()
+
+                    duplicate_rejected = False
+                    try:
+                        db.execute(insert_event_sql, event_params)
+                        db.commit()
+                    except Exception as exc:
+                        db.rollback()
+                        duplicate_rejected = "unique" in str(exc).lower() or "dedupe" in str(exc).lower()
+                    assert duplicate_rejected, "order_status_events duplicate dedupe key was not rejected"
+
+                    event_rows = db.execute(text("""
+                        SELECT
+                            store_id,
+                            order_id,
+                            platform,
+                            external_order_id_hash,
+                            external_product_order_id_hash,
+                            event_type,
+                            status_raw,
+                            status_label_zh,
+                            payment_status_raw,
+                            payment_status_label_zh,
+                            delivery_status_raw,
+                            delivery_status_label_zh,
+                            claim_status_raw,
+                            claim_status_label_zh,
+                            observed_at,
+                            source_phase,
+                            source_type,
+                            mapping_version,
+                            dedupe_key,
+                            raw_response_saved,
+                            privacy_fields_redacted,
+                            address_saved,
+                            safe_metadata
+                        FROM order_status_events
+                    """)).mappings().all()
+                    assert len(event_rows) == 1, event_rows
+                    event_row = dict(event_rows[0])
+                    assert event_row["store_id"] == naver_store_id, event_row
+                    assert event_row["order_id"] == refreshed_order.id, event_row
+                    assert event_row["platform"] == "naver", event_row
+                    assert event_row["event_type"] == "delivered", event_row
+                    assert event_row["source_phase"] == "Naver-ERP-14E", event_row
+                    assert event_row["source_type"] == sync_service.NAVER_ORDER_PREVIEW_SOURCE_TYPE, event_row
+                    assert event_row["mapping_version"] == sync_service.NAVER_ORDER_TIMELINE_MAPPING_VERSION, event_row
+                    assert event_row["dedupe_key"] == delivered_event["dedupe_key"], event_row
+                    assert event_row["raw_response_saved"] in (0, False), event_row
+                    assert event_row["privacy_fields_redacted"] in (1, True), event_row
+                    assert event_row["address_saved"] in (0, False), event_row
+                    event_metadata = json.loads(event_row["safe_metadata"])
+                    assert event_metadata["raw_response_saved"] is False, event_metadata
+                    assert event_metadata["privacy_fields_redacted"] is True, event_metadata
+                    assert event_metadata["address_saved"] is False, event_metadata
+                    assert event_metadata["timeline_mapper_phase"] == "Naver-ERP-14B", event_metadata
+                    event_row_text = json.dumps(
+                        {"event_row": event_row, "safe_metadata": event_metadata},
+                        ensure_ascii=False,
+                        default=str,
+                    ).lower()
+                    for forbidden in [
+                        "timeline-full-order-id-must-not-leak",
+                        "timeline-raw-response-must-not-leak",
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-refresh-buyer",
+                        "must-not-leak-timeline-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in event_row_text, event_row_text
                     assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
                     assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_13a_product_count
                     assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_13a_logs
