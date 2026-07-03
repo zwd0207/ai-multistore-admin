@@ -4822,6 +4822,170 @@ def verify_sync_preview_schema_and_security() -> None:
                         "raw response",
                     ]:
                         assert forbidden not in event_row_text, event_row_text
+
+                    before_14h_event_count = len(db.scalars(
+                        select(OrderStatusEvent).where(OrderStatusEvent.store_id == naver_store_id)
+                    ).all())
+                    assert before_14h_event_count == 1, before_14h_event_count
+                    planned_delivery_events = delivery_timeline_gate["planned_events"]
+
+                    event_write_not_requested_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=planned_delivery_events,
+                        write_enabled=False,
+                        manual_approval=False,
+                    )
+                    assert event_write_not_requested_gate["phase"] == "Naver-ERP-14H", event_write_not_requested_gate
+                    assert event_write_not_requested_gate["status"] == "timeline_event_write_not_requested", event_write_not_requested_gate
+                    assert event_write_not_requested_gate["event_rows_written"] == 0, event_write_not_requested_gate
+                    assert event_write_not_requested_gate["timeline_rows_written"] is False, event_write_not_requested_gate
+                    assert event_write_not_requested_gate["orders_written"] is False, event_write_not_requested_gate
+
+                    event_manual_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=planned_delivery_events,
+                        write_enabled=True,
+                        manual_approval=False,
+                    )
+                    assert event_manual_gate["skip_reason"] == "manual_approval_required", event_manual_gate
+                    assert event_manual_gate["event_rows_written"] == 0, event_manual_gate
+
+                    multi_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=[planned_delivery_events[0], delivered_event],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert multi_event_gate["skip_reason"] == "planned_event_count_not_one", multi_event_gate
+
+                    mismatch_event = dict(planned_delivery_events[0])
+                    mismatch_event["external_product_order_id_hash"] = "id-hash-1111111111"
+                    mismatch_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=[mismatch_event],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert mismatch_event_gate["skip_reason"] == "timeline_event_identity_mismatch", mismatch_event_gate
+
+                    sensitive_event = dict(planned_delivery_events[0])
+                    sensitive_event["raw_response"] = "timeline-event-raw-response-must-not-leak"
+                    sensitive_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=[sensitive_event],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert sensitive_event_gate["skip_reason"] == "timeline_event_sensitive_field_blocked", sensitive_event_gate
+                    assert "timeline-event-raw-response-must-not-leak" not in json.dumps(
+                        sensitive_event_gate,
+                        ensure_ascii=False,
+                        default=str,
+                    ).lower()
+
+                    unknown_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=unknown_timeline_gate["planned_events"],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert unknown_event_gate["skip_reason"] == "timeline_event_unknown_status_blocked", unknown_event_gate
+                    assert unknown_event_gate["manual_review_required"] is True, unknown_event_gate
+                    assert unknown_event_gate["event_rows_written"] == 0, unknown_event_gate
+
+                    approved_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=planned_delivery_events,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert approved_event_gate["status"] == "timeline_event_written", approved_event_gate
+                    assert approved_event_gate["event_rows_written"] == 1, approved_event_gate
+                    assert approved_event_gate["timeline_rows_written"] is True, approved_event_gate
+                    assert approved_event_gate["orders_written"] is False, approved_event_gate
+                    assert approved_event_gate["products_written"] is False, approved_event_gate
+                    assert approved_event_gate["sync_log_written"] is False, approved_event_gate
+                    assert approved_event_gate["capability_tested_success_written"] is False, approved_event_gate
+                    assert approved_event_gate["raw_response_saved"] is False, approved_event_gate
+                    assert approved_event_gate["privacy_fields_redacted"] is True, approved_event_gate
+                    assert approved_event_gate["address_saved"] is False, approved_event_gate
+                    assert approved_event_gate["formal_order_sync_open"] is False, approved_event_gate
+                    assert approved_event_gate["platform_writes_enabled"] is False, approved_event_gate
+                    assert len(db.scalars(
+                        select(OrderStatusEvent).where(OrderStatusEvent.store_id == naver_store_id)
+                    ).all()) == before_14h_event_count + 1
+
+                    written_event = db.scalar(select(OrderStatusEvent).where(
+                        OrderStatusEvent.id == approved_event_gate["event_row_id"]
+                    ))
+                    assert written_event is not None
+                    assert written_event.store_id == naver_store_id
+                    assert written_event.order_id == refreshed_order.id
+                    assert written_event.platform == "naver"
+                    assert written_event.external_product_order_id_hash == "id-hash-abcdef1234"
+                    assert written_event.event_type == "dispatched"
+                    assert written_event.source_phase == "Naver-ERP-14H"
+                    assert written_event.source_type == sync_service.NAVER_ORDER_PREVIEW_SOURCE_TYPE
+                    assert written_event.mapping_version == sync_service.NAVER_ORDER_TIMELINE_MAPPING_VERSION
+                    assert written_event.raw_response_saved is False
+                    assert written_event.privacy_fields_redacted is True
+                    assert written_event.address_saved is False
+                    assert written_event.safe_metadata["write_gate_phase"] == "Naver-ERP-14H"
+                    assert written_event.safe_metadata["timeline_mapper_phase"] == "Naver-ERP-14B"
+
+                    duplicate_event_gate = sync_service._evaluate_naver_order_timeline_event_single_write_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        planned_events=planned_delivery_events,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert duplicate_event_gate["status"] == "timeline_event_already_exists", duplicate_event_gate
+                    assert duplicate_event_gate["event_rows_written"] == 0, duplicate_event_gate
+                    assert len(db.scalars(
+                        select(OrderStatusEvent).where(OrderStatusEvent.store_id == naver_store_id)
+                    ).all()) == before_14h_event_count + 1
+
+                    written_event_text = json.dumps({
+                        "gate": approved_event_gate,
+                        "event": {
+                            "external_order_id_hash": written_event.external_order_id_hash,
+                            "external_product_order_id_hash": written_event.external_product_order_id_hash,
+                            "event_type": written_event.event_type,
+                            "status_raw": written_event.status_raw,
+                            "delivery_status_raw": written_event.delivery_status_raw,
+                            "safe_metadata": written_event.safe_metadata,
+                        },
+                    }, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "timeline-event-raw-response-must-not-leak",
+                        "timeline-full-order-id-must-not-leak",
+                        "timeline-raw-response-must-not-leak",
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-refresh-buyer",
+                        "must-not-leak-timeline-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in written_event_text, written_event_text
                     assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
                     assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_13a_product_count
                     assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_13a_logs

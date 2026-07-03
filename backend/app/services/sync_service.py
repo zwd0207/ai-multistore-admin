@@ -19,6 +19,7 @@ from app.core.timezone import get_business_date, get_business_day_range, get_bus
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.api_credential import ApiCredential
 from app.models.order import Order
+from app.models.order_status_event import OrderStatusEvent
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.schemas.credential import DecryptedCredential
@@ -4592,6 +4593,237 @@ def _evaluate_naver_order_status_timeline_mock_mapper(
     else:
         result["status"] = "no_timeline_event"
         result["skip_reason"] = "no_status_change"
+    return result
+
+
+def _naver_order_timeline_event_forbidden_field_names(payload: object) -> list[str]:
+    allowed_names = {
+        "addresssaved",
+        "address_saved",
+        "privacyfieldsredacted",
+        "privacy_fields_redacted",
+        "rawresponsesaved",
+        "raw_response_saved",
+    }
+    forbidden_fragments = {
+        "authorization",
+        "bcrypt",
+        "buyer",
+        "clientsecret",
+        "client_secret",
+        "completefield",
+        "complete_field",
+        "header",
+        "phone",
+        "rawdata",
+        "rawresponse",
+        "raw_data",
+        "raw_response",
+        "receiver",
+        "secret",
+        "signature",
+        "token",
+        "zipcode",
+        "zip_code",
+    }
+    normalized_names = {
+        name.replace("-", "").replace("_", "").replace(" ", "").lower()
+        for name in _collect_json_field_names(payload)
+    } - allowed_names
+    return sorted(
+        name
+        for name in normalized_names
+        if any(fragment in name for fragment in forbidden_fragments)
+    )
+
+
+def _evaluate_naver_order_timeline_event_single_write_mock_gate(
+    db: Session,
+    *,
+    selected_order_hash: str | None,
+    planned_events: list[dict] | tuple[dict, ...] | None,
+    write_enabled: bool = False,
+    manual_approval: bool = False,
+    fresh_readonly_preview: bool = True,
+) -> dict:
+    """Mock-testable 14H event write gate; not wired to public endpoints or real sync."""
+    result = {
+        "phase": "Naver-ERP-14H",
+        "timeline_event_single_write_mock_gate": True,
+        "write_enabled": bool(write_enabled),
+        "manual_approval": bool(manual_approval),
+        "fresh_readonly_preview": bool(fresh_readonly_preview),
+        "status": "blocked",
+        "selected_order_hash": selected_order_hash if _is_hash_identifier(selected_order_hash) else None,
+        "matched_local_count": 0,
+        "planned_event_count": len(planned_events) if isinstance(planned_events, (list, tuple)) else 0,
+        "event_rows_written": 0,
+        "timeline_rows_written": False,
+        "orders_written": False,
+        "orders_created": False,
+        "orders_updated": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "skip_reason": None,
+        "event_type": None,
+        "dedupe_key": None,
+        "event_row_id": None,
+        "safe_metadata": None,
+    }
+    if not fresh_readonly_preview:
+        result["skip_reason"] = "timeline_event_stale_preview"
+        return result
+    if not _is_hash_identifier(selected_order_hash):
+        result["skip_reason"] = "selected_order_missing"
+        return result
+    if not isinstance(planned_events, (list, tuple)):
+        result["skip_reason"] = "planned_events_missing"
+        return result
+    if len(planned_events) != 1:
+        result["skip_reason"] = "planned_event_count_not_one"
+        return result
+    event = planned_events[0]
+    if not isinstance(event, dict):
+        result["skip_reason"] = "planned_event_invalid"
+        return result
+
+    forbidden_names = _naver_order_timeline_event_forbidden_field_names(event)
+    if forbidden_names:
+        result["skip_reason"] = "timeline_event_sensitive_field_blocked"
+        result["forbidden_field_names"] = forbidden_names
+        return result
+
+    if event.get("store_id") != 8 or event.get("platform") != "naver":
+        result["skip_reason"] = "timeline_event_scope_mismatch"
+        return result
+    if event.get("external_product_order_id_hash") != selected_order_hash:
+        result["skip_reason"] = "timeline_event_identity_mismatch"
+        return result
+    if event.get("external_order_id_hash") is not None and not _is_hash_identifier(event.get("external_order_id_hash")):
+        result["skip_reason"] = "timeline_event_order_hash_invalid"
+        return result
+    event_type = _safe_order_text(event.get("event_type"), max_length=50)
+    allowed_event_types = set(NAVER_ORDER_TIMELINE_EVENT_TYPES.values()) | {"unknown_status_observed"}
+    if event_type not in allowed_event_types:
+        result["skip_reason"] = "timeline_event_type_not_allowed"
+        return result
+    if event_type == "unknown_status_observed":
+        result["skip_reason"] = "timeline_event_unknown_status_blocked"
+        result["manual_review_required"] = True
+        return result
+    if event.get("source_type") != NAVER_ORDER_PREVIEW_SOURCE_TYPE:
+        result["skip_reason"] = "timeline_event_source_type_invalid"
+        return result
+    if event.get("mapping_version") != NAVER_ORDER_TIMELINE_MAPPING_VERSION:
+        result["skip_reason"] = "timeline_event_mapping_version_invalid"
+        return result
+    if event.get("raw_response_saved") is not False:
+        result["skip_reason"] = "timeline_event_raw_response_flag_invalid"
+        return result
+    if event.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "timeline_event_privacy_flag_invalid"
+        return result
+    if event.get("address_saved") is not False:
+        result["skip_reason"] = "timeline_event_address_flag_invalid"
+        return result
+
+    expected_dedupe_key = _naver_order_timeline_dedupe_key(event)
+    if event.get("dedupe_key") != expected_dedupe_key:
+        result["skip_reason"] = "timeline_event_dedupe_key_invalid"
+        return result
+    result["event_type"] = event_type
+    result["dedupe_key"] = expected_dedupe_key
+
+    existing_orders = db.scalars(
+        select(Order).where(
+            Order.store_id == 8,
+            Order.platform == "naver",
+            Order.external_order_id == selected_order_hash,
+        )
+    ).all()
+    result["matched_local_count"] = len(existing_orders)
+    if not existing_orders:
+        result["skip_reason"] = "local_order_not_found"
+        return result
+    if len(existing_orders) > 1:
+        result["skip_reason"] = "local_order_not_unique"
+        return result
+    existing_order = existing_orders[0]
+
+    existing_events = db.scalars(
+        select(OrderStatusEvent).where(
+            OrderStatusEvent.store_id == 8,
+            OrderStatusEvent.platform == "naver",
+            OrderStatusEvent.dedupe_key == expected_dedupe_key,
+        )
+    ).all()
+    if existing_events:
+        result.update({
+            "status": "timeline_event_already_exists",
+            "deduped_event_count": len(existing_events),
+        })
+        return result
+    if not write_enabled:
+        result["status"] = "timeline_event_write_not_requested"
+        return result
+    if not manual_approval:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+
+    safe_metadata = {
+        "source_window": "mock_single_event_write_gate",
+        "candidate_classification": "selected_local_refresh_candidate",
+        "refresh_gate_phase": "Naver-ERP-13C",
+        "timeline_mapper_phase": event.get("source_phase"),
+        "write_gate_phase": "Naver-ERP-14H",
+        "unknown_status_observed": False,
+        "deduped_event_count": 0,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+    }
+    observed_at = _parse_preview_iso_datetime(event.get("observed_at")) or get_utc_now()
+    row = OrderStatusEvent(
+        store_id=8,
+        order_id=existing_order.id,
+        platform="naver",
+        external_order_id_hash=event.get("external_order_id_hash"),
+        external_product_order_id_hash=selected_order_hash,
+        event_type=event_type,
+        status_raw=_safe_order_text(event.get("status_raw"), max_length=60),
+        status_label_zh=_safe_order_text(event.get("status_label_zh"), max_length=120),
+        payment_status_raw=_safe_order_text(event.get("payment_status_raw"), max_length=60),
+        payment_status_label_zh=_safe_order_text(event.get("payment_status_label_zh"), max_length=120),
+        delivery_status_raw=_safe_order_text(event.get("delivery_status_raw"), max_length=60),
+        delivery_status_label_zh=_safe_order_text(event.get("delivery_status_label_zh"), max_length=120),
+        claim_status_raw=_safe_order_text(event.get("claim_status_raw"), max_length=60),
+        claim_status_label_zh=_safe_order_text(event.get("claim_status_label_zh"), max_length=120),
+        observed_at=observed_at,
+        source_phase="Naver-ERP-14H",
+        source_type=NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        mapping_version=NAVER_ORDER_TIMELINE_MAPPING_VERSION,
+        dedupe_key=expected_dedupe_key,
+        raw_response_saved=False,
+        privacy_fields_redacted=True,
+        address_saved=False,
+        safe_metadata=safe_metadata,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    result.update({
+        "status": "timeline_event_written",
+        "event_rows_written": 1,
+        "timeline_rows_written": True,
+        "event_row_id": row.id,
+        "safe_metadata": safe_metadata,
+    })
     return result
 
 
