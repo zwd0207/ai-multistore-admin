@@ -617,6 +617,12 @@ The audit log schema migration approval plan is documented in `PHASE_ERP_AUDIT_1
 
 ERP-Audit-1D is planning-only. It approves no real schema change by itself; instead, it defines the required pre-checks, explicit operator approval, database backup metadata, zero-row migration rule, post-migration verification, rollback boundary, and sensitive-data ban for a future `operation_audit_logs` migration. The future real migration must be a separate phase and must create only the table and indexes, insert zero audit rows, keep business table counts unchanged, and continue blocking tokens, Authorization, headers, signatures, client secrets, raw platform responses, full platform identifiers, buyer/receiver privacy, phones, and addresses.
 
+## Phase ERP-Audit-1E - Audit Log Schema Migration
+
+The audit log schema migration is documented in `PHASE_ERP_AUDIT_1E_AUDIT_LOG_SCHEMA_MIGRATION.md`.
+
+ERP-Audit-1E creates the real local `operation_audit_logs` table and approved indexes in `backend/codex1.db` after backing up the database. The migration inserted zero audit rows and left business table counts unchanged: stores 8, products 9, orders 9, sync logs 47, tested success results 8, order status events 0, and operation audit logs 0. It adds no runtime audit writer, no public audit endpoint, no frontend audit reader, no restore execution, no platform API call, and no formal product/order sync approval.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
