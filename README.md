@@ -382,3 +382,9 @@ The Naver new-order write window decision is documented in `PHASE_NAVER_ERP_10D_
 The selected Naver new-order write path is documented in `PHASE_NAVER_ERP_11A_SELECTED_NEW_ORDER_WRITE_PATH_PLAN.md`.
 
 11A keeps the existing 24-hour write gate unchanged and defines a separate future selected-candidate path for any manually approved older new-order candidate. The future path must re-run a fresh readonly preview, recompute safe hashes server-side, match exactly one selected candidate, pass duplicate and privacy gates, back up the database, write at most one order, and keep `products`, `SyncLog`, and `tested_success` unchanged. This phase does not call Naver, does not write local data, does not change Codex1, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-11B - Selected New-Order Write Mock Gate
+
+The selected Naver new-order write mock gate is documented in `PHASE_NAVER_ERP_11B_SELECTED_NEW_ORDER_WRITE_MOCK_GATE.md`.
+
+11B adds a private Codex1 mock-testable gate for future selected-candidate persistence. It is not wired to the public preview endpoint and does not call Naver. `verify_all.py` now covers readonly not-requested, stale, missing, changed, duplicate, not-unique, privacy-blocked, and one-row temporary mock success paths while keeping `products`, `SyncLog`, `tested_success`, raw response saving, platform writes, and formal order sync closed.
