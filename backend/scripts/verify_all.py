@@ -4385,6 +4385,31 @@ def verify_sync_preview_schema_and_security() -> None:
                 ]:
                     assert forbidden not in delivered_fallback_text, delivered_fallback_text
 
+                collect_done_preview = sync_service._build_naver_order_detail_preview({
+                    "productOrderId": "COLLECT-DONE-PRODUCT-ORDER-ID-MUST-NOT-LEAK",
+                    "orderId": "COLLECT-DONE-ORDER-ID-MUST-NOT-LEAK",
+                    "orderStatus": "DELIVERED",
+                    "deliveryStatus": "DELIVERY_COMPLETION",
+                    "claimStatus": "COLLECT_DONE",
+                    "buyerName": "collect-done-must-not-leak-name",
+                    "buyerTelNo": "010-8888-9999",
+                    "receiverAddress": "collect-done-must-not-leak-address",
+                }, store_id=8)
+                assert collect_done_preview["claim_status"]["raw"] == "COLLECT_DONE", collect_done_preview
+                assert collect_done_preview["claim_status"]["label_zh"] == "售后取件完成", collect_done_preview
+                assert collect_done_preview["claim_status_label_zh"] == "售后取件完成", collect_done_preview
+                assert collect_done_preview["claim_status"]["unknown_status_observed"] is False, collect_done_preview
+                assert collect_done_preview["unknown_status_observed"] is False, collect_done_preview
+                collect_done_text = json.dumps(collect_done_preview, ensure_ascii=False).lower()
+                for forbidden in [
+                    "collect-done-product-order-id-must-not-leak",
+                    "collect-done-order-id-must-not-leak",
+                    "collect-done-must-not-leak-name",
+                    "010-8888-9999",
+                    "collect-done-must-not-leak-address",
+                ]:
+                    assert forbidden not in collect_done_text, collect_done_text
+
                 unknown_preview = sync_service._build_naver_order_detail_preview({
                     "productOrderId": "UNKNOWN-PRODUCT-ORDER-ID-MUST-NOT-LEAK",
                     "orderId": "UNKNOWN-ORDER-ID-MUST-NOT-LEAK",
@@ -5061,11 +5086,13 @@ def verify_sync_preview_schema_and_security() -> None:
                         ("CANCEL_REQUEST", "cancel_requested"),
                         ("RETURN_REQUEST", "return_requested"),
                         ("EXCHANGE_REQUEST", "exchange_requested"),
+                        ("COLLECT_DONE", "claim_collected"),
                     ]:
                         claim_preview = dict(timeline_delivered_preview)
                         claim_preview.update({
                             "claim_status": {"raw": claim_raw, "label_zh": sync_service._status_label_zh(claim_raw)[0]},
                             "claim_status_label_zh": sync_service._status_label_zh(claim_raw)[0],
+                            "unknown_status_observed": False,
                         })
                         claim_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
                             selected_order_hash="id-hash-abcdef1234",

@@ -3557,8 +3557,15 @@ NAVER_ORDER_STATUS_LABELS_ZH = {
     "취소요청": "取消请求",
     "RETURN_REQUEST": "退货请求",
     "반품요청": "退货请求",
+    "RETURNED": "退货完成",
+    "RETURN_DONE": "退货完成",
     "EXCHANGE_REQUEST": "换货请求",
     "교환요청": "换货请求",
+    "EXCHANGED": "换货完成",
+    "EXCHANGE_DONE": "换货完成",
+    "COLLECT_REQUEST": "售后取件请求",
+    "COLLECTING": "售后取件中",
+    "COLLECT_DONE": "售后取件完成",
     "PURCHASE_DECIDED": "已确认购买",
     "구매확정": "已确认购买",
 }
@@ -4609,8 +4616,13 @@ NAVER_ORDER_TIMELINE_EVENT_TYPES = {
     "CANCELLED": "canceled",
     "RETURN_REQUEST": "return_requested",
     "RETURNED": "returned",
+    "RETURN_DONE": "returned",
     "EXCHANGE_REQUEST": "exchange_requested",
     "EXCHANGED": "exchanged",
+    "EXCHANGE_DONE": "exchanged",
+    "COLLECT_REQUEST": "claim_collect_requested",
+    "COLLECTING": "claim_collecting",
+    "COLLECT_DONE": "claim_collected",
     "PURCHASE_DECIDED": "purchase_decided",
 }
 
@@ -4625,6 +4637,7 @@ NAVER_ORDER_TIMELINE_LABEL_CANONICALS = (
     ("CANCELED", "canceled"),
     ("RETURN_REQUEST", "return_requested"),
     ("EXCHANGE_REQUEST", "exchange_requested"),
+    ("COLLECT_DONE", "claim_collected"),
     ("PURCHASE_DECIDED", "purchase_decided"),
 )
 
