@@ -527,6 +527,12 @@ The Naver order refresh batch mock gate is documented in `PHASE_NAVER_ERP_15B_OR
 
 15B adds a private Codex1 mock gate for a future existing-order refresh batch. It is exercised only by `verify_all.py` against the temporary verification database. The gate defaults to at most two candidates, rejects stale previews, duplicate safe hashes, new-order candidates, privacy failures, unknown statuses, sensitive/raw-response fields, and unapproved writes, and can update two temporary existing local orders only when `write_enabled=true` and `manual_approval=true`. It does not change the public endpoint, call Naver, write the real database, insert timeline events, modify runtime UI, or open formal order sync.
 
+## Phase Naver-ERP-15C - Naver Order Refresh Readonly Candidate Batch
+
+The Naver order refresh readonly candidate batch result is documented in `PHASE_NAVER_ERP_15C_ORDER_REFRESH_READONLY_CANDIDATE_BATCH.md`.
+
+15C runs a controlled real readonly candidate discovery under the existing public guardrail, so the request remains `page=1,size=1`, `real_preview=true`, `include_detail=true`, and `real_sync=false`. The preview returned HTTP 200 with feed/detail HTTP 200 and one safe candidate hash, `id-hash-67b5fc1c97`, but that hash did not match an existing local real Naver order. It is therefore a new-order candidate, not an existing-order batch refresh candidate. Counts stayed unchanged: `orders_store8=5`, real Naver local orders 2, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, and `order_status_events_rows=0`. `DELIVERY_COMPLETION` is now recognized as `配送完成`. True multi-candidate probing, local batch refresh writing, timeline event insertion, new-order writing, platform writes, and formal Naver order sync remain closed.
+
 ## Phase Naver-ERP-15D - Naver Order Refresh Batch Approval Plan
 
 The Naver order refresh batch approval plan is documented in `PHASE_NAVER_ERP_15D_ORDER_REFRESH_BATCH_APPROVAL_PLAN.md`.

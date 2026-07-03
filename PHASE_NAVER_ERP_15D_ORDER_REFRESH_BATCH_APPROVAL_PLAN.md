@@ -10,9 +10,12 @@ This phase is planning-only. It does not call Naver, does not run a readonly bat
 
 - Phase 15A documented the batch-refresh gate direction.
 - Phase 15B added a private mock gate in Codex1 and `verify_all.py` coverage.
+- Phase 15C ran a controlled real readonly candidate discovery under the current `page=1,size=1` public guardrail.
+- 15C returned HTTP 200 and one safe hash, `id-hash-67b5fc1c97`, but it did not match an existing local real Naver order.
 - The public real Naver order preview endpoint still remains capped at `page=1,size=1`.
 - Current real write behavior remains single-order only.
-- No production batch readonly probe has been executed in this phase.
+- No true multi-candidate batch readonly probe has been executed.
+- No existing-order batch refresh candidate is currently approved.
 - Formal order sync, automatic refresh, timeline event writes, shipment writes, cancel/return/exchange writes, SyncLog writes, and tested_success writes remain closed.
 
 ## Approval Scope
@@ -117,6 +120,7 @@ If any readback fails, stop and restore from the database backup.
 
 Approval must be denied if:
 
+- the latest readonly candidate is still `id-hash-67b5fc1c97` and still does not match an existing local real Naver order.
 - current endpoint still cannot produce a safe readonly batch candidate result.
 - candidate batch is larger than the approved first-batch limit.
 - any candidate is a new order.
@@ -135,7 +139,7 @@ Approval must be denied if:
 Recommended next stage:
 
 ```text
-Phase Naver-ERP-15E: Naver order refresh batch readonly probe approval
+Phase Naver-ERP-15E: Naver order refresh batch readonly expansion approval plan
 ```
 
-15E should still avoid writes. It should decide whether to temporarily expand the readonly candidate probe beyond `page=1,size=1`, and if approved, define the exact probe parameters and stop conditions before any real request is made.
+15E should still avoid writes. It should decide whether to temporarily expand the readonly candidate probe beyond `page=1,size=1`, define the exact probe parameters and stop conditions before any real request is made, and explicitly separate new-order candidates from existing-order refresh candidates.
