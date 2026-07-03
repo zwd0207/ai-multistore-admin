@@ -448,3 +448,9 @@ The Naver order readonly refresh repeat is documented in `PHASE_NAVER_ERP_13B_OR
 The Naver selected order refresh approval plan is documented in `PHASE_NAVER_ERP_13C_SELECTED_ORDER_REFRESH_APPROVAL_PLAN.md`.
 
 13C is documentation-only. It records the future gate for refreshing one existing local Naver order with selected safe hash `id-hash-ab176f5db1`: explicit user approval, clean worktrees, database backup, fresh readonly preview, exact hash match, exactly one existing local real Naver order, privacy gate pass, one-row update limit, post-write readback, no product writes, no SyncLog, no tested_success, no raw response saving, and no Naver platform write operation. It does not call Naver, does not write local data, and does not approve formal order sync.
+
+## Phase Naver-ERP-14A - Naver Order Status Timeline Plan
+
+The Naver order status timeline plan is documented in `PHASE_NAVER_ERP_14A_ORDER_STATUS_TIMELINE_PLAN.md`.
+
+14A is planning-only. It separates the latest local order snapshot from future status-history events so a later refresh does not hide transitions such as `PAYED -> DELIVERED`. The plan defines safe timeline event fields, forbidden privacy/raw-response fields, status-to-event mapping, dedupe rules, no-change refresh behavior, and a future preference for a separate `order_status_events` table in a later approved schema phase. It does not call Naver, does not write local data, does not change schema, and does not open formal order sync.
