@@ -628,3 +628,9 @@ ERP-UX-1I updates Codex2 Logs runtime UI so administrator-facing audit pages are
 The TechnicalDetails safety hardening plan is documented in `PHASE_ERP_UX_1J_TECHNICALDETAILS_SAFETY_HARDENING_PLAN.md`.
 
 ERP-UX-1J is planning-only. It defines a frontend last-line-of-defense redaction plan for folded technical details: labels and values related to tokens, Authorization, headers, signatures, client secrets, raw responses, full platform ids, buyer/receiver privacy, phones, and addresses must be hidden, while safe diagnostics such as error codes, http status, safe keyword flags, mapping versions, source phases, safe hashes, counts, and booleans may remain visible only inside folded administrator details. This phase does not modify runtime frontend code, Codex1, platform APIs, local data, schema, or formal sync gates.
+
+## Phase ERP-UX-1K - TechnicalDetails Safety Hardening Implementation
+
+The TechnicalDetails safety hardening implementation is documented in `PHASE_ERP_UX_1K_TECHNICALDETAILS_SAFETY_HARDENING_IMPLEMENTATION.md`.
+
+ERP-UX-1K updates Codex2 runtime `TechnicalDetails` with strict default redaction. Folded administrator details now hide token, Authorization, headers, signatures, bcrypt/sign values, client secrets, raw response/body fields, full channel/product/order identifiers, buyer/receiver names and phones, and address-like fields. Safe diagnostics such as error codes, HTTP status, business hints, safe keyword flags, hashes, mapping versions, counts, booleans, source phases, and backup metadata can still appear in folded details. Logs before/after JSON is passed through the same redaction helper before rendering. This phase does not modify Codex1, call platform APIs, write local data, change database schema, or open formal product/order sync.

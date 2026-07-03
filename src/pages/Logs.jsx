@@ -9,7 +9,7 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
-import TechnicalDetails from '../components/common/TechnicalDetails';
+import TechnicalDetails, { redactTechnicalObject } from '../components/common/TechnicalDetails';
 import { useSyncRefresh } from '../context/SyncRefreshContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
@@ -345,11 +345,11 @@ export default function Logs() {
             >
               <section className="detail-section">
                 <h3>操作前数据</h3>
-                <pre>{JSON.stringify(detail.beforeData, null, 2)}</pre>
+                <pre>{JSON.stringify(redactTechnicalObject(detail.beforeData), null, 2)}</pre>
               </section>
               <section className="detail-section">
                 <h3>操作后数据</h3>
-                <pre>{JSON.stringify(detail.afterData, null, 2)}</pre>
+                <pre>{JSON.stringify(redactTechnicalObject(detail.afterData), null, 2)}</pre>
               </section>
             </TechnicalDetails>
           </>
