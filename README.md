@@ -514,3 +514,9 @@ The post-refresh timeline verification is documented in `PHASE_NAVER_ERP_14I_POS
 The Orders UI timeline readonly display is documented in `PHASE_NAVER_ERP_14J_ORDERS_UI_TIMELINE_READONLY_DISPLAY.md`.
 
 14J adds a read-only Naver order status timeline section to Codex2 Orders detail. The main panel shows the current local order status snapshot and safe future timeline events when present; if no event rows are available, it explicitly shows that no local status history has been recorded yet. Raw enums, source phase, dedupe key, mapping version, and safe hashes stay in TechnicalDetails. This phase does not call Naver, does not write local data, does not modify Codex1 schema or APIs, and does not open formal Naver order sync.
+
+## Phase Naver-ERP-15A - Naver Order Refresh Batch Gate Plan
+
+The Naver order refresh batch gate plan is documented in `PHASE_NAVER_ERP_15A_ORDER_REFRESH_BATCH_GATE_PLAN.md`.
+
+15A is planning-only. It defines the future gate for refreshing multiple already-existing local Naver orders while keeping the current public real preview cap at `page=1,size=1`. It separates existing-order refresh from new-order creation, timeline event insertion, shipment/claim platform writes, and formal order sync. A future batch gate must start with readonly candidate discovery, reject mixed new/refresh candidates, require exact safe-hash matches to existing local real Naver orders, block partial writes in the first batch, and require explicit approval plus database backup before any later local write phase.
