@@ -12,6 +12,31 @@ function normalizePlatform(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function statusRawValue(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value.raw ?? value.value ?? '';
+  }
+  return value ?? '';
+}
+
+function statusLabelValue(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value.label_zh ?? value.label ?? value.name ?? '';
+  }
+  return value ?? '';
+}
+
+function naverBusinessStatusLabel(rawValue, ...labelValues) {
+  const raw = String(statusRawValue(rawValue) || '').trim();
+  const presentation = raw ? getNaverOrderStatusPresentation(raw) : null;
+  if (presentation && presentation.bucket !== 'unknown') return presentation.label;
+  const label = labelValues
+    .map(statusLabelValue)
+    .find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  if (label) return String(label).trim();
+  return presentation?.label || '';
+}
+
 function adaptStatus(value, mapping = {}) {
   return mapping[String(value || '').toLowerCase()] || value || '未知';
 }
@@ -280,8 +305,18 @@ export function adaptProduct(item = {}) {
 export function adaptOrder(item = {}) {
   const rawPlatform = normalizePlatform(item.platform);
   const rawData = item.raw_data || {};
-  const naverStatusLabel = rawData.order_status_label_zh || rawData?.order_status?.label_zh;
   const isNaver = rawPlatform === 'naver';
+  const naverStatusLabel = isNaver
+    ? naverBusinessStatusLabel(item.order_status || rawData.order_status, item.order_status_label_zh, rawData.order_status_label_zh, rawData.order_status)
+    : '';
+  const naverDeliveryStatus = item.delivery_status || rawData.delivery_status;
+  const naverClaimStatus = item.claim_status || rawData.claim_status;
+  const naverDeliveryLabel = isNaver
+    ? naverBusinessStatusLabel(naverDeliveryStatus, item.delivery_status_label_zh, rawData.delivery_status_label_zh, naverDeliveryStatus)
+    : item.delivery_status_label_zh || rawData.delivery_status_label_zh;
+  const naverClaimLabel = isNaver
+    ? naverBusinessStatusLabel(naverClaimStatus, item.claim_status_label_zh, rawData.claim_status_label_zh, naverClaimStatus)
+    : item.claim_status_label_zh || rawData.claim_status_label_zh;
   const isHashOrderId = /^id-hash-[a-z0-9_-]+$/i.test(String(item.external_order_id || ''));
   const displayOrderNo = isNaver && isHashOrderId ? '订单编号已脱敏' : item.external_order_id;
   const displayCustomer = isNaver ? (item.buyer_name || '买家信息已脱敏') : item.buyer_name;
@@ -337,10 +372,10 @@ export function adaptOrder(item = {}) {
     rawStatus: item.order_status,
     status: statusLabel,
     paymentStatus: item.payment_status || rawData.payment_status,
-    deliveryStatus: item.delivery_status || rawData.delivery_status,
-    deliveryStatusLabelZh: item.delivery_status_label_zh || rawData.delivery_status_label_zh,
-    claimStatus: item.claim_status || rawData.claim_status,
-    claimStatusLabelZh: item.claim_status_label_zh || rawData.claim_status_label_zh,
+    deliveryStatus: statusRawValue(naverDeliveryStatus),
+    deliveryStatusLabelZh: naverDeliveryLabel,
+    claimStatus: statusRawValue(naverClaimStatus),
+    claimStatusLabelZh: naverClaimLabel,
     statusEvents,
     orderStatusEvents: statusEvents,
     sourceType: item.source_type,
@@ -381,7 +416,7 @@ export function adaptNaverOrderCompletePreview(data = {}) {
       externalOrderIdHash: detailPreview.external_order_id_hash || detailPreview.order_id_hash,
       externalProductOrderIdHash: detailPreview.external_product_order_id_hash || detailPreview.product_order_id_hash,
       orderStatus: detailPreview.order_status?.raw || detailPreview.order_status,
-      orderStatusLabelZh: detailPreview.order_status_label_zh || detailPreview.order_status?.label_zh,
+      orderStatusLabelZh: naverBusinessStatusLabel(detailPreview.order_status, detailPreview.order_status_label_zh, detailPreview.order_status),
       orderAmount: detailPreview.order_amount,
       currency: detailPreview.currency,
       rawResponseSaved: Boolean(detailPreview.raw_response_saved),
@@ -410,12 +445,12 @@ export function adaptNaverOrderCompletePreview(data = {}) {
       orderAmount: completeFields.order_amount,
       currency: completeFields.currency,
       orderStatus: completeFields.order_status,
-      orderStatusLabelZh: completeFields.order_status_label_zh,
+      orderStatusLabelZh: naverBusinessStatusLabel(completeFields.order_status, completeFields.order_status_label_zh),
       paymentStatus: completeFields.payment_status,
       deliveryStatus: completeFields.delivery_status,
-      deliveryStatusLabelZh: completeFields.delivery_status_label_zh,
+      deliveryStatusLabelZh: naverBusinessStatusLabel(completeFields.delivery_status, completeFields.delivery_status_label_zh),
       claimStatus: completeFields.claim_status,
-      claimStatusLabelZh: completeFields.claim_status_label_zh,
+      claimStatusLabelZh: naverBusinessStatusLabel(completeFields.claim_status, completeFields.claim_status_label_zh),
       buyerName: completeFields.buyer_name,
       buyerPhone: completeFields.buyer_phone,
       receiverName: completeFields.receiver_name,

@@ -587,6 +587,12 @@ The claim status mapping expansion is documented in `PHASE_NAVER_ERP_17A_CLAIM_S
 
 17A does not call Naver, write local data, change schema, modify runtime UI, or open formal order sync. It expands backend readonly mapping so `COLLECT_DONE` now displays as `售后取件完成` instead of an unknown status, and adds related safe mappings for claim pickup, return completion, and exchange completion states. Timeline mock mapping now recognizes `COLLECT_DONE` as `claim_collected`. Existing persisted rows are not rewritten; UI display cleanup or a later approved refresh should handle historical sanitized labels separately. Naver after-sales platform actions remain closed.
 
+## Phase Naver-ERP-17B - Orders UI Claim/Delivery Wording Check
+
+The Orders UI claim/delivery wording check is documented in `PHASE_NAVER_ERP_17B_ORDERS_UI_CLAIM_DELIVERY_WORDING_CHECK.md`.
+
+17B updates Codex2 display mapping so Orders and Dashboard main areas show business Chinese wording for Naver delivery and claim states, even when older sanitized rows contain stale labels. `DELIVERY_COMPLETION` is normalized to delivered wording, `COLLECT_DONE` is shown as after-sales pickup completed wording, and return/exchange completed states use operator-friendly labels. The main UI no longer surfaces raw Naver enums such as `DELIVERY_COMPLETION` or `COLLECT_DONE`; technical enum values remain limited to folded diagnostic details. This phase does not modify Codex1, call Naver, write local data, change schema, or open formal order sync.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.

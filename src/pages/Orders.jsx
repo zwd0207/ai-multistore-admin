@@ -12,6 +12,7 @@ import {
   buildNaverClaimReadonlySummary,
   buildNaverOrderFulfillmentSummary,
   filterNaverOrdersForStore,
+  getNaverOrderStatusPresentation,
   isNaverMockSyncOrder,
 } from '../utils/naverOrderFulfillment';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
@@ -78,6 +79,37 @@ function displayText(...values) {
   return firstText(...values) || '待接入';
 }
 
+function statusRawValue(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value.raw ?? value.value ?? '';
+  }
+  return value ?? '';
+}
+
+function statusLabelValue(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value.label_zh ?? value.label ?? value.name ?? '';
+  }
+  return value ?? '';
+}
+
+function businessStatusDisplay(...values) {
+  const raw = values
+    .map(statusRawValue)
+    .find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  const presentation = raw ? getNaverOrderStatusPresentation(raw) : null;
+  if (presentation && presentation.bucket !== 'unknown') return presentation.label;
+  const label = values
+    .map(statusLabelValue)
+    .find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  return label ? String(label).trim() : '待接入';
+}
+
+function isUnknownStatusDisplay(value) {
+  const text = String(value || '');
+  return text.includes('未识别') || text.toLowerCase().includes('unknown');
+}
+
 function safeDateTime(value) {
   return value ? formatKstDateTimeWithLabel(value) : '待接入';
 }
@@ -123,24 +155,27 @@ function paginateRows(rows = [], page = 1, pageSize = 5) {
 }
 
 function getDeliveryDisplayText(complete = {}, order = {}) {
-  const directLabel = displayText(
-    complete.deliveryStatusLabelZh,
-    complete.delivery_status_label_zh,
+  const directLabel = businessStatusDisplay(
     complete.deliveryStatus,
     complete.delivery_status,
-    order.deliveryStatusLabelZh,
-    order.delivery_status_label_zh,
     order.deliveryStatus,
     order.delivery_status,
+    complete.deliveryStatusLabelZh,
+    complete.delivery_status_label_zh,
+    order.deliveryStatusLabelZh,
+    order.delivery_status_label_zh,
   );
-  if (directLabel && directLabel !== '待接入' && directLabel !== '未识别状态，需人工确认') {
+  if (directLabel && directLabel !== '待接入' && !isUnknownStatusDisplay(directLabel)) {
     return directLabel;
   }
-  return displayText(
+  return businessStatusDisplay(
+    complete.orderStatus,
+    complete.order_status,
+    order.rawStatus,
+    order.order_status,
     complete.orderStatusLabelZh,
     complete.order_status_label_zh,
     order.status,
-    order.order_status,
     directLabel,
   );
 }
@@ -156,10 +191,10 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
     optionName: displayText(complete.optionName, complete.option_name, order.optionName, order.option_name, rawData.option_name),
     quantity: displayText(complete.quantity, order.quantity),
     amount: formatMoney(complete.orderAmount ?? complete.order_amount ?? order.amount ?? order.order_amount, complete.currency || order.currency),
-    orderStatus: displayText(complete.orderStatusLabelZh, complete.order_status_label_zh, complete.orderStatus, complete.order_status, order.status, order.order_status),
+    orderStatus: businessStatusDisplay(complete.orderStatus, complete.order_status, order.rawStatus, order.order_status, complete.orderStatusLabelZh, complete.order_status_label_zh, order.status),
     paymentStatus: displayText(paymentStatusLabel(complete.paymentStatus || complete.payment_status || order.paymentStatus || order.payment_status)),
     deliveryStatus: getDeliveryDisplayText(complete, order),
-    claimStatus: displayText(complete.claimStatusLabelZh, complete.claim_status_label_zh, complete.claimStatus, complete.claim_status, order.claimStatusLabelZh, order.claim_status_label_zh, order.claimStatus, order.claim_status),
+    claimStatus: businessStatusDisplay(complete.claimStatus, complete.claim_status, order.claimStatus, order.claim_status, complete.claimStatusLabelZh, complete.claim_status_label_zh, order.claimStatusLabelZh, order.claim_status_label_zh),
     buyerName: displayText(complete.buyerName, complete.buyer_name, order.buyerName, order.buyer_name, order.customerName, order.customer),
     buyerPhone: displayText(complete.buyerPhone, complete.buyer_phone, order.buyerPhone, order.buyer_phone, order.phone),
     receiverName: displayText(complete.receiverName, complete.receiver_name, order.receiverName, order.receiver_name),
@@ -194,9 +229,9 @@ function getOrderTimelineSource(order = {}) {
 }
 
 function buildTimelineDescription(event = {}) {
-  const orderLabel = firstText(event.order_status_label_zh, event.status_label_zh, event.statusLabelZh, event.status);
-  const deliveryLabel = firstText(event.delivery_status_label_zh, event.deliveryStatusLabelZh);
-  const claimLabel = firstText(event.claim_status_label_zh, event.claimStatusLabelZh);
+  const orderLabel = businessStatusDisplay(event.order_status, event.order_status_raw, event.status_raw, event.order_status_label_zh, event.status_label_zh, event.statusLabelZh, event.status);
+  const deliveryLabel = businessStatusDisplay(event.delivery_status, event.delivery_status_raw, event.delivery_status_label_zh, event.deliveryStatusLabelZh);
+  const claimLabel = businessStatusDisplay(event.claim_status, event.claim_status_raw, event.claim_status_label_zh, event.claimStatusLabelZh);
   const parts = [
     orderLabel && `订单状态：${orderLabel}`,
     deliveryLabel && `配送：${deliveryLabel}`,
@@ -217,7 +252,7 @@ function normalizeOrderStatusTimelineEvents(order = {}) {
       event.statusLabelZh,
       '订单状态记录',
     ),
-    status: firstText(event.status_label_zh, event.order_status_label_zh, event.statusLabelZh, event.status),
+    status: businessStatusDisplay(event.status, event.order_status, event.status_raw, event.order_status_raw, event.status_label_zh, event.order_status_label_zh, event.statusLabelZh),
     description: buildTimelineDescription(event),
     time: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
     technical: {

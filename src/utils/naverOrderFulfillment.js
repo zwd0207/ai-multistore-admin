@@ -53,11 +53,53 @@ const STATUS_PRESENTATIONS = {
     bucketLabel: '退货请求',
     nextAction: '需要人工查看退货请求，不执行平台退货写操作。',
   },
+  RETURNED: {
+    label: '退货完成',
+    bucket: 'completed',
+    bucketLabel: '退货完成',
+    nextAction: '退货状态已完成；当前仅展示本地只读状态。',
+  },
+  RETURN_DONE: {
+    label: '退货完成',
+    bucket: 'completed',
+    bucketLabel: '退货完成',
+    nextAction: '退货状态已完成；当前仅展示本地只读状态。',
+  },
   EXCHANGE_REQUEST: {
     label: '换货请求',
     bucket: 'exchangeRequests',
     bucketLabel: '换货请求',
     nextAction: '需要人工查看换货请求，不执行平台换货写操作。',
+  },
+  EXCHANGED: {
+    label: '换货完成',
+    bucket: 'completed',
+    bucketLabel: '换货完成',
+    nextAction: '换货状态已完成；当前仅展示本地只读状态。',
+  },
+  EXCHANGE_DONE: {
+    label: '换货完成',
+    bucket: 'completed',
+    bucketLabel: '换货完成',
+    nextAction: '换货状态已完成；当前仅展示本地只读状态。',
+  },
+  COLLECT_REQUEST: {
+    label: '售后取件请求',
+    bucket: 'returnRequests',
+    bucketLabel: '售后取件请求',
+    nextAction: '需要人工关注售后取件请求；当前不执行平台售后写操作。',
+  },
+  COLLECTING: {
+    label: '售后取件中',
+    bucket: 'returnRequests',
+    bucketLabel: '售后取件中',
+    nextAction: '继续关注售后取件进度；当前不执行平台售后写操作。',
+  },
+  COLLECT_DONE: {
+    label: '售后取件完成',
+    bucket: 'completed',
+    bucketLabel: '售后取件完成',
+    nextAction: '售后取件已完成；当前仅展示本地只读状态。',
   },
   PURCHASE_DECIDED: {
     label: '已确认购买',
@@ -112,7 +154,10 @@ export function normalizeNaverOrderStatus(value) {
   if (upperValue === 'CANCELLED') return 'CANCELED';
   if (['DELIVERY_READY'].includes(upperValue)) return 'READY';
   if (['SHIPPING', 'IN_DELIVERY'].includes(upperValue)) return 'DELIVERING';
-  if (['DELIVERY_COMPLETED', 'DELIVERY_COMPLETE', 'COMPLETED_DELIVERY', 'SHIPPING_COMPLETED'].includes(upperValue)) return 'DELIVERED';
+  if (['DELIVERY_COMPLETION', 'DELIVERY_COMPLETED', 'DELIVERY_COMPLETE', 'COMPLETED_DELIVERY', 'SHIPPING_COMPLETED'].includes(upperValue)) return 'DELIVERED';
+  if (upperValue === 'RETURN_DONE') return 'RETURN_DONE';
+  if (upperValue === 'EXCHANGE_DONE') return 'EXCHANGE_DONE';
+  if (['COLLECT_REQUEST', 'COLLECTING', 'COLLECT_DONE'].includes(upperValue)) return upperValue;
   if (STATUS_PRESENTATIONS[upperValue]) return upperValue;
   return KOREAN_STATUS_ALIASES[rawValue] || 'UNKNOWN';
 }
