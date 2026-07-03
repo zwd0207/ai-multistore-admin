@@ -466,3 +466,9 @@ The Naver order status timeline mock mapper is documented in `PHASE_NAVER_ERP_14
 The Orders UI status timeline display plan is documented in `PHASE_NAVER_ERP_14C_ORDERS_UI_STATUS_TIMELINE_DISPLAY_PLAN.md`.
 
 14C is display-planning only. It defines how Orders UI should separate current status, future status history, refresh gate state, complete-field readonly preview, and TechnicalDetails. The plan keeps seller-facing text on the main page, puts safe raw enums and hashes only in TechnicalDetails, keeps timeline history collapsed by default, and forbids wording that implies timeline persistence, automatic refresh, or formal Naver order sync is already open. It does not modify runtime frontend code.
+
+## Phase Naver-ERP-14D - Order Status Events Schema Proposal
+
+The order status events schema proposal is documented in `PHASE_NAVER_ERP_14D_ORDER_STATUS_EVENTS_SCHEMA_PROPOSAL.md`.
+
+14D is proposal-only. It recommends a future `order_status_events` table linked to `orders.id`, with safe order hashes, event type, status labels, observed time, source metadata, a dedupe key, and safety booleans. It defines unique/index strategy, forbidden privacy/raw-response fields, migration and rollback direction, and future read API boundaries. It does not modify models, run migrations, write data, or open formal order sync.
