@@ -653,6 +653,12 @@ The audit logs API readonly mock gate is documented in `PHASE_ERP_AUDIT_1J_AUDIT
 
 ERP-Audit-1J adds private backend mock-gate coverage for future read-only audit log list and summary responses. The helpers require the private verification scope, return business-first Chinese labels, enforce bounded filters and pagination, keep raw summaries out of the default response, and restrict advanced details to safe enums, abbreviated hashes, abbreviated SHA-256 values, and safe field labels. `verify_all.py` proves the read gate writes no business rows and exposes no public endpoint. The real `backend/codex1.db` remains `operation_audit_logs=0`.
 
+## Phase ERP-Audit-1K - Audit Logs API Readonly Implementation Approval Plan
+
+The audit logs API readonly implementation approval plan is documented in `PHASE_ERP_AUDIT_1K_AUDIT_LOGS_API_READONLY_IMPLEMENTATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-1K is documentation-only. It approves the boundary for a future local read-only audit logs route implementation, limited to list and summary endpoints, bounded filters, business-first responses, opt-in advanced details, and strict sensitive-field bans. It does not add routes, register routers, query audit logs from runtime UI, write audit rows, modify schema, call platform APIs, or open formal sync. The real `backend/codex1.db` remains `operation_audit_logs=0`.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
