@@ -623,6 +623,12 @@ The audit log schema migration is documented in `PHASE_ERP_AUDIT_1E_AUDIT_LOG_SC
 
 ERP-Audit-1E creates the real local `operation_audit_logs` table and approved indexes in `backend/codex1.db` after backing up the database. The migration inserted zero audit rows and left business table counts unchanged: stores 8, products 9, orders 9, sync logs 47, tested success results 8, order status events 0, and operation audit logs 0. It adds no runtime audit writer, no public audit endpoint, no frontend audit reader, no restore execution, no platform API call, and no formal product/order sync approval.
 
+## Phase ERP-Audit-1F - Audit Log Post-Migration Verification
+
+The audit log post-migration verification is documented in `PHASE_ERP_AUDIT_1F_AUDIT_LOG_POST_MIGRATION_VERIFICATION.md`.
+
+ERP-Audit-1F is verification-only. It opens the real `backend/codex1.db` in SQLite read-only mode and confirms the `operation_audit_logs` table still has 34 approved columns, 10 approved non-unique indexes, safe defaults, no forbidden columns, zero rows, and unchanged business counts. It also confirms no public audit route exists and runtime audit writing remains disabled. This phase changes no schema, writes no audit or business rows, calls no platform APIs, and opens no formal sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
