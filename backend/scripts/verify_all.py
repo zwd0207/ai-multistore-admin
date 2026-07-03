@@ -288,10 +288,398 @@ FORBIDDEN_ORDER_STATUS_EVENT_COLUMNS = {
     "zip_code",
 }
 
+EXPECTED_OPERATION_AUDIT_LOG_COLUMNS = {
+    "id",
+    "created_at",
+    "updated_at",
+    "store_id",
+    "platform",
+    "environment",
+    "actor_type",
+    "actor_id",
+    "actor_label",
+    "actor_role",
+    "action",
+    "operation_phase",
+    "correlation_id",
+    "request_id",
+    "status",
+    "reason_code",
+    "target_type",
+    "target_id",
+    "target_hash",
+    "target_label",
+    "changed_field_names",
+    "before_summary",
+    "after_summary",
+    "counts_summary",
+    "safety_flags",
+    "backup_path",
+    "backup_sha256",
+    "restore_source_path",
+    "restore_source_sha256",
+    "sensitive_scan_passed",
+    "raw_response_saved",
+    "secrets_saved",
+    "privacy_fields_redacted",
+    "notes",
+}
+
+EXPECTED_OPERATION_AUDIT_LOG_NOT_NULL_COLUMNS = {
+    "created_at",
+    "updated_at",
+    "environment",
+    "actor_type",
+    "action",
+    "correlation_id",
+    "status",
+    "sensitive_scan_passed",
+    "raw_response_saved",
+    "secrets_saved",
+    "privacy_fields_redacted",
+}
+
+EXPECTED_OPERATION_AUDIT_LOG_INDEXES = {
+    "ix_operation_audit_logs_created_at": ["created_at"],
+    "ix_operation_audit_logs_store_created_at": ["store_id", "created_at"],
+    "ix_operation_audit_logs_platform_created_at": ["platform", "created_at"],
+    "ix_operation_audit_logs_actor_created_at": ["actor_type", "actor_id", "created_at"],
+    "ix_operation_audit_logs_action_created_at": ["action", "created_at"],
+    "ix_operation_audit_logs_status_reason": ["status", "reason_code"],
+    "ix_operation_audit_logs_target": ["target_type", "target_id"],
+    "ix_operation_audit_logs_target_hash": ["target_hash"],
+    "ix_operation_audit_logs_correlation_id": ["correlation_id"],
+    "ix_operation_audit_logs_request_id": ["request_id"],
+}
+
+FORBIDDEN_OPERATION_AUDIT_LOG_COLUMNS = {
+    "access_token",
+    "authorization",
+    "buyer_name",
+    "buyer_phone",
+    "channel_no",
+    "client_secret",
+    "headers",
+    "order_id",
+    "product_order_id",
+    "raw_data",
+    "raw_request",
+    "raw_response",
+    "receiver_name",
+    "receiver_phone",
+    "refresh_token",
+    "signature",
+    "token",
+    "zip_code",
+}
+
+FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS = [
+    "audit-raw-response-must-not-leak",
+    "audit-raw-request-must-not-leak",
+    "audit-client-secret-must-not-leak",
+    "fake-audit-token-must-not-leak",
+    "authorization: bearer audit-must-not-leak",
+    "headers-must-not-leak",
+    "signature-must-not-leak",
+    "bcrypt-must-not-leak",
+    "channel-500000000000",
+    "order-202607030001",
+    "product-order-202607030001",
+    "buyer-real-name-must-not-leak",
+    "receiver-real-name-must-not-leak",
+    "010-1111-2222",
+    "seoul full address must not leak",
+    "zip-12345",
+]
+
 FORBIDDEN_TIME_PATTERNS = {
     "datetime.utcnow(": "use app.core.timezone.get_utc_now()",
     "date.today(": "use app.core.timezone.get_business_date() for business dates",
 }
+
+
+def _normalize_audit_key(value: str) -> str:
+    return "".join(char for char in value.lower() if char.isalnum())
+
+
+def _operation_audit_forbidden_key_name(key: str) -> str | None:
+    normalized = _normalize_audit_key(key)
+    if normalized in {"rawresponsesaved", "secretssaved", "privacyfieldsredacted"}:
+        return None
+    if normalized.endswith("hash"):
+        return None
+    exact_forbidden = {
+        "accesstoken",
+        "authorization",
+        "bcrypt",
+        "buyerfullname",
+        "buyername",
+        "buyerphone",
+        "channelno",
+        "clientsecret",
+        "detailedaddress",
+        "headers",
+        "orderid",
+        "productorderid",
+        "rawdata",
+        "rawrequest",
+        "rawresponse",
+        "receiverfullname",
+        "receivername",
+        "receiverphone",
+        "refreshtoken",
+        "requestheaders",
+        "responseheaders",
+        "signature",
+        "token",
+        "zipcode",
+    }
+    if normalized in exact_forbidden:
+        return normalized
+    if any(part in normalized for part in ["token", "authorization", "headers", "signature", "bcrypt", "clientsecret"]):
+        return normalized
+    if any(part in normalized for part in ["rawresponse", "rawrequest", "rawdata"]):
+        return normalized
+    if ("orderid" in normalized or "productorderid" in normalized) and not normalized.endswith("hash"):
+        return normalized
+    if any(part in normalized for part in ["buyer", "receiver", "phone", "address", "zipcode"]):
+        return normalized
+    return None
+
+
+def _operation_audit_sensitive_fields(payload) -> list[str]:
+    forbidden: set[str] = set()
+
+    def walk(value, path: str = "") -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                key_name = str(key)
+                forbidden_key = _operation_audit_forbidden_key_name(key_name)
+                if forbidden_key:
+                    forbidden.add(forbidden_key)
+                    continue
+                walk(nested, f"{path}.{key_name}" if path else key_name)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                walk(item, path)
+            return
+        if isinstance(value, str):
+            lowered = value.lower()
+            for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+                if marker in lowered:
+                    forbidden.add("sensitive_value")
+
+    walk(payload)
+    return sorted(forbidden)
+
+
+def _operation_audit_valid_sha256(value: str | None) -> bool:
+    if value is None:
+        return True
+    return len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _json_for_audit(value):
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _operation_audit_mock_write_gate(db, audit_row: dict, *, write_enabled: bool, manual_approval: bool) -> dict:
+    from sqlalchemy import text
+
+    result = {
+        "phase": "ERP-Audit-1C",
+        "status": "audit_write_not_requested",
+        "audit_rows_written": False,
+        "rows_written": 0,
+        "real_schema_changed": False,
+        "real_database_written": False,
+        "sync_log_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+    }
+    if not write_enabled:
+        return result
+    if not manual_approval:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+
+    required_fields = ["created_at", "updated_at", "actor_type", "action", "correlation_id", "status"]
+    missing_required = [
+        field
+        for field in required_fields
+        if not str(audit_row.get(field, "")).strip()
+    ]
+    if missing_required:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_required_fields",
+            "missing_required_fields": missing_required,
+        })
+        return result
+
+    for sha_field in ["backup_sha256", "restore_source_sha256"]:
+        if not _operation_audit_valid_sha256(audit_row.get(sha_field)):
+            result.update({
+                "status": "audit_write_blocked",
+                "skip_reason": "invalid_sha256",
+                "invalid_sha256_fields": [sha_field],
+            })
+            return result
+
+    if audit_row.get("raw_response_saved") is not False or audit_row.get("secrets_saved") is not False:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsafe_saved_flags",
+        })
+        return result
+    if audit_row.get("privacy_fields_redacted") is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "privacy_fields_not_redacted",
+        })
+        return result
+    if audit_row.get("status") != "blocked" and audit_row.get("sensitive_scan_passed") is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "sensitive_scan_not_passed",
+        })
+        return result
+
+    forbidden_fields = _operation_audit_sensitive_fields(audit_row)
+    if forbidden_fields:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "audit_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    insert_sql = text("""
+        INSERT INTO operation_audit_logs (
+            created_at,
+            updated_at,
+            store_id,
+            platform,
+            environment,
+            actor_type,
+            actor_id,
+            actor_label,
+            actor_role,
+            action,
+            operation_phase,
+            correlation_id,
+            request_id,
+            status,
+            reason_code,
+            target_type,
+            target_id,
+            target_hash,
+            target_label,
+            changed_field_names,
+            before_summary,
+            after_summary,
+            counts_summary,
+            safety_flags,
+            backup_path,
+            backup_sha256,
+            restore_source_path,
+            restore_source_sha256,
+            sensitive_scan_passed,
+            raw_response_saved,
+            secrets_saved,
+            privacy_fields_redacted,
+            notes
+        ) VALUES (
+            :created_at,
+            :updated_at,
+            :store_id,
+            :platform,
+            :environment,
+            :actor_type,
+            :actor_id,
+            :actor_label,
+            :actor_role,
+            :action,
+            :operation_phase,
+            :correlation_id,
+            :request_id,
+            :status,
+            :reason_code,
+            :target_type,
+            :target_id,
+            :target_hash,
+            :target_label,
+            :changed_field_names,
+            :before_summary,
+            :after_summary,
+            :counts_summary,
+            :safety_flags,
+            :backup_path,
+            :backup_sha256,
+            :restore_source_path,
+            :restore_source_sha256,
+            :sensitive_scan_passed,
+            :raw_response_saved,
+            :secrets_saved,
+            :privacy_fields_redacted,
+            :notes
+        )
+    """)
+    params = {
+        "created_at": audit_row["created_at"],
+        "updated_at": audit_row["updated_at"],
+        "store_id": audit_row.get("store_id"),
+        "platform": audit_row.get("platform"),
+        "environment": audit_row.get("environment", "local"),
+        "actor_type": audit_row["actor_type"],
+        "actor_id": audit_row.get("actor_id"),
+        "actor_label": audit_row.get("actor_label"),
+        "actor_role": audit_row.get("actor_role"),
+        "action": audit_row["action"],
+        "operation_phase": audit_row.get("operation_phase"),
+        "correlation_id": audit_row["correlation_id"],
+        "request_id": audit_row.get("request_id"),
+        "status": audit_row["status"],
+        "reason_code": audit_row.get("reason_code"),
+        "target_type": audit_row.get("target_type"),
+        "target_id": audit_row.get("target_id"),
+        "target_hash": audit_row.get("target_hash"),
+        "target_label": audit_row.get("target_label"),
+        "changed_field_names": _json_for_audit(audit_row.get("changed_field_names")),
+        "before_summary": _json_for_audit(audit_row.get("before_summary")),
+        "after_summary": _json_for_audit(audit_row.get("after_summary")),
+        "counts_summary": _json_for_audit(audit_row.get("counts_summary")),
+        "safety_flags": _json_for_audit(audit_row.get("safety_flags")),
+        "backup_path": audit_row.get("backup_path"),
+        "backup_sha256": audit_row.get("backup_sha256"),
+        "restore_source_path": audit_row.get("restore_source_path"),
+        "restore_source_sha256": audit_row.get("restore_source_sha256"),
+        "sensitive_scan_passed": audit_row.get("sensitive_scan_passed", False),
+        "raw_response_saved": audit_row.get("raw_response_saved", False),
+        "secrets_saved": audit_row.get("secrets_saved", False),
+        "privacy_fields_redacted": audit_row.get("privacy_fields_redacted", True),
+        "notes": audit_row.get("notes"),
+    }
+    cursor = db.execute(insert_sql, params)
+    db.commit()
+    result.update({
+        "status": "audit_row_written",
+        "audit_rows_written": True,
+        "rows_written": 1,
+        "audit_log_id": cursor.lastrowid,
+    })
+    return result
 
 
 def run(command: list[str], cwd: Path = BACKEND_DIR, echo: bool = True) -> str:
@@ -6263,6 +6651,397 @@ def verify_naver_order_local_list_cleanup() -> None:
     print("Naver order local list cleanup: ok")
 
 
+def verify_operation_audit_log_mock_write_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+        }
+
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS operation_audit_logs (
+                id INTEGER PRIMARY KEY,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                store_id INTEGER,
+                platform VARCHAR(50),
+                environment VARCHAR(30) NOT NULL DEFAULT 'local',
+                actor_type VARCHAR(30) NOT NULL,
+                actor_id VARCHAR(120),
+                actor_label VARCHAR(160),
+                actor_role VARCHAR(80),
+                action VARCHAR(120) NOT NULL,
+                operation_phase VARCHAR(120),
+                correlation_id VARCHAR(80) NOT NULL,
+                request_id VARCHAR(120),
+                status VARCHAR(30) NOT NULL,
+                reason_code VARCHAR(120),
+                target_type VARCHAR(80),
+                target_id INTEGER,
+                target_hash VARCHAR(160),
+                target_label VARCHAR(200),
+                changed_field_names JSON,
+                before_summary JSON,
+                after_summary JSON,
+                counts_summary JSON,
+                safety_flags JSON,
+                backup_path VARCHAR(500),
+                backup_sha256 VARCHAR(64),
+                restore_source_path VARCHAR(500),
+                restore_source_sha256 VARCHAR(64),
+                sensitive_scan_passed BOOLEAN NOT NULL DEFAULT 0,
+                raw_response_saved BOOLEAN NOT NULL DEFAULT 0,
+                secrets_saved BOOLEAN NOT NULL DEFAULT 0,
+                privacy_fields_redacted BOOLEAN NOT NULL DEFAULT 1,
+                notes TEXT,
+                CHECK (length(trim(actor_type)) > 0),
+                CHECK (length(trim(action)) > 0),
+                CHECK (length(trim(correlation_id)) > 0),
+                CHECK (length(trim(status)) > 0),
+                CHECK (raw_response_saved IN (0, 1)),
+                CHECK (secrets_saved IN (0, 1)),
+                CHECK (privacy_fields_redacted IN (0, 1))
+            )
+        """))
+        for index_name, index_columns in EXPECTED_OPERATION_AUDIT_LOG_INDEXES.items():
+            db.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {index_name} "
+                f"ON operation_audit_logs ({', '.join(index_columns)})"
+            ))
+        db.commit()
+
+        audit_table_info = db.execute(text("PRAGMA table_info(operation_audit_logs)")).all()
+        audit_columns = {row[1] for row in audit_table_info}
+        missing_columns = sorted(EXPECTED_OPERATION_AUDIT_LOG_COLUMNS - audit_columns)
+        assert not missing_columns, f"Missing operation_audit_logs columns: {missing_columns}"
+        forbidden_columns = sorted(
+            {column.lower() for column in audit_columns}
+            & {item.lower() for item in FORBIDDEN_OPERATION_AUDIT_LOG_COLUMNS}
+        )
+        assert not forbidden_columns, f"Forbidden operation_audit_logs columns: {forbidden_columns}"
+        audit_notnull = {row[1]: bool(row[3]) for row in audit_table_info}
+        missing_notnull = sorted(
+            column
+            for column in EXPECTED_OPERATION_AUDIT_LOG_NOT_NULL_COLUMNS
+            if not audit_notnull.get(column)
+        )
+        assert not missing_notnull, f"Missing operation_audit_logs NOT NULL columns: {missing_notnull}"
+
+        audit_index_rows = db.execute(text("PRAGMA index_list(operation_audit_logs)")).all()
+        audit_index_names = {row[1] for row in audit_index_rows}
+        unique_audit_indexes = {row[1] for row in audit_index_rows if row[2]}
+        assert not unique_audit_indexes, f"Unexpected unique operation_audit_logs indexes: {unique_audit_indexes}"
+        missing_indexes = sorted(set(EXPECTED_OPERATION_AUDIT_LOG_INDEXES) - audit_index_names)
+        assert not missing_indexes, f"Missing operation_audit_logs indexes: {missing_indexes}"
+        for index_name, expected_columns in EXPECTED_OPERATION_AUDIT_LOG_INDEXES.items():
+            observed_columns = [
+                row[2]
+                for row in db.execute(text(f"PRAGMA index_info({index_name})")).all()
+            ]
+            assert observed_columns == expected_columns, {
+                "index": index_name,
+                "observed": observed_columns,
+                "expected": expected_columns,
+            }
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.execute(text("""
+            INSERT INTO operation_audit_logs (
+                created_at,
+                updated_at,
+                actor_type,
+                action,
+                correlation_id,
+                status
+            ) VALUES (
+                :created_at,
+                :updated_at,
+                :actor_type,
+                :action,
+                :correlation_id,
+                :status
+            )
+        """), {
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "actor_type": "test",
+            "action": "audit_log_default_check",
+            "correlation_id": "audit-corr-1c-default",
+            "status": "planned",
+        })
+        db.commit()
+        default_row = db.execute(text("""
+            SELECT
+                environment,
+                sensitive_scan_passed,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted
+            FROM operation_audit_logs
+            WHERE correlation_id = 'audit-corr-1c-default'
+        """)).mappings().one()
+        assert default_row["environment"] == "local", default_row
+        assert default_row["sensitive_scan_passed"] in (0, False), default_row
+        assert default_row["raw_response_saved"] in (0, False), default_row
+        assert default_row["secrets_saved"] in (0, False), default_row
+        assert default_row["privacy_fields_redacted"] in (1, True), default_row
+
+        empty_action_rejected = False
+        try:
+            db.execute(text("""
+                INSERT INTO operation_audit_logs (
+                    created_at,
+                    updated_at,
+                    actor_type,
+                    action,
+                    correlation_id,
+                    status
+                ) VALUES (
+                    :created_at,
+                    :updated_at,
+                    'test',
+                    ' ',
+                    'audit-corr-1c-empty-action',
+                    'planned'
+                )
+            """), {"created_at": now_iso, "updated_at": now_iso})
+            db.commit()
+        except Exception:
+            db.rollback()
+            empty_action_rejected = True
+        assert empty_action_rejected, "operation_audit_logs allowed empty action"
+
+        valid_sha = "a" * 64
+        restore_sha = "b" * 64
+        safe_row = {
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "store_id": 8,
+            "platform": "naver",
+            "environment": "local",
+            "actor_type": "human",
+            "actor_id": "operator-safe-hash-001",
+            "actor_label": "Local operator",
+            "actor_role": "owner",
+            "action": "order_refresh_batch_approval_planned",
+            "operation_phase": "ERP-Audit-1C",
+            "correlation_id": "audit-corr-1c-chain",
+            "request_id": "audit-request-1c-001",
+            "status": "planned",
+            "reason_code": "mock_write_gate",
+            "target_type": "order",
+            "target_id": 101,
+            "target_hash": "id-hash-ab176f5db1",
+            "target_label": "Naver order safe hash",
+            "changed_field_names": ["order_status", "delivery_status", "last_synced_at"],
+            "before_summary": {
+                "order_status": "PAYED",
+                "status_label_zh": "paid_new_order",
+            },
+            "after_summary": {
+                "order_status": "DELIVERED",
+                "status_label_zh": "delivered",
+            },
+            "counts_summary": {
+                "candidate_count": 1,
+                "orders_written": 0,
+                "products_written": 0,
+                "sync_logs_written": 0,
+            },
+            "safety_flags": {
+                "real_api_called": False,
+                "real_database_written": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+            },
+            "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1c",
+            "backup_sha256": valid_sha,
+            "restore_source_path": "C:/safe-backups/codex1.db.backup-erp-audit-1c",
+            "restore_source_sha256": restore_sha,
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Mock audit row contains only safe metadata.",
+        }
+
+        not_requested_gate = _operation_audit_mock_write_gate(
+            db,
+            safe_row,
+            write_enabled=False,
+            manual_approval=False,
+        )
+        assert not_requested_gate["status"] == "audit_write_not_requested", not_requested_gate
+        assert not_requested_gate["rows_written"] == 0, not_requested_gate
+
+        manual_gate = _operation_audit_mock_write_gate(
+            db,
+            safe_row,
+            write_enabled=True,
+            manual_approval=False,
+        )
+        assert manual_gate["skip_reason"] == "manual_approval_required", manual_gate
+        assert manual_gate["rows_written"] == 0, manual_gate
+
+        invalid_sha_row = dict(safe_row)
+        invalid_sha_row["backup_sha256"] = "not-a-sha"
+        invalid_sha_gate = _operation_audit_mock_write_gate(
+            db,
+            invalid_sha_row,
+            write_enabled=True,
+            manual_approval=True,
+        )
+        assert invalid_sha_gate["skip_reason"] == "invalid_sha256", invalid_sha_gate
+        assert invalid_sha_gate["rows_written"] == 0, invalid_sha_gate
+
+        sensitive_row = dict(safe_row)
+        sensitive_row["after_summary"] = {
+            "raw_response": "audit-raw-response-must-not-leak",
+            "Authorization": "authorization: bearer audit-must-not-leak",
+        }
+        sensitive_gate = _operation_audit_mock_write_gate(
+            db,
+            sensitive_row,
+            write_enabled=True,
+            manual_approval=True,
+        )
+        assert sensitive_gate["skip_reason"] == "audit_sensitive_field_blocked", sensitive_gate
+        assert sensitive_gate["rows_written"] == 0, sensitive_gate
+        sensitive_gate_text = json.dumps(sensitive_gate, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in sensitive_gate_text, sensitive_gate_text
+
+        approval_gate = _operation_audit_mock_write_gate(
+            db,
+            safe_row,
+            write_enabled=True,
+            manual_approval=True,
+        )
+        assert approval_gate["status"] == "audit_row_written", approval_gate
+        assert approval_gate["rows_written"] == 1, approval_gate
+        assert approval_gate["real_schema_changed"] is False, approval_gate
+        assert approval_gate["real_database_written"] is False, approval_gate
+        assert approval_gate["sync_log_written"] is False, approval_gate
+
+        backup_row = dict(safe_row)
+        backup_row.update({
+            "action": "database_backup_created",
+            "status": "success",
+            "reason_code": "backup_created",
+            "target_type": "backup",
+            "target_id": None,
+            "target_label": "codex1 backup evidence",
+        })
+        backup_gate = _operation_audit_mock_write_gate(
+            db,
+            backup_row,
+            write_enabled=True,
+            manual_approval=True,
+        )
+        assert backup_gate["status"] == "audit_row_written", backup_gate
+
+        blocked_row = dict(safe_row)
+        blocked_row.update({
+            "action": "order_refresh_batch_write_blocked",
+            "status": "blocked",
+            "reason_code": "sensitive_scan_failed",
+            "target_type": "sync_gate",
+            "target_id": None,
+            "target_label": "blocked operation evidence",
+            "before_summary": None,
+            "after_summary": None,
+            "counts_summary": {
+                "candidate_count": 1,
+                "blocked_count": 1,
+                "rows_written": 0,
+            },
+            "safety_flags": {
+                "blocked_payload_written": False,
+                "sensitive_scan_passed": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+            },
+            "sensitive_scan_passed": False,
+        })
+        blocked_gate = _operation_audit_mock_write_gate(
+            db,
+            blocked_row,
+            write_enabled=True,
+            manual_approval=True,
+        )
+        assert blocked_gate["status"] == "audit_row_written", blocked_gate
+
+        chain_rows = db.execute(text("""
+            SELECT
+                action,
+                status,
+                reason_code,
+                correlation_id,
+                backup_sha256,
+                restore_source_sha256,
+                sensitive_scan_passed,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted,
+                changed_field_names,
+                before_summary,
+                after_summary,
+                counts_summary,
+                safety_flags
+            FROM operation_audit_logs
+            WHERE correlation_id = 'audit-corr-1c-chain'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(chain_rows) == 3, chain_rows
+        assert [row["action"] for row in chain_rows] == [
+            "order_refresh_batch_approval_planned",
+            "database_backup_created",
+            "order_refresh_batch_write_blocked",
+        ], chain_rows
+        assert {row["correlation_id"] for row in chain_rows} == {"audit-corr-1c-chain"}, chain_rows
+        assert chain_rows[0]["backup_sha256"] == valid_sha, chain_rows
+        assert chain_rows[0]["restore_source_sha256"] == restore_sha, chain_rows
+        assert chain_rows[0]["sensitive_scan_passed"] in (1, True), chain_rows
+        assert chain_rows[2]["sensitive_scan_passed"] in (0, False), chain_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in chain_rows), chain_rows
+        assert all(row["secrets_saved"] in (0, False) for row in chain_rows), chain_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in chain_rows), chain_rows
+
+        persisted_text = json.dumps(
+            [dict(row) for row in chain_rows],
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+        }
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+
+    print("operation audit log mock write gate: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -6450,6 +7229,7 @@ def main() -> None:
         verify_sync_preview_schema_and_security()
         verify_kst_business_timezone()
         verify_naver_order_local_list_cleanup()
+        verify_operation_audit_log_mock_write_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()
