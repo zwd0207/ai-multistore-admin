@@ -406,3 +406,9 @@ After the Naver API allowed IP setting was updated, the same readonly preview bo
 The selected candidate real write approval plan is documented in `PHASE_NAVER_ERP_11D_SELECTED_CANDIDATE_REAL_WRITE_APPROVAL_PLAN.md`.
 
 11D does not call Naver, does not write local data, and does not execute `real_sync=true`. It records that candidate `id-hash-ab176f5db1` may enter a later 11E manual review only after explicit user approval, database backup, fresh candidate validation, duplicate checks, privacy gate success, and a one-row write limit. Formal Naver order sync remains closed.
+
+## Phase Naver-ERP-11E - Selected Candidate Single Local Write
+
+The selected candidate single local write is documented in `PHASE_NAVER_ERP_11E_SELECTED_CANDIDATE_SINGLE_LOCAL_WRITE.md`.
+
+11E backed up `backend/codex1.db`, re-ran a fresh readonly sanitized preview, confirmed candidate `id-hash-ab176f5db1` still matched `candidate_new` with duplicate count 0, and wrote exactly one sanitized local Naver order. `orders_store8` moved from 4 to 5, real Naver local orders moved from 1 to 2, mock Naver orders remained 3, `products_store8` stayed 5, `sync_logs_store8` stayed 1, and `tested_success_store8` stayed 8. The row keeps `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Formal Naver order sync remains closed.
