@@ -430,3 +430,9 @@ The Naver Orders and Dashboard display check is documented in `PHASE_NAVER_ERP_1
 The Orders UI manual approval affordance plan is documented in `PHASE_NAVER_ERP_12B_ORDERS_UI_MANUAL_APPROVAL_AFFORDANCE_PLAN.md`.
 
 12B adds a display-only manual approval status area to the Naver Orders detail panel. It shows the future approval boundary, required preconditions, disabled approval/write placeholders, and the continued closure of formal order sync and platform write operations. The disabled buttons do not call Codex1 or Naver, no local data is written, and no real API request is triggered by this phase.
+
+## Phase Naver-ERP-13A - Naver Order Local Refresh Mock Gate
+
+The Naver order local refresh mock gate is documented in `PHASE_NAVER_ERP_13A_ORDER_LOCAL_REFRESH_MOCK_GATE.md`.
+
+13A adds a private Codex1 mock-testable gate for future local order refresh planning. It is not wired to a public endpoint and does not call Naver. `verify_all.py` covers readonly not-requested, stale preview, identity mismatch, missing local order, privacy-blocked, manual-approval-required, one-row temporary mock refresh success, no-change repeat refresh, and sensitive field scanning while keeping products, SyncLog, tested_success, raw response saving, platform writes, and formal order sync closed.
