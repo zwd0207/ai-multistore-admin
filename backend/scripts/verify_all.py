@@ -7943,6 +7943,353 @@ def verify_operation_audit_writer_local_implementation() -> None:
     print("operation audit writer local implementation: ok")
 
 
+def verify_operation_audit_logs_readonly_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        READONLY_MOCK_SCOPE,
+        list_operation_audit_logs_readonly_mock_gate,
+        summarize_operation_audit_logs_readonly_mock_gate,
+        write_operation_audit_log_mock_gate,
+    )
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        empty_result = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"store_id": 999999},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert empty_result["status"] == "audit_read_empty", empty_result
+        assert empty_result["items"] == [], empty_result
+        assert empty_result["total"] == 0, empty_result
+        assert "当前还没有操作审计记录" in empty_result["business_message"], empty_result
+        assert empty_result["rows_written"] == 0, empty_result
+        assert empty_result["public_endpoint_enabled"] is False, empty_result
+
+        blocked_scope = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={},
+            verification_scope=None,
+        )
+        assert blocked_scope["status"] == "audit_read_blocked", blocked_scope
+        assert blocked_scope["skip_reason"] == "readonly_mock_scope_required", blocked_scope
+
+        unsafe_filter = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"action": "audit; DROP TABLE operation_audit_logs"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert unsafe_filter["status"] == "audit_read_blocked", unsafe_filter
+        assert unsafe_filter["skip_reason"] == "unsafe_action", unsafe_filter
+
+        unsupported_filter = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"raw_response": "must-not-be-supported"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert unsupported_filter["skip_reason"] == "unsupported_filter", unsupported_filter
+        assert "raw_response" in unsupported_filter["unsupported_filters"], unsupported_filter
+
+        wide_window = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={
+                "date_from": (datetime.now(timezone.utc) - timedelta(days=120)).isoformat(),
+                "date_to": datetime.now(timezone.utc).isoformat(),
+            },
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert wide_window["skip_reason"] == "date_window_too_large", wide_window
+
+        now = datetime.now(timezone.utc)
+        valid_sha = "1" * 64
+        restore_sha = "2" * 64
+        safe_rows = [
+            {
+                "created_at": (now - timedelta(minutes=3)).isoformat(),
+                "updated_at": (now - timedelta(minutes=3)).isoformat(),
+                "store_id": 8,
+                "platform": "naver",
+                "environment": "local",
+                "actor_type": "human",
+                "actor_id": "operator-safe-hash-1j",
+                "actor_label": "Local operator",
+                "actor_role": "owner",
+                "action": "audit_logs_readonly_mock_success",
+                "operation_phase": "ERP-Audit-1J",
+                "correlation_id": "audit-corr-1j-chain",
+                "request_id": "audit-request-1j-001",
+                "status": "success",
+                "reason_code": "readonly_mock_gate",
+                "target_type": "audit_log",
+                "target_id": None,
+                "target_hash": "id-hash-audit1j001",
+                "target_label": "Audit readonly mock gate",
+                "changed_field_names": ["action", "status", "counts_summary"],
+                "before_summary": {"audit_api": "not_planned"},
+                "after_summary": {"audit_api": "readonly_mock_planned"},
+                "counts_summary": {
+                    "audit_rows_written": 1,
+                    "orders_written": 0,
+                    "products_written": 0,
+                },
+                "safety_flags": {
+                    "readonly_mock_gate": True,
+                    "public_endpoint_enabled": False,
+                    "raw_response_saved": False,
+                    "secrets_saved": False,
+                    "privacy_fields_redacted": True,
+                },
+                "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1j",
+                "backup_sha256": valid_sha,
+                "restore_source_path": "C:/safe-backups/codex1.db.backup-erp-audit-1j",
+                "restore_source_sha256": restore_sha,
+                "sensitive_scan_passed": True,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "notes": "Readonly API shape verified in temporary database only.",
+            },
+            {
+                "created_at": (now - timedelta(minutes=2)).isoformat(),
+                "updated_at": (now - timedelta(minutes=2)).isoformat(),
+                "store_id": 8,
+                "platform": "naver",
+                "environment": "local",
+                "actor_type": "system",
+                "actor_id": "system-safe-hash-1j",
+                "actor_label": "System gate",
+                "actor_role": "backend",
+                "action": "audit_logs_readonly_mock_blocked",
+                "operation_phase": "ERP-Audit-1J",
+                "correlation_id": "audit-corr-1j-chain",
+                "request_id": "audit-request-1j-002",
+                "status": "blocked",
+                "reason_code": "sensitive_scan_failed",
+                "target_type": "sync_gate",
+                "target_id": None,
+                "target_hash": "id-hash-audit1j002",
+                "target_label": "Blocked readonly sample",
+                "changed_field_names": ["status"],
+                "before_summary": None,
+                "after_summary": None,
+                "counts_summary": {
+                    "blocked_count": 1,
+                    "rows_written": 0,
+                    "audit_rows_written": 1,
+                },
+                "safety_flags": {
+                    "blocked_payload_written": False,
+                    "sensitive_scan_passed": False,
+                    "raw_response_saved": False,
+                    "secrets_saved": False,
+                    "privacy_fields_redacted": True,
+                },
+                "backup_path": None,
+                "backup_sha256": None,
+                "restore_source_path": None,
+                "restore_source_sha256": None,
+                "sensitive_scan_passed": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "notes": "Blocked evidence row contains no blocked payload.",
+            },
+            {
+                "created_at": (now - timedelta(minutes=1)).isoformat(),
+                "updated_at": (now - timedelta(minutes=1)).isoformat(),
+                "store_id": None,
+                "platform": "local",
+                "environment": "local",
+                "actor_type": "system",
+                "actor_id": "backup-safe-hash-1j",
+                "actor_label": "Backup service",
+                "actor_role": "system",
+                "action": "database_backup_created",
+                "operation_phase": "ERP-Backup-1D",
+                "correlation_id": "audit-corr-backup-1j",
+                "request_id": "audit-request-1j-003",
+                "status": "planned",
+                "reason_code": "readonly_mock_gate",
+                "target_type": "backup",
+                "target_id": None,
+                "target_hash": "id-hash-backup1j001",
+                "target_label": "Backup plan sample",
+                "changed_field_names": ["counts_summary"],
+                "before_summary": {"backup": "not_connected"},
+                "after_summary": {"backup": "planned"},
+                "counts_summary": {"audit_rows_written": 1},
+                "safety_flags": {
+                    "readonly_mock_gate": True,
+                    "raw_response_saved": False,
+                    "secrets_saved": False,
+                    "privacy_fields_redacted": True,
+                },
+                "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1j",
+                "backup_sha256": "3" * 64,
+                "restore_source_path": None,
+                "restore_source_sha256": None,
+                "sensitive_scan_passed": True,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "notes": "Store-less rows remain admin-only in the future API.",
+            },
+        ]
+
+        for row in safe_rows:
+            write_result = write_operation_audit_log_mock_gate(
+                db,
+                row,
+                write_enabled=True,
+                manual_approval=True,
+                verification_scope=READONLY_MOCK_SCOPE,
+            )
+            assert write_result["status"] == "audit_row_written", write_result
+
+        list_result = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"correlation_id": "audit-corr-1j-chain", "limit": 200},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert list_result["status"] == "audit_read_success", list_result
+        assert list_result["total"] == 2, list_result
+        assert list_result["limit"] == 50, list_result
+        assert list_result["limit_was_capped"] is True, list_result
+        assert len(list_result["items"]) == 2, list_result
+        assert "advanced_details" not in list_result["items"][0], list_result
+        assert list_result["items"][0]["status_label_zh"] in {"已阻断", "已完成"}, list_result
+        assert list_result["items"][0]["action_label_zh"].startswith("审计日志"), list_result
+        assert list_result["items"][0]["safety_label_zh"] == "未保存敏感原文", list_result
+        assert list_result["public_endpoint_enabled"] is False, list_result
+        assert list_result["rows_written"] == 0, list_result
+        assert list_result["orders_written"] is False, list_result
+        assert list_result["products_written"] is False, list_result
+        assert list_result["sync_log_written"] is False, list_result
+        assert list_result["capability_tested_success_written"] is False, list_result
+
+        advanced_result = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={
+                "correlation_id": "audit-corr-1j-chain",
+                "action": "audit_logs_readonly_mock_success",
+                "status": "success",
+                "include_advanced": True,
+                "limit": 1,
+            },
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert advanced_result["status"] == "audit_read_success", advanced_result
+        assert advanced_result["total"] == 1, advanced_result
+        advanced_item = advanced_result["items"][0]
+        assert "advanced_details" in advanced_item, advanced_item
+        assert "target_hash_abbrev" in advanced_item["advanced_details"], advanced_item
+        assert advanced_item["advanced_details"]["target_hash_abbrev"].endswith("..."), advanced_item
+        assert "backup_sha256_abbrev" in advanced_item["advanced_details"], advanced_item
+        assert len(advanced_item["advanced_details"]["backup_sha256_abbrev"]) < 64, advanced_item
+        assert "safe_summary_fields" in advanced_item["advanced_details"], advanced_item
+        assert "安全标记" not in advanced_item["advanced_details"]["safe_summary_fields"], advanced_item
+        assert "before_summary" not in advanced_item["advanced_details"], advanced_item
+        assert "after_summary" not in advanced_item["advanced_details"], advanced_item
+        assert "safety_flags" not in advanced_item["advanced_details"], advanced_item
+        assert "counts_summary" not in advanced_item["advanced_details"], advanced_item
+
+        status_filter = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"correlation_id": "audit-corr-1j-chain", "status": "blocked", "target_type": "sync_gate"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert status_filter["total"] == 1, status_filter
+        assert status_filter["items"][0]["reason_label_zh"] == "敏感字段扫描未通过", status_filter
+        assert status_filter["items"][0]["next_action_label_zh"] == "需要复核阻断原因", status_filter
+
+        correlation_filter = list_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"correlation_id": "audit-corr-1j-chain"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert correlation_filter["total"] == 2, correlation_filter
+
+        summary = summarize_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"correlation_id": "audit-corr-1j-chain"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert summary["status"] == "audit_summary_success", summary
+        assert summary["audit_runtime_status"] == "needs_attention", summary
+        assert summary["total"] == 2, summary
+        assert summary["needs_attention_count"] == 1, summary
+        assert summary["backup_evidence_count"] == 1, summary
+        assert summary["public_endpoint_enabled"] is False, summary
+        assert summary["rows_written"] == 0, summary
+
+        empty_summary = summarize_operation_audit_logs_readonly_mock_gate(
+            db,
+            filters={"platform": "coupang"},
+            verification_scope=READONLY_MOCK_SCOPE,
+        )
+        assert empty_summary["audit_runtime_status"] == "empty", empty_summary
+        assert empty_summary["total"] == 0, empty_summary
+
+        response_text = json.dumps(
+            {
+                "list_result": list_result,
+                "advanced_result": advanced_result,
+                "summary": summary,
+                "empty_summary": empty_summary,
+            },
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in response_text, response_text
+        for forbidden_key in [
+            "raw_response",
+            "raw_request",
+            "client_secret",
+            "authorization:",
+            "access_token",
+            "refresh_token",
+            "buyer_phone",
+            "receiver_phone",
+            "detailed_address",
+            "zip_code",
+        ]:
+            assert forbidden_key not in response_text, response_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 3, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("operation audit logs readonly mock gate: ok")
+
+
 def verify_backup_restore_verification_dry_run() -> None:
     production_db_path = BACKEND_DIR / "codex1.db"
     production_before = None
@@ -8294,6 +8641,7 @@ def main() -> None:
         verify_operation_audit_log_mock_write_gate()
         verify_operation_audit_writer_service_mock_gate()
         verify_operation_audit_writer_local_implementation()
+        verify_operation_audit_logs_readonly_mock_gate()
         verify_backup_restore_verification_dry_run()
         verify_git_tracking()
         verify_docs_no_real_secrets()
