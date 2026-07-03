@@ -611,6 +611,12 @@ The audit log mock write gate is documented in `PHASE_ERP_AUDIT_1C_AUDIT_LOG_MOC
 
 ERP-Audit-1C adds private `verify_all.py` coverage for the future `operation_audit_logs` write gate. It creates the proposed table only inside the temporary verification SQLite database, validates columns/defaults/indexes, blocks unapproved writes, rejects invalid SHA-256 and sensitive JSON, writes safe mock audit rows, records blocked-operation evidence without sensitive payloads, and confirms multiple rows can share a `correlation_id`. It does not create a real schema, add a model, run a migration, write real audit rows, call platform APIs, modify runtime UI, or change backup/restore behavior.
 
+## Phase ERP-Audit-1D - Audit Log Schema Migration Approval Plan
+
+The audit log schema migration approval plan is documented in `PHASE_ERP_AUDIT_1D_AUDIT_LOG_SCHEMA_MIGRATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-1D is planning-only. It approves no real schema change by itself; instead, it defines the required pre-checks, explicit operator approval, database backup metadata, zero-row migration rule, post-migration verification, rollback boundary, and sensitive-data ban for a future `operation_audit_logs` migration. The future real migration must be a separate phase and must create only the table and indexes, insert zero audit rows, keep business table counts unchanged, and continue blocking tokens, Authorization, headers, signatures, client secrets, raw platform responses, full platform identifiers, buyer/receiver privacy, phones, and addresses.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
