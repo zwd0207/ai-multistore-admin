@@ -460,3 +460,9 @@ The Naver order status timeline plan is documented in `PHASE_NAVER_ERP_14A_ORDER
 The Naver order status timeline mock mapper is documented in `PHASE_NAVER_ERP_14B_ORDER_STATUS_TIMELINE_MOCK_MAPPER.md`.
 
 14B adds a private Codex1 helper that maps sanitized previous/current Naver order status snapshots into planned timeline events for mock verification only. It covers delivered, delivery, cancel, return, exchange, unknown-status, privacy-blocked, identity-mismatch, no-change, and deduped refresh cases while keeping `orders`, products, SyncLog, tested_success, raw responses, platform writes, schema changes, and formal order sync closed. The helper is not wired to any public endpoint.
+
+## Phase Naver-ERP-14C - Orders UI Status Timeline Display Plan
+
+The Orders UI status timeline display plan is documented in `PHASE_NAVER_ERP_14C_ORDERS_UI_STATUS_TIMELINE_DISPLAY_PLAN.md`.
+
+14C is display-planning only. It defines how Orders UI should separate current status, future status history, refresh gate state, complete-field readonly preview, and TechnicalDetails. The plan keeps seller-facing text on the main page, puts safe raw enums and hashes only in TechnicalDetails, keeps timeline history collapsed by default, and forbids wording that implies timeline persistence, automatic refresh, or formal Naver order sync is already open. It does not modify runtime frontend code.
