@@ -442,3 +442,9 @@ The Naver order local refresh mock gate is documented in `PHASE_NAVER_ERP_13A_OR
 The Naver order readonly refresh repeat is documented in `PHASE_NAVER_ERP_13B_ORDER_READONLY_REFRESH_REPEAT.md`.
 
 13B re-ran the existing Codex1 order preview endpoint with `real_preview=true`, `include_detail=true`, `complete_field_preview=true`, and `real_sync=false` over a recent 3-day KST window. The backend returned HTTP 200 with `preview_status=success`, feed/detail HTTP 200, and safe hash `id-hash-ab176f5db1`, which matched an existing real local Naver order. The observed status is `DELIVERED / 配送完成`, amount is `330000 KRW`, and quantity is 1. Local counts stayed unchanged: `orders_store8=5`, real Naver local orders 2, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. This is not refresh write approval; formal Naver order sync and all platform write operations remain closed.
+
+## Phase Naver-ERP-13C - Naver Selected Order Refresh Approval Plan
+
+The Naver selected order refresh approval plan is documented in `PHASE_NAVER_ERP_13C_SELECTED_ORDER_REFRESH_APPROVAL_PLAN.md`.
+
+13C is documentation-only. It records the future gate for refreshing one existing local Naver order with selected safe hash `id-hash-ab176f5db1`: explicit user approval, clean worktrees, database backup, fresh readonly preview, exact hash match, exactly one existing local real Naver order, privacy gate pass, one-row update limit, post-write readback, no product writes, no SyncLog, no tested_success, no raw response saving, and no Naver platform write operation. It does not call Naver, does not write local data, and does not approve formal order sync.
