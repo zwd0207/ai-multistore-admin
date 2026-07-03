@@ -562,3 +562,9 @@ ERP-Backup-1A is planning-only. It defines the future backup filename and manife
 The backup metadata and retention plan is documented in `PHASE_ERP_BACKUP_1B_BACKUP_METADATA_RETENTION_PLAN.md`.
 
 ERP-Backup-1B is planning-only. It defines future backup manifest metadata, retention classes, retention windows, protected-from-auto-delete rules, cleanup approval gates, restore metadata checks, and future audit-log relationships. It does not create backups, delete backups, restore a database, modify `backend/codex1.db`, change schema, write business data, call platform APIs, modify runtime UI, or change backup/restore behavior. The first cleanup implementation must be report-only and must not delete files automatically.
+
+## Phase ERP-Backup-1C - Restore Verification Dry-Run
+
+The restore verification dry-run is documented in `PHASE_ERP_BACKUP_1C_RESTORE_VERIFICATION_DRY_RUN.md`.
+
+ERP-Backup-1C adds private `verify_all.py` coverage for a future restore verification workflow. It creates a temporary SQLite fixture, temporary backup copy, safe manifest, and temporary restore target, then verifies SHA-256, file size, retention class, safety flags, sensitive-field rejection, `PRAGMA integrity_check`, expected tables, and restored row counts. It blocks the production database path as a restore target and confirms the real `backend/codex1.db` is unchanged. It does not create production backups, restore the real database, delete backups, modify schema, write business data, call platform APIs, modify runtime UI, or open any formal sync.
