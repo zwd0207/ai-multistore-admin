@@ -575,6 +575,12 @@ The approved current candidate single local write is documented in `PHASE_NAVER_
 
 16D-Retry performed one controlled local write for safe hash `id-hash-bc5528d093` after backing up `backend/codex1.db` and rerunning the 24-hour readonly preview. The fresh gate returned HTTP 200 with token/feed/detail HTTP 200, the approved safe hash, zero local duplicate matches, privacy gate passed, and required fields present. Post-write counts are `orders_store8=6`, real Naver local orders 3, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, and `order_status_events_rows=0`. The written row is sanitized with `source_type=naver_real_order_sync`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Formal Naver order sync, batch writes, timeline insertion, and all Naver platform write operations remain closed.
 
+## Phase Naver-ERP-16E - New-Order Post-Write Verification
+
+The new-order post-write verification is documented in `PHASE_NAVER_ERP_16E_NEW_ORDER_POST_WRITE_VERIFICATION.md`.
+
+16E is local verification only. It does not call Naver, execute `real_sync=true`, write local rows, modify schema, change runtime UI, or open formal order sync. It verified safe hash `id-hash-bc5528d093` through direct database readback, Orders API, Dashboard summary, and order-based sales summary. The local real Naver order count is now 3, default Orders API excludes 3 mock/test rows, Dashboard reports `order_count=3`, and order-based sales summary reports `total_orders=3` with `total_sales_amount=1159000.00 KRW`. Sensitive scans found no token, secret, Authorization, header, signature, raw platform response, full id key, address key, or plain phone pattern.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
