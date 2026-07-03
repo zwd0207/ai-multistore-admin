@@ -80,9 +80,9 @@ const NAVER_ORDER_PREVIEW_STATUS = {
 };
 
 const NAVER_ORDER_DETAIL_STATUS = {
-  statusLabel: '1 条写入测试已完成',
-  reason: '已完成 1 条 Naver 订单本地写入测试，订单详情只保存业务字段和脱敏信息。',
-  nextAction: '当前只是单条写入测试，不会自动扩大为订单批量同步。',
+  statusLabel: '受控写入测试已完成',
+  reason: '已完成受控 Naver 订单本地写入测试，订单详情只保存业务字段和脱敏信息。',
+  nextAction: '当前只是受控小批量验证，不会自动扩大为订单批量同步。',
 };
 
 const NAVER_SYNC_PROTECTION_STATUS = {

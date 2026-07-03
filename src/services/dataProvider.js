@@ -20,7 +20,12 @@ function queryBackendRows(rows, params = {}) {
     filtered = filtered.filter((item) => Object.values(item).some((value) => comparable(value).includes(expected)));
   }
   if (status) filtered = filtered.filter((item) => comparable(item.status || item.testStatus) === comparable(status));
-  if (platform) filtered = filtered.filter((item) => comparable(item.platform) === comparable(platform));
+  if (platform) {
+    filtered = filtered.filter((item) => (
+      comparable(item.platform) === comparable(platform)
+      || comparable(item.rawPlatform) === comparable(platform)
+    ));
+  }
   if (params.priority) filtered = filtered.filter((item) => comparable(item.priority) === comparable(params.priority));
 
   const start = (page - 1) * pageSize;

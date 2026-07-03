@@ -577,13 +577,17 @@ function NaverOrderPreviewStatusPanel() {
   const claimSummary = buildNaverClaimReadonlySummary(fulfillmentSummary);
   const operationalOrderCount = fulfillmentSummary.total;
   const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount + orderListMeta.testOrdersExcluded;
+  const localOrderCount = operationalOrderCount + isolatedTestOrderCount;
+  const orderStageMessage = operationalOrderCount > 0
+    ? `Naver 受控订单本地写入测试已完成。当前本地可见 ${operationalOrderCount} 条运营订单，订单详情完整字段只在受控详情区展示。`
+    : 'Naver 订单本地写入测试已完成。当前没有可展示的运营订单，正式订单批量同步仍未开放。';
 
   return (
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
           <h2>Naver 订单状态</h2>
-          <p>Naver 单条订单本地写入测试已完成。订单详情完整字段先在 mock 受控展示；真实后端完整字段保存需要后续单独批准。</p>
+          <p>{orderStageMessage}</p>
         </div>
         <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
       </div>
@@ -593,7 +597,7 @@ function NaverOrderPreviewStatusPanel() {
             <strong>本地订单</strong>
             <span>运营订单 {operationalOrderCount} 条</span>
           </div>
-          <p>主列表和 Dashboard 只统计运营订单，完整字段继续留在订单详情区。</p>
+          <p>主列表和 Dashboard 只统计运营订单，完整订单字段继续留在订单详情区。</p>
           <small>当前隔离测试数据 {isolatedTestOrderCount} 条，不混入业务摘要。</small>
         </article>
         <article className={`business-capability-card ${fulfillmentSummary.tone}`}>
@@ -664,7 +668,7 @@ function NaverOrderPreviewStatusPanel() {
       <TechnicalDetails
         description="技术状态仅供管理员排查，普通卖家页面默认不展示。"
         items={[
-          { label: 'orders_store8', value: 1 },
+          { label: 'orders_store8', value: localOrderCount },
           { label: 'naver_orders_scoped_total', value: allNaverOrders.length },
           { label: 'operational_orders_visible', value: operationalOrderCount },
           { label: 'mock_sync_orders_isolated', value: isolatedTestOrderCount },

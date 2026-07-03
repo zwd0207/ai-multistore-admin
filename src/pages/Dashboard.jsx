@@ -114,8 +114,10 @@ function SellerTodoOverview({
     ? null
     : {
       id: 'naver-orders',
-      title: '订单单条写入测试',
-      description: `${naverOrderStatus?.detail.reason || 'Naver 已完成 1 条订单本地写入测试。'}正式订单批量同步仍未开放。`,
+      title: '订单受控写入测试',
+      description: orderFulfillmentSummary?.total
+        ? `Naver 受控订单本地写入测试已完成。当前本地可见 ${orderFulfillmentSummary.total} 条运营订单。正式订单批量同步仍未开放。`
+        : `${naverOrderStatus?.detail.reason || 'Naver 订单本地写入测试已完成。'}正式订单批量同步仍未开放。`,
       status: 'success',
     };
   const naverInventoryTodo = !isNaverStore || !inventorySummary
@@ -160,12 +162,17 @@ function SellerTodoOverview({
     naverClaimTodo,
     naverFulfillmentTodo,
   ].filter(Boolean);
+  const pendingOrderCount = isNaverStore && orderFulfillmentSummary
+    ? (orderFulfillmentSummary.newOrders + orderFulfillmentSummary.pendingDispatch)
+    : (summary.scopeOrderCount ?? summary.todayOrderCount ?? 0);
   const priorityItems = [
     {
       id: 'orders',
-      title: '待发货订单',
-      description: `${summary.scopeOrderCount ?? summary.todayOrderCount ?? 0} 条订单需要持续关注发货和异常状态。`,
-      status: 'info',
+      title: isNaverStore ? '新订单 / 待发货' : '待发货订单',
+      description: isNaverStore
+        ? `${pendingOrderCount} 条 Naver 订单需要关注发货前状态；已配送完成订单不计入待发货。`
+        : `${pendingOrderCount} 条订单需要持续关注发货和异常状态。`,
+      status: pendingOrderCount > 0 ? 'info' : 'success',
     },
     {
       id: 'customers',
@@ -460,9 +467,9 @@ function NaverErpWorkbenchSection({
     {
       key: 'orders',
       title: '订单管理',
-      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '单条测试完成',
+      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '受控测试完成',
       tone: orderActionCount > 0 ? 'info' : 'success',
-      reason: orderFulfillmentSummary?.businessMessage || 'Naver 单条订单本地写入测试已完成。',
+      reason: orderFulfillmentSummary?.businessMessage || 'Naver 受控订单本地写入测试已完成。',
       nextAction: '正式订单批量同步仍未开放。',
     },
     {
@@ -517,7 +524,7 @@ function NaverErpWorkbenchSection({
             <p>只读取本地 Naver ERP 数据</p>
           </div>
           <strong>{productCount} 商品 / {orderCount} 订单</strong>
-          <small>商品小批量写入和单条订单写入测试已阶段收口。</small>
+          <small>商品小批量写入和订单受控写入测试已阶段收口。</small>
         </article>
         <article className="financial-card">
           <div className="financial-card-head">

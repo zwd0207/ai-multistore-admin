@@ -1,5 +1,5 @@
 export const stores = [
-  { id: 8, name: 'pxg球包店', platform: 'Naver', manager: '管理员', region: '韩国', status: '单条订单写入测试完成', products: 5, updatedAt: '2026-07-02 23:38' },
+  { id: 8, name: 'pxg球包店', platform: 'Naver', manager: '管理员', region: '韩国', status: '订单受控写入测试完成', products: 5, updatedAt: '2026-07-02 23:38' },
   { id: 1, name: '스마트스토어 뷰티샵', platform: 'Naver', manager: '李秀妍', region: '首尔', status: '정상 운영', products: 128, updatedAt: '2026-06-29 14:20' },
   { id: 2, name: '韩国本土运动鞋店', platform: 'Coupang', manager: '王晨', region: '釜山', status: '正常运营', products: 86, updatedAt: '2026-06-29 13:45' },
   { id: 3, name: 'Gmarket 럭셔리 골프관', platform: 'Gmarket', manager: '朴智勋', region: '仁川', status: '심사중', products: 45, updatedAt: '2026-06-28 18:10' },

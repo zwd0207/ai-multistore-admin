@@ -418,3 +418,9 @@ The selected candidate single local write is documented in `PHASE_NAVER_ERP_11E_
 The selected candidate post-write verification is documented in `PHASE_NAVER_ERP_11F_SELECTED_CANDIDATE_POST_WRITE_VERIFICATION.md`.
 
 11F performed local database readback only. It did not call Naver, did not write local data, did not modify Codex1 or Codex2 runtime behavior, and did not open formal Naver order sync. The selected candidate `id-hash-ab176f5db1` exists exactly once with `source_type=naver_real_order_sync`, `order_status=DELIVERED`, `quantity=1`, `order_amount=330000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Current counts remain `orders_store8=5`, real Naver local orders 2, mock Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`.
+
+## Phase Naver-ERP-12A - Orders and Dashboard Real-Order Count Display Check
+
+The Naver Orders and Dashboard display check is documented in `PHASE_NAVER_ERP_12A_ORDER_DASHBOARD_REAL_COUNT_DISPLAY_CHECK.md`.
+
+12A fixed Codex2 display filtering so backend rows with display platform `Naver` still match the `naver` platform filter, removed stale one-order wording, and confirmed Orders/Dashboard now show 2 real Naver operational orders while 3 mock/test orders stay isolated. Dashboard shows `5 商品 / 2 订单`, local order amount `829000 KRW`, and keeps formal order sync, product batch sync, and platform delivery/claim writes closed.
