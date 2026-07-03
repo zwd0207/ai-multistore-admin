@@ -671,6 +671,12 @@ The audit logs API post-implementation verification is documented in `PHASE_ERP_
 
 ERP-Audit-1M verifies the 1L read-only audit routes against the real local backend database. `GET /api/v1/operation-audit-logs?store_id=8` and `GET /api/v1/operation-audit-logs/summary?store_id=8` return HTTP 200 with an empty business state because `operation_audit_logs=0`. `POST`, `PUT`, `PATCH`, and `DELETE` remain 405. Unsupported filters return a safe Chinese business message without echoing raw unsupported names. Real database counts stayed unchanged: `operation_audit_logs=0`, `products=9`, `orders=9`, `sync_logs=47`, `tested_success_store8=8`, and `order_status_events=0`. This phase does not add frontend readers, audit writers, schema changes, platform API calls, backups, restores, or formal product/order sync approval.
 
+## Phase ERP-Audit-1N - Logs/Audit UI Readonly Integration Plan
+
+The Logs/Audit UI readonly integration plan is documented in `PHASE_ERP_AUDIT_1N_LOGS_AUDIT_UI_READONLY_INTEGRATION_PLAN.md`.
+
+ERP-Audit-1N is planning-only. It defines how Codex2 should connect the verified read-only audit API to the Logs page in a later runtime phase: backend mode should call only `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`, show `operation_audit_logs=0` as a normal Chinese empty state, keep SyncLog as a separate `同步记录` section, and keep audit diagnostics folded through `TechnicalDetails`. The plan forbids audit write/delete/export/detail calls, raw JSON display, full hashes or platform ids on the main page, frontend claims that audit writing is live, platform API calls, local data writes, and formal product/order sync approval.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
