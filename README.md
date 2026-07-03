@@ -574,3 +574,9 @@ ERP-Backup-1C adds private `verify_all.py` coverage for a future restore verific
 The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
 
 ERP-UX-1A is planning-only. It defines how the frontend should become usable for non-technical operators by making Dashboard, Orders, Products, Credentials, API status, Logs, Audit, Backup, and Restore screens business-first. Main pages should show Chinese business copy, daily tasks, safe next actions, and formal-sync status without exposing raw enums, safe hashes, guardrail wording, `real_sync`, `store_id`, `credential_id`, HTTP details, or other technical fields. Those fields belong only in collapsed `TechnicalDetails` or diagnostic views. This phase does not modify runtime frontend code, Codex1, database schema, local data, platform APIs, or formal sync gates.
+
+## Phase ERP-UX-1B - Frontend Technical Field Inventory
+
+The frontend technical field inventory is documented in `PHASE_ERP_UX_1B_FRONTEND_TECHNICAL_FIELD_INVENTORY.md`.
+
+ERP-UX-1B is inventory-only. It scans Codex2 pages, adapters, service helpers, and `TechnicalDetails` usage for technical fields that can confuse non-technical operators. The main findings are visible `store #...` chips in Orders, Products, and Sales; a visible `store_id=8` Orders restriction message; seller-facing no-write wording that mentions `orders`, `SyncLog`, and `tested_success`; and the need to keep API capability result codes collapsed. It does not modify runtime code, Codex1, schema, local data, platform APIs, or formal sync gates.
