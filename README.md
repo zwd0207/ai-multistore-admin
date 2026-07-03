@@ -400,3 +400,9 @@ The selected Naver new-order readonly candidate refresh is documented in `PHASE_
 The selected Naver new-order readonly retry is documented in `PHASE_NAVER_ERP_11C_RETRY_SELECTED_NEW_ORDER_READONLY_REFRESH.md`.
 
 After the Naver API allowed IP setting was updated, the same readonly preview boundary succeeded with HTTP 200, `preview_status=success`, feed/detail HTTP 200, and `real_sync=false`. The candidate safe hash is `id-hash-ab176f5db1`, status is `DELIVERED / 配送完成`, amount is `330000 KRW`, quantity is 1, and local duplicate checks returned zero matches across real and mock Naver orders. Local counts stayed unchanged: `orders_store8=4`, real Naver local orders remain 1, mock Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. The candidate is `candidate_new`, but this is not a write approval and formal Naver order sync remains closed.
+
+## Phase Naver-ERP-11D - Selected Candidate Real Write Approval Plan
+
+The selected candidate real write approval plan is documented in `PHASE_NAVER_ERP_11D_SELECTED_CANDIDATE_REAL_WRITE_APPROVAL_PLAN.md`.
+
+11D does not call Naver, does not write local data, and does not execute `real_sync=true`. It records that candidate `id-hash-ab176f5db1` may enter a later 11E manual review only after explicit user approval, database backup, fresh candidate validation, duplicate checks, privacy gate success, and a one-row write limit. Formal Naver order sync remains closed.
