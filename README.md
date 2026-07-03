@@ -598,3 +598,9 @@ ERP-UX-1D updates Codex2 Orders runtime UI so Naver order summaries are business
 The Products business display cleanup is documented in `PHASE_ERP_UX_1E_PRODUCTS_BUSINESS_DISPLAY_CLEANUP.md`.
 
 ERP-UX-1E updates Codex2 Products runtime UI so Naver product summaries are business-first: local products, stock alerts, price/stock change hints, refresh-only count, skipped count, and formal-sync status are separated from technical preview fields. Main Products copy no longer shows `store #...`, `store_id`, `real_sync`, `SyncLog`, or `tested_success`; product preview and inventory diagnostics stay folded in `TechnicalDetails`. Product identifiers remain masked in summary/list views, and formal Naver product batch sync remains closed. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal product sync.
+
+## Phase ERP-UX-1F - Credentials and API Status Wording Cleanup
+
+The Credentials and API status wording cleanup is documented in `PHASE_ERP_UX_1F_CREDENTIALS_API_STATUS_WORDING_CLEANUP.md`.
+
+ERP-UX-1F updates Codex2 API Credentials and API Capabilities runtime UI so connection status, authorization issues, IP allowlist problems, product/order access, and formal-sync boundaries are shown in business Chinese. Main pages no longer surface raw technical enums such as `ip_not_allowed`, `token_auth_failed`, `product_api_not_allowed`, `http_status`, `safe_keyword_flags`, `credential_id`, or channel identifiers; those diagnostics remain folded in `TechnicalDetails`. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal product/order sync.
