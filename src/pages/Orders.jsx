@@ -24,22 +24,24 @@ const api = {
 };
 
 const statusOptions = ['待发货', '配送中', '已完成', '取消/退款'];
+
 const columns = [
   { key: 'orderNo', title: '订单编号', render: (value) => <strong>{value}</strong> },
   { key: 'product', title: '商品' },
   { key: 'store', title: '店铺' },
-  { key: 'sourceType', title: '数据层级', render: (value, row) => sourceTypeLabel(row) },
-  { key: 'customer', title: '客户' },
+  { key: 'sourceType', title: '数据来源', render: (value, row) => sourceTypeLabel(row) },
+  { key: 'customer', title: '买家' },
   { key: 'phone', title: '联系电话' },
-  { key: 'amount', title: '订单金额', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
+  { key: 'amount', title: '订单金额', render: (value, row) => formatMoney(value, row.currency) },
   { key: 'status', title: '订单状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'createdAt', title: '下单时间' },
 ];
+
 const fields = [
   { key: 'orderNo', label: '订单编号', required: true },
-  { key: 'product', label: '商品名', required: true },
+  { key: 'product', label: '商品名称', required: true },
   { key: 'store', label: '店铺', required: true },
-  { key: 'customer', label: '客户', required: true },
+  { key: 'customer', label: '买家', required: true },
   { key: 'amount', label: '订单金额（KRW）', type: 'number', required: true },
   { key: 'status', label: '订单状态', type: 'select', required: true, options: statusOptions },
   { key: 'createdAt', label: '下单时间', required: true, placeholder: '2026-06-29 15:00' },
@@ -76,6 +78,50 @@ function displayText(...values) {
   return firstText(...values) || '待接入';
 }
 
+function safeDateTime(value) {
+  return value ? formatKstDateTimeWithLabel(value) : '待接入';
+}
+
+function formatMoney(value, currency = 'KRW') {
+  return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
+}
+
+function paymentStatusLabel(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  const labels = {
+    PAID: '已付款',
+    PAYED: '已付款',
+    PAYMENT_WAITING: '待付款',
+    CANCELED: '已取消',
+    CANCELLED: '已取消',
+    REFUNDED: '已退款',
+  };
+  return labels[normalized] || value;
+}
+
+function sourceTypeLabel(order = {}) {
+  if (isNaverMockSyncOrder(order)) return '测试数据';
+  const sourceType = firstText(order.sourceType, order.source_type, order.rawData?.source_type, order.raw_data?.source_type);
+  if (sourceType === 'naver_real_order_sync') return '运营订单';
+  return sourceType || '本地订单';
+}
+
+function businessReadableSummary(value = '') {
+  return String(value)
+    .replace('已只读检查', '已汇总')
+    .replace('已只读汇总', '已汇总')
+    .replace('已只读分类', '已整理')
+    .replace('当前只做只读展示', '当前仅展示状态')
+    .replace('继续按本地订单状态观察', '继续关注本地订单状态');
+}
+
+function paginateRows(rows = [], page = 1, pageSize = 5) {
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safePageSize = Math.max(Number(pageSize) || 5, 1);
+  const start = (safePage - 1) * safePageSize;
+  return rows.slice(start, start + safePageSize);
+}
+
 function getDeliveryDisplayText(complete = {}, order = {}) {
   const directLabel = displayText(
     complete.deliveryStatusLabelZh,
@@ -90,34 +136,13 @@ function getDeliveryDisplayText(complete = {}, order = {}) {
   if (directLabel && directLabel !== '待接入' && directLabel !== '未识别状态，需人工确认') {
     return directLabel;
   }
-  const orderLabel = displayText(
+  return displayText(
     complete.orderStatusLabelZh,
     complete.order_status_label_zh,
     order.status,
     order.order_status,
+    directLabel,
   );
-  if (['待发货', '待发货 / 已确认订单', '已确认订单', '已发货 / 配送中', '配送完成'].includes(orderLabel)) {
-    return orderLabel;
-  }
-  return directLabel;
-}
-
-function formatMoney(value, currency = 'KRW') {
-  return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
-}
-
-function sourceTypeLabel(order = {}) {
-  if (isNaverMockSyncOrder(order)) return '测试数据';
-  const sourceType = firstText(order.sourceType, order.source_type, order.rawData?.source_type, order.raw_data?.source_type);
-  if (sourceType === 'naver_real_order_sync') return '运营订单';
-  return sourceType || '本地订单';
-}
-
-function paginateRows(rows = [], page = 1, pageSize = 5) {
-  const safePage = Math.max(Number(page) || 1, 1);
-  const safePageSize = Math.max(Number(pageSize) || 5, 1);
-  const start = (safePage - 1) * safePageSize;
-  return rows.slice(start, start + safePageSize);
 }
 
 function getCompleteOrderFields(order = {}, previewFields = {}) {
@@ -132,7 +157,7 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
     quantity: displayText(complete.quantity, order.quantity),
     amount: formatMoney(complete.orderAmount ?? complete.order_amount ?? order.amount ?? order.order_amount, complete.currency || order.currency),
     orderStatus: displayText(complete.orderStatusLabelZh, complete.order_status_label_zh, complete.orderStatus, complete.order_status, order.status, order.order_status),
-    paymentStatus: displayText(complete.paymentStatus, complete.payment_status, order.paymentStatus, order.payment_status),
+    paymentStatus: displayText(paymentStatusLabel(complete.paymentStatus || complete.payment_status || order.paymentStatus || order.payment_status)),
     deliveryStatus: getDeliveryDisplayText(complete, order),
     claimStatus: displayText(complete.claimStatusLabelZh, complete.claim_status_label_zh, complete.claimStatus, complete.claim_status, order.claimStatusLabelZh, order.claim_status_label_zh, order.claimStatus, order.claim_status),
     buyerName: displayText(complete.buyerName, complete.buyer_name, order.buyerName, order.buyer_name, order.customerName, order.customer),
@@ -141,16 +166,12 @@ function getCompleteOrderFields(order = {}, previewFields = {}) {
     receiverPhone: displayText(complete.receiverPhone, complete.receiver_phone, order.receiverPhone, order.receiver_phone),
     receiverAddress: displayText(complete.receiverAddress, complete.receiver_address, order.receiverAddress, order.receiver_address),
     zipCode: displayText(complete.zipCode, complete.zip_code, order.zipCode, order.zip_code),
-    orderedAt: displayText(formatKstDateTimeWithLabel(complete.orderedAt || complete.ordered_at || order.ordered_at || order.createdAt || order.created_at), '待接入'),
-    paidAt: displayText(formatKstDateTimeWithLabel(complete.paidAt || complete.paid_at || order.paid_at || order.paidAt), '待接入'),
-    sourceType: displayText(order.sourceType, order.source_type),
+    orderedAt: safeDateTime(complete.orderedAt || complete.ordered_at || order.ordered_at || order.createdAt || order.created_at),
+    paidAt: safeDateTime(complete.paidAt || complete.paid_at || order.paid_at || order.paidAt),
+    sourceType: sourceTypeLabel(order),
     mappingVersion: displayText(complete.mappingVersion, complete.mapping_version, order.mappingVersion, rawData.mapping_version),
     rawResponseSaved: complete.rawResponseSaved ?? complete.raw_response_saved ?? order.rawResponseSaved ?? rawData.raw_response_saved ?? false,
   };
-}
-
-function normalizeTimelineSource(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function getOrderTimelineSource(order = {}) {
@@ -169,7 +190,7 @@ function getOrderTimelineSource(order = {}) {
   ];
   const source = candidates.find((item) => Array.isArray(item) && item.length)
     || candidates.find((item) => Array.isArray(item));
-  return normalizeTimelineSource(source);
+  return Array.isArray(source) ? source : [];
 }
 
 function buildTimelineDescription(event = {}) {
@@ -185,48 +206,38 @@ function buildTimelineDescription(event = {}) {
 }
 
 function normalizeOrderStatusTimelineEvents(order = {}) {
-  return getOrderTimelineSource(order)
-    .map((event, index) => {
-      const title = firstText(
-        event.title,
-        event.event_label_zh,
-        event.eventLabelZh,
-        event.order_status_label_zh,
-        event.status_label_zh,
-        event.statusLabelZh,
-        '订单状态记录',
-      );
-      return {
-        id: firstText(event.id, event.event_id, event.dedupe_key, event.dedupeKey, `order-status-event-${index}`),
-        title,
-        status: firstText(event.status_label_zh, event.order_status_label_zh, event.statusLabelZh, event.status),
-        description: buildTimelineDescription(event),
-        time: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
-        technical: {
-          eventType: firstText(event.event_type, event.eventType),
-          orderStatusRaw: firstText(event.order_status_raw, event.orderStatusRaw, event.order_status, event.status_raw, event.statusRaw),
-          deliveryStatusRaw: firstText(event.delivery_status_raw, event.deliveryStatusRaw, event.delivery_status),
-          claimStatusRaw: firstText(event.claim_status_raw, event.claimStatusRaw, event.claim_status),
-          observedAt: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
-          sourcePhase: firstText(event.source_phase, event.sourcePhase),
-          sourceType: firstText(event.source_type, event.sourceType),
-          mappingVersion: firstText(event.mapping_version, event.mappingVersion),
-          dedupeKey: firstText(event.dedupe_key, event.dedupeKey),
-          rawResponseSaved: event.raw_response_saved ?? event.rawResponseSaved ?? false,
-          privacyFieldsRedacted: event.privacy_fields_redacted ?? event.privacyFieldsRedacted ?? true,
-        },
-      };
-    });
+  return getOrderTimelineSource(order).map((event, index) => ({
+    id: firstText(event.id, event.event_id, event.dedupe_key, event.dedupeKey, `order-status-event-${index}`),
+    title: firstText(
+      event.title,
+      event.event_label_zh,
+      event.eventLabelZh,
+      event.order_status_label_zh,
+      event.status_label_zh,
+      event.statusLabelZh,
+      '订单状态记录',
+    ),
+    status: firstText(event.status_label_zh, event.order_status_label_zh, event.statusLabelZh, event.status),
+    description: buildTimelineDescription(event),
+    time: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
+    technical: {
+      eventType: firstText(event.event_type, event.eventType),
+      orderStatusRaw: firstText(event.order_status_raw, event.orderStatusRaw, event.order_status, event.status_raw, event.statusRaw),
+      deliveryStatusRaw: firstText(event.delivery_status_raw, event.deliveryStatusRaw, event.delivery_status),
+      claimStatusRaw: firstText(event.claim_status_raw, event.claimStatusRaw, event.claim_status),
+      observedAt: firstText(event.observed_at, event.observedAt, event.event_time, event.eventTime, event.created_at, event.time),
+      sourcePhase: firstText(event.source_phase, event.sourcePhase),
+      sourceType: firstText(event.source_type, event.sourceType),
+      mappingVersion: firstText(event.mapping_version, event.mappingVersion),
+      dedupeKey: firstText(event.dedupe_key, event.dedupeKey),
+      rawResponseSaved: event.raw_response_saved ?? event.rawResponseSaved ?? false,
+      privacyFieldsRedacted: event.privacy_fields_redacted ?? event.privacyFieldsRedacted ?? true,
+    },
+  }));
 }
 
 function buildOrderTimelineTechnicalItems(activeOrder = {}, fields = {}, timelineEvents = []) {
   const rawData = activeOrder.rawData || activeOrder.raw_data || {};
-  const selectedProductOrderHash = firstText(
-    activeOrder.productOrderHash,
-    rawData.external_product_order_id_hash,
-    rawData.product_order_id_hash,
-  );
-  const selectedOrderHash = firstText(activeOrder.orderHash, rawData.external_order_id_hash, rawData.order_id_hash);
   const eventItems = timelineEvents.flatMap((event, index) => ([
     { label: `event_${index + 1}_event_type`, value: event.technical.eventType },
     { label: `event_${index + 1}_order_status_raw`, value: event.technical.orderStatusRaw },
@@ -248,8 +259,6 @@ function buildOrderTimelineTechnicalItems(activeOrder = {}, fields = {}, timelin
     { label: 'selected_order_status_raw', value: activeOrder.rawStatus || activeOrder.order_status || rawData.order_status },
     { label: 'selected_delivery_status_raw', value: activeOrder.deliveryStatus || activeOrder.delivery_status || rawData.delivery_status },
     { label: 'selected_claim_status_raw', value: activeOrder.claimStatus || activeOrder.claim_status || rawData.claim_status },
-    { label: 'selected_product_order_hash', value: selectedProductOrderHash },
-    { label: 'selected_order_hash', value: selectedOrderHash },
     { label: 'current_mapping_version', value: fields.mappingVersion },
     { label: 'raw_response_saved', value: fields.rawResponseSaved },
     { label: 'event_write_enabled', value: false },
@@ -298,8 +307,8 @@ function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
       matched: false,
       comparable: false,
       method: 'none',
-      label: '待只读预览',
-      detail: '需要先读取完整字段只读预览，才能确认是否命中当前选中的本地订单。',
+      label: '等待最近订单核对',
+      detail: '需要先查看最近订单完整信息，才能确认是否命中当前选中的本地订单。',
     };
   }
 
@@ -309,8 +318,8 @@ function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
       matched: false,
       comparable: false,
       method: 'none',
-      label: '预览不可用',
-      detail: '完整字段只读预览不可用，不能确认订单身份。',
+      label: '最近订单不可用',
+      detail: '当前时间窗口没有可核对的订单详情，不能进入刷新审核。',
     };
   }
 
@@ -321,10 +330,10 @@ function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
       matched,
       comparable: true,
       method: 'hash',
-      label: matched ? '身份匹配' : '身份不匹配',
+      label: matched ? '订单身份一致' : '订单身份不一致',
       detail: matched
-        ? '只读预览的商品订单安全哈希与当前本地运营订单一致。'
-        : '只读预览的商品订单安全哈希与当前本地运营订单不一致，禁止进入刷新写库审核。',
+        ? '最近订单与当前本地运营订单一致。'
+        : '最近订单与当前选中的本地运营订单不一致，不能进入刷新审核。',
     };
   }
 
@@ -335,10 +344,10 @@ function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
       matched,
       comparable: true,
       method: 'full_product_order_id',
-      label: matched ? '身份匹配' : '身份不匹配',
+      label: matched ? '订单身份一致' : '订单身份不一致',
       detail: matched
-        ? '只读预览的商品订单号与当前本地运营订单一致。'
-        : '只读预览的商品订单号与当前本地运营订单不一致，禁止进入刷新写库审核。',
+        ? '最近订单号与当前本地运营订单一致。'
+        : '最近订单号与当前选中的本地运营订单不一致，不能进入刷新审核。',
     };
   }
 
@@ -347,17 +356,10 @@ function buildNaverOrderIdentityMatch(activeOrder, previewResult) {
     matched: false,
     comparable: false,
     method: 'unresolved',
-    label: '身份无法确认',
-    detail: '缺少可比较的商品订单安全哈希或完整商品订单号，禁止进入刷新写库审核。',
+    label: '订单身份无法确认',
+    detail: '缺少可比较的订单标识，不能进入刷新审核。',
   };
 }
-
-const orderRefreshGateStateLabels = {
-  ready: '已满足',
-  pending: '待准备',
-  review: '需人工确认',
-  blocked: '不可进入',
-};
 
 function buildNaverOrderRefreshGatePlan({
   activeOrder,
@@ -376,95 +378,60 @@ function buildNaverOrderRefreshGatePlan({
   const rawResponseClosed = !savePlan.rawResponseSaved;
 
   let statusKind = 'pending';
-  let statusLabel = '待只读预览';
-  let message = `先读取${previewWindowLabel}完整字段只读预览，再由人工决定是否进入后续刷新写库审核。`;
+  let statusLabel = '等待核对';
+  let message = `先查看${previewWindowLabel}的最近订单完整信息，再由人工决定是否进入后续刷新审核。`;
 
   if (!previewAllowed) {
     statusKind = 'blocked';
-    statusLabel = '不可写库';
-    message = '当前店铺不在 Naver 订单刷新写库门禁范围内。';
+    statusLabel = '当前店铺暂不可核对';
+    message = '当前店铺暂未开放最近订单完整信息核对。';
   } else if (!activeOrder) {
     statusKind = 'pending';
-    statusLabel = '待本地运营订单';
-    message = '当前没有可选择的 Naver 本地运营订单，不能进入刷新写库审核。';
+    statusLabel = '等待本地订单';
+    message = '当前没有可选择的 Naver 本地运营订单。';
   } else if (!selectedOperationalOrder) {
     statusKind = 'blocked';
-    statusLabel = '不可写库';
-    message = '当前选中的是测试订单或非运营订单，不能进入刷新写库审核。';
+    statusLabel = '不可刷新';
+    message = '当前选中的是测试订单或非运营订单，不能进入刷新审核。';
   } else if (hasPreviewResult && !previewAvailable) {
     statusKind = 'blocked';
-    statusLabel = '不可写库';
-    message = '完整字段只读预览当前不可用，不能进入刷新写库审核。';
+    statusLabel = '不可刷新';
+    message = '当前时间窗口没有可核对的最近订单详情。';
   } else if (previewAvailable && !identityMatch.matched) {
     statusKind = 'blocked';
-    statusLabel = '不可写库';
+    statusLabel = '不可刷新';
     message = `${identityMatch.label}：${identityMatch.detail}`;
   } else if (previewAvailable) {
     statusKind = 'review';
-    statusLabel = '可进入人工审核，不会自行写库';
-    message = '只读预览可用且订单身份匹配，但本阶段只完成门禁计划展示；后续写库必须单独批准并先备份数据库。';
+    statusLabel = '可进入人工复核';
+    message = '最近订单可用且订单身份一致；后续如要刷新本地订单，必须单独批准并先备份数据库。';
   }
 
-  const canEnterManualReview = statusKind === 'review' && identityMatch.matched && noLocalWrites && noPlatformWrites && rawResponseClosed;
+  const canEnterManualReview = statusKind === 'review'
+    && identityMatch.matched
+    && noLocalWrites
+    && noPlatformWrites
+    && rawResponseClosed;
 
   return {
     statusKind,
     statusLabel,
     message,
     canEnterManualReview,
+    businessMessage: canEnterManualReview
+      ? '已具备进入人工复核的前置条件，但本页面不会自动刷新本地订单。'
+      : message,
     items: [
-      {
-        label: '店铺与连接资料范围',
-        state: previewAllowed ? 'ready' : 'blocked',
-        detail: previewAllowed ? '仅限 pxg球包店已验证 Naver 配置。' : '当前店铺不允许进入该门禁。',
-      },
-      {
-        label: '本地运营订单选择',
-        state: selectedOperationalOrder ? 'ready' : (activeOrder ? 'blocked' : 'pending'),
-        detail: selectedOperationalOrder ? '已选中 1 条本地运营订单。' : '需要先有 1 条可审核的 Naver 运营订单。',
-      },
-      {
-        label: '完整字段只读预览',
-        state: previewAvailable ? 'ready' : (hasPreviewResult ? 'blocked' : 'pending'),
-        detail: previewAvailable
-          ? `已取得${previewResult.previewWindowLabel || previewWindowLabel}只读预览。`
-          : `尚未取得可用只读预览，当前窗口为${previewWindowLabel}。`,
-      },
-      {
-        label: '订单身份匹配',
-        state: identityMatch.state,
-        detail: identityMatch.detail,
-      },
-      {
-        label: '数据库备份',
-        state: 'review',
-        detail: '后续刷新写库前必须先备份 codex1.db，本阶段未执行。',
-      },
-      {
-        label: '人工批准',
-        state: 'review',
-        detail: '后续写库必须由人工单独批准，本阶段不会触发。',
-      },
-      {
-        label: '刷新字段白名单',
-        state: previewAvailable ? 'review' : 'pending',
-        detail: '后续只允许刷新订单状态、付款、配送、售后、金额、时间和安全商品字段。',
-      },
-      {
-        label: '本地写入边界',
-        state: noLocalWrites ? 'ready' : 'blocked',
-        detail: '本阶段不写 orders，不写 SyncLog，不新增 tested_success。',
-      },
-      {
-        label: '平台写操作边界',
-        state: noPlatformWrites ? 'ready' : 'blocked',
-        detail: '不执行发货、取消、退货、换货、退款或其他平台订单写操作。',
-      },
-      {
-        label: '原始响应边界',
-        state: rawResponseClosed ? 'ready' : 'blocked',
-        detail: '不保存 Naver 原始响应、平台密钥、临时授权、请求头或签名。',
-      },
+      { label: '店铺与连接资料范围', state: previewAllowed ? 'ready' : 'blocked', detail: previewAllowed ? '当前店铺允许进行最近订单核对。' : '当前店铺不允许进入该核对流程。' },
+      { label: '本地运营订单选择', state: selectedOperationalOrder ? 'ready' : (activeOrder ? 'blocked' : 'pending'), detail: selectedOperationalOrder ? '已选中 1 条本地运营订单。' : '需要先有 1 条可审核的 Naver 运营订单。' },
+      { label: '最近订单完整信息', state: previewAvailable ? 'ready' : (hasPreviewResult ? 'blocked' : 'pending'), detail: previewAvailable ? `已取得${previewResult.previewWindowLabel || previewWindowLabel}最近订单完整信息。` : `尚未取得可用订单详情，当前窗口为${previewWindowLabel}。` },
+      { label: '订单身份匹配', state: identityMatch.state, detail: identityMatch.detail },
+      { label: '数据库备份', state: 'review', detail: '后续刷新前必须先备份 codex1.db，本阶段未执行。' },
+      { label: '人工批准', state: 'review', detail: '后续刷新必须由人工单独批准，本页面不会触发。' },
+      { label: '刷新字段白名单', state: previewAvailable ? 'review' : 'pending', detail: '后续只允许刷新订单状态、付款、配送、售后、金额、时间和安全商品字段。' },
+      { label: '本地写入边界', state: noLocalWrites ? 'ready' : 'blocked', detail: '本页面不写本地订单，不写日志，不新增平台能力测试记录。' },
+      { label: '平台写操作边界', state: noPlatformWrites ? 'ready' : 'blocked', detail: '不执行发货、取消、退货、换货、退款或其他平台订单写操作。' },
+      { label: '原始响应边界', state: rawResponseClosed ? 'ready' : 'blocked', detail: '不保存 Naver 原始响应、平台密钥、临时授权、请求头或签名。' },
     ],
     technical: {
       phase: 'Naver-ERP-9D',
@@ -484,76 +451,6 @@ function buildNaverOrderRefreshGatePlan({
       testedSuccessWriteAllowed: false,
       platformWriteAllowed: false,
       rawResponseSaved: false,
-      formalOrderSyncOpen: false,
-    },
-  };
-}
-
-function buildNaverManualApprovalAffordance(refreshGatePlan = {}) {
-  const canEnterManualReview = Boolean(refreshGatePlan.canEnterManualReview);
-  const blocked = refreshGatePlan.statusKind === 'blocked';
-  const statusLabel = canEnterManualReview
-    ? '可准备人工审核'
-    : blocked
-      ? '暂不可申请'
-      : '等待前置条件';
-  const tone = canEnterManualReview ? 'info' : blocked ? 'warning' : 'muted';
-  const message = canEnterManualReview
-    ? '只读预览和身份匹配已满足，但本页面仍不会发起写库；需要另开阶段、先备份数据库并由人工明确批准。'
-    : blocked
-      ? '当前门禁阻断，不能进入人工批准或刷新写库。'
-      : '先完成本地运营订单选择、完整字段只读预览和身份匹配，再考虑人工审核。';
-
-  return {
-    statusLabel,
-    tone,
-    message,
-    approvalButtonLabel: canEnterManualReview ? '等待单独批准阶段' : '人工批准未开放',
-    writeButtonLabel: '刷新写库未开放',
-    approvalButtonEnabled: false,
-    writeButtonEnabled: false,
-    cards: [
-      {
-        title: '人工批准入口',
-        statusLabel,
-        tone,
-        reason: message,
-        nextAction: canEnterManualReview
-          ? '下一步只能规划单独批准阶段；本页不生成批准记录。'
-          : '继续完成只读预览和身份匹配，不要直接写库。',
-      },
-      {
-        title: '批准前置条件',
-        statusLabel: canEnterManualReview ? '待人工确认' : '未满足',
-        tone: canEnterManualReview ? 'info' : 'muted',
-        reason: '需要可用只读预览、订单身份匹配、数据库备份、字段白名单和敏感字段扫描。',
-        nextAction: '任何一个条件缺失都不能进入写库阶段。',
-      },
-      {
-        title: '按钮行为',
-        statusLabel: '仅占位',
-        tone: 'muted',
-        reason: '批准和写库按钮只用于告诉卖家当前边界，点击能力未开放。',
-        nextAction: '不会调用 Codex1 写库接口，也不会请求 Naver 平台写操作。',
-      },
-      {
-        title: '同步边界',
-        statusLabel: '未开放',
-        tone: 'warning',
-        reason: '正式订单批量同步、刷新写库、发货、取消、退货、换货写操作都保持关闭。',
-        nextAction: '需要后续阶段单独批准。',
-      },
-    ],
-    technical: {
-      phase: 'Naver-ERP-12B',
-      displayOnly: true,
-      canEnterManualReview,
-      approvalButtonEnabled: false,
-      writeButtonEnabled: false,
-      approvalRecordCreated: false,
-      realSyncAllowed: false,
-      ordersWriteAllowed: false,
-      platformWriteAllowed: false,
       formalOrderSyncOpen: false,
     },
   };
@@ -683,7 +580,7 @@ function CoupangOrderSyncPanel() {
           <h2>Coupang 订单读取</h2>
           <p>先查看指定日期内是否有订单，再按需写入本地。不会修改 Coupang 平台订单。</p>
         </div>
-        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+        <span className="period-chip">{selectedStore?.name || 'Coupang 店铺'}</span>
       </div>
 
       <div className="sync-control-grid">
@@ -705,7 +602,7 @@ function CoupangOrderSyncPanel() {
         </div>
       </div>
 
-      <p className="mock-sync-note">单次日期窗口最多 3 天，最多读取 3 页。页面不会显示平台密钥、临时授权、请求签名或订单原始响应。</p>
+      <p className="mock-sync-note">单次日期窗口最多 3 天，最多读取 3 页。页面不显示平台密钥、临时授权、请求签名或订单原始响应。</p>
       {validationError && <div className="sync-inline-warning">{validationError}</div>}
       {loadingAction && <div className="sync-inline-warning">{loadingAction === 'preview' ? '正在预览订单...' : '正在写入本地订单...'}</div>}
       {message && <div className="mock-sync-success">{message}</div>}
@@ -720,6 +617,7 @@ function NaverOrderPreviewStatusPanel() {
   const [orders, setOrders] = useState([]);
   const [orderListMeta, setOrderListMeta] = useState({ testOrdersExcluded: 0 });
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
   useEffect(() => {
     if (!isNaverStore || !selectedStoreId) {
       setOrders([]);
@@ -749,45 +647,46 @@ function NaverOrderPreviewStatusPanel() {
   }, [isNaverStore, selectedStoreId]);
 
   if (!isNaverStore) return null;
+
   const status = getNaverOrderPreviewStatus();
   const allNaverOrders = filterNaverOrdersForStore(orders, selectedStore, selectedStoreId, { includeMockSync: true });
-  const fulfillmentSummary = buildNaverOrderFulfillmentSummary(orders, {
-    selectedStore,
-    selectedStoreId,
-  });
+  const fulfillmentSummary = buildNaverOrderFulfillmentSummary(orders, { selectedStore, selectedStoreId });
   const claimSummary = buildNaverClaimReadonlySummary(fulfillmentSummary);
+  const fulfillmentBusinessMessage = businessReadableSummary(fulfillmentSummary.businessMessage);
+  const claimBusinessMessage = businessReadableSummary(claimSummary.businessMessage);
+  const claimNextAction = businessReadableSummary(claimSummary.nextAction);
   const operationalOrderCount = fulfillmentSummary.total;
   const isolatedTestOrderCount = fulfillmentSummary.excludedMockSyncCount + orderListMeta.testOrdersExcluded;
   const localOrderCount = operationalOrderCount + isolatedTestOrderCount;
   const orderStageMessage = operationalOrderCount > 0
-    ? `Naver 受控订单本地写入测试已完成。当前本地可见 ${operationalOrderCount} 条运营订单，订单详情完整字段只在受控详情区展示。`
-    : 'Naver 订单本地写入测试已完成。当前没有可展示的运营订单，正式订单批量同步仍未开放。';
+    ? `当前本地可见 ${operationalOrderCount} 条 Naver 运营订单，详情区可查看完整订单信息。正式订单批量同步仍未开放。`
+    : '当前没有可展示的 Naver 运营订单。正式订单批量同步仍未开放。';
 
   return (
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Naver 订单状态</h2>
+          <h2>Naver 订单概览</h2>
           <p>{orderStageMessage}</p>
         </div>
-        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+        <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
       <div className="business-capability-grid compact">
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>本地订单</strong>
-            <span>运营订单 {operationalOrderCount} 条</span>
+            <strong>本地运营订单</strong>
+            <span>{operationalOrderCount} 条</span>
           </div>
-          <p>主列表和 Dashboard 只统计运营订单，完整订单字段继续留在订单详情区。</p>
+          <p>主列表和 Dashboard 只统计运营订单，测试数据已隔离。</p>
           <small>当前隔离测试数据 {isolatedTestOrderCount} 条，不混入业务摘要。</small>
         </article>
         <article className={`business-capability-card ${fulfillmentSummary.tone}`}>
           <div className="business-capability-head">
-            <strong>履约 / 售后只读分类</strong>
+            <strong>履约 / 售后状态</strong>
             <span>{fulfillmentSummary.statusLabel}</span>
           </div>
-          <p>{fulfillmentSummary.businessMessage}</p>
-          <small>状态只来自本地脱敏订单，不请求 Naver，不执行平台写操作。</small>
+          <p>{fulfillmentBusinessMessage}</p>
+          <small>状态来自本地订单，不执行平台发货、取消、退货或换货写操作。</small>
         </article>
         <article className="business-capability-card info">
           <div className="business-capability-head">
@@ -795,7 +694,7 @@ function NaverOrderPreviewStatusPanel() {
             <span>{fulfillmentSummary.newOrders + fulfillmentSummary.pendingDispatch} 条</span>
           </div>
           <p>新订单 {fulfillmentSummary.newOrders} 条，待发货 {fulfillmentSummary.pendingDispatch} 条。</p>
-          <small>不把已付款订单误显示为已发货。</small>
+          <small>不会把已付款订单误显示为已发货。</small>
         </article>
         <article className="business-capability-card muted">
           <div className="business-capability-head">
@@ -803,15 +702,15 @@ function NaverOrderPreviewStatusPanel() {
             <span>{fulfillmentSummary.inDelivery + fulfillmentSummary.delivered} 条</span>
           </div>
           <p>配送中 {fulfillmentSummary.inDelivery} 条，配送完成 {fulfillmentSummary.delivered} 条。</p>
-          <small>当前只读展示配送状态，不接入配送写接口。</small>
+          <small>当前只展示配送状态，不接入配送写接口。</small>
         </article>
         <article className={`business-capability-card ${claimSummary.tone}`}>
           <div className="business-capability-head">
             <strong>取消 / 退货 / 换货</strong>
             <span>{claimSummary.statusLabel}</span>
           </div>
-          <p>{claimSummary.businessMessage}</p>
-          <small>{claimSummary.nextAction}</small>
+          <p>{claimBusinessMessage}</p>
+          <small>{claimNextAction}</small>
         </article>
         <article className={fulfillmentSummary.unknown > 0 ? 'business-capability-card warning' : 'business-capability-card muted'}>
           <div className="business-capability-head">
@@ -819,23 +718,15 @@ function NaverOrderPreviewStatusPanel() {
             <span>{fulfillmentSummary.unknown} 条</span>
           </div>
           <p>{fulfillmentSummary.unknown > 0 ? '存在未识别状态，需要人工确认。' : '当前没有未识别订单状态。'}</p>
-          <small>未知状态不会抛错，也不会进入平台写操作。</small>
+          <small>未知状态不会进入平台写操作。</small>
         </article>
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>展示层级</strong>
-            <span>{status.feed.statusLabel}</span>
+            <strong>详情展示</strong>
+            <span>可查看详情</span>
           </div>
-          <p>订单详情可展示完整字段，列表和 Dashboard 保持摘要口径。</p>
-          <small>完整买家信息、地址和商品编号不进入首页大卡片。</small>
-        </article>
-        <article className="business-capability-card success">
-          <div className="business-capability-head">
-            <strong>详情展示边界</strong>
-            <span>受控展示</span>
-          </div>
-          <p>完整买家和收件信息只放在订单详情区，Dashboard、日志和技术详情不展开。</p>
-          <small>未保存平台原始响应、授权凭证、请求头或签名。</small>
+          <p>订单详情区可以查看完整订单号、商品编号、买家和收件信息。</p>
+          <small>Dashboard 和主列表保持摘要口径。</small>
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
@@ -843,7 +734,7 @@ function NaverOrderPreviewStatusPanel() {
             <span>未开放</span>
           </div>
           <p>{status.sync.reason}</p>
-          <small>批量订单同步、发货、取消、退货、换货写操作都需要单独确认。</small>
+          <small>批量同步、发货、取消、退货、换货写操作都需要单独确认。</small>
         </article>
       </div>
       <TechnicalDetails
@@ -859,7 +750,6 @@ function NaverOrderPreviewStatusPanel() {
           { label: 'raw_response_saved', value: false },
           { label: 'privacy_fields_redacted', value: true },
           { label: 'address_saved', value: false },
-          { label: 'fulfillment.source', value: fulfillmentSummary.source },
           { label: 'fulfillment.total', value: operationalOrderCount },
           { label: 'fulfillment.new_orders', value: fulfillmentSummary.newOrders },
           { label: 'fulfillment.pending_dispatch', value: fulfillmentSummary.pendingDispatch },
@@ -870,14 +760,12 @@ function NaverOrderPreviewStatusPanel() {
           { label: 'fulfillment.exchange_requests', value: fulfillmentSummary.exchangeRequests },
           { label: 'fulfillment.unknown', value: fulfillmentSummary.unknown },
           { label: 'claim.active_request_count', value: claimSummary.activeClaimRequestCount },
-          { label: 'claim.attention_count', value: claimSummary.claimAttentionCount },
-          { label: 'claim.canceled', value: claimSummary.canceled },
           { label: 'claim.platform_claim_write_enabled', value: claimSummary.platformClaimWriteEnabled },
           { label: 'platform_writes_enabled', value: fulfillmentSummary.platformWritesEnabled },
           { label: 'formal_order_sync_status', value: 'not_open' },
         ]}
       />
-      <p className="mock-sync-note">订单详情区可受控展示完整订单号、商品编号和买家信息；平台密钥、临时授权、请求签名和订单原始响应仍不会展示。</p>
+      <p className="mock-sync-note">订单详情区可受控展示完整订单号、商品编号和买家信息；平台密钥、临时授权、请求签名和订单原始响应不会展示。</p>
     </section>
   );
 }
@@ -960,7 +848,6 @@ function NaverOrderCompleteDetailPanel() {
     previewWindow,
     previewWindowLabel,
   });
-  const manualApprovalAffordance = buildNaverManualApprovalAffordance(refreshGatePlan);
   const timelineEvents = activeOrder ? normalizeOrderStatusTimelineEvents(activeOrder) : [];
   const timelineTechnicalItems = activeOrder ? buildOrderTimelineTechnicalItems(activeOrder, fields, timelineEvents) : [];
 
@@ -977,7 +864,7 @@ function NaverOrderCompleteDetailPanel() {
       });
       setPreviewResult(result);
       if (!result.available) {
-        setPreviewError(result.businessMessage || `当前选择的${previewWindowLabel}窗口没有可展示的 Naver 订单完整字段。`);
+        setPreviewError(result.businessMessage || `当前选择的${previewWindowLabel}窗口没有可展示的 Naver 订单完整信息。`);
       }
     } catch (error) {
       setPreviewError(formatError(error));
@@ -991,13 +878,13 @@ function NaverOrderCompleteDetailPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>Naver 订单详情</h2>
-          <p>完整订单号、商品编号和买家信息只在内部订单详情区展示；Dashboard 仍保持摘要口径。</p>
+          <p>完整订单号、商品编号和买家信息只在内部订单详情区展示；Dashboard 和汇总卡片保持摘要口径。</p>
         </div>
         <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
       <div className="sync-action-row">
         <label className="form-field preview-window-field">
-          <span>预览窗口</span>
+          <span>查看范围</span>
           <select value={previewWindow} disabled={previewLoading} onChange={(event) => setPreviewWindow(event.target.value)}>
             {naverCompletePreviewWindows.map((item) => (
               <option key={item.value} value={item.value}>{item.label}</option>
@@ -1009,23 +896,19 @@ function NaverOrderCompleteDetailPanel() {
           onClick={runCompleteFieldPreview}
           disabled={!activeOrder || previewLoading || !previewAllowed}
         >
-          {previewLoading ? '读取完整字段中...' : '读取完整字段只读预览'}
+          {previewLoading ? '正在读取最近订单...' : '查看最近订单完整信息'}
         </button>
         <span className="mock-sync-note">
           {previewAllowed
-            ? `手动读取 Codex1 只读 preview，当前窗口：${previewWindowLabel}；不写 orders，不开放正式订单同步。`
-            : '当前完整字段只读预览仅限 pxg球包店 store_id=8。'}
+            ? `手动查看 ${previewWindowLabel} 的最近订单完整信息；只展示结果，不保存新订单。`
+            : '当前店铺暂未开放最近订单完整信息核对。'}
         </span>
       </div>
-      {loadError ? (
-        <div className="mock-sync-error">{loadError}</div>
-      ) : null}
+      {loadError ? <div className="mock-sync-error">{loadError}</div> : null}
       {previewResult?.available ? (
-        <div className="mock-sync-success">已读取{previewResult.previewWindowLabel || previewWindowLabel}完整字段只读预览，页面仅展示结果，不写库。</div>
+        <div className="mock-sync-success">已读取{previewResult.previewWindowLabel || previewWindowLabel}最近订单完整信息，页面仅展示结果，不写库。</div>
       ) : null}
-      {previewError ? (
-        <div className="mock-sync-error">{previewError}</div>
-      ) : null}
+      {previewError ? <div className="mock-sync-error">{previewError}</div> : null}
       {!activeOrder ? (
         <div className="empty-state">当前店铺暂无可展示的 Naver 本地订单详情。</div>
       ) : (
@@ -1083,6 +966,7 @@ function NaverOrderCompleteDetailPanel() {
               </div>
             </section>
           </div>
+
           <section className="detail-section">
             <h3>订单状态时间线</h3>
             <div className="detail-grid">
@@ -1096,49 +980,28 @@ function NaverOrderCompleteDetailPanel() {
             ) : (
               <div className="empty-state compact">当前暂无已记录的订单状态历史。</div>
             )}
-            <p className="mock-sync-note">
-              状态时间线当前只读展示。没有历史记录时，只表示本地尚未生成状态事件；正式订单同步、自动刷新和事件写入仍未开放。
-            </p>
+            <p className="mock-sync-note">状态时间线当前只展示本地记录。没有历史记录时，只表示本地尚未生成状态事件；正式订单同步、自动刷新和事件写入仍未开放。</p>
             <TechnicalDetails
               title="查看状态时间线技术详情"
-              description="原始状态枚举、来源阶段和去重信息仅放在折叠详情中；页面主区域只展示卖家可读状态。"
+              description="原始状态枚举、来源阶段和去重信息只放在折叠详情中；页面主区域只展示卖家可读状态。"
               items={timelineTechnicalItems}
             />
           </section>
+
           <section className="detail-section">
-            <h3>Naver 订单刷新写库门禁计划</h3>
+            <h3>后续刷新保护</h3>
             <div className={refreshGatePlan.statusKind === 'blocked' ? 'mock-sync-error' : 'sync-inline-warning'}>
-              {refreshGatePlan.statusLabel}：{refreshGatePlan.message}
+              {refreshGatePlan.statusLabel}：{refreshGatePlan.businessMessage}
             </div>
-            <div className="detail-grid">
-              {refreshGatePlan.items.map((item) => (
-                <DetailItem
-                  key={item.label}
-                  label={`${orderRefreshGateStateLabels[item.state]} · ${item.label}`}
-                  value={item.detail}
-                />
-              ))}
-            </div>
-            <div className="business-capability-grid compact">
-              {manualApprovalAffordance.cards.map((card) => (
-                <article className={`business-capability-card ${card.tone || 'info'}`} key={card.title}>
-                  <div className="business-capability-head">
-                    <strong>{card.title}</strong>
-                    <span>{card.statusLabel}</span>
-                  </div>
-                  <p>{card.reason}</p>
-                  <small>{card.nextAction}</small>
-                </article>
-              ))}
-            </div>
-            <div className="sync-action-row">
-              <button className="button ghost" type="button" disabled>{manualApprovalAffordance.approvalButtonLabel}</button>
-              <button className="button primary" type="button" disabled>{manualApprovalAffordance.writeButtonLabel}</button>
-            </div>
-            <p className="mock-sync-note">Phase 12B 只展示人工批准入口状态；当前不新增可点击写库按钮，不改后端，不开放正式订单同步。</p>
+            <p className="mock-sync-note">当前页面不会自动刷新本地订单，也不会执行平台发货、取消、退货或换货。需要刷新本地订单时，必须另开阶段、先备份数据库并由人工明确批准。</p>
             <TechnicalDetails
-              description="刷新写库门禁只保留执行边界，不展示订单原始响应。"
+              title="查看刷新保护技术详情"
+              description="刷新保护细节仅供管理员排查，普通卖家主页面不展示门禁参数。"
               items={[
+                ...refreshGatePlan.items.map((item) => ({
+                  label: `gate_${item.label}`,
+                  value: `${item.state}: ${item.detail}`,
+                })),
                 { label: 'order_refresh_write_gate_phase', value: refreshGatePlan.technical.phase },
                 { label: 'planned_only', value: refreshGatePlan.technical.plannedOnly },
                 { label: 'selected_store_id', value: selectedStoreId },
@@ -1160,16 +1023,12 @@ function NaverOrderCompleteDetailPanel() {
                 { label: 'platform_write_allowed', value: refreshGatePlan.technical.platformWriteAllowed },
                 { label: 'raw_response_saved', value: refreshGatePlan.technical.rawResponseSaved },
                 { label: 'formal_order_sync_open', value: refreshGatePlan.technical.formalOrderSyncOpen },
-                { label: 'manual_approval_affordance_phase', value: manualApprovalAffordance.technical.phase },
-                { label: 'manual_approval_display_only', value: manualApprovalAffordance.technical.displayOnly },
-                { label: 'manual_approval_button_enabled', value: manualApprovalAffordance.technical.approvalButtonEnabled },
-                { label: 'manual_write_button_enabled', value: manualApprovalAffordance.technical.writeButtonEnabled },
-                { label: 'manual_approval_record_created', value: manualApprovalAffordance.technical.approvalRecordCreated },
               ]}
             />
           </section>
-          <p className="mock-sync-note">页面不会自动请求 Naver；只有点击完整字段只读预览时才通过 Codex1 做受控读取。该操作最多使用最近 7 天窗口，不写 orders，不保存原始响应，不开放正式订单同步。</p>
+
           <TechnicalDetails
+            title="查看完整字段读取技术详情"
             description="仅保留字段可用性和口径，不展示平台原始响应。"
             items={[
               { label: 'complete_field_view', value: completeFieldReady },
@@ -1237,6 +1096,7 @@ export default function Orders() {
       return dataProvider.getOrders(params);
     },
   }), [selectedStore, selectedStoreId, storeLoading]);
+
   return (
     <>
       <NaverOrderPreviewStatusPanel />
@@ -1244,7 +1104,7 @@ export default function Orders() {
       <CoupangOrderSyncPanel />
       <ResourcePage
         title="订单管理"
-        description="查看订单履约、发货、退款和异常处理状态。"
+        description="查看订单履约、发货、退款和异常处理状态。Naver 订单的完整信息放在上方详情区，主列表保持业务摘要。"
         resourceName="订单"
         api={pageApi}
         columns={columns}

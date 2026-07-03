@@ -53,6 +53,7 @@ export default function ResourcePage({
       setLoading(false);
     }
   }, [api, query, stableExtraParams, reloadKey, resourceName]);
+
   useEffect(() => { load(); }, [load]);
 
   const openModal = (record = null) => {
@@ -61,10 +62,19 @@ export default function ResourcePage({
     setErrors({});
     setSaveError('');
   };
+
   const save = async () => {
     if (submitting) return;
-    const nextErrors = fields.reduce((value, field) => field.required && !String(form[field.key] ?? '').trim() ? { ...value, [field.key]: `请填写${field.label}` } : value, {});
-    if (Object.keys(nextErrors).length) return setErrors(nextErrors);
+    const nextErrors = fields.reduce(
+      (value, field) => (field.required && !String(form[field.key] ?? '').trim()
+        ? { ...value, [field.key]: `请填写${field.label}` }
+        : value),
+      {},
+    );
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      return;
+    }
     setSubmitting(true);
     setSaveError('');
     try {
@@ -79,31 +89,100 @@ export default function ResourcePage({
       setSubmitting(false);
     }
   };
+
   const remove = async (record) => {
     if (!window.confirm(`确认删除“${record.name || record.orderNo}”吗？此操作不可撤销。`)) return;
     await api.remove(record.id);
     await load();
   };
-  const search = () => setQuery({ ...draftQuery, page: 1 });
-  const reset = () => { const clean = { keyword: '', status: '', platform: '', page: 1, pageSize: 5 }; setDraftQuery(clean); setQuery(clean); };
 
-  return <>
-    <PageHeader title={title} description={description} actions={<><button className="button ghost" onClick={load}>↻ 刷新</button>{extraActions}{readOnly ? <span className="period-chip">后端只读</span> : null}{canCreate ? <button className="button primary" onClick={() => openModal()}>＋ 新增{resourceName}</button> : null}</>} />
-    <section className="content-card">
-      <SearchBar value={draftQuery.keyword} onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })} onSearch={search} onReset={reset} placeholder={`搜索${resourceName}名称、编号或负责人`}>
-        {platforms.length > 0 && <select value={draftQuery.platform} onChange={(e) => setDraftQuery({ ...draftQuery, platform: e.target.value })}><option value="">全部平台</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select>}
-        <select value={draftQuery.status} onChange={(e) => setDraftQuery({ ...draftQuery, status: e.target.value })}><option value="">全部状态</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select>
-      </SearchBar>
-      {loadError ? <EmptyState title={`${resourceName}数据加载失败`} description={loadError} /> : <>
-        <DataTable columns={columns} rows={result.data || []} loading={loading} onEdit={canEdit ? openModal : undefined} onDelete={canDelete ? remove : undefined} />
-        <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
-      </>}
-    </section>
-    {(canCreate || canEdit) && <Modal open={modal.open} title={`${modal.record ? '编辑' : '新增'}${resourceName}`} onClose={() => setModal({ open: false, record: null })} onConfirm={save} confirmText={submitting ? '保存中...' : '保存'} confirmDisabled={submitting}>
-      {saveError && <div className="form-error">{saveError}</div>}
-      <div className="form-grid">{fields.map((field) => <FormField key={field.key} label={field.label} required={field.required} error={errors[field.key]}>
-        {field.type === 'select' ? <select value={form[field.key] ?? ''} disabled={submitting || field.disabled} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}><option value="">请选择</option>{field.options.map((option) => (typeof option === 'object' ? <option key={option.value} value={option.value}>{option.label}</option> : <option key={option}>{option}</option>))}</select> : <input type={field.type || 'text'} value={form[field.key] ?? ''} disabled={submitting || field.disabled} placeholder={field.placeholder || `请输入${field.label}`} onChange={(e) => setForm({ ...form, [field.key]: field.type === 'number' ? Number(e.target.value) : e.target.value })} />}
-      </FormField>)}</div>
-    </Modal>}
-  </>;
+  const search = () => setQuery({ ...draftQuery, page: 1 });
+  const reset = () => {
+    const clean = { keyword: '', status: '', platform: '', page: 1, pageSize: 5 };
+    setDraftQuery(clean);
+    setQuery(clean);
+  };
+
+  return (
+    <>
+      <PageHeader
+        title={title}
+        description={description}
+        actions={(
+          <>
+            <button className="button ghost" onClick={load}>刷新</button>
+            {extraActions}
+            {readOnly ? <span className="period-chip">只读展示</span> : null}
+            {canCreate ? <button className="button primary" onClick={() => openModal()}>新增{resourceName}</button> : null}
+          </>
+        )}
+      />
+      <section className="content-card">
+        <SearchBar
+          value={draftQuery.keyword}
+          onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })}
+          onSearch={search}
+          onReset={reset}
+          placeholder={`搜索${resourceName}名称、编号或负责人`}
+        >
+          {platforms.length > 0 && (
+            <select value={draftQuery.platform} onChange={(e) => setDraftQuery({ ...draftQuery, platform: e.target.value })}>
+              <option value="">全部平台</option>
+              {platforms.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          )}
+          <select value={draftQuery.status} onChange={(e) => setDraftQuery({ ...draftQuery, status: e.target.value })}>
+            <option value="">全部状态</option>
+            {statuses.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </SearchBar>
+        {loadError ? (
+          <EmptyState title={`${resourceName}数据加载失败`} description={loadError} />
+        ) : (
+          <>
+            <DataTable columns={columns} rows={result.data || []} loading={loading} onEdit={canEdit ? openModal : undefined} onDelete={canDelete ? remove : undefined} />
+            <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
+          </>
+        )}
+      </section>
+      {(canCreate || canEdit) && (
+        <Modal
+          open={modal.open}
+          title={`${modal.record ? '编辑' : '新增'}${resourceName}`}
+          onClose={() => setModal({ open: false, record: null })}
+          onConfirm={save}
+          confirmText={submitting ? '保存中...' : '保存'}
+          confirmDisabled={submitting}
+        >
+          {saveError && <div className="form-error">{saveError}</div>}
+          <div className="form-grid">
+            {fields.map((field) => (
+              <FormField key={field.key} label={field.label} required={field.required} error={errors[field.key]}>
+                {field.type === 'select' ? (
+                  <select
+                    value={form[field.key] ?? ''}
+                    disabled={submitting || field.disabled}
+                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                  >
+                    <option value="">请选择</option>
+                    {field.options.map((option) => (typeof option === 'object'
+                      ? <option key={option.value} value={option.value}>{option.label}</option>
+                      : <option key={option}>{option}</option>))}
+                  </select>
+                ) : (
+                  <input
+                    type={field.type || 'text'}
+                    value={form[field.key] ?? ''}
+                    disabled={submitting || field.disabled}
+                    placeholder={field.placeholder || `请输入${field.label}`}
+                    onChange={(e) => setForm({ ...form, [field.key]: field.type === 'number' ? Number(e.target.value) : e.target.value })}
+                  />
+                )}
+              </FormField>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
 }

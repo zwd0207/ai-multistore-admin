@@ -586,3 +586,9 @@ ERP-UX-1B is inventory-only. It scans Codex2 pages, adapters, service helpers, a
 The Dashboard business summary cleanup is documented in `PHASE_ERP_UX_1C_DASHBOARD_BUSINESS_SUMMARY_CLEANUP.md`.
 
 ERP-UX-1C updates Codex2 Dashboard runtime UI so Naver stores show a business-first `今日经营摘要` before generic statistics. Backend mode no longer shows a visible `数据源 backend` chip; mock mode still shows `演示数据`. Main Dashboard copy now avoids `store #...`, `store_id`, `real_sync`, `SyncLog`, and `tested_success`, while technical diagnostics stay folded in `TechnicalDetails`. This phase does not modify Codex1, call platform APIs, write data, change schema, or open formal product/order sync.
+
+## Phase ERP-UX-1D - Orders Business Display Cleanup
+
+The Orders business display cleanup is documented in `PHASE_ERP_UX_1D_ORDERS_BUSINESS_DISPLAY_CLEANUP.md`.
+
+ERP-UX-1D updates Codex2 Orders runtime UI so Naver order summaries are business-first: local operational orders, fulfillment, delivery, claims, detail visibility, and formal-sync status are separated from technical gate fields. Main Orders copy no longer shows `store #...`, `store_id=8`, `real_sync`, `SyncLog`, or `tested_success`; refresh protection details stay folded in `TechnicalDetails`. The order detail section may show full order number, product number, buyer, receiver, phone, and address information, while Dashboard and list summaries remain concise. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal order sync.
