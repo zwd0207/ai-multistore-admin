@@ -449,6 +449,12 @@ The Naver selected order refresh approval plan is documented in `PHASE_NAVER_ERP
 
 13C is documentation-only. It records the future gate for refreshing one existing local Naver order with selected safe hash `id-hash-ab176f5db1`: explicit user approval, clean worktrees, database backup, fresh readonly preview, exact hash match, exactly one existing local real Naver order, privacy gate pass, one-row update limit, post-write readback, no product writes, no SyncLog, no tested_success, no raw response saving, and no Naver platform write operation. It does not call Naver, does not write local data, and does not approve formal order sync.
 
+## Phase Naver-ERP-13D - Selected Naver Order Single Local Refresh Write
+
+The selected Naver order single local refresh write attempt is documented in `PHASE_NAVER_ERP_13D_SELECTED_ORDER_SINGLE_LOCAL_REFRESH_WRITE.md`.
+
+13D backed up the real database and ran fresh readonly Naver order previews, but it did not update the selected local order because the fresh preview hashes did not match approved hash `id-hash-ab176f5db1`. The 3-day window returned `id-hash-0c36f22281`, and the targeted narrow probe returned `id-hash-a5870c77c2`. The refresh gate blocked on selected-hash mismatch, leaving orders, products, SyncLog, tested_success, and order status events unchanged. Formal Naver order sync remains closed.
+
 ## Phase Naver-ERP-14A - Naver Order Status Timeline Plan
 
 The Naver order status timeline plan is documented in `PHASE_NAVER_ERP_14A_ORDER_STATUS_TIMELINE_PLAN.md`.
