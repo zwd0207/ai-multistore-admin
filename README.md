@@ -616,3 +616,9 @@ ERP-UX-1G is planning-only. It defines how Logs and Audit should read for produc
 The production usability mock walkthrough is documented in `PHASE_ERP_UX_1H_PRODUCTION_USABILITY_MOCK_WALKTHROUGH.md`.
 
 ERP-UX-1H checks the current Codex2 mock frontend across Dashboard, Orders, Products, Sales, API Capabilities, Accounts, Logs, and Settings. The mock pages load without console errors or mojibake, use business-facing Chinese, keep technical details folded, and do not claim formal Naver product/order sync is open. The Logs detail modal also keeps before/after JSON folded by default. This phase does not modify runtime frontend code, Codex1, platform APIs, local data, database schema, or formal sync gates.
+
+## Phase ERP-UX-1I - Logs Runtime Readability Cleanup
+
+The Logs runtime readability cleanup is documented in `PHASE_ERP_UX_1I_LOGS_RUNTIME_READABILITY_CLEANUP.md`.
+
+ERP-UX-1I updates Codex2 Logs runtime UI so administrator-facing audit pages are easier to read: the page now starts with an `审计可读性摘要`, frames sync jobs as `同步记录`, frames local history as `操作记录`, shows business columns such as object/action/actor/result/risk/next step, and keeps internal log numbers, raw status, raw risk level, IP/device/source, and JSON before/after payloads folded in advanced details. It does not claim full production audit coverage because the real audit-log service is not live yet. This phase does not modify Codex1, call platform APIs, write local data, change schema, or open formal sync gates.
