@@ -622,3 +622,9 @@ ERP-UX-1H checks the current Codex2 mock frontend across Dashboard, Orders, Prod
 The Logs runtime readability cleanup is documented in `PHASE_ERP_UX_1I_LOGS_RUNTIME_READABILITY_CLEANUP.md`.
 
 ERP-UX-1I updates Codex2 Logs runtime UI so administrator-facing audit pages are easier to read: the page now starts with an `审计可读性摘要`, frames sync jobs as `同步记录`, frames local history as `操作记录`, shows business columns such as object/action/actor/result/risk/next step, and keeps internal log numbers, raw status, raw risk level, IP/device/source, and JSON before/after payloads folded in advanced details. It does not claim full production audit coverage because the real audit-log service is not live yet. This phase does not modify Codex1, call platform APIs, write local data, change schema, or open formal sync gates.
+
+## Phase ERP-UX-1J - TechnicalDetails Safety Hardening Plan
+
+The TechnicalDetails safety hardening plan is documented in `PHASE_ERP_UX_1J_TECHNICALDETAILS_SAFETY_HARDENING_PLAN.md`.
+
+ERP-UX-1J is planning-only. It defines a frontend last-line-of-defense redaction plan for folded technical details: labels and values related to tokens, Authorization, headers, signatures, client secrets, raw responses, full platform ids, buyer/receiver privacy, phones, and addresses must be hidden, while safe diagnostics such as error codes, http status, safe keyword flags, mapping versions, source phases, safe hashes, counts, and booleans may remain visible only inside folded administrator details. This phase does not modify runtime frontend code, Codex1, platform APIs, local data, schema, or formal sync gates.
