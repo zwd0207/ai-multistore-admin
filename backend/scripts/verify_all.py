@@ -4,6 +4,9 @@ import os
 import tempfile
 import uuid
 import json
+import hashlib
+import shutil
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -392,6 +395,63 @@ FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS = [
     "zip-12345",
 ]
 
+REQUIRED_BACKUP_MANIFEST_FIELDS = {
+    "manifest_version",
+    "backup_id",
+    "phase",
+    "operation_type",
+    "created_at",
+    "created_by_actor_type",
+    "created_by_actor_label",
+    "source_db_path",
+    "backup_path",
+    "backup_sha256",
+    "backup_size_bytes",
+    "backup_method",
+    "sqlite_integrity_check",
+    "git_commit_codex1",
+    "git_commit_codex2",
+    "baseline_counts",
+    "retention_class",
+    "retention_reason",
+    "retention_until",
+    "legal_hold",
+    "protected_from_auto_delete",
+    "restore_drill_status",
+    "sensitive_scan_passed",
+    "raw_response_saved",
+    "secrets_saved",
+    "privacy_fields_redacted",
+}
+
+ALLOWED_BACKUP_RETENTION_CLASSES = {
+    "pre_write",
+    "pre_migration",
+    "pre_restore",
+    "scheduled_daily",
+    "scheduled_weekly",
+    "manual_checkpoint",
+    "release_checkpoint",
+    "incident_response",
+}
+
+FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS = [
+    "backup-token-must-not-leak",
+    "backup-client-secret-must-not-leak",
+    "authorization: bearer backup-must-not-leak",
+    "backup-headers-must-not-leak",
+    "backup-signature-must-not-leak",
+    "backup-bcrypt-must-not-leak",
+    "backup-raw-response-must-not-leak",
+    "channel-500000000000",
+    "order-202607030001",
+    "product-order-202607030001",
+    "backup-buyer-name-must-not-leak",
+    "010-1111-2222",
+    "backup-address-must-not-leak",
+    "zip-12345",
+]
+
 FORBIDDEN_TIME_PATTERNS = {
     "datetime.utcnow(": "use app.core.timezone.get_utc_now()",
     "date.today(": "use app.core.timezone.get_business_date() for business dates",
@@ -484,6 +544,190 @@ def _json_for_audit(value):
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _backup_manifest_sensitive_fields(manifest: dict) -> list[str]:
+    forbidden = set(_operation_audit_sensitive_fields(manifest))
+    manifest_text = json.dumps(manifest, ensure_ascii=False, default=str).lower()
+    for marker in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+        if marker in manifest_text:
+            forbidden.add("sensitive_value")
+    return sorted(forbidden)
+
+
+def _validate_backup_manifest_for_restore_dry_run(manifest: dict, backup_path: Path) -> dict:
+    result = {
+        "phase": "ERP-Backup-1C",
+        "status": "restore_dry_run_manifest_valid",
+        "safe_to_restore_to_temp": True,
+        "real_database_touched": False,
+        "real_restore_executed": False,
+    }
+    missing = sorted(REQUIRED_BACKUP_MANIFEST_FIELDS - set(manifest))
+    if missing:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "missing_manifest_fields",
+            "missing_manifest_fields": missing,
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if manifest.get("retention_class") not in ALLOWED_BACKUP_RETENTION_CLASSES:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "invalid_retention_class",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if not _operation_audit_valid_sha256(manifest.get("backup_sha256")):
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "invalid_backup_sha256_format",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if manifest.get("raw_response_saved") is not False or manifest.get("secrets_saved") is not False:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "unsafe_manifest_saved_flags",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if manifest.get("privacy_fields_redacted") is not True or manifest.get("sensitive_scan_passed") is not True:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "manifest_safety_flags_failed",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    forbidden_fields = _backup_manifest_sensitive_fields(manifest)
+    if forbidden_fields:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "manifest_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if not backup_path.exists():
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "backup_file_missing",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    if backup_path.stat().st_size != int(manifest["backup_size_bytes"]):
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "backup_size_mismatch",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    actual_sha = _sha256_file(backup_path)
+    if actual_sha != manifest["backup_sha256"]:
+        result.update({
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "backup_sha256_mismatch",
+            "safe_to_restore_to_temp": False,
+        })
+        return result
+    return result
+
+
+def _run_sqlite_restore_dry_run(manifest: dict, backup_path: Path, restore_path: Path) -> dict:
+    production_db_path = (BACKEND_DIR / "codex1.db").resolve()
+    if restore_path.resolve() == production_db_path:
+        return {
+            "phase": "ERP-Backup-1C",
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "restore_target_is_production_db",
+            "safe_to_restore_to_temp": False,
+            "real_database_touched": False,
+            "real_restore_executed": False,
+        }
+    manifest_gate = _validate_backup_manifest_for_restore_dry_run(manifest, backup_path)
+    if manifest_gate["status"] != "restore_dry_run_manifest_valid":
+        return manifest_gate
+
+    restore_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(backup_path, restore_path)
+    restored_sha = _sha256_file(restore_path)
+    if restored_sha != manifest["backup_sha256"]:
+        return {
+            "phase": "ERP-Backup-1C",
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "restored_copy_sha256_mismatch",
+            "safe_to_restore_to_temp": False,
+            "real_database_touched": False,
+            "real_restore_executed": False,
+        }
+
+    with sqlite3.connect(restore_path) as conn:
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        observed_counts = {
+            table_name: conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            for table_name in manifest["baseline_counts"]
+        }
+    if integrity != "ok":
+        return {
+            "phase": "ERP-Backup-1C",
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "sqlite_integrity_check_failed",
+            "integrity_check": integrity,
+            "safe_to_restore_to_temp": False,
+            "real_database_touched": False,
+            "real_restore_executed": False,
+        }
+    missing_tables = sorted(set(manifest["baseline_counts"]) - tables)
+    if missing_tables:
+        return {
+            "phase": "ERP-Backup-1C",
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "restore_missing_expected_tables",
+            "missing_tables": missing_tables,
+            "safe_to_restore_to_temp": False,
+            "real_database_touched": False,
+            "real_restore_executed": False,
+        }
+    if observed_counts != manifest["baseline_counts"]:
+        return {
+            "phase": "ERP-Backup-1C",
+            "status": "restore_dry_run_blocked",
+            "skip_reason": "restore_count_mismatch",
+            "observed_counts": observed_counts,
+            "expected_counts": manifest["baseline_counts"],
+            "safe_to_restore_to_temp": False,
+            "real_database_touched": False,
+            "real_restore_executed": False,
+        }
+
+    return {
+        "phase": "ERP-Backup-1C",
+        "status": "restore_dry_run_verified",
+        "safe_to_restore_to_temp": True,
+        "real_database_touched": False,
+        "real_restore_executed": False,
+        "restore_target": "temporary_sqlite_fixture",
+        "integrity_check": integrity,
+        "observed_counts": observed_counts,
+        "backup_sha256_verified": True,
+        "restored_copy_sha256_verified": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
 
 
 def _operation_audit_mock_write_gate(db, audit_row: dict, *, write_enabled: bool, manual_approval: bool) -> dict:
@@ -7042,6 +7286,151 @@ def verify_operation_audit_log_mock_write_gate() -> None:
     print("operation audit log mock write gate: ok")
 
 
+def verify_backup_restore_verification_dry_run() -> None:
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1c-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_dir = temp_dir / "backups"
+        restore_dir = temp_dir / "restore-drill"
+        backup_dir.mkdir()
+        restore_dir.mkdir()
+
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver safe fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Safe fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-restore001', 'DELIVERED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'delivered')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.commit()
+            source_integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            baseline_counts = {
+                table_name: conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                for table_name in [
+                    "stores",
+                    "products",
+                    "orders",
+                    "order_status_events",
+                    "sync_logs",
+                    "api_capability_test_results",
+                ]
+            }
+        assert source_integrity == "ok", source_integrity
+
+        backup_path = backup_dir / "codex1.db.backup-erp-backup-1c-20260703-120000.db"
+        shutil.copy2(source_db, backup_path)
+        backup_sha = _sha256_file(backup_path)
+        manifest = {
+            "manifest_version": "backup-manifest-v1",
+            "backup_id": "backup-erp-1c-safe-fixture",
+            "phase": "ERP-Backup-1C",
+            "operation_type": "restore_verification_dry_run",
+            "created_at": "2026-07-03T12:00:00+00:00",
+            "created_by_actor_type": "test",
+            "created_by_actor_label": "verify_all",
+            "source_db_path": source_db.as_posix(),
+            "backup_path": backup_path.as_posix(),
+            "backup_sha256": backup_sha,
+            "backup_size_bytes": backup_path.stat().st_size,
+            "backup_method": "temporary_fixture_copy",
+            "sqlite_integrity_check": "ok",
+            "git_commit_codex1": "0" * 40,
+            "git_commit_codex2": "1" * 40,
+            "baseline_counts": baseline_counts,
+            "related_store_ids": [8],
+            "related_platforms": ["naver"],
+            "related_safe_hashes": ["id-hash-restore001"],
+            "retention_class": "manual_checkpoint",
+            "retention_reason": "restore dry-run fixture",
+            "retention_until": "2026-10-01T00:00:00+00:00",
+            "legal_hold": False,
+            "protected_from_auto_delete": True,
+            "restore_drill_status": "pending",
+            "last_restore_drill_at": None,
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "operation_audit_correlation_id": "backup-1c-correlation-safe-fixture",
+            "notes": "Temporary restore dry-run fixture only.",
+        }
+        manifest_path = backup_dir / "codex1.db.backup-erp-backup-1c-20260703-120000.manifest.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_text = json.dumps(loaded_manifest, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert marker not in manifest_text, manifest_text
+
+        manifest_gate = _validate_backup_manifest_for_restore_dry_run(loaded_manifest, backup_path)
+        assert manifest_gate["status"] == "restore_dry_run_manifest_valid", manifest_gate
+        assert manifest_gate["real_database_touched"] is False, manifest_gate
+
+        restore_path = restore_dir / "codex1.db.restore-dry-run-copy.db"
+        restore_gate = _run_sqlite_restore_dry_run(loaded_manifest, backup_path, restore_path)
+        assert restore_gate["status"] == "restore_dry_run_verified", restore_gate
+        assert restore_gate["safe_to_restore_to_temp"] is True, restore_gate
+        assert restore_gate["real_database_touched"] is False, restore_gate
+        assert restore_gate["real_restore_executed"] is False, restore_gate
+        assert restore_gate["integrity_check"] == "ok", restore_gate
+        assert restore_gate["observed_counts"] == baseline_counts, restore_gate
+        assert restore_path.exists(), restore_path
+        assert restore_path.resolve() != production_db_path.resolve(), restore_path
+
+        production_target_gate = _run_sqlite_restore_dry_run(
+            loaded_manifest,
+            backup_path,
+            production_db_path,
+        )
+        assert production_target_gate["skip_reason"] == "restore_target_is_production_db", production_target_gate
+        assert production_target_gate["real_restore_executed"] is False, production_target_gate
+
+        tampered_manifest = dict(loaded_manifest)
+        tampered_manifest["backup_sha256"] = "c" * 64
+        tampered_gate = _validate_backup_manifest_for_restore_dry_run(tampered_manifest, backup_path)
+        assert tampered_gate["skip_reason"] == "backup_sha256_mismatch", tampered_gate
+        assert tampered_gate["safe_to_restore_to_temp"] is False, tampered_gate
+
+        unsafe_manifest = dict(loaded_manifest)
+        unsafe_manifest["notes"] = "backup-token-must-not-leak"
+        unsafe_manifest["headers"] = "backup-headers-must-not-leak"
+        unsafe_gate = _validate_backup_manifest_for_restore_dry_run(unsafe_manifest, backup_path)
+        assert unsafe_gate["skip_reason"] == "manifest_sensitive_field_blocked", unsafe_gate
+        unsafe_gate_text = json.dumps(unsafe_gate, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert marker not in unsafe_gate_text, unsafe_gate_text
+
+        invalid_retention_manifest = dict(loaded_manifest)
+        invalid_retention_manifest["retention_class"] = "delete_now"
+        invalid_retention_gate = _validate_backup_manifest_for_restore_dry_run(invalid_retention_manifest, backup_path)
+        assert invalid_retention_gate["skip_reason"] == "invalid_retention_class", invalid_retention_gate
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("backup restore verification dry-run: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -7230,6 +7619,7 @@ def main() -> None:
         verify_kst_business_timezone()
         verify_naver_order_local_list_cleanup()
         verify_operation_audit_log_mock_write_gate()
+        verify_backup_restore_verification_dry_run()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()
