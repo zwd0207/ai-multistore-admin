@@ -532,3 +532,9 @@ The Naver order refresh batch mock gate is documented in `PHASE_NAVER_ERP_15B_OR
 The Naver order refresh batch approval plan is documented in `PHASE_NAVER_ERP_15D_ORDER_REFRESH_BATCH_APPROVAL_PLAN.md`.
 
 15D is planning-only. It defines the human approval checklist for a future batch refresh of already-existing local Naver orders after 15B mock coverage. It does not run a real readonly batch probe, does not change the current `page=1,size=1` public guardrail, and does not write local data. A later write phase would require clean worktrees, a database backup, explicit approved safe hashes, a fresh readonly candidate batch result, no mixed new-order candidates, no duplicate hashes, every hash matching exactly one existing local real Naver order, privacy/status gates passing, and post-write readback.
+
+## Phase ERP-Audit-1A - Local Operation Audit Log Plan
+
+The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
+
+ERP-Audit-1A is planning-only. It defines a future `operation_audit_logs` trail separate from `SyncLog` so production operators can answer who approved or performed a local operation, what object/store was affected, when it happened, what safe fields changed, whether backup/restore evidence exists, and whether sensitive scans passed. It also defines the sensitive-data boundary for audit logs: no tokens, Authorization, headers, signatures, client secrets, raw platform responses, full order ids, full product-order ids, buyer/receiver privacy, phones, addresses, or zip codes. This phase does not create schema, write audit rows, modify runtime UI, or change backup/restore behavior.
