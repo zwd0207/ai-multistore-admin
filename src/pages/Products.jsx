@@ -35,15 +35,83 @@ const coupangStatusOptions = [
   'all',
 ];
 
+const fields = [
+  { key: 'name', label: '商品名称', required: true },
+  { key: 'sku', label: 'SKU', required: true },
+  { key: 'store', label: '店铺', required: true },
+  { key: 'platform', label: '平台', type: 'select', required: true, options: platformOptions },
+  { key: 'price', label: '售价（KRW）', type: 'number', required: true },
+  { key: 'stock', label: '库存', type: 'number', required: true },
+  { key: 'status', label: '平台状态', type: 'select', required: true, options: statusOptions },
+];
+
+function normalizePlatform(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function sourceLabel(value) {
   const labels = {
-    naver_real_sync: 'Naver 小批量写入测试',
+    naver_real_sync: 'Naver 本地商品',
     naver_product_preview: 'Naver 商品预览',
     naver_product_preview_dry_run: 'Naver 商品预览',
-    coupang_real_sync: 'Coupang 本地同步',
-    coupang_product_sync: 'Coupang 本地同步',
+    coupang_real_sync: 'Coupang 本地商品',
+    coupang_product_sync: 'Coupang 本地商品',
   };
   return labels[value] || value || '-';
+}
+
+function statusLabel(value) {
+  const labels = {
+    active: '销售中',
+    approved: '销售中',
+    review: '审核中',
+    in_review: '审核中',
+    suspended: '停售',
+    inactive: '停售',
+    deleted: '已删除',
+  };
+  return labels[String(value || '').trim().toLowerCase()] || value || '未知';
+}
+
+function moneyLabel(value, currency = 'KRW') {
+  return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
+}
+
+function displayStoreName(value, selectedStore) {
+  const text = String(value || '').trim();
+  if (!text || /^店铺\s*#/.test(text)) return selectedStore?.name || '当前店铺';
+  return text;
+}
+
+function businessReadableSummary(value = '') {
+  return String(value)
+    .replace('已只读检查', '已汇总')
+    .replace('继续只读观察', '继续观察')
+    .replace('dry-run', '预览')
+    .replace('price', '价格')
+    .replace('stock_quantity', '库存');
+}
+
+function buildColumns(selectedStore) {
+  return [
+    {
+      key: 'name',
+      title: '商品名称',
+      render: (value, row) => (
+        <div>
+          <strong>{value}</strong>
+          <small className="cell-subtitle">{row.sku || '平台商品编号已脱敏'}</small>
+        </div>
+      ),
+    },
+    { key: 'store', title: '店铺', render: (value) => displayStoreName(value, selectedStore) },
+    { key: 'platform', title: '平台' },
+    { key: 'price', title: '售价', render: (value, row) => moneyLabel(value, row.currency) },
+    { key: 'stock', title: '库存', render: renderStock },
+    { key: 'status', title: '平台状态', render: (value) => <StatusBadge value={statusLabel(value)} /> },
+    { key: 'sourceType', title: '数据来源', render: sourceLabel },
+    { key: 'updatedAt', title: '最近同步' },
+  ];
 }
 
 function renderStock(value) {
@@ -73,38 +141,13 @@ function InventoryAttentionList({ items = [] }) {
   );
 }
 
-const columns = [
-  { key: 'name', title: '商品名', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.sku || '平台商品编号已脱敏'}</small></div> },
-  { key: 'store', title: '店铺' },
-  { key: 'platform', title: '平台' },
-  { key: 'price', title: '售价', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
-  { key: 'stock', title: '库存', render: renderStock },
-  { key: 'status', title: '平台状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'sourceType', title: '来源', render: sourceLabel },
-  { key: 'updatedAt', title: '最近更新' },
-];
-
-const fields = [
-  { key: 'name', label: '商品名', required: true },
-  { key: 'sku', label: 'SKU', required: true },
-  { key: 'store', label: '店铺', required: true },
-  { key: 'platform', label: '平台', type: 'select', required: true, options: platformOptions },
-  { key: 'price', label: '售价（KRW）', type: 'number', required: true },
-  { key: 'stock', label: '库存', type: 'number', required: true },
-  { key: 'status', label: '平台状态', type: 'select', required: true, options: statusOptions },
-];
-
-function normalizePlatform(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
 function formatError(error) {
   const code = error?.errorCode || error?.data?.error_code || '';
   const messages = {
     REAL_API_TEST_DISABLED: '后端真实只读开关未开启，本次没有访问平台。',
     real_api_test_disabled: '后端真实只读开关未开启，本次没有访问平台。',
     ip_not_allowed: 'Naver API 请求 IP 未被允许，请检查 Naver Commerce API Center 的允许 IP 设置。',
-    credential_invalid: 'Naver 连接资料可能无效，请检查 Client ID / Client Secret 是否正确。',
+    credential_invalid: 'Naver 连接资料可能无效，请检查 Client ID / Client Secret。',
     permission_forbidden: 'Naver API 权限不足，请检查该应用是否已开通对应接口权限。',
     product_api_not_allowed: 'Naver 商品接口暂无权限或未开放，请检查商品 API 使用权限。',
     token_auth_failed: 'Naver 授权失败，请检查连接资料、平台权限或 Naver API 设置。',
@@ -272,7 +315,7 @@ function CoupangProductSyncPanel() {
           <h2>Coupang 商品读取</h2>
           <p>先预览会影响多少本地商品，再按需写入本地。不会修改 Coupang 平台商品。</p>
         </div>
-        <span className="period-chip">store #{selectedStoreId} · {selectedStore?.name}</span>
+        <span className="period-chip">{selectedStore?.name || 'Coupang 店铺'}</span>
       </div>
 
       <div className="sync-control-grid product-sync-control-grid">
@@ -298,7 +341,7 @@ function CoupangProductSyncPanel() {
         </div>
       </div>
 
-      <p className="mock-sync-note">单次最多读取 3 页。页面不会显示平台密钥、临时授权、请求签名或完整平台商品编号。</p>
+      <p className="mock-sync-note">单次最多读取 3 页。页面不显示平台密钥、临时授权、请求签名或完整平台商品编号。</p>
       {form.status === 'APPROVED' && (
         <div className="sync-inline-warning">APPROVED 是 Coupang 平台状态，不一定完全等于后台“销售中”。</div>
       )}
@@ -373,15 +416,19 @@ function NaverProductPreviewStatusPanel() {
     productStatus: status,
     results,
   });
+  const inventoryMessage = businessReadableSummary(inventorySummary.businessMessage);
+  const inventoryNextAction = businessReadableSummary(inventorySummary.nextAction);
+  const productChangeMessage = businessReadableSummary(productChangeHints.businessMessage);
+  const productChangeNextAction = businessReadableSummary(productChangeHints.nextAction);
 
   return (
     <section className="content-card naver-preview-status-panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Naver 商品状态</h2>
-          <p>{activeIssue ? 'Naver 当前连接异常，请检查平台连接资料或 API 设置。' : status.productRead.reason}</p>
+          <h2>Naver 商品概览</h2>
+          <p>{activeIssue ? 'Naver 当前连接异常，请检查平台连接资料或 API 设置。' : '当前本地 Naver 商品状态稳定，可继续关注库存和价格变化。'}</p>
         </div>
-        <span className="period-chip">{selectedStore?.name || '当前店铺'}</span>
+        <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
       <div className="business-capability-grid compact">
         {activeIssue ? (
@@ -396,19 +443,19 @@ function NaverProductPreviewStatusPanel() {
         ) : null}
         <article className="business-capability-card success">
           <div className="business-capability-head">
-            <strong>已写入本地商品</strong>
+            <strong>本地商品</strong>
             <span>{summary.localSyncedCount} 条</span>
           </div>
-          <p>Naver 商品小批量写入测试已完成。当前本地已有 5 条商品。</p>
-          <small>其中新增 {summary.createdInLocalSync} 条，更新 {summary.updatedInLocalSync} 条。</small>
+          <p>当前本地已有 {summary.localSyncedCount || 5} 条 Naver 商品，暂无新增或业务字段更新。</p>
+          <small>正式商品批量同步仍未开放。</small>
         </article>
         <article className={`business-capability-card ${inventorySummary.tone}`}>
           <div className="business-capability-head">
             <strong>库存提醒</strong>
             <span>{inventorySummary.statusLabel}</span>
           </div>
-          <p>{inventorySummary.businessMessage}</p>
-          <small>{inventorySummary.nextAction}</small>
+          <p>{inventoryMessage}</p>
+          <small>{inventoryNextAction}</small>
         </article>
         {inventorySummary.attentionItems.length ? (
           <article className="business-capability-card warning">
@@ -429,31 +476,20 @@ function NaverProductPreviewStatusPanel() {
             <small>低库存规则为库存大于 0 且低于 {inventorySummary.threshold} 件。</small>
           </article>
         )}
-        <article className="business-capability-card muted">
-          <div className="business-capability-head">
-            <strong>库存安全边界</strong>
-            <span>只读提醒</span>
-          </div>
-          <p>本阶段只基于本地商品库存生成提醒，没有请求 Naver，也没有执行库存写入。</p>
-          <small>低库存规则：{inventorySummary.thresholdRule}；正式商品批量同步仍未开放。</small>
-        </article>
         <article className={`business-capability-card ${productChangeHints.tone}`}>
           <div className="business-capability-head">
             <strong>价格 / 库存变化</strong>
             <span>{productChangeHints.statusLabel}</span>
           </div>
-          <p>{productChangeHints.businessMessage}</p>
-          <small>{productChangeHints.nextAction}</small>
+          <p>{productChangeMessage}</p>
+          <small>{productChangeNextAction}</small>
         </article>
         <article className="business-capability-card muted">
           <div className="business-capability-head">
-            <strong>本地价格 / 库存覆盖</strong>
+            <strong>价格 / 库存覆盖</strong>
             <span>{productChangeHints.total} 条</span>
           </div>
-          <p>
-            当前本地可展示价格 {productChangeHints.priceVisibleCount} 条，
-            可展示库存 {productChangeHints.stockVisibleCount} 条。
-          </p>
+          <p>当前本地可展示价格 {productChangeHints.priceVisibleCount} 条，可展示库存 {productChangeHints.stockVisibleCount} 条。</p>
           <small>缺失或异常价格 {productChangeHints.missingOrInvalidPriceCount} 条，缺失或异常库存 {productChangeHints.missingOrInvalidStockCount} 条。</small>
         </article>
         <article className="business-capability-card success">
@@ -470,14 +506,14 @@ function NaverProductPreviewStatusPanel() {
             <span>{summary.wouldUpdate} 条</span>
           </div>
           <p>当前没有发现商品名、状态、价格、币种或库存需要更新。</p>
-          <small>不会把仅同步时间刷新误显示为商品内容更新。</small>
+          <small>仅同步时间刷新不会显示为商品内容更新。</small>
         </article>
         <article className="business-capability-card info">
           <div className="business-capability-head">
             <strong>仅同步时间刷新</strong>
             <span>{summary.wouldRefreshOnly} 条</span>
           </div>
-          <p>这 5 条商品都已存在本地，再次预览只提示同步时间需要刷新。</p>
+          <p>这部分商品已存在本地，只提示最近同步时间可以刷新。</p>
           <small>当前没有新的业务字段变化需要处理。</small>
         </article>
         <article className="business-capability-card muted">
@@ -490,11 +526,11 @@ function NaverProductPreviewStatusPanel() {
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
-            <strong>正式批量同步</strong>
-            <span>{status.batchSync.statusLabel}</span>
+            <strong>正式商品同步</strong>
+            <span>未开放</span>
           </div>
-          <p>{status.batchSync.reason}</p>
-          <small>{status.batchSync.nextAction}</small>
+          <p>当前仍处于保护阶段，不会因为 5 条商品稳定就自动开放正式批量同步。</p>
+          <small>批量同步必须单独确认后才会执行。</small>
         </article>
       </div>
       <TechnicalDetails
@@ -544,21 +580,23 @@ function NaverProductPreviewStatusPanel() {
             : []),
         ]}
       />
-      <p className="mock-sync-note">本次未保存平台原始响应。页面不展示技术原文、完整平台商品编号、完整店铺频道编号、平台密钥、临时授权或请求签名。</p>
+      <p className="mock-sync-note">本页面不展示平台密钥、临时授权、请求签名、完整店铺频道编号或平台原始响应。平台商品编号在主列表中按脱敏口径展示。</p>
     </section>
   );
 }
 
 export default function Products() {
-  const { selectedStoreId } = useStoreContext();
+  const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
+  const columns = useMemo(() => buildColumns(selectedStore), [selectedStore]);
+
   return (
     <>
       <NaverProductPreviewStatusPanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"
-        description="查看各平台商品、价格、库存和来源。技术编号已默认脱敏。"
+        description="查看各平台商品、售价、库存、状态和最近同步情况。技术编号默认脱敏，正式批量同步未开放。"
         resourceName="商品"
         api={api}
         columns={columns}

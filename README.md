@@ -592,3 +592,9 @@ ERP-UX-1C updates Codex2 Dashboard runtime UI so Naver stores show a business-fi
 The Orders business display cleanup is documented in `PHASE_ERP_UX_1D_ORDERS_BUSINESS_DISPLAY_CLEANUP.md`.
 
 ERP-UX-1D updates Codex2 Orders runtime UI so Naver order summaries are business-first: local operational orders, fulfillment, delivery, claims, detail visibility, and formal-sync status are separated from technical gate fields. Main Orders copy no longer shows `store #...`, `store_id=8`, `real_sync`, `SyncLog`, or `tested_success`; refresh protection details stay folded in `TechnicalDetails`. The order detail section may show full order number, product number, buyer, receiver, phone, and address information, while Dashboard and list summaries remain concise. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal order sync.
+
+## Phase ERP-UX-1E - Products Business Display Cleanup
+
+The Products business display cleanup is documented in `PHASE_ERP_UX_1E_PRODUCTS_BUSINESS_DISPLAY_CLEANUP.md`.
+
+ERP-UX-1E updates Codex2 Products runtime UI so Naver product summaries are business-first: local products, stock alerts, price/stock change hints, refresh-only count, skipped count, and formal-sync status are separated from technical preview fields. Main Products copy no longer shows `store #...`, `store_id`, `real_sync`, `SyncLog`, or `tested_success`; product preview and inventory diagnostics stay folded in `TechnicalDetails`. Product identifiers remain masked in summary/list views, and formal Naver product batch sync remains closed. This phase does not modify Codex1, call platform APIs during validation, write data, change schema, or open formal product sync.
