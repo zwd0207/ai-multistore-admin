@@ -557,6 +557,12 @@ The Naver selected new-order readonly repeat result is documented in `PHASE_NAVE
 
 16B repeats the real readonly preview under the existing `page=1,size=1` guardrail with `real_sync=false`. It returned HTTP 200 with feed/detail HTTP 200 and the same selected safe hash, `id-hash-67b5fc1c97`. Duplicate checks found 0 real local matches and 0 mock/test matches, so the candidate remains `candidate_new`. Status and privacy gates passed, required business fields were present, and counts stayed unchanged: `orders_store8=5`, real Naver local orders 2, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, and `order_status_events_rows=0`. 16B does not approve a write; it only allows a later 16C approval plan to be considered.
 
+## Phase Naver-ERP-16C - Selected New-Order Single Local Write Approval
+
+The Naver selected new-order single local write approval is documented in `PHASE_NAVER_ERP_16C_SELECTED_NEW_ORDER_SINGLE_LOCAL_WRITE_APPROVAL.md`.
+
+16C is approval and documentation only. It does not call Naver, does not back up or write the database, does not modify schema or runtime UI, and does not open formal order sync. It approves only the plan for a later 16D single local write of selected safe hash `id-hash-67b5fc1c97`. 16D must still re-check clean worktrees, back up `backend/codex1.db`, rerun a fresh readonly preview, verify the selected hash and duplicate counts, write at most one sanitized local order, keep products/SyncLog/tested_success/timeline counts unchanged, and perform post-write readback plus sensitive scans.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
