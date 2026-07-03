@@ -454,3 +454,9 @@ The Naver selected order refresh approval plan is documented in `PHASE_NAVER_ERP
 The Naver order status timeline plan is documented in `PHASE_NAVER_ERP_14A_ORDER_STATUS_TIMELINE_PLAN.md`.
 
 14A is planning-only. It separates the latest local order snapshot from future status-history events so a later refresh does not hide transitions such as `PAYED -> DELIVERED`. The plan defines safe timeline event fields, forbidden privacy/raw-response fields, status-to-event mapping, dedupe rules, no-change refresh behavior, and a future preference for a separate `order_status_events` table in a later approved schema phase. It does not call Naver, does not write local data, does not change schema, and does not open formal order sync.
+
+## Phase Naver-ERP-14B - Naver Order Status Timeline Mock Mapper
+
+The Naver order status timeline mock mapper is documented in `PHASE_NAVER_ERP_14B_ORDER_STATUS_TIMELINE_MOCK_MAPPER.md`.
+
+14B adds a private Codex1 helper that maps sanitized previous/current Naver order status snapshots into planned timeline events for mock verification only. It covers delivered, delivery, cancel, return, exchange, unknown-status, privacy-blocked, identity-mismatch, no-change, and deduped refresh cases while keeping `orders`, products, SyncLog, tested_success, raw responses, platform writes, schema changes, and formal order sync closed. The helper is not wired to any public endpoint.
