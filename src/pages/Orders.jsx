@@ -378,6 +378,76 @@ function buildNaverOrderRefreshGatePlan({
   };
 }
 
+function buildNaverManualApprovalAffordance(refreshGatePlan = {}) {
+  const canEnterManualReview = Boolean(refreshGatePlan.canEnterManualReview);
+  const blocked = refreshGatePlan.statusKind === 'blocked';
+  const statusLabel = canEnterManualReview
+    ? '可准备人工审核'
+    : blocked
+      ? '暂不可申请'
+      : '等待前置条件';
+  const tone = canEnterManualReview ? 'info' : blocked ? 'warning' : 'muted';
+  const message = canEnterManualReview
+    ? '只读预览和身份匹配已满足，但本页面仍不会发起写库；需要另开阶段、先备份数据库并由人工明确批准。'
+    : blocked
+      ? '当前门禁阻断，不能进入人工批准或刷新写库。'
+      : '先完成本地运营订单选择、完整字段只读预览和身份匹配，再考虑人工审核。';
+
+  return {
+    statusLabel,
+    tone,
+    message,
+    approvalButtonLabel: canEnterManualReview ? '等待单独批准阶段' : '人工批准未开放',
+    writeButtonLabel: '刷新写库未开放',
+    approvalButtonEnabled: false,
+    writeButtonEnabled: false,
+    cards: [
+      {
+        title: '人工批准入口',
+        statusLabel,
+        tone,
+        reason: message,
+        nextAction: canEnterManualReview
+          ? '下一步只能规划单独批准阶段；本页不生成批准记录。'
+          : '继续完成只读预览和身份匹配，不要直接写库。',
+      },
+      {
+        title: '批准前置条件',
+        statusLabel: canEnterManualReview ? '待人工确认' : '未满足',
+        tone: canEnterManualReview ? 'info' : 'muted',
+        reason: '需要可用只读预览、订单身份匹配、数据库备份、字段白名单和敏感字段扫描。',
+        nextAction: '任何一个条件缺失都不能进入写库阶段。',
+      },
+      {
+        title: '按钮行为',
+        statusLabel: '仅占位',
+        tone: 'muted',
+        reason: '批准和写库按钮只用于告诉卖家当前边界，点击能力未开放。',
+        nextAction: '不会调用 Codex1 写库接口，也不会请求 Naver 平台写操作。',
+      },
+      {
+        title: '同步边界',
+        statusLabel: '未开放',
+        tone: 'warning',
+        reason: '正式订单批量同步、刷新写库、发货、取消、退货、换货写操作都保持关闭。',
+        nextAction: '需要后续阶段单独批准。',
+      },
+    ],
+    technical: {
+      phase: 'Naver-ERP-12B',
+      displayOnly: true,
+      canEnterManualReview,
+      approvalButtonEnabled: false,
+      writeButtonEnabled: false,
+      approvalRecordCreated: false,
+      realSyncAllowed: false,
+      ordersWriteAllowed: false,
+      platformWriteAllowed: false,
+      formalOrderSyncOpen: false,
+    },
+  };
+}
+
 function formatError(error) {
   const code = error?.errorCode || error?.data?.error_code || '';
   const messages = {
@@ -779,6 +849,7 @@ function NaverOrderCompleteDetailPanel() {
     previewWindow,
     previewWindowLabel,
   });
+  const manualApprovalAffordance = buildNaverManualApprovalAffordance(refreshGatePlan);
 
   const runCompleteFieldPreview = async () => {
     if (previewLoading || !activeOrder || !previewAllowed) return;
@@ -913,7 +984,23 @@ function NaverOrderCompleteDetailPanel() {
                 />
               ))}
             </div>
-            <p className="mock-sync-note">Phase 9D 加入订单身份匹配门禁；当前不新增写库按钮，不改后端，不开放正式订单同步。</p>
+            <div className="business-capability-grid compact">
+              {manualApprovalAffordance.cards.map((card) => (
+                <article className={`business-capability-card ${card.tone || 'info'}`} key={card.title}>
+                  <div className="business-capability-head">
+                    <strong>{card.title}</strong>
+                    <span>{card.statusLabel}</span>
+                  </div>
+                  <p>{card.reason}</p>
+                  <small>{card.nextAction}</small>
+                </article>
+              ))}
+            </div>
+            <div className="sync-action-row">
+              <button className="button ghost" type="button" disabled>{manualApprovalAffordance.approvalButtonLabel}</button>
+              <button className="button primary" type="button" disabled>{manualApprovalAffordance.writeButtonLabel}</button>
+            </div>
+            <p className="mock-sync-note">Phase 12B 只展示人工批准入口状态；当前不新增可点击写库按钮，不改后端，不开放正式订单同步。</p>
             <TechnicalDetails
               description="刷新写库门禁只保留执行边界，不展示订单原始响应。"
               items={[
@@ -938,6 +1025,11 @@ function NaverOrderCompleteDetailPanel() {
                 { label: 'platform_write_allowed', value: refreshGatePlan.technical.platformWriteAllowed },
                 { label: 'raw_response_saved', value: refreshGatePlan.technical.rawResponseSaved },
                 { label: 'formal_order_sync_open', value: refreshGatePlan.technical.formalOrderSyncOpen },
+                { label: 'manual_approval_affordance_phase', value: manualApprovalAffordance.technical.phase },
+                { label: 'manual_approval_display_only', value: manualApprovalAffordance.technical.displayOnly },
+                { label: 'manual_approval_button_enabled', value: manualApprovalAffordance.technical.approvalButtonEnabled },
+                { label: 'manual_write_button_enabled', value: manualApprovalAffordance.technical.writeButtonEnabled },
+                { label: 'manual_approval_record_created', value: manualApprovalAffordance.technical.approvalRecordCreated },
               ]}
             />
           </section>

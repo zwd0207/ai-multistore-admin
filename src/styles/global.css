@@ -10,6 +10,8 @@ button { cursor: pointer; }
 h1, h2, p { margin-top: 0; }
 .button { border: 1px solid var(--border); border-radius: 8px; padding: 9px 15px; background: white; color: #3c465a; transition: .18s ease; }
 .button:hover { border-color: #b9c0ce; transform: translateY(-1px); }
+.button:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.button:disabled:hover { transform: none; border-color: var(--border); }
 .button.primary { background: var(--primary); border-color: var(--primary); color: white; box-shadow: 0 4px 12px #4f46e52a; }
 .button.primary:hover { background: var(--primary-dark); }
 .button.ghost { background: #fff; }

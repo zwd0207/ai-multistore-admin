@@ -424,3 +424,9 @@ The selected candidate post-write verification is documented in `PHASE_NAVER_ERP
 The Naver Orders and Dashboard display check is documented in `PHASE_NAVER_ERP_12A_ORDER_DASHBOARD_REAL_COUNT_DISPLAY_CHECK.md`.
 
 12A fixed Codex2 display filtering so backend rows with display platform `Naver` still match the `naver` platform filter, removed stale one-order wording, and confirmed Orders/Dashboard now show 2 real Naver operational orders while 3 mock/test orders stay isolated. Dashboard shows `5 商品 / 2 订单`, local order amount `829000 KRW`, and keeps formal order sync, product batch sync, and platform delivery/claim writes closed.
+
+## Phase Naver-ERP-12B - Orders UI Manual Approval Affordance Plan
+
+The Orders UI manual approval affordance plan is documented in `PHASE_NAVER_ERP_12B_ORDERS_UI_MANUAL_APPROVAL_AFFORDANCE_PLAN.md`.
+
+12B adds a display-only manual approval status area to the Naver Orders detail panel. It shows the future approval boundary, required preconditions, disabled approval/write placeholders, and the continued closure of formal order sync and platform write operations. The disabled buttons do not call Codex1 or Naver, no local data is written, and no real API request is triggered by this phase.
