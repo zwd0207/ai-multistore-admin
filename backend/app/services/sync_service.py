@@ -4113,6 +4113,196 @@ def _evaluate_naver_selected_new_order_write_gate(
     return result
 
 
+def _extract_naver_order_status_raw(detail_preview: dict) -> str:
+    order_status = detail_preview.get("order_status")
+    if isinstance(order_status, dict):
+        return _bounded_text(order_status.get("raw"), 30) or "UNKNOWN"
+    return _bounded_text(order_status, 30) or "UNKNOWN"
+
+
+def _naver_order_refresh_sanitized_raw_data(detail_preview: dict) -> dict:
+    raw_data = _naver_order_sanitized_raw_data(detail_preview)
+    raw_data.update({
+        "orders_written": False,
+        "orders_refreshed": True,
+        "refreshed_from": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+    })
+    return raw_data
+
+
+def _build_naver_order_refresh_payload(detail_preview: dict) -> dict:
+    synced_at = _parse_preview_iso_datetime(detail_preview.get("last_synced_at")) or get_utc_now()
+    ordered_at = _parse_preview_iso_datetime(detail_preview.get("ordered_at")) or synced_at
+    paid_at = _parse_preview_iso_datetime(detail_preview.get("paid_at"))
+    external_order_id = str(detail_preview["external_product_order_id_hash"])
+    return {
+        "external_order_id": external_order_id,
+        "buyer_name": _bounded_text(detail_preview.get("buyer_name_masked"), 120),
+        "buyer_masked_phone": _bounded_text(detail_preview.get("buyer_phone_masked"), 30),
+        "product_name": _bounded_text(detail_preview.get("product_name"), 300) or f"Naver order {external_order_id}",
+        "quantity": _extract_int_by_keys(detail_preview, ("quantity",)) or 1,
+        "order_amount": _to_decimal(detail_preview.get("order_amount")) or Decimal("0"),
+        "currency": "KRW",
+        "order_status": _extract_naver_order_status_raw(detail_preview),
+        "paid_at": paid_at,
+        "ordered_at": ordered_at,
+        "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+        "last_synced_at": synced_at,
+        "raw_data": _naver_order_refresh_sanitized_raw_data(detail_preview),
+    }
+
+
+def _same_naver_refresh_datetime(current: object, incoming: object) -> bool:
+    if current is None or incoming is None:
+        return current is incoming
+    if not isinstance(current, datetime) or not isinstance(incoming, datetime):
+        return current == incoming
+    if current.tzinfo is None or incoming.tzinfo is None:
+        return current.replace(tzinfo=None) == incoming.replace(tzinfo=None)
+    return current.astimezone(timezone.utc) == incoming.astimezone(timezone.utc)
+
+
+def _changed_naver_order_refresh_fields(order: Order, payload: dict) -> list[str]:
+    changed: list[str] = []
+    comparable_fields = (
+        "buyer_name",
+        "buyer_masked_phone",
+        "product_name",
+        "quantity",
+        "order_amount",
+        "currency",
+        "order_status",
+        "paid_at",
+        "ordered_at",
+    )
+    for field in comparable_fields:
+        current = getattr(order, field)
+        incoming = payload.get(field)
+        if field == "order_amount":
+            current_value = Decimal(str(current or "0"))
+            incoming_value = Decimal(str(incoming or "0"))
+            if current_value != incoming_value:
+                changed.append(field)
+            continue
+        if field in {"paid_at", "ordered_at"}:
+            if not _same_naver_refresh_datetime(current, incoming):
+                changed.append(field)
+            continue
+        if current != incoming:
+            changed.append(field)
+    return changed
+
+
+def _evaluate_naver_order_local_refresh_mock_gate(
+    db: Session,
+    *,
+    selected_order_hash: str | None,
+    refresh_preview: dict | None,
+    write_enabled: bool = False,
+    manual_approval: bool = False,
+    fresh_readonly_preview: bool = True,
+) -> dict:
+    """Mock-testable 13A refresh gate; not wired to the public preview endpoint."""
+    result = {
+        "phase": "Naver-ERP-13A",
+        "local_refresh_mock_gate": True,
+        "write_enabled": bool(write_enabled),
+        "manual_approval": bool(manual_approval),
+        "fresh_readonly_preview": bool(fresh_readonly_preview),
+        "status": "blocked",
+        "matched_local_count": 0,
+        "identity_matched": False,
+        "would_update": 0,
+        "changed_fields": [],
+        "refreshed_count": 0,
+        "orders_written": False,
+        "orders_created": False,
+        "orders_updated": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "skip_reason": None,
+        "sample_ids": [],
+    }
+    if not fresh_readonly_preview:
+        result["skip_reason"] = "local_refresh_stale_preview"
+        return result
+    if not _is_hash_identifier(selected_order_hash):
+        result["skip_reason"] = "selected_order_missing"
+        return result
+    if not isinstance(refresh_preview, dict):
+        result["skip_reason"] = "refresh_preview_missing"
+        return result
+    preview_hash = refresh_preview.get("external_product_order_id_hash")
+    if preview_hash != selected_order_hash:
+        result["skip_reason"] = "refresh_identity_mismatch"
+        return result
+    result["identity_matched"] = True
+    result["sample_ids"] = [selected_order_hash]
+
+    existing_orders = db.scalars(
+        select(Order).where(
+            Order.store_id == 8,
+            Order.platform == "naver",
+            Order.external_order_id == selected_order_hash,
+        )
+    ).all()
+    result["matched_local_count"] = len(existing_orders)
+    if not existing_orders:
+        result["skip_reason"] = "local_order_not_found"
+        return result
+    if len(existing_orders) > 1:
+        result["skip_reason"] = "local_order_not_unique"
+        return result
+
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+    result["privacy_gate"] = privacy_gate
+    if not privacy_gate["passed"]:
+        result["skip_reason"] = "local_refresh_privacy_blocked"
+        return result
+
+    existing = existing_orders[0]
+    payload = _build_naver_order_refresh_payload(refresh_preview)
+    changed_fields = _changed_naver_order_refresh_fields(existing, payload)
+    result["changed_fields"] = changed_fields
+    result["would_update"] = 1 if changed_fields else 0
+
+    if not changed_fields:
+        result["status"] = "local_refresh_no_change"
+        return result
+    if not write_enabled:
+        result["status"] = "local_refresh_not_requested"
+        return result
+    if not manual_approval:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+
+    for field, value in payload.items():
+        setattr(existing, field, value)
+    db.commit()
+    result.update({
+        "status": "local_refresh_updated",
+        "refreshed_count": 1,
+        "orders_written": True,
+        "orders_updated": True,
+        "orders_created": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
 def _collect_json_field_names(payload: object) -> list[str]:
     names: list[str] = []
     if isinstance(payload, dict):

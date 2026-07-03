@@ -3990,6 +3990,175 @@ def verify_sync_preview_schema_and_security() -> None:
                         "raw response",
                     ]:
                         assert forbidden not in selected_text, selected_text
+
+                    refresh_preview = dict(selected_candidate)
+                    refresh_preview.update({
+                        "external_product_order_id_hash": "id-hash-abcdef1234",
+                        "external_order_id_hash": "id-hash-fedcba4321",
+                        "order_status": {"raw": "DELIVERED", "label_zh": "配送完成"},
+                        "order_status_label_zh": "配送完成",
+                        "delivery_status": {"raw": "DELIVERED", "label_zh": "配送完成"},
+                        "delivery_status_label_zh": "配送完成",
+                        "order_amount": 330000,
+                        "quantity": 1,
+                        "last_synced_at": "2026-07-03T10:00:00+09:00",
+                    })
+                    before_13a_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_13a_product_count = len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all())
+                    before_13a_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
+                    before_13a_cap_success = len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all())
+
+                    readonly_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=refresh_preview,
+                        write_enabled=False,
+                        manual_approval=False,
+                    )
+                    assert readonly_refresh_gate["phase"] == "Naver-ERP-13A", readonly_refresh_gate
+                    assert readonly_refresh_gate["status"] == "local_refresh_not_requested", readonly_refresh_gate
+                    assert readonly_refresh_gate["would_update"] == 1, readonly_refresh_gate
+                    assert "order_status" in readonly_refresh_gate["changed_fields"], readonly_refresh_gate
+                    assert readonly_refresh_gate["orders_written"] is False, readonly_refresh_gate
+                    assert readonly_refresh_gate["formal_order_sync_open"] is False, readonly_refresh_gate
+                    assert readonly_refresh_gate["platform_writes_enabled"] is False, readonly_refresh_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
+
+                    stale_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=refresh_preview,
+                        write_enabled=True,
+                        manual_approval=True,
+                        fresh_readonly_preview=False,
+                    )
+                    assert stale_refresh_gate["skip_reason"] == "local_refresh_stale_preview", stale_refresh_gate
+                    assert stale_refresh_gate["orders_written"] is False, stale_refresh_gate
+
+                    mismatch_refresh_preview = dict(refresh_preview)
+                    mismatch_refresh_preview["external_product_order_id_hash"] = "id-hash-1111111111"
+                    mismatch_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=mismatch_refresh_preview,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert mismatch_refresh_gate["skip_reason"] == "refresh_identity_mismatch", mismatch_refresh_gate
+                    assert mismatch_refresh_gate["orders_written"] is False, mismatch_refresh_gate
+
+                    missing_local_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-2222222222",
+                        refresh_preview={**refresh_preview, "external_product_order_id_hash": "id-hash-2222222222"},
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert missing_local_refresh_gate["skip_reason"] == "local_order_not_found", missing_local_refresh_gate
+                    assert missing_local_refresh_gate["orders_written"] is False, missing_local_refresh_gate
+
+                    bad_refresh_preview = dict(refresh_preview)
+                    bad_refresh_preview["buyer_name_masked"] = "must-not-leak-refresh-buyer"
+                    privacy_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=bad_refresh_preview,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert privacy_refresh_gate["skip_reason"] == "local_refresh_privacy_blocked", privacy_refresh_gate
+                    assert privacy_refresh_gate["privacy_gate"]["passed"] is False, privacy_refresh_gate
+                    assert "buyer_name_not_masked" in privacy_refresh_gate["privacy_gate"]["reasons"], privacy_refresh_gate
+                    assert privacy_refresh_gate["orders_written"] is False, privacy_refresh_gate
+
+                    not_approved_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=refresh_preview,
+                        write_enabled=True,
+                        manual_approval=False,
+                    )
+                    assert not_approved_refresh_gate["skip_reason"] == "manual_approval_required", not_approved_refresh_gate
+                    assert not_approved_refresh_gate["orders_written"] is False, not_approved_refresh_gate
+
+                    approved_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=refresh_preview,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert approved_refresh_gate["status"] == "local_refresh_updated", approved_refresh_gate
+                    assert approved_refresh_gate["refreshed_count"] == 1, approved_refresh_gate
+                    assert approved_refresh_gate["orders_written"] is True, approved_refresh_gate
+                    assert approved_refresh_gate["orders_updated"] is True, approved_refresh_gate
+                    assert approved_refresh_gate["orders_created"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["products_written"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["sync_log_written"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["capability_tested_success_written"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["raw_response_saved"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["privacy_fields_redacted"] is True, approved_refresh_gate
+                    assert approved_refresh_gate["address_saved"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["formal_order_sync_open"] is False, approved_refresh_gate
+                    assert approved_refresh_gate["platform_writes_enabled"] is False, approved_refresh_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_13a_product_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_13a_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_13a_cap_success
+
+                    refreshed_order = db.scalar(select(Order).where(
+                        Order.store_id == naver_store_id,
+                        Order.platform == "naver",
+                        Order.external_order_id == "id-hash-abcdef1234",
+                    ))
+                    assert refreshed_order is not None
+                    assert refreshed_order.order_status == "DELIVERED"
+                    assert refreshed_order.order_amount == Decimal("330000")
+                    assert refreshed_order.raw_data["orders_refreshed"] is True
+                    assert refreshed_order.raw_data["orders_written"] is False
+                    assert refreshed_order.raw_data["raw_response_saved"] is False
+                    assert refreshed_order.raw_data["privacy_fields_redacted"] is True
+                    assert refreshed_order.raw_data["address_saved"] is False
+                    refreshed_text = json.dumps({
+                        "external_order_id": refreshed_order.external_order_id,
+                        "buyer_name": refreshed_order.buyer_name,
+                        "buyer_masked_phone": refreshed_order.buyer_masked_phone,
+                        "product_name": refreshed_order.product_name,
+                        "raw_data": refreshed_order.raw_data,
+                    }, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-refresh-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in refreshed_text, refreshed_text
+
+                    no_change_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
+                        db,
+                        selected_order_hash="id-hash-abcdef1234",
+                        refresh_preview=refresh_preview,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert no_change_refresh_gate["status"] == "local_refresh_no_change", no_change_refresh_gate
+                    assert no_change_refresh_gate["orders_written"] is False, no_change_refresh_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
