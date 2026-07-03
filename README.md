@@ -665,6 +665,12 @@ The audit logs API readonly local implementation is documented in `PHASE_ERP_AUD
 
 ERP-Audit-1L implements local read-only audit list and summary routes: `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`. The routes use the 1J business-first response shape, enforce bounded filters and capped pagination, keep advanced details opt-in, reject unsupported or unsafe filters, and expose no write/export/delete/detail routes. `verify_all.py` proves read calls write no audit rows or business rows. The real `backend/codex1.db` remains `operation_audit_logs=0`, so an empty response is currently expected.
 
+## Phase ERP-Audit-1M - Audit Logs API Post-Implementation Verification
+
+The audit logs API post-implementation verification is documented in `PHASE_ERP_AUDIT_1M_AUDIT_LOGS_API_POST_IMPLEMENTATION_VERIFICATION.md`.
+
+ERP-Audit-1M verifies the 1L read-only audit routes against the real local backend database. `GET /api/v1/operation-audit-logs?store_id=8` and `GET /api/v1/operation-audit-logs/summary?store_id=8` return HTTP 200 with an empty business state because `operation_audit_logs=0`. `POST`, `PUT`, `PATCH`, and `DELETE` remain 405. Unsupported filters return a safe Chinese business message without echoing raw unsupported names. Real database counts stayed unchanged: `operation_audit_logs=0`, `products=9`, `orders=9`, `sync_logs=47`, `tested_success_store8=8`, and `order_status_events=0`. This phase does not add frontend readers, audit writers, schema changes, platform API calls, backups, restores, or formal product/order sync approval.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
