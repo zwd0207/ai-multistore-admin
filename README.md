@@ -563,6 +563,12 @@ The Naver selected new-order single local write approval is documented in `PHASE
 
 16C is approval and documentation only. It does not call Naver, does not back up or write the database, does not modify schema or runtime UI, and does not open formal order sync. It approves only the plan for a later 16D single local write of selected safe hash `id-hash-67b5fc1c97`. 16D must still re-check clean worktrees, back up `backend/codex1.db`, rerun a fresh readonly preview, verify the selected hash and duplicate counts, write at most one sanitized local order, keep products/SyncLog/tested_success/timeline counts unchanged, and perform post-write readback plus sensitive scans.
 
+## Phase Naver-ERP-16C2 - Current 24h Candidate Write Approval Plan
+
+The current 24-hour candidate write approval plan is documented in `PHASE_NAVER_ERP_16C2_CURRENT_24H_CANDIDATE_WRITE_APPROVAL_PLAN.md`.
+
+16C2 is approval and documentation only. It does not call Naver, execute `real_sync=true`, back up or write `backend/codex1.db`, change schema, modify runtime UI, or open formal order sync. It exists because the stopped 16D gate saw the 3-day readonly candidate `id-hash-67b5fc1c97`, but the writeable 24-hour guardrail returned a different current candidate, `id-hash-bc5528d093`. Since the 24-hour candidate was not approved by 16C, no order was written. 16C2 approves only the plan for a later one-row retry targeting `id-hash-bc5528d093`; that retry must still back up the database, rerun fresh readonly preview, confirm duplicate counts are zero, pass privacy and required-field gates, write no products/SyncLog/tested_success/timeline rows, and keep all Naver platform write operations plus formal order sync closed.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
