@@ -3838,6 +3838,158 @@ def verify_sync_preview_schema_and_security() -> None:
                     "raw response",
                 ]:
                     assert forbidden not in failed_text, failed_text
+
+                selected_candidate = dict(detail_summary)
+                selected_candidate.update({
+                    "external_product_order_id_hash": "id-hash-abcdef1234",
+                    "product_order_id_hash": "id-hash-abcdef1234",
+                    "external_order_id_hash": "id-hash-fedcba4321",
+                    "order_id_hash": "id-hash-fedcba4321",
+                    "candidate_classification": "candidate_new",
+                })
+                with SessionLocal() as db:
+                    before_11b_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_11b_product_count = len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all())
+                    before_11b_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
+                    before_11b_cap_success = len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all())
+
+                    readonly_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[selected_candidate],
+                        write_enabled=False,
+                    )
+                    assert readonly_selected_gate["status"] == "selected_candidate_write_not_requested", readonly_selected_gate
+                    assert readonly_selected_gate["would_create"] == 1, readonly_selected_gate
+                    assert readonly_selected_gate["orders_written"] is False, readonly_selected_gate
+                    assert readonly_selected_gate["formal_order_sync_open"] is False, readonly_selected_gate
+                    assert readonly_selected_gate["platform_writes_enabled"] is False, readonly_selected_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_11b_order_count
+
+                    missing_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[],
+                        write_enabled=True,
+                    )
+                    assert missing_selected_gate["skip_reason"] == "selected_candidate_missing", missing_selected_gate
+                    assert missing_selected_gate["orders_written"] is False, missing_selected_gate
+
+                    stale_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[selected_candidate],
+                        write_enabled=True,
+                        fresh_readonly_preview=False,
+                    )
+                    assert stale_selected_gate["skip_reason"] == "selected_candidate_stale_preview", stale_selected_gate
+                    assert stale_selected_gate["orders_written"] is False, stale_selected_gate
+
+                    changed_candidate = dict(selected_candidate)
+                    changed_candidate["candidate_classification"] = "candidate_stale_preview"
+                    changed_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[changed_candidate],
+                        write_enabled=True,
+                    )
+                    assert changed_selected_gate["skip_reason"] == "selected_candidate_changed", changed_selected_gate
+                    assert changed_selected_gate["orders_written"] is False, changed_selected_gate
+
+                    not_unique_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[dict(selected_candidate), dict(selected_candidate)],
+                        write_enabled=True,
+                    )
+                    assert not_unique_selected_gate["skip_reason"] == "selected_candidate_not_unique", not_unique_selected_gate
+                    assert not_unique_selected_gate["orders_written"] is False, not_unique_selected_gate
+
+                    bad_selected_candidate = dict(selected_candidate)
+                    bad_selected_candidate["buyer_name_masked"] = "must-not-leak-selected-buyer"
+                    privacy_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[bad_selected_candidate],
+                        write_enabled=True,
+                    )
+                    assert privacy_selected_gate["skip_reason"] == "selected_candidate_privacy_blocked", privacy_selected_gate
+                    assert privacy_selected_gate["privacy_gate"]["passed"] is False, privacy_selected_gate
+                    assert "buyer_name_not_masked" in privacy_selected_gate["privacy_gate"]["reasons"], privacy_selected_gate
+                    assert privacy_selected_gate["orders_written"] is False, privacy_selected_gate
+
+                    write_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[selected_candidate],
+                        write_enabled=True,
+                    )
+                    assert write_selected_gate["status"] == "selected_candidate_write_created", write_selected_gate
+                    assert write_selected_gate["created_count"] == 1, write_selected_gate
+                    assert write_selected_gate["orders_written"] is True, write_selected_gate
+                    assert write_selected_gate["products_written"] is False, write_selected_gate
+                    assert write_selected_gate["sync_log_written"] is False, write_selected_gate
+                    assert write_selected_gate["capability_tested_success_written"] is False, write_selected_gate
+                    assert write_selected_gate["raw_response_saved"] is False, write_selected_gate
+                    assert write_selected_gate["privacy_fields_redacted"] is True, write_selected_gate
+                    assert write_selected_gate["address_saved"] is False, write_selected_gate
+                    assert write_selected_gate["formal_order_sync_open"] is False, write_selected_gate
+                    assert write_selected_gate["platform_writes_enabled"] is False, write_selected_gate
+                    assert write_selected_gate["sample_ids"] == ["id-hash-abcdef1234"], write_selected_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_11b_order_count + 1
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_11b_product_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_11b_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_11b_cap_success
+
+                    duplicate_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
+                        db,
+                        selected_candidate_hash="id-hash-abcdef1234",
+                        candidate_previews=[selected_candidate],
+                        write_enabled=True,
+                    )
+                    assert duplicate_selected_gate["status"] == "selected_candidate_duplicate", duplicate_selected_gate
+                    assert duplicate_selected_gate["already_exists"] is True, duplicate_selected_gate
+                    assert duplicate_selected_gate["no_duplicate_created"] is True, duplicate_selected_gate
+                    assert duplicate_selected_gate["created_count"] == 0, duplicate_selected_gate
+                    assert duplicate_selected_gate["orders_written"] is False, duplicate_selected_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_11b_order_count + 1
+
+                    selected_order = db.scalar(select(Order).where(
+                        Order.store_id == naver_store_id,
+                        Order.platform == "naver",
+                        Order.external_order_id == "id-hash-abcdef1234",
+                    ))
+                    assert selected_order is not None
+                    selected_text = json.dumps({
+                        "external_order_id": selected_order.external_order_id,
+                        "buyer_name": selected_order.buyer_name,
+                        "buyer_masked_phone": selected_order.buyer_masked_phone,
+                        "product_name": selected_order.product_name,
+                        "raw_data": selected_order.raw_data,
+                    }, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-buyer",
+                        "must-not-leak-selected-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in selected_text, selected_text
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token

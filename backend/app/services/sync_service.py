@@ -4006,6 +4006,113 @@ def _sync_naver_order_detail_preview(
     return result
 
 
+def _evaluate_naver_selected_new_order_write_gate(
+    db: Session,
+    *,
+    selected_candidate_hash: str | None,
+    candidate_previews: list[dict] | None,
+    write_enabled: bool = False,
+    fresh_readonly_preview: bool = True,
+) -> dict:
+    """Mock-testable 11B gate; not wired to the public preview endpoint."""
+    result = {
+        "phase": "Naver-ERP-11B",
+        "selected_candidate_write": True,
+        "write_enabled": bool(write_enabled),
+        "fresh_readonly_preview": bool(fresh_readonly_preview),
+        "status": "blocked",
+        "candidate_count": len(candidate_previews) if isinstance(candidate_previews, list) else 0,
+        "matched_candidate_count": 0,
+        "created_count": 0,
+        "already_exists": False,
+        "no_duplicate_created": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "skip_reason": None,
+        "sample_ids": [],
+    }
+    if not fresh_readonly_preview:
+        result["skip_reason"] = "selected_candidate_stale_preview"
+        return result
+    if not _is_hash_identifier(selected_candidate_hash):
+        result["skip_reason"] = "selected_candidate_missing"
+        return result
+    safe_candidates = candidate_previews if isinstance(candidate_previews, list) else []
+    matched = [
+        candidate
+        for candidate in safe_candidates
+        if isinstance(candidate, dict)
+        and candidate.get("external_product_order_id_hash") == selected_candidate_hash
+    ]
+    result["matched_candidate_count"] = len(matched)
+    if not matched:
+        result["skip_reason"] = "selected_candidate_missing"
+        return result
+    if len(matched) > 1:
+        result["skip_reason"] = "selected_candidate_not_unique"
+        return result
+
+    candidate = matched[0]
+    candidate_classification = candidate.get("candidate_classification")
+    if candidate_classification not in (None, "candidate_new"):
+        result["skip_reason"] = "selected_candidate_changed"
+        return result
+
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(candidate)
+    result["privacy_gate"] = privacy_gate
+    if not privacy_gate["passed"]:
+        result["skip_reason"] = "selected_candidate_privacy_blocked"
+        return result
+
+    existing = db.scalar(
+        select(Order).where(
+            Order.store_id == 8,
+            Order.platform == "naver",
+            Order.external_order_id == selected_candidate_hash,
+        )
+    )
+    if existing is not None:
+        result.update({
+            "status": "selected_candidate_duplicate",
+            "already_exists": True,
+            "no_duplicate_created": True,
+            "skip_reason": "selected_candidate_duplicate",
+            "sample_ids": [selected_candidate_hash],
+        })
+        return result
+
+    if not write_enabled:
+        result.update({
+            "status": "selected_candidate_write_not_requested",
+            "would_create": 1,
+            "sample_ids": [selected_candidate_hash],
+        })
+        return result
+
+    sync_result = _sync_naver_order_detail_preview(
+        db,
+        detail_preview=candidate,
+        real_sync=True,
+    )
+    result.update({
+        **sync_result,
+        "status": "selected_candidate_write_created" if sync_result.get("status") == "success" else sync_result.get("status"),
+        "selected_candidate_write": True,
+        "write_enabled": True,
+        "fresh_readonly_preview": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
 def _collect_json_field_names(payload: object) -> list[str]:
     names: list[str] = []
     if isinstance(payload, dict):
