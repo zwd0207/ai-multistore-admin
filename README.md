@@ -581,6 +581,12 @@ The new-order post-write verification is documented in `PHASE_NAVER_ERP_16E_NEW_
 
 16E is local verification only. It does not call Naver, execute `real_sync=true`, write local rows, modify schema, change runtime UI, or open formal order sync. It verified safe hash `id-hash-bc5528d093` through direct database readback, Orders API, Dashboard summary, and order-based sales summary. The local real Naver order count is now 3, default Orders API excludes 3 mock/test rows, Dashboard reports `order_count=3`, and order-based sales summary reports `total_orders=3` with `total_sales_amount=1159000.00 KRW`. Sensitive scans found no token, secret, Authorization, header, signature, raw platform response, full id key, address key, or plain phone pattern.
 
+## Phase Naver-ERP-17A - Claim Status Mapping Expansion
+
+The claim status mapping expansion is documented in `PHASE_NAVER_ERP_17A_CLAIM_STATUS_MAPPING_EXPANSION.md`.
+
+17A does not call Naver, write local data, change schema, modify runtime UI, or open formal order sync. It expands backend readonly mapping so `COLLECT_DONE` now displays as `售后取件完成` instead of an unknown status, and adds related safe mappings for claim pickup, return completion, and exchange completion states. Timeline mock mapping now recognizes `COLLECT_DONE` as `claim_collected`. Existing persisted rows are not rewritten; UI display cleanup or a later approved refresh should handle historical sanitized labels separately. Naver after-sales platform actions remain closed.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
