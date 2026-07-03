@@ -6923,6 +6923,93 @@ def verify_naver_order_local_list_cleanup() -> None:
     print("Naver order local list cleanup: ok")
 
 
+def verify_operation_audit_log_schema_migration_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from scripts.upgrade_operation_audit_logs_schema import (
+        OPERATION_AUDIT_LOG_INDEXES,
+        upgrade as upgrade_operation_audit_logs,
+    )
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+
+    first_result = upgrade_operation_audit_logs()
+    second_result = upgrade_operation_audit_logs()
+    assert first_result["indexes"] == sorted(OPERATION_AUDIT_LOG_INDEXES), first_result
+    assert second_result["tables"] == [], second_result
+
+    with SessionLocal() as db:
+        audit_table_info = db.execute(text("PRAGMA table_info(operation_audit_logs)")).all()
+        audit_columns = {row[1] for row in audit_table_info}
+        missing_columns = sorted(EXPECTED_OPERATION_AUDIT_LOG_COLUMNS - audit_columns)
+        assert not missing_columns, f"Missing operation_audit_logs columns: {missing_columns}"
+        forbidden_columns = sorted(
+            {column.lower() for column in audit_columns}
+            & {item.lower() for item in FORBIDDEN_OPERATION_AUDIT_LOG_COLUMNS}
+        )
+        assert not forbidden_columns, f"Forbidden operation_audit_logs columns: {forbidden_columns}"
+
+        audit_notnull = {row[1]: bool(row[3]) for row in audit_table_info}
+        missing_notnull = sorted(
+            column
+            for column in EXPECTED_OPERATION_AUDIT_LOG_NOT_NULL_COLUMNS
+            if not audit_notnull.get(column)
+        )
+        assert not missing_notnull, f"Missing operation_audit_logs NOT NULL columns: {missing_notnull}"
+
+        audit_defaults = {row[1]: str(row[4]) for row in audit_table_info}
+        assert audit_defaults["environment"] in {"'local'", "local"}, audit_defaults
+        assert audit_defaults["sensitive_scan_passed"] in {"0", "'0'"}, audit_defaults
+        assert audit_defaults["raw_response_saved"] in {"0", "'0'"}, audit_defaults
+        assert audit_defaults["secrets_saved"] in {"0", "'0'"}, audit_defaults
+        assert audit_defaults["privacy_fields_redacted"] in {"1", "'1'"}, audit_defaults
+
+        audit_index_rows = db.execute(text("PRAGMA index_list(operation_audit_logs)")).all()
+        audit_index_names = {row[1] for row in audit_index_rows}
+        unique_audit_indexes = {row[1] for row in audit_index_rows if row[2]}
+        assert not unique_audit_indexes, f"Unexpected unique operation_audit_logs indexes: {unique_audit_indexes}"
+        missing_indexes = sorted(set(EXPECTED_OPERATION_AUDIT_LOG_INDEXES) - audit_index_names)
+        assert not missing_indexes, f"Missing operation_audit_logs indexes: {missing_indexes}"
+        for index_name, expected_columns in EXPECTED_OPERATION_AUDIT_LOG_INDEXES.items():
+            observed_columns = [
+                row[2]
+                for row in db.execute(text(f"PRAGMA index_info({index_name})")).all()
+            ]
+            assert observed_columns == expected_columns, {
+                "index": index_name,
+                "observed": observed_columns,
+                "expected": expected_columns,
+            }
+
+        assert db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one() == 0
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+
+    print("operation audit log schema migration gate: ok")
+
+
 def verify_operation_audit_log_mock_write_gate() -> None:
     from sqlalchemy import text
 
@@ -7471,6 +7558,7 @@ def verify_git_tracking() -> None:
     status = run(["git", "status", "--short"], cwd=ROOT_DIR, echo=False)
     allowed_prefixes = (
         " M backend/README.md",
+        "M  backend/README.md",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
@@ -7481,13 +7569,18 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
         " M backend/app/database.py",
+        "M  backend/app/database.py",
         " M backend/app/models/__init__.py",
+        "M  backend/app/models/__init__.py",
         " M backend/app/models/api_credential.py",
         " M backend/app/models/financial.py",
         " M backend/app/models/order.py",
         " M backend/app/models/order_status_event.py",
+        " M backend/app/models/operation_audit_log.py",
+        "A  backend/app/models/operation_audit_log.py",
         " M backend/app/models/product.py",
         " M backend/app/models/store.py",
+        "M  backend/app/models/store.py",
         " M backend/app/schemas/api_credential_readiness.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",
@@ -7500,12 +7593,16 @@ def verify_git_tracking() -> None:
         " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
+        "M  backend/docs/",
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
+        "M  backend/scripts/verify_all.py",
         " M backend/scripts/verify_stage_1c.py",
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
+        " M backend/scripts/upgrade_operation_audit_logs_schema.py",
+        "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
@@ -7513,6 +7610,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/financial.py",
         "?? backend/app/models/order_status_event.py",
+        "?? backend/app/models/operation_audit_log.py",
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
@@ -7526,6 +7624,7 @@ def verify_git_tracking() -> None:
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
         "?? backend/scripts/upgrade_order_status_events_schema.py",
+        "?? backend/scripts/upgrade_operation_audit_logs_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/verify_all.py",
     )
@@ -7646,6 +7745,7 @@ def main() -> None:
         verify_sync_preview_schema_and_security()
         verify_kst_business_timezone()
         verify_naver_order_local_list_cleanup()
+        verify_operation_audit_log_schema_migration_gate()
         verify_operation_audit_log_mock_write_gate()
         verify_backup_restore_verification_dry_run()
         verify_git_tracking()

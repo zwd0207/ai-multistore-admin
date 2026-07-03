@@ -10,6 +10,7 @@ from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.important_email import ImportantEmail
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
+from app.models.operation_audit_log import OperationAuditLog
 from app.models.platform_login_credential import PlatformLoginCredential
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
@@ -29,6 +30,7 @@ __all__ = [
     "ImportantEmail",
     "Order",
     "OrderStatusEvent",
+    "OperationAuditLog",
     "PlatformLoginCredential",
     "Product",
     "SyncCheckpoint",

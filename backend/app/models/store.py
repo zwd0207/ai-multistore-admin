@@ -65,6 +65,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    operation_audit_logs = relationship(
+        "OperationAuditLog",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     platform_sales_details = relationship(
         "PlatformSalesDetail",
         back_populates="store",

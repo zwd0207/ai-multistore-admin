@@ -42,6 +42,8 @@ def init_db() -> None:
     if settings.database_url.startswith("sqlite"):
         from scripts.upgrade_sync_schema import upgrade as upgrade_sync_schema
         from scripts.upgrade_order_status_events_schema import upgrade as upgrade_order_status_events_schema
+        from scripts.upgrade_operation_audit_logs_schema import upgrade as upgrade_operation_audit_logs_schema
 
         upgrade_sync_schema(run_create_all=False)
         upgrade_order_status_events_schema(run_create_all=False)
+        upgrade_operation_audit_logs_schema(run_create_all=False)
