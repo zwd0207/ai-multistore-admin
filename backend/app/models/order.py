@@ -39,3 +39,8 @@ class Order(Base):
     )
 
     store = relationship("Store", back_populates="orders")
+    status_events = relationship(
+        "OrderStatusEvent",
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )

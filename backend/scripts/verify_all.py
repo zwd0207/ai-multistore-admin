@@ -133,6 +133,72 @@ EXPECTED_SYNC_TABLES = {
     "sync_checkpoints",
 }
 
+EXPECTED_ORDER_STATUS_EVENT_COLUMNS = {
+    "id",
+    "store_id",
+    "order_id",
+    "platform",
+    "external_order_id_hash",
+    "external_product_order_id_hash",
+    "event_type",
+    "status_raw",
+    "status_label_zh",
+    "payment_status_raw",
+    "payment_status_label_zh",
+    "delivery_status_raw",
+    "delivery_status_label_zh",
+    "claim_status_raw",
+    "claim_status_label_zh",
+    "observed_at",
+    "source_phase",
+    "source_type",
+    "mapping_version",
+    "dedupe_key",
+    "raw_response_saved",
+    "privacy_fields_redacted",
+    "address_saved",
+    "safe_metadata",
+    "created_at",
+    "updated_at",
+}
+
+EXPECTED_ORDER_STATUS_EVENT_NOT_NULL_COLUMNS = {
+    "store_id",
+    "order_id",
+    "platform",
+    "external_product_order_id_hash",
+    "event_type",
+    "source_phase",
+    "source_type",
+    "mapping_version",
+    "dedupe_key",
+    "raw_response_saved",
+    "privacy_fields_redacted",
+    "address_saved",
+    "created_at",
+    "updated_at",
+}
+
+EXPECTED_ORDER_STATUS_EVENT_INDEXES = {
+    "uq_order_status_event_dedupe": ["store_id", "platform", "dedupe_key"],
+    "ix_order_status_events_store_platform_observed": ["store_id", "platform", "observed_at"],
+    "ix_order_status_events_order_observed": ["order_id", "observed_at"],
+    "ix_order_status_events_store_event_type": ["store_id", "platform", "event_type"],
+    "ix_order_status_events_product_order_hash": ["external_product_order_id_hash"],
+}
+
+UNPLANNED_ORDER_STATUS_EVENT_INDEXES = {
+    "ix_order_status_events_event_type",
+    "ix_order_status_events_external_order_id_hash",
+    "ix_order_status_events_external_product_order_id_hash",
+    "ix_order_status_events_id",
+    "ix_order_status_events_observed_at",
+    "ix_order_status_events_order_id",
+    "ix_order_status_events_platform",
+    "ix_order_status_events_source_type",
+    "ix_order_status_events_store_id",
+}
+
 EXPECTED_FINANCIAL_SCHEMA_COLUMNS = {
     "platform_sales_details": {
         "id",
@@ -204,6 +270,22 @@ FORBIDDEN_FINANCIAL_COLUMNS = {
     "authorization",
     "raw_data",
     "raw_response",
+}
+
+FORBIDDEN_ORDER_STATUS_EVENT_COLUMNS = {
+    "authorization",
+    "buyer_name",
+    "buyer_phone",
+    "client_secret",
+    "complete_field_preview",
+    "headers",
+    "raw_data",
+    "raw_response",
+    "receiver_name",
+    "receiver_phone",
+    "signature",
+    "token",
+    "zip_code",
 }
 
 FORBIDDEN_TIME_PATTERNS = {
@@ -1463,17 +1545,22 @@ def verify_sync_preview_schema_and_security() -> None:
     from app.main import app
     from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
     from app.models.order import Order
+    from app.models.order_status_event import OrderStatusEvent
     from app.models.product import Product
     from app.models.sync_checkpoint import SyncCheckpoint
     from app.models.sync_log import SyncLog
     from app.services import api_credential_readiness_service, sync_service
+    from scripts.upgrade_order_status_events_schema import upgrade as upgrade_order_status_events
     from scripts.upgrade_sync_schema import upgrade
 
     upgrade()
     upgrade()
+    upgrade_order_status_events()
+    upgrade_order_status_events()
     with SessionLocal() as db:
         tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()}
-        missing_tables = sorted((EXPECTED_SYNC_TABLES | set(EXPECTED_FINANCIAL_SCHEMA_COLUMNS)) - tables)
+        expected_tables = EXPECTED_SYNC_TABLES | set(EXPECTED_FINANCIAL_SCHEMA_COLUMNS) | {"order_status_events"}
+        missing_tables = sorted(expected_tables - tables)
         assert not missing_tables, f"Missing sync tables: {missing_tables}"
         for table_name, expected_columns in EXPECTED_SYNC_SCHEMA_COLUMNS.items():
             columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table_name})")).all()}
@@ -1505,6 +1592,41 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert "ix_platform_settlement_store_platform_month" in index_names, index_names
                 assert "ix_platform_settlement_store_platform_date" in index_names, index_names
 
+        event_table_info = db.execute(text("PRAGMA table_info(order_status_events)")).all()
+        event_columns = {row[1] for row in event_table_info}
+        missing_event_columns = sorted(EXPECTED_ORDER_STATUS_EVENT_COLUMNS - event_columns)
+        assert not missing_event_columns, f"Missing order_status_events columns: {missing_event_columns}"
+        forbidden_event_columns = sorted(
+            {column.lower() for column in event_columns}
+            & {item.lower() for item in FORBIDDEN_ORDER_STATUS_EVENT_COLUMNS}
+        )
+        assert not forbidden_event_columns, f"Forbidden order_status_events columns: {forbidden_event_columns}"
+        event_notnull = {row[1]: bool(row[3]) for row in event_table_info}
+        missing_event_notnull = sorted(
+            column
+            for column in EXPECTED_ORDER_STATUS_EVENT_NOT_NULL_COLUMNS
+            if not event_notnull.get(column)
+        )
+        assert not missing_event_notnull, f"Missing order_status_events NOT NULL columns: {missing_event_notnull}"
+        event_index_rows = db.execute(text("PRAGMA index_list(order_status_events)")).all()
+        event_index_names = {row[1] for row in event_index_rows}
+        event_unique_indexes = {row[1] for row in event_index_rows if row[2]}
+        assert "uq_order_status_event_dedupe" in event_unique_indexes, event_index_rows
+        missing_event_indexes = sorted(set(EXPECTED_ORDER_STATUS_EVENT_INDEXES) - event_index_names)
+        assert not missing_event_indexes, f"Missing order_status_events indexes: {missing_event_indexes}"
+        unplanned_event_indexes = sorted(UNPLANNED_ORDER_STATUS_EVENT_INDEXES & event_index_names)
+        assert not unplanned_event_indexes, f"Unplanned order_status_events indexes: {unplanned_event_indexes}"
+        for index_name, expected_index_columns in EXPECTED_ORDER_STATUS_EVENT_INDEXES.items():
+            observed_index_columns = [
+                row[2]
+                for row in db.execute(text(f"PRAGMA index_info({index_name})")).all()
+            ]
+            assert observed_index_columns == expected_index_columns, {
+                "index": index_name,
+                "observed": observed_index_columns,
+                "expected": expected_index_columns,
+            }
+
         PlatformSalesDetail(observed_fields=["revenueId", "saleAmount"])
         PlatformSettlementDetail(observed_fields=["settlementId", "settlementAmount"])
         for model in (PlatformSalesDetail, PlatformSettlementDetail):
@@ -1514,6 +1636,47 @@ def verify_sync_preview_schema_and_security() -> None:
                 pass
             else:
                 raise AssertionError(f"{model.__name__} accepted forbidden observed_fields")
+        OrderStatusEvent(
+            store_id=1,
+            order_id=1,
+            platform="naver",
+            external_product_order_id_hash="id-hash-abcdef1234",
+            event_type="delivered",
+            source_phase="Naver-ERP-14G",
+            source_type="naver_real_order_sync",
+            mapping_version="naver_order_status_timeline_mock_mapper_v1",
+            dedupe_key="8|naver|id-hash-abcdef1234|delivered|DELIVERED|DELIVERED|",
+            raw_response_saved=False,
+            privacy_fields_redacted=True,
+            address_saved=False,
+            safe_metadata={
+                "source_window": "schema_model_gate",
+                "refresh_gate_phase": "Naver-ERP-13C",
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "address_saved": False,
+            },
+        )
+        try:
+            OrderStatusEvent(
+                store_id=1,
+                order_id=1,
+                platform="naver",
+                external_product_order_id_hash="id-hash-abcdef1234",
+                event_type="delivered",
+                source_phase="Naver-ERP-14G",
+                source_type="naver_real_order_sync",
+                mapping_version="naver_order_status_timeline_mock_mapper_v1",
+                dedupe_key="8|naver|id-hash-abcdef1234|delivered|DELIVERED|DELIVERED|",
+                raw_response_saved=False,
+                privacy_fields_redacted=True,
+                address_saved=False,
+                safe_metadata={"raw_response": "must-not-be-accepted"},
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("OrderStatusEvent accepted forbidden safe_metadata")
 
     original_test_enabled = os.environ.get("REAL_API_TEST_ENABLED")
     try:
@@ -5652,6 +5815,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/api_credential.py",
         " M backend/app/models/financial.py",
         " M backend/app/models/order.py",
+        " M backend/app/models/order_status_event.py",
         " M backend/app/models/product.py",
         " M backend/app/models/store.py",
         " M backend/app/schemas/api_credential_readiness.py",
@@ -5671,12 +5835,14 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_stage_1c.py",
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
+        " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/financial.py",
+        "?? backend/app/models/order_status_event.py",
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
@@ -5689,6 +5855,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/platform_login_service.py",
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
+        "?? backend/scripts/upgrade_order_status_events_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/verify_all.py",
     )

@@ -60,6 +60,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    order_status_events = relationship(
+        "OrderStatusEvent",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     platform_sales_details = relationship(
         "PlatformSalesDetail",
         back_populates="store",
