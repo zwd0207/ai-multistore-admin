@@ -550,3 +550,9 @@ ERP-Audit-1B is proposal-only. It defines the future `operation_audit_logs` tabl
 The audit log mock write gate is documented in `PHASE_ERP_AUDIT_1C_AUDIT_LOG_MOCK_WRITE_GATE.md`.
 
 ERP-Audit-1C adds private `verify_all.py` coverage for the future `operation_audit_logs` write gate. It creates the proposed table only inside the temporary verification SQLite database, validates columns/defaults/indexes, blocks unapproved writes, rejects invalid SHA-256 and sensitive JSON, writes safe mock audit rows, records blocked-operation evidence without sensitive payloads, and confirms multiple rows can share a `correlation_id`. It does not create a real schema, add a model, run a migration, write real audit rows, call platform APIs, modify runtime UI, or change backup/restore behavior.
+
+## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
+
+The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
+
+ERP-Backup-1A is planning-only. It defines the future backup filename and manifest convention, SHA-256 verification, SQLite integrity checks, temporary restore drill workflow, real restore approval boundary, and phases that must require a backup before writes or migrations. It does not create a backup, restore a database, modify `backend/codex1.db`, change schema, write business data, call platform APIs, modify runtime UI, or change backup/restore behavior.
