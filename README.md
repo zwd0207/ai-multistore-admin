@@ -641,6 +641,12 @@ The audit writer local implementation is documented in `PHASE_ERP_AUDIT_1H_AUDIT
 
 ERP-Audit-1H adds a controlled backend local writer helper for future approved internal operations. It requires explicit write intent, manual approval, a private local scope, valid timestamps, valid SHA-256 values, safe flags, and sensitive JSON blocking. `verify_all.py` proves safe local audit rows and blocked-operation evidence rows can be written to the temporary database only. The real `backend/codex1.db` remains `operation_audit_logs=0`; no public audit endpoint, frontend reader, automatic order/product instrumentation, platform API call, or formal sync is opened.
 
+## Phase ERP-Audit-1I - Audit Logs API Readonly Plan
+
+The audit logs API readonly plan is documented in `PHASE_ERP_AUDIT_1I_AUDIT_LOGS_API_READONLY_PLAN.md`.
+
+ERP-Audit-1I is planning-only. It defines the future read-only `operation_audit_logs` API shape, bounded filters, business-first list response, empty-state message, summary endpoint direction, advanced-detail boundary, store/permission boundary, and sensitive-field ban. It does not add a route, expose a public audit API, query real audit rows from the UI, write audit rows, modify schema, call platform APIs, or open formal sync. The real `backend/codex1.db` remains `operation_audit_logs=0`.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
