@@ -4315,6 +4315,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     "DISPATCHED": "已发货 / 配送中",
                     "DELIVERING": "已发货 / 配送中",
                     "DELIVERED": "配送完成",
+                    "DELIVERY_COMPLETION": "配送完成",
                     "DELIVERY_COMPLETED": "配送完成",
                     "CANCEL_REQUEST": "取消请求",
                     "RETURN_REQUEST": "退货请求",

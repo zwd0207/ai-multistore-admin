@@ -3544,6 +3544,7 @@ NAVER_ORDER_STATUS_LABELS_ZH = {
     "IN_DELIVERY": "已发货 / 配送中",
     "배송중": "已发货 / 配送中",
     "DELIVERED": "配送完成",
+    "DELIVERY_COMPLETION": "配送完成",
     "DELIVERY_COMPLETED": "配送完成",
     "DELIVERY_COMPLETE": "配送完成",
     "COMPLETED_DELIVERY": "配送完成",
