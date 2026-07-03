@@ -8392,6 +8392,8 @@ def verify_operation_audit_logs_readonly_local_api() -> None:
         assert "unsupported_audit_log_filter" in unsupported_text, unsupported_text
         assert "raw_response" not in unsupported_text, unsupported_text
         assert "unsupported_filter_count" in unsupported_text, unsupported_text
+        unsupported_detail = unsupported_response.json()["detail"]
+        assert unsupported_detail["business_message"] == "审计记录筛选条件不支持，请使用页面提供的筛选项。", unsupported_detail
 
         unsafe_response = client.get(
             "/api/v1/operation-audit-logs",
@@ -8399,6 +8401,8 @@ def verify_operation_audit_logs_readonly_local_api() -> None:
         )
         assert unsafe_response.status_code == 400, unsafe_response.text
         assert "unsafe_action" in unsafe_response.text, unsafe_response.text
+        unsafe_detail = unsafe_response.json()["detail"]
+        assert unsafe_detail["business_message"] == "审计记录筛选条件无效，请调整筛选范围后重试。", unsafe_detail
 
         wide_window_response = client.get(
             "/api/v1/operation-audit-logs",
@@ -8409,6 +8413,8 @@ def verify_operation_audit_logs_readonly_local_api() -> None:
         )
         assert wide_window_response.status_code == 400, wide_window_response.text
         assert "date_window_too_large" in wide_window_response.text, wide_window_response.text
+        wide_window_detail = wide_window_response.json()["detail"]
+        assert wide_window_detail["business_message"] == "审计记录筛选条件无效，请调整筛选范围后重试。", wide_window_detail
 
         for method_name in ["post", "put", "patch", "delete"]:
             method_response = getattr(client, method_name)("/api/v1/operation-audit-logs")
