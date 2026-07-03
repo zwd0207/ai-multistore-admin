@@ -490,3 +490,9 @@ The order status timeline schema approval plan is documented in `PHASE_NAVER_ERP
 The order status timeline schema migration is documented in `PHASE_NAVER_ERP_14G_ORDER_STATUS_TIMELINE_SCHEMA_MIGRATION.md`.
 
 14G creates the real `order_status_events` table in `backend/codex1.db` with the approved safe columns and dedupe/index strategy. The migration leaves the table empty, keeps existing order/product/log/capability counts unchanged, and still does not approve event writes, order refresh writes, platform writes, UI timeline display, or formal Naver order sync.
+
+## Phase Naver-ERP-14H - Timeline Event Single Local Write Mock Gate
+
+The timeline event single local write mock gate is documented in `PHASE_NAVER_ERP_14H_TIMELINE_EVENT_SINGLE_LOCAL_WRITE_MOCK_GATE.md`.
+
+14H adds a private Codex1 helper and verify_all coverage for a single timeline event write gate in the temporary verification database only. It checks fresh preview, selected hash identity, exactly one planned event, local order uniqueness, known event type, dedupe key, safety booleans, sensitive fields, and manual approval before a mock event row can be inserted. It does not write the real event table, call Naver, modify runtime UI, or open formal order sync.
