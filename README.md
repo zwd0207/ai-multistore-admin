@@ -580,3 +580,9 @@ ERP-UX-1A is planning-only. It defines how the frontend should become usable for
 The frontend technical field inventory is documented in `PHASE_ERP_UX_1B_FRONTEND_TECHNICAL_FIELD_INVENTORY.md`.
 
 ERP-UX-1B is inventory-only. It scans Codex2 pages, adapters, service helpers, and `TechnicalDetails` usage for technical fields that can confuse non-technical operators. The main findings are visible `store #...` chips in Orders, Products, and Sales; a visible `store_id=8` Orders restriction message; seller-facing no-write wording that mentions `orders`, `SyncLog`, and `tested_success`; and the need to keep API capability result codes collapsed. It does not modify runtime code, Codex1, schema, local data, platform APIs, or formal sync gates.
+
+## Phase ERP-UX-1C - Dashboard Business Summary Cleanup
+
+The Dashboard business summary cleanup is documented in `PHASE_ERP_UX_1C_DASHBOARD_BUSINESS_SUMMARY_CLEANUP.md`.
+
+ERP-UX-1C updates Codex2 Dashboard runtime UI so Naver stores show a business-first `今日经营摘要` before generic statistics. Backend mode no longer shows a visible `数据源 backend` chip; mock mode still shows `演示数据`. Main Dashboard copy now avoids `store #...`, `store_id`, `real_sync`, `SyncLog`, and `tested_success`, while technical diagnostics stay folded in `TechnicalDetails`. This phase does not modify Codex1, call platform APIs, write data, change schema, or open formal product/order sync.

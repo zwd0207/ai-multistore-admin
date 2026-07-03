@@ -98,8 +98,8 @@ function SellerTodoOverview({
     ? null
     : {
       id: 'naver-products',
-      title: '商品小批量写入测试',
-      description: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
+      title: '商品状态稳定',
+      description: '当前本地已有 5 条 Naver 商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
       status: 'success',
     };
   const naverProductChangeTodo = !isNaverStore || !productChangeHints
@@ -114,10 +114,10 @@ function SellerTodoOverview({
     ? null
     : {
       id: 'naver-orders',
-      title: '订单受控写入测试',
+      title: '订单状态',
       description: orderFulfillmentSummary?.total
-        ? `Naver 受控订单本地写入测试已完成。当前本地可见 ${orderFulfillmentSummary.total} 条运营订单。正式订单批量同步仍未开放。`
-        : `${naverOrderStatus?.detail.reason || 'Naver 订单本地写入测试已完成。'}正式订单批量同步仍未开放。`,
+        ? `当前本地可见 ${orderFulfillmentSummary.total} 条 Naver 运营订单。正式订单批量同步仍未开放。`
+        : `${naverOrderStatus?.detail.reason || 'Naver 订单本地记录已准备。'}正式订单批量同步仍未开放。`,
       status: 'success',
     };
   const naverInventoryTodo = !isNaverStore || !inventorySummary
@@ -133,7 +133,7 @@ function SellerTodoOverview({
     : {
       id: 'naver-fulfillment',
       title: '订单履约 / 售后',
-      description: `${orderFulfillmentSummary.businessMessage}发货、取消、退货、换货写操作仍未开放。`,
+      description: `${orderFulfillmentSummary.businessMessage}平台发货、取消、退货、换货处理仍未开放。`,
       status: orderFulfillmentSummary.actionNeededCount > 0 ? 'warning' : 'success',
     };
   const naverDeliveryTodo = !isNaverStore || !deliverySummary
@@ -432,28 +432,28 @@ function NaverErpWorkbenchSection({
             : {
               label: '暂无高优先级阻断',
               tone: 'success',
-              message: '继续按本地商品、订单、库存、配送、售后和订单金额观察。',
+              message: '继续关注订单、库存、配送、售后和订单金额。',
             };
 
   const cards = [
     {
       key: 'connection',
       title: '店铺连接',
-      statusLabel: activeIssue ? '需要检查' : hasConnectionEvidence ? '只读检测无阻断' : '等待检测结果',
+      statusLabel: activeIssue ? '需要检查' : hasConnectionEvidence ? '连接检查无阻断' : '等待检测结果',
       tone: activeIssue ? activeIssue.tone || 'warning' : hasConnectionEvidence ? 'success' : 'muted',
       reason: activeIssue
         ? 'Naver 当前连接异常，请检查平台连接资料或 API 设置。'
         : hasConnectionEvidence
-          ? '当前没有检测到阻断 Naver 基础 ERP 只读展示的连接异常。'
+          ? '当前没有影响 Naver 工作台展示的连接异常。'
           : '正在读取本地连接检测结果，暂不判断平台授权是否正常。',
-      nextAction: activeIssue?.description || '继续保持只读预览优先，正式同步仍需单独批准。',
+      nextAction: activeIssue?.description || '需要写入数据时仍需单独批准。',
     },
     {
       key: 'products',
-      title: '商品管理',
-      statusLabel: '5 条小批量完成',
+      title: '商品状态',
+      statusLabel: '5 条本地商品稳定',
       tone: 'success',
-      reason: 'Naver 商品小批量写入测试已完成。当前本地已有 5 条商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
+      reason: '当前本地已有 5 条 Naver 商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
       nextAction: '正式商品批量同步仍未开放。',
     },
     {
@@ -466,10 +466,10 @@ function NaverErpWorkbenchSection({
     },
     {
       key: 'orders',
-      title: '订单管理',
-      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '受控测试完成',
+      title: '订单状态',
+      statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '等待订单数据',
       tone: orderActionCount > 0 ? 'info' : 'success',
-      reason: orderFulfillmentSummary?.businessMessage || 'Naver 受控订单本地写入测试已完成。',
+      reason: orderFulfillmentSummary?.businessMessage || '当前没有可用于履约 / 售后分类的 Naver 本地订单。',
       nextAction: '正式订单批量同步仍未开放。',
     },
     {
@@ -504,8 +504,8 @@ function NaverErpWorkbenchSection({
     <section className="content-card">
       <div className="card-title">
         <div>
-          <h2>Naver ERP 工作台摘要</h2>
-          <p>围绕连接、商品、订单、库存、配送 / 售后和订单金额展示当前店铺今天要处理的事项。</p>
+          <h2>今日经营摘要</h2>
+          <p>按日常运营顺序汇总连接、订单、库存、配送 / 售后和订单金额。</p>
         </div>
         <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
       </div>
@@ -524,7 +524,7 @@ function NaverErpWorkbenchSection({
             <p>只读取本地 Naver ERP 数据</p>
           </div>
           <strong>{productCount} 商品 / {orderCount} 订单</strong>
-          <small>商品小批量写入和订单受控写入测试已阶段收口。</small>
+          <small>本地商品和订单记录已可用于日常观察。</small>
         </article>
         <article className="financial-card">
           <div className="financial-card-head">
@@ -547,7 +547,7 @@ function NaverErpWorkbenchSection({
         <span>正式商品批量同步未开放</span>
         <span>正式订单批量同步未开放</span>
         <span>平台发货 / 售后写操作未开放</span>
-        <span>Naver 销售 / 结算接口未接入</span>
+        <span>Naver 销售 / 结算数据待接入</span>
       </div>
       <div className="business-capability-grid">
         {cards.map((card) => (
@@ -1078,34 +1078,27 @@ export default function Dashboard() {
         actions={(
           <>
             {!isBackendSource && <MockSyncPanel />}
-            <span className="period-chip">数据源 {DATA_SOURCE}</span>
+            {!isBackendSource && <span className="period-chip">演示数据</span>}
             <span className="period-chip">业务日期 {businessDate ? formatKstDate(businessDate) : BUSINESS_TIME_LABEL}</span>
           </>
         )}
       />
-      <StatGrid items={stats} />
 
-      <NaverErpWorkbenchSection
-        selectedStore={selectedStore}
-        capabilities={platformStatusData.capabilities}
-        results={platformStatusData.results}
-        inventorySummary={naverInventorySummary}
-        orderFulfillmentSummary={naverOrderFulfillmentSummary}
-        deliverySummary={naverDeliveryStatusSummary}
-        claimSummary={naverClaimReadonlySummary}
-        orderSalesSummary={naverOrderSalesSummary}
-        productChangeHints={naverProductChangeHints}
-      />
-
-      <NaverDeliveryStatusSummarySection
-        selectedStore={selectedStore}
-        deliverySummary={naverDeliveryStatusSummary}
-      />
-
-      <NaverClaimReadonlySummarySection
-        selectedStore={selectedStore}
-        claimSummary={naverClaimReadonlySummary}
-      />
+      {isSelectedNaverStore ? (
+        <NaverErpWorkbenchSection
+          selectedStore={selectedStore}
+          capabilities={platformStatusData.capabilities}
+          results={platformStatusData.results}
+          inventorySummary={naverInventorySummary}
+          orderFulfillmentSummary={naverOrderFulfillmentSummary}
+          deliverySummary={naverDeliveryStatusSummary}
+          claimSummary={naverClaimReadonlySummary}
+          orderSalesSummary={naverOrderSalesSummary}
+          productChangeHints={naverProductChangeHints}
+        />
+      ) : (
+        <StatGrid items={stats} />
+      )}
 
       <section className="panel-grid">
         <SellerTodoOverview
@@ -1122,6 +1115,18 @@ export default function Dashboard() {
         />
         <RiskPanel title="风险提醒" items={risks} />
       </section>
+
+      {isSelectedNaverStore && <StatGrid items={stats} />}
+
+      <NaverDeliveryStatusSummarySection
+        selectedStore={selectedStore}
+        deliverySummary={naverDeliveryStatusSummary}
+      />
+
+      <NaverClaimReadonlySummarySection
+        selectedStore={selectedStore}
+        claimSummary={naverClaimReadonlySummary}
+      />
 
       <PlatformBusinessStatusSection
         selectedStore={selectedStore}
