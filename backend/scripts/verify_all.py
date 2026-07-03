@@ -4159,6 +4159,207 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert no_change_refresh_gate["status"] == "local_refresh_no_change", no_change_refresh_gate
                     assert no_change_refresh_gate["orders_written"] is False, no_change_refresh_gate
                     assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
+
+                    previous_paid_snapshot = {
+                        "store_id": 8,
+                        "platform": "naver",
+                        "external_order_id": "id-hash-abcdef1234",
+                        "order_status": "PAYED",
+                        "payment_status": "PAYED",
+                        "raw_data": {
+                            "external_product_order_id_hash": "id-hash-abcdef1234",
+                            "order_status": {"raw": "PAYED", "label_zh": sync_service._status_label_zh("PAYED")[0]},
+                            "payment_status": "PAYED",
+                            "delivery_status": {"raw": None, "label_zh": None},
+                            "claim_status": {"raw": None, "label_zh": None},
+                            "raw_response_saved": False,
+                            "privacy_fields_redacted": True,
+                            "address_saved": False,
+                        },
+                    }
+                    timeline_delivered_preview = dict(refresh_preview)
+                    timeline_delivered_preview.update({
+                        "claim_status": {"raw": None, "label_zh": None, "unknown_status_observed": False},
+                        "claim_status_label_zh": None,
+                        "unknown_status_observed": False,
+                    })
+                    previous_delivered_snapshot = {
+                        "store_id": 8,
+                        "platform": "naver",
+                        "external_order_id": "id-hash-abcdef1234",
+                        "order_status": "DELIVERED",
+                        "payment_status": "PAYED",
+                        "raw_data": {
+                            "external_product_order_id_hash": "id-hash-abcdef1234",
+                            "order_status": {"raw": "DELIVERED", "label_zh": sync_service._status_label_zh("DELIVERED")[0]},
+                            "payment_status": "PAYED",
+                            "delivery_status": {"raw": "DELIVERED", "label_zh": sync_service._status_label_zh("DELIVERED")[0]},
+                            "claim_status": {"raw": None, "label_zh": None},
+                            "raw_response_saved": False,
+                            "privacy_fields_redacted": True,
+                            "address_saved": False,
+                        },
+                    }
+                    delivered_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=timeline_delivered_preview,
+                    )
+                    assert delivered_timeline_gate["phase"] == "Naver-ERP-14B", delivered_timeline_gate
+                    assert delivered_timeline_gate["status"] == "timeline_events_planned", delivered_timeline_gate
+                    assert delivered_timeline_gate["event_count"] == 1, delivered_timeline_gate
+                    delivered_event = delivered_timeline_gate["planned_events"][0]
+                    assert delivered_event["event_type"] == "delivered", delivered_event
+                    assert delivered_event["external_product_order_id_hash"] == "id-hash-abcdef1234", delivered_event
+                    assert delivered_event["raw_response_saved"] is False, delivered_event
+                    assert delivered_event["privacy_fields_redacted"] is True, delivered_event
+                    assert delivered_event["address_saved"] is False, delivered_event
+                    assert delivered_event["dedupe_key"], delivered_event
+                    assert delivered_timeline_gate["orders_written"] is False, delivered_timeline_gate
+                    assert delivered_timeline_gate["timeline_rows_written"] is False, delivered_timeline_gate
+                    assert delivered_timeline_gate["formal_order_sync_open"] is False, delivered_timeline_gate
+                    assert delivered_timeline_gate["platform_writes_enabled"] is False, delivered_timeline_gate
+
+                    delivered_deduped_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=timeline_delivered_preview,
+                        existing_event_keys=[delivered_event["dedupe_key"]],
+                    )
+                    assert delivered_deduped_gate["status"] == "timeline_events_deduped", delivered_deduped_gate
+                    assert delivered_deduped_gate["event_count"] == 0, delivered_deduped_gate
+                    assert delivered_deduped_gate["deduped_event_count"] == 1, delivered_deduped_gate
+
+                    no_timeline_event_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_delivered_snapshot,
+                        refresh_preview=timeline_delivered_preview,
+                    )
+                    assert no_timeline_event_gate["status"] == "no_timeline_event", no_timeline_event_gate
+                    assert no_timeline_event_gate["skip_reason"] == "no_status_change", no_timeline_event_gate
+                    assert no_timeline_event_gate["event_count"] == 0, no_timeline_event_gate
+
+                    delivery_change_preview = dict(selected_candidate)
+                    delivery_change_preview.update({
+                        "external_product_order_id_hash": "id-hash-abcdef1234",
+                        "external_order_id_hash": "id-hash-fedcba4321",
+                        "order_status": {"raw": "PAYED", "label_zh": sync_service._status_label_zh("PAYED")[0]},
+                        "order_status_label_zh": sync_service._status_label_zh("PAYED")[0],
+                        "payment_status": "PAYED",
+                        "delivery_status": {"raw": "DISPATCHED", "label_zh": sync_service._status_label_zh("DISPATCHED")[0]},
+                        "delivery_status_label_zh": sync_service._status_label_zh("DISPATCHED")[0],
+                        "claim_status": {"raw": None, "label_zh": None},
+                        "claim_status_label_zh": None,
+                        "unknown_status_observed": False,
+                    })
+                    delivery_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=delivery_change_preview,
+                    )
+                    assert delivery_timeline_gate["status"] == "timeline_events_planned", delivery_timeline_gate
+                    assert delivery_timeline_gate["event_count"] == 1, delivery_timeline_gate
+                    assert delivery_timeline_gate["planned_events"][0]["event_type"] == "dispatched", delivery_timeline_gate
+
+                    for claim_raw, expected_event_type in [
+                        ("CANCEL_REQUEST", "cancel_requested"),
+                        ("RETURN_REQUEST", "return_requested"),
+                        ("EXCHANGE_REQUEST", "exchange_requested"),
+                    ]:
+                        claim_preview = dict(timeline_delivered_preview)
+                        claim_preview.update({
+                            "claim_status": {"raw": claim_raw, "label_zh": sync_service._status_label_zh(claim_raw)[0]},
+                            "claim_status_label_zh": sync_service._status_label_zh(claim_raw)[0],
+                        })
+                        claim_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                            selected_order_hash="id-hash-abcdef1234",
+                            previous_snapshot=previous_delivered_snapshot,
+                            refresh_preview=claim_preview,
+                        )
+                        assert claim_timeline_gate["status"] == "timeline_events_planned", claim_timeline_gate
+                        assert claim_timeline_gate["event_count"] == 1, claim_timeline_gate
+                        assert claim_timeline_gate["planned_events"][0]["event_type"] == expected_event_type, claim_timeline_gate
+                        assert claim_timeline_gate["planned_events"][0]["delivery_status_raw"] == "DELIVERED", claim_timeline_gate
+
+                    unknown_timeline_preview = dict(timeline_delivered_preview)
+                    unknown_timeline_preview.update({
+                        "order_status": {
+                            "raw": "UNEXPECTED_ORDER_STATUS",
+                            "label_zh": sync_service._status_label_zh("UNEXPECTED_ORDER_STATUS")[0],
+                            "unknown_status_observed": True,
+                        },
+                        "order_status_label_zh": sync_service._status_label_zh("UNEXPECTED_ORDER_STATUS")[0],
+                        "unknown_status_observed": True,
+                    })
+                    unknown_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=unknown_timeline_preview,
+                    )
+                    assert unknown_timeline_gate["status"] == "blocked_unknown_status", unknown_timeline_gate
+                    assert unknown_timeline_gate["manual_review_required"] is True, unknown_timeline_gate
+                    assert unknown_timeline_gate["unknown_status_observed"] is True, unknown_timeline_gate
+                    assert unknown_timeline_gate["event_count"] == 1, unknown_timeline_gate
+                    assert unknown_timeline_gate["planned_events"][0]["event_type"] == "unknown_status_observed", unknown_timeline_gate
+                    assert unknown_timeline_gate["orders_written"] is False, unknown_timeline_gate
+
+                    bad_timeline_preview = dict(timeline_delivered_preview)
+                    bad_timeline_preview["buyer_name_masked"] = "must-not-leak-timeline-buyer"
+                    privacy_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=bad_timeline_preview,
+                    )
+                    assert privacy_timeline_gate["skip_reason"] == "timeline_privacy_gate_failed", privacy_timeline_gate
+                    assert privacy_timeline_gate["event_count"] == 0, privacy_timeline_gate
+                    assert privacy_timeline_gate["orders_written"] is False, privacy_timeline_gate
+
+                    mismatch_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview={**timeline_delivered_preview, "external_product_order_id_hash": "id-hash-1111111111"},
+                    )
+                    assert mismatch_timeline_gate["skip_reason"] == "timeline_identity_mismatch", mismatch_timeline_gate
+                    assert mismatch_timeline_gate["event_count"] == 0, mismatch_timeline_gate
+
+                    sensitive_timeline_preview = dict(timeline_delivered_preview)
+                    sensitive_timeline_preview.update({
+                        "complete_field_preview": "timeline-full-order-id-must-not-leak",
+                        "raw_response": "timeline-raw-response-must-not-leak",
+                    })
+                    sensitive_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
+                        selected_order_hash="id-hash-abcdef1234",
+                        previous_snapshot=previous_paid_snapshot,
+                        refresh_preview=sensitive_timeline_preview,
+                    )
+                    sensitive_timeline_text = json.dumps(sensitive_timeline_gate, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "timeline-full-order-id-must-not-leak",
+                        "timeline-raw-response-must-not-leak",
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "must-not-leak-refresh-buyer",
+                        "must-not-leak-timeline-buyer",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in sensitive_timeline_text, sensitive_timeline_text
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_13a_order_count
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_13a_product_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_13a_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_13a_cap_success
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token

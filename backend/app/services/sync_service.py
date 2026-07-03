@@ -48,6 +48,7 @@ NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
 NAVER_PRODUCT_SYNC_SOURCE_TYPE = "naver_real_sync"
 NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
 NAVER_ORDER_SYNC_SOURCE_TYPE = "naver_real_order_sync"
+NAVER_ORDER_TIMELINE_MAPPING_VERSION = "naver_order_status_timeline_mock_mapper_v1"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
 COUPANG_FINANCIAL_SOURCE_TYPE = "real_coupang"
@@ -4300,6 +4301,297 @@ def _evaluate_naver_order_local_refresh_mock_gate(
         "formal_order_sync_open": False,
         "platform_writes_enabled": False,
     })
+    return result
+
+
+NAVER_ORDER_TIMELINE_EVENT_TYPES = {
+    "PAYED": "order_paid",
+    "PLACE_PRODUCT_ORDER": "order_confirmed",
+    "READY": "dispatch_ready",
+    "DELIVERY_READY": "dispatch_ready",
+    "DISPATCHED": "dispatched",
+    "DELIVERING": "delivering",
+    "SHIPPING": "delivering",
+    "IN_DELIVERY": "delivering",
+    "DELIVERED": "delivered",
+    "DELIVERY_COMPLETION": "delivered",
+    "DELIVERY_COMPLETED": "delivered",
+    "DELIVERY_COMPLETE": "delivered",
+    "COMPLETED_DELIVERY": "delivered",
+    "SHIPPING_COMPLETED": "delivered",
+    "CANCEL_REQUEST": "cancel_requested",
+    "CANCELED": "canceled",
+    "CANCELLED": "canceled",
+    "RETURN_REQUEST": "return_requested",
+    "RETURNED": "returned",
+    "EXCHANGE_REQUEST": "exchange_requested",
+    "EXCHANGED": "exchanged",
+    "PURCHASE_DECIDED": "purchase_decided",
+}
+
+NAVER_ORDER_TIMELINE_LABEL_CANONICALS = (
+    ("PAYED", "order_paid"),
+    ("PLACE_PRODUCT_ORDER", "order_confirmed"),
+    ("READY", "dispatch_ready"),
+    ("DELIVERING", "delivering"),
+    ("DISPATCHED", "dispatched"),
+    ("DELIVERED", "delivered"),
+    ("CANCEL_REQUEST", "cancel_requested"),
+    ("CANCELED", "canceled"),
+    ("RETURN_REQUEST", "return_requested"),
+    ("EXCHANGE_REQUEST", "exchange_requested"),
+    ("PURCHASE_DECIDED", "purchase_decided"),
+)
+
+
+def _naver_order_timeline_status_raw(value: object) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("raw")
+    return _safe_order_text(value, max_length=40)
+
+
+def _naver_order_timeline_status_unknown(value: object) -> bool:
+    if isinstance(value, dict) and value.get("unknown_status_observed") is not None:
+        return bool(value.get("unknown_status_observed"))
+    raw_value = _naver_order_timeline_status_raw(value)
+    return bool(raw_value and _status_label_zh(raw_value)[1])
+
+
+def _naver_order_timeline_event_type(raw_value: str | None) -> str:
+    if not raw_value:
+        return "unknown_status_observed"
+    normalized = str(raw_value).strip()
+    event_type = NAVER_ORDER_TIMELINE_EVENT_TYPES.get(normalized) or NAVER_ORDER_TIMELINE_EVENT_TYPES.get(normalized.upper())
+    if event_type:
+        return event_type
+    label, unknown = _status_label_zh(normalized)
+    if unknown or not label:
+        return "unknown_status_observed"
+    for canonical_status, canonical_event_type in NAVER_ORDER_TIMELINE_LABEL_CANONICALS:
+        canonical_label, _ = _status_label_zh(canonical_status)
+        if label == canonical_label:
+            return canonical_event_type
+    return "unknown_status_observed"
+
+
+def _naver_order_timeline_snapshot_statuses(snapshot: object) -> dict:
+    if snapshot is None:
+        return {"order_status": None, "payment_status": None, "delivery_status": None, "claim_status": None}
+    if isinstance(snapshot, dict):
+        raw_data = snapshot.get("raw_data") if isinstance(snapshot.get("raw_data"), dict) else {}
+        return {
+            "order_status": _naver_order_timeline_status_raw(snapshot.get("order_status"))
+            or _naver_order_timeline_status_raw(raw_data.get("order_status")),
+            "payment_status": _naver_order_timeline_status_raw(snapshot.get("payment_status"))
+            or _naver_order_timeline_status_raw(raw_data.get("payment_status")),
+            "delivery_status": _naver_order_timeline_status_raw(snapshot.get("delivery_status"))
+            or _naver_order_timeline_status_raw(raw_data.get("delivery_status")),
+            "claim_status": _naver_order_timeline_status_raw(snapshot.get("claim_status"))
+            or _naver_order_timeline_status_raw(raw_data.get("claim_status")),
+        }
+    raw_data = getattr(snapshot, "raw_data", None)
+    raw_data = raw_data if isinstance(raw_data, dict) else {}
+    return {
+        "order_status": _naver_order_timeline_status_raw(getattr(snapshot, "order_status", None))
+        or _naver_order_timeline_status_raw(raw_data.get("order_status")),
+        "payment_status": _naver_order_timeline_status_raw(raw_data.get("payment_status")),
+        "delivery_status": _naver_order_timeline_status_raw(raw_data.get("delivery_status")),
+        "claim_status": _naver_order_timeline_status_raw(raw_data.get("claim_status")),
+    }
+
+
+def _naver_order_timeline_status_label(raw_value: str | None) -> str | None:
+    if not raw_value:
+        return None
+    return _status_label_zh(raw_value)[0]
+
+
+def _naver_order_timeline_dedupe_key(event: dict) -> str:
+    parts = (
+        event.get("store_id"),
+        event.get("platform"),
+        event.get("external_product_order_id_hash"),
+        event.get("event_type"),
+        event.get("status_raw"),
+        event.get("delivery_status_raw"),
+        event.get("claim_status_raw"),
+    )
+    return "|".join("" if item is None else str(item) for item in parts)
+
+
+def _build_naver_order_timeline_mock_event(
+    *,
+    selected_order_hash: str,
+    refresh_preview: dict,
+    event_type: str,
+    status_raw: str | None,
+    source_phase: str = "Naver-ERP-14B",
+) -> dict:
+    delivery_raw = _naver_order_timeline_status_raw(refresh_preview.get("delivery_status"))
+    claim_raw = _naver_order_timeline_status_raw(refresh_preview.get("claim_status"))
+    payment_raw = _naver_order_timeline_status_raw(refresh_preview.get("payment_status"))
+    event = {
+        "store_id": 8,
+        "platform": "naver",
+        "external_order_id_hash": refresh_preview.get("external_order_id_hash")
+        if _is_hash_identifier(refresh_preview.get("external_order_id_hash"))
+        else None,
+        "external_product_order_id_hash": selected_order_hash,
+        "event_type": event_type,
+        "status_raw": status_raw,
+        "status_label_zh": _naver_order_timeline_status_label(status_raw),
+        "payment_status_raw": payment_raw,
+        "payment_status_label_zh": _naver_order_timeline_status_label(payment_raw),
+        "delivery_status_raw": delivery_raw,
+        "delivery_status_label_zh": _naver_order_timeline_status_label(delivery_raw),
+        "claim_status_raw": claim_raw,
+        "claim_status_label_zh": _naver_order_timeline_status_label(claim_raw),
+        "observed_at": refresh_preview.get("last_changed_at") or refresh_preview.get("last_synced_at") or get_utc_now().isoformat(),
+        "source_phase": source_phase,
+        "source_type": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
+        "mapping_version": NAVER_ORDER_TIMELINE_MAPPING_VERSION,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+    }
+    event["dedupe_key"] = _naver_order_timeline_dedupe_key(event)
+    return event
+
+
+def _evaluate_naver_order_status_timeline_mock_mapper(
+    *,
+    selected_order_hash: str | None,
+    previous_snapshot: object,
+    refresh_preview: dict | None,
+    existing_event_keys: list[str] | set[str] | tuple[str, ...] | None = None,
+    fresh_readonly_preview: bool = True,
+    identity_matched: bool = True,
+) -> dict:
+    """Mock-testable 14B timeline mapper; not wired to public endpoints or persistence."""
+    result = {
+        "phase": "Naver-ERP-14B",
+        "timeline_mock_mapper": True,
+        "fresh_readonly_preview": bool(fresh_readonly_preview),
+        "identity_matched": bool(identity_matched),
+        "status": "blocked",
+        "selected_order_hash": selected_order_hash if _is_hash_identifier(selected_order_hash) else None,
+        "changed_status_fields": [],
+        "planned_events": [],
+        "event_count": 0,
+        "deduped_event_count": 0,
+        "manual_review_required": False,
+        "unknown_status_observed": False,
+        "orders_written": False,
+        "timeline_rows_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "skip_reason": None,
+    }
+    if not fresh_readonly_preview:
+        result["skip_reason"] = "timeline_stale_preview"
+        return result
+    if not _is_hash_identifier(selected_order_hash):
+        result["skip_reason"] = "selected_order_missing"
+        return result
+    if not isinstance(refresh_preview, dict):
+        result["skip_reason"] = "refresh_preview_missing"
+        return result
+    if not identity_matched or refresh_preview.get("external_product_order_id_hash") != selected_order_hash:
+        result["skip_reason"] = "timeline_identity_mismatch"
+        return result
+
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+    result["privacy_gate"] = privacy_gate
+    if not privacy_gate["passed"]:
+        result["skip_reason"] = "timeline_privacy_gate_failed"
+        return result
+
+    previous_statuses = _naver_order_timeline_snapshot_statuses(previous_snapshot)
+    current_statuses = _naver_order_timeline_snapshot_statuses(refresh_preview)
+    result["previous_statuses"] = previous_statuses
+    result["current_statuses"] = current_statuses
+    existing_keys = set(existing_event_keys or [])
+
+    status_values = (
+        refresh_preview.get("order_status"),
+        refresh_preview.get("delivery_status"),
+        refresh_preview.get("claim_status"),
+    )
+    unknown_status = bool(refresh_preview.get("unknown_status_observed")) or any(
+        _naver_order_timeline_status_unknown(value)
+        for value in status_values
+        if _naver_order_timeline_status_raw(value)
+    )
+    if unknown_status:
+        raw_value = (
+            current_statuses.get("order_status")
+            or current_statuses.get("delivery_status")
+            or current_statuses.get("claim_status")
+        )
+        event = _build_naver_order_timeline_mock_event(
+            selected_order_hash=selected_order_hash,
+            refresh_preview=refresh_preview,
+            event_type="unknown_status_observed",
+            status_raw=raw_value,
+        )
+        result.update({
+            "status": "blocked_unknown_status",
+            "skip_reason": "unknown_status_observed",
+            "manual_review_required": True,
+            "unknown_status_observed": True,
+        })
+        if event["dedupe_key"] in existing_keys:
+            result["deduped_event_count"] = 1
+        else:
+            result["planned_events"] = [event]
+            result["event_count"] = 1
+        return result
+
+    seen_event_types: set[str] = set()
+    for field_name in ("order_status", "delivery_status", "claim_status", "payment_status"):
+        current_raw = current_statuses.get(field_name)
+        previous_raw = previous_statuses.get(field_name)
+        if not current_raw or current_raw == previous_raw:
+            continue
+        event_type = _naver_order_timeline_event_type(current_raw)
+        if event_type == "unknown_status_observed":
+            result.update({
+                "status": "blocked_unknown_status",
+                "skip_reason": "unknown_status_observed",
+                "manual_review_required": True,
+                "unknown_status_observed": True,
+            })
+            return result
+        if event_type in seen_event_types:
+            result["changed_status_fields"].append(field_name)
+            continue
+        seen_event_types.add(event_type)
+        event = _build_naver_order_timeline_mock_event(
+            selected_order_hash=selected_order_hash,
+            refresh_preview=refresh_preview,
+            event_type=event_type,
+            status_raw=current_raw,
+        )
+        result["changed_status_fields"].append(field_name)
+        if event["dedupe_key"] in existing_keys:
+            result["deduped_event_count"] += 1
+            continue
+        result["planned_events"].append(event)
+
+    result["event_count"] = len(result["planned_events"])
+    if result["event_count"]:
+        result["status"] = "timeline_events_planned"
+    elif result["deduped_event_count"]:
+        result["status"] = "timeline_events_deduped"
+    else:
+        result["status"] = "no_timeline_event"
+        result["skip_reason"] = "no_status_change"
     return result
 
 
