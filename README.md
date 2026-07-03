@@ -520,3 +520,9 @@ The Orders UI timeline readonly display is documented in `PHASE_NAVER_ERP_14J_OR
 The Naver order refresh batch gate plan is documented in `PHASE_NAVER_ERP_15A_ORDER_REFRESH_BATCH_GATE_PLAN.md`.
 
 15A is planning-only. It defines the future gate for refreshing multiple already-existing local Naver orders while keeping the current public real preview cap at `page=1,size=1`. It separates existing-order refresh from new-order creation, timeline event insertion, shipment/claim platform writes, and formal order sync. A future batch gate must start with readonly candidate discovery, reject mixed new/refresh candidates, require exact safe-hash matches to existing local real Naver orders, block partial writes in the first batch, and require explicit approval plus database backup before any later local write phase.
+
+## Phase Naver-ERP-15B - Naver Order Refresh Batch Mock Gate
+
+The Naver order refresh batch mock gate is documented in `PHASE_NAVER_ERP_15B_ORDER_REFRESH_BATCH_MOCK_GATE.md`.
+
+15B adds a private Codex1 mock gate for a future existing-order refresh batch. It is exercised only by `verify_all.py` against the temporary verification database. The gate defaults to at most two candidates, rejects stale previews, duplicate safe hashes, new-order candidates, privacy failures, unknown statuses, sensitive/raw-response fields, and unapproved writes, and can update two temporary existing local orders only when `write_enabled=true` and `manual_approval=true`. It does not change the public endpoint, call Naver, write the real database, insert timeline events, modify runtime UI, or open formal order sync.
