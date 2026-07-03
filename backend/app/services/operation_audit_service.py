@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.models.operation_audit_log import OperationAuditLog
 
 
 VERIFICATION_SCOPE = "verify_all_temp_db"
+LOCAL_WRITER_SCOPE = "local_runtime_approved"
 
 REQUIRED_AUDIT_FIELDS = {
     "created_at",
@@ -36,21 +38,27 @@ SENSITIVE_VALUE_MARKERS = {
     "bcrypt",
     "client_secret",
     "client-secret",
+    "full address",
     "must-not-leak",
+    "must not leak",
     "raw_response",
     "raw response",
     "raw-request",
     "signature",
 }
 
+SENSITIVE_VALUE_PATTERNS = (
+    re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b"),
+)
 
-def _base_result() -> dict[str, Any]:
+
+def _base_result(*, phase: str = "ERP-Audit-1G", runtime_writer_enabled: bool = False) -> dict[str, Any]:
     return {
-        "phase": "ERP-Audit-1G",
+        "phase": phase,
         "status": "audit_write_not_requested",
         "audit_rows_written": False,
         "rows_written": 0,
-        "runtime_writer_enabled": False,
+        "runtime_writer_enabled": runtime_writer_enabled,
         "real_api_called": False,
         "real_schema_changed": False,
         "sync_log_written": False,
@@ -135,6 +143,8 @@ def _sensitive_fields(payload: Any) -> list[str]:
             lowered = value.lower()
             if any(marker in lowered for marker in SENSITIVE_VALUE_MARKERS):
                 forbidden.add("sensitive_value")
+            if any(pattern.search(value) for pattern in SENSITIVE_VALUE_PATTERNS):
+                forbidden.add("sensitive_value")
 
     walk(payload)
     return sorted(forbidden)
@@ -202,6 +212,48 @@ def _validate_audit_row(audit_row: dict[str, Any]) -> tuple[str | None, dict[str
     return None, {}
 
 
+def _insert_audit_row(db: Session, audit_row: dict[str, Any]) -> OperationAuditLog:
+    row = OperationAuditLog(
+        created_at=_coerce_datetime(audit_row["created_at"]),
+        updated_at=_coerce_datetime(audit_row["updated_at"]),
+        store_id=audit_row.get("store_id"),
+        platform=audit_row.get("platform"),
+        environment=audit_row.get("environment", "local"),
+        actor_type=audit_row["actor_type"],
+        actor_id=audit_row.get("actor_id"),
+        actor_label=audit_row.get("actor_label"),
+        actor_role=audit_row.get("actor_role"),
+        action=audit_row["action"],
+        operation_phase=audit_row.get("operation_phase"),
+        correlation_id=audit_row["correlation_id"],
+        request_id=audit_row.get("request_id"),
+        status=audit_row["status"],
+        reason_code=audit_row.get("reason_code"),
+        target_type=audit_row.get("target_type"),
+        target_id=audit_row.get("target_id"),
+        target_hash=audit_row.get("target_hash"),
+        target_label=audit_row.get("target_label"),
+        changed_field_names=audit_row.get("changed_field_names"),
+        before_summary=audit_row.get("before_summary"),
+        after_summary=audit_row.get("after_summary"),
+        counts_summary=audit_row.get("counts_summary"),
+        safety_flags=audit_row.get("safety_flags"),
+        backup_path=audit_row.get("backup_path"),
+        backup_sha256=audit_row.get("backup_sha256"),
+        restore_source_path=audit_row.get("restore_source_path"),
+        restore_source_sha256=audit_row.get("restore_source_sha256"),
+        sensitive_scan_passed=audit_row.get("sensitive_scan_passed", False),
+        raw_response_saved=audit_row.get("raw_response_saved", False),
+        secrets_saved=audit_row.get("secrets_saved", False),
+        privacy_fields_redacted=audit_row.get("privacy_fields_redacted", True),
+        notes=audit_row.get("notes"),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def write_operation_audit_log_mock_gate(
     db: Session,
     audit_row: dict[str, Any],
@@ -242,48 +294,63 @@ def write_operation_audit_log_mock_gate(
         })
         return result
 
-    row = OperationAuditLog(
-        created_at=_coerce_datetime(audit_row["created_at"]),
-        updated_at=_coerce_datetime(audit_row["updated_at"]),
-        store_id=audit_row.get("store_id"),
-        platform=audit_row.get("platform"),
-        environment=audit_row.get("environment", "local"),
-        actor_type=audit_row["actor_type"],
-        actor_id=audit_row.get("actor_id"),
-        actor_label=audit_row.get("actor_label"),
-        actor_role=audit_row.get("actor_role"),
-        action=audit_row["action"],
-        operation_phase=audit_row.get("operation_phase"),
-        correlation_id=audit_row["correlation_id"],
-        request_id=audit_row.get("request_id"),
-        status=audit_row["status"],
-        reason_code=audit_row.get("reason_code"),
-        target_type=audit_row.get("target_type"),
-        target_id=audit_row.get("target_id"),
-        target_hash=audit_row.get("target_hash"),
-        target_label=audit_row.get("target_label"),
-        changed_field_names=audit_row.get("changed_field_names"),
-        before_summary=audit_row.get("before_summary"),
-        after_summary=audit_row.get("after_summary"),
-        counts_summary=audit_row.get("counts_summary"),
-        safety_flags=audit_row.get("safety_flags"),
-        backup_path=audit_row.get("backup_path"),
-        backup_sha256=audit_row.get("backup_sha256"),
-        restore_source_path=audit_row.get("restore_source_path"),
-        restore_source_sha256=audit_row.get("restore_source_sha256"),
-        sensitive_scan_passed=audit_row.get("sensitive_scan_passed", False),
-        raw_response_saved=audit_row.get("raw_response_saved", False),
-        secrets_saved=audit_row.get("secrets_saved", False),
-        privacy_fields_redacted=audit_row.get("privacy_fields_redacted", True),
-        notes=audit_row.get("notes"),
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
+    row = _insert_audit_row(db, audit_row)
     result.update({
         "status": "audit_row_written",
         "audit_rows_written": True,
         "rows_written": 1,
         "audit_log_id": row.id,
+    })
+    return result
+
+
+def write_operation_audit_log_local(
+    db: Session,
+    audit_row: dict[str, Any],
+    *,
+    write_enabled: bool,
+    manual_approval: bool,
+    local_write_scope: str | None = None,
+) -> dict[str, Any]:
+    """Controlled local writer for explicitly approved internal operations.
+
+    1H adds the service entry point but does not wire it to public routes or
+    broad business flows. Callers must pass the private local scope and manual
+    approval, and the payload must pass the same safety gates as the mock gate.
+    """
+
+    result = _base_result(phase="ERP-Audit-1H")
+    if not write_enabled:
+        return result
+    if local_write_scope != LOCAL_WRITER_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "local_writer_scope_required",
+        })
+        return result
+    if not manual_approval:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+
+    skip_reason, extra = _validate_audit_row(audit_row)
+    if skip_reason:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": skip_reason,
+            **extra,
+        })
+        return result
+
+    row = _insert_audit_row(db, audit_row)
+    result.update({
+        "status": "audit_row_written",
+        "audit_rows_written": True,
+        "rows_written": 1,
+        "audit_log_id": row.id,
+        "runtime_writer_enabled": True,
+        "local_write_scope": "approved_internal_only",
     })
     return result

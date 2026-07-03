@@ -7690,6 +7690,259 @@ def verify_operation_audit_writer_service_mock_gate() -> None:
     print("operation audit writer service mock gate: ok")
 
 
+def verify_operation_audit_writer_local_implementation() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        LOCAL_WRITER_SCOPE,
+        write_operation_audit_log_local,
+    )
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        valid_sha = "e" * 64
+        restore_sha = "f" * 64
+        safe_row = {
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "store_id": 8,
+            "platform": "naver",
+            "environment": "local",
+            "actor_type": "human",
+            "actor_id": "operator-safe-hash-1h",
+            "actor_label": "Local operator",
+            "actor_role": "owner",
+            "action": "audit_writer_local_approved",
+            "operation_phase": "ERP-Audit-1H",
+            "correlation_id": "audit-corr-1h-chain",
+            "request_id": "audit-request-1h-001",
+            "status": "success",
+            "reason_code": "local_writer_verified",
+            "target_type": "audit_log",
+            "target_id": None,
+            "target_hash": "id-hash-audit1h001",
+            "target_label": "Audit writer local implementation",
+            "changed_field_names": ["action", "status", "safety_flags"],
+            "before_summary": {
+                "runtime_writer": "manual_scope_required",
+                "operation_audit_logs": audit_count_before,
+            },
+            "after_summary": {
+                "runtime_writer": "local_scope_verified",
+                "operation_audit_logs_delta": 1,
+            },
+            "counts_summary": {
+                "orders_written": 0,
+                "products_written": 0,
+                "sync_logs_written": 0,
+                "audit_rows_written": 1,
+            },
+            "safety_flags": {
+                "local_write_scope_required": True,
+                "manual_approval": True,
+                "real_api_called": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+            },
+            "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1h",
+            "backup_sha256": valid_sha,
+            "restore_source_path": "C:/safe-backups/codex1.db.backup-erp-audit-1h",
+            "restore_source_sha256": restore_sha,
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Local writer implementation verified in temporary database only.",
+        }
+
+        not_requested_gate = write_operation_audit_log_local(
+            db,
+            safe_row,
+            write_enabled=False,
+            manual_approval=False,
+        )
+        assert not_requested_gate["status"] == "audit_write_not_requested", not_requested_gate
+        assert not_requested_gate["rows_written"] == 0, not_requested_gate
+
+        scope_gate = write_operation_audit_log_local(
+            db,
+            safe_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=None,
+        )
+        assert scope_gate["skip_reason"] == "local_writer_scope_required", scope_gate
+        assert scope_gate["rows_written"] == 0, scope_gate
+
+        manual_gate = write_operation_audit_log_local(
+            db,
+            safe_row,
+            write_enabled=True,
+            manual_approval=False,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert manual_gate["skip_reason"] == "manual_approval_required", manual_gate
+        assert manual_gate["rows_written"] == 0, manual_gate
+
+        invalid_datetime_row = dict(safe_row)
+        invalid_datetime_row["created_at"] = "not-a-date"
+        invalid_datetime_gate = write_operation_audit_log_local(
+            db,
+            invalid_datetime_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert invalid_datetime_gate["skip_reason"] == "invalid_datetime", invalid_datetime_gate
+        assert "created_at" in invalid_datetime_gate["invalid_datetime_fields"], invalid_datetime_gate
+
+        sensitive_value_row = dict(safe_row)
+        sensitive_value_row["notes"] = "010-1111-2222 must not persist"
+        sensitive_value_gate = write_operation_audit_log_local(
+            db,
+            sensitive_value_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert sensitive_value_gate["skip_reason"] == "audit_sensitive_field_blocked", sensitive_value_gate
+        sensitive_gate_text = json.dumps(sensitive_value_gate, ensure_ascii=False, default=str).lower()
+        assert "010-1111-2222" not in sensitive_gate_text, sensitive_gate_text
+
+        unsafe_key_row = dict(safe_row)
+        unsafe_key_row["after_summary"] = {
+            "buyer_phone": "masked value should still be blocked by unsafe key",
+        }
+        unsafe_key_gate = write_operation_audit_log_local(
+            db,
+            unsafe_key_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert unsafe_key_gate["skip_reason"] == "audit_sensitive_field_blocked", unsafe_key_gate
+        assert unsafe_key_gate["rows_written"] == 0, unsafe_key_gate
+
+        approved_gate = write_operation_audit_log_local(
+            db,
+            safe_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert approved_gate["status"] == "audit_row_written", approved_gate
+        assert approved_gate["rows_written"] == 1, approved_gate
+        assert approved_gate["runtime_writer_enabled"] is True, approved_gate
+        assert approved_gate["local_write_scope"] == "approved_internal_only", approved_gate
+        assert approved_gate["real_api_called"] is False, approved_gate
+        assert approved_gate["sync_log_written"] is False, approved_gate
+
+        blocked_row = dict(safe_row)
+        blocked_row.update({
+            "action": "audit_writer_local_blocked_evidence",
+            "status": "blocked",
+            "reason_code": "manual_operation_blocked",
+            "before_summary": None,
+            "after_summary": None,
+            "counts_summary": {
+                "blocked_count": 1,
+                "rows_written": 0,
+                "audit_rows_written": 1,
+            },
+            "safety_flags": {
+                "blocked_payload_written": False,
+                "sensitive_scan_passed": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+            },
+            "sensitive_scan_passed": False,
+        })
+        blocked_gate = write_operation_audit_log_local(
+            db,
+            blocked_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert blocked_gate["status"] == "audit_row_written", blocked_gate
+        assert blocked_gate["rows_written"] == 1, blocked_gate
+
+        local_rows = db.execute(text("""
+            SELECT
+                action,
+                status,
+                reason_code,
+                correlation_id,
+                sensitive_scan_passed,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted,
+                changed_field_names,
+                before_summary,
+                after_summary,
+                counts_summary,
+                safety_flags
+            FROM operation_audit_logs
+            WHERE correlation_id = 'audit-corr-1h-chain'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(local_rows) == 2, local_rows
+        assert [row["action"] for row in local_rows] == [
+            "audit_writer_local_approved",
+            "audit_writer_local_blocked_evidence",
+        ], local_rows
+        assert local_rows[0]["sensitive_scan_passed"] in (1, True), local_rows
+        assert local_rows[1]["sensitive_scan_passed"] in (0, False), local_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in local_rows), local_rows
+        assert all(row["secrets_saved"] in (0, False) for row in local_rows), local_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in local_rows), local_rows
+
+        persisted_text = json.dumps(
+            [dict(row) for row in local_rows],
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+        assert "010-1111-2222" not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 2, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("operation audit writer local implementation: ok")
+
+
 def verify_backup_restore_verification_dry_run() -> None:
     production_db_path = BACKEND_DIR / "codex1.db"
     production_before = None
@@ -8040,6 +8293,7 @@ def main() -> None:
         verify_operation_audit_log_schema_migration_gate()
         verify_operation_audit_log_mock_write_gate()
         verify_operation_audit_writer_service_mock_gate()
+        verify_operation_audit_writer_local_implementation()
         verify_backup_restore_verification_dry_run()
         verify_git_tracking()
         verify_docs_no_real_secrets()
