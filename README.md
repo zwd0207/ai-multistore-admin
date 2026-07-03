@@ -629,6 +629,12 @@ The audit log post-migration verification is documented in `PHASE_ERP_AUDIT_1F_A
 
 ERP-Audit-1F is verification-only. It opens the real `backend/codex1.db` in SQLite read-only mode and confirms the `operation_audit_logs` table still has 34 approved columns, 10 approved non-unique indexes, safe defaults, no forbidden columns, zero rows, and unchanged business counts. It also confirms no public audit route exists and runtime audit writing remains disabled. This phase changes no schema, writes no audit or business rows, calls no platform APIs, and opens no formal sync.
 
+## Phase ERP-Audit-1G - Audit Writer Service Mock Gate
+
+The audit writer service mock gate is documented in `PHASE_ERP_AUDIT_1G_AUDIT_WRITER_SERVICE_MOCK_GATE.md`.
+
+ERP-Audit-1G adds a private backend audit writer gate and verifies it only inside the temporary `verify_all.py` database. The helper stays blocked unless write intent, manual approval, and the private verification scope are all present. Tests cover safe mock audit rows, blocked-operation evidence rows, sensitive JSON rejection, invalid SHA-256 rejection, privacy flag rejection, and unchanged business counts. The real `backend/codex1.db` remains `operation_audit_logs=0`; no public audit endpoint, frontend reader, runtime writer, platform API call, or formal sync is opened.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
