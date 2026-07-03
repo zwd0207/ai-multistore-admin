@@ -551,6 +551,12 @@ The Naver new-order candidate approval plan is documented in `PHASE_NAVER_ERP_16
 
 16A is planning-only. It does not call Naver, does not write local data, does not change schema or runtime UI, and does not open formal order sync. It routes the 15C safe hash `id-hash-67b5fc1c97` into the selected new-order path, not the existing-order refresh batch path. A later write still requires a fresh 16B readonly repeat, duplicate checks, privacy/status gates, explicit write approval, database backup, one-order limit, no products/SyncLog/tested_success/timeline writes, and no Naver platform write action.
 
+## Phase Naver-ERP-16B - Selected New-Order Readonly Repeat Check
+
+The Naver selected new-order readonly repeat result is documented in `PHASE_NAVER_ERP_16B_SELECTED_NEW_ORDER_READONLY_REPEAT_CHECK.md`.
+
+16B repeats the real readonly preview under the existing `page=1,size=1` guardrail with `real_sync=false`. It returned HTTP 200 with feed/detail HTTP 200 and the same selected safe hash, `id-hash-67b5fc1c97`. Duplicate checks found 0 real local matches and 0 mock/test matches, so the candidate remains `candidate_new`. Status and privacy gates passed, required business fields were present, and counts stayed unchanged: `orders_store8=5`, real Naver local orders 2, mock/test Naver orders 3, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, and `order_status_events_rows=0`. 16B does not approve a write; it only allows a later 16C approval plan to be considered.
+
 ## Phase ERP-Audit-1A - Local Operation Audit Log Plan
 
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
