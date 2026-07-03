@@ -388,3 +388,9 @@ The selected Naver new-order write path is documented in `PHASE_NAVER_ERP_11A_SE
 The selected Naver new-order write mock gate is documented in `PHASE_NAVER_ERP_11B_SELECTED_NEW_ORDER_WRITE_MOCK_GATE.md`.
 
 11B adds a private Codex1 mock-testable gate for future selected-candidate persistence. It is not wired to the public preview endpoint and does not call Naver. `verify_all.py` now covers readonly not-requested, stale, missing, changed, duplicate, not-unique, privacy-blocked, and one-row temporary mock success paths while keeping `products`, `SyncLog`, `tested_success`, raw response saving, platform writes, and formal order sync closed.
+
+## Phase Naver-ERP-11C - Selected New-Order Readonly Candidate Refresh
+
+The selected Naver new-order readonly candidate refresh is documented in `PHASE_NAVER_ERP_11C_SELECTED_NEW_ORDER_READONLY_CANDIDATE_REFRESH.md`.
+
+11C re-ran the existing Codex1 order preview endpoint with `real_preview=true`, `include_detail=true`, `complete_field_preview=true`, and `real_sync=false` over a recent 3-day KST window. The backend returned HTTP 200 with `preview_status=failed` and `error_code=ip_not_allowed`, so feed/detail were not called and the older `candidate_new` could not be refreshed. Local counts stayed unchanged: `orders_store8=4`, real Naver local orders remain 1, mock Naver orders remain 3, `products_store8=5`, `sync_logs_store8=1`, and `tested_success_store8=8`. The next step is to confirm the Naver Commerce API allowed IP setting before retrying 11C; selected-candidate write approval remains blocked.
