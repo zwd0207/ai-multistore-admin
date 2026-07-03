@@ -538,3 +538,9 @@ The Naver order refresh batch approval plan is documented in `PHASE_NAVER_ERP_15
 The local operation audit log plan is documented in `PHASE_ERP_AUDIT_1A_LOCAL_OPERATION_AUDIT_LOG_PLAN.md`.
 
 ERP-Audit-1A is planning-only. It defines a future `operation_audit_logs` trail separate from `SyncLog` so production operators can answer who approved or performed a local operation, what object/store was affected, when it happened, what safe fields changed, whether backup/restore evidence exists, and whether sensitive scans passed. It also defines the sensitive-data boundary for audit logs: no tokens, Authorization, headers, signatures, client secrets, raw platform responses, full order ids, full product-order ids, buyer/receiver privacy, phones, addresses, or zip codes. This phase does not create schema, write audit rows, modify runtime UI, or change backup/restore behavior.
+
+## Phase ERP-Audit-1B - Audit Log Schema Proposal
+
+The audit log schema proposal is documented in `PHASE_ERP_AUDIT_1B_AUDIT_LOG_SCHEMA_PROPOSAL.md`.
+
+ERP-Audit-1B is proposal-only. It defines the future `operation_audit_logs` table shape, column types, status/action/target enum direction, indexes, SHA-256 backup/restore fields, safety booleans, JSON summary boundaries, and sensitive-field ban. It keeps audit logging separate from `SyncLog`, proposes no uniqueness constraint for normal audit rows because correlation chains need multiple rows, and recommends a later mock schema gate before any real migration. It does not create a table, run a migration, add a model, write audit rows, or modify runtime UI.
