@@ -4305,6 +4305,289 @@ def _evaluate_naver_order_local_refresh_mock_gate(
     return result
 
 
+def _naver_order_refresh_batch_forbidden_field_names(payload: object) -> list[str]:
+    allowed_names = {
+        "addressobserved",
+        "addresssaved",
+        "buyeridhash",
+        "buyerid_hash",
+        "buyerphonemasked",
+        "buyer_phone_masked",
+        "buyernamemasked",
+        "buyer_name_masked",
+        "externalorderidhash",
+        "external_order_id_hash",
+        "externalproductorderidhash",
+        "external_product_order_id_hash",
+        "orderidhash",
+        "order_id_hash",
+        "privacyfieldsredacted",
+        "privacy_fields_redacted",
+        "productorderidhash",
+        "product_order_id_hash",
+        "rawresponsesaved",
+        "raw_response_saved",
+        "receivernamemasked",
+        "receiver_name_masked",
+        "receiverphonemasked",
+        "receiver_phone_masked",
+    }
+    forbidden_fragments = {
+        "authorization",
+        "bcrypt",
+        "buyername",
+        "buyerphone",
+        "clientsecret",
+        "client_secret",
+        "completefield",
+        "complete_field",
+        "header",
+        "orderid",
+        "orderno",
+        "phone",
+        "postal",
+        "productorderid",
+        "productorderno",
+        "rawdata",
+        "raw_data",
+        "rawresponse",
+        "raw_response",
+        "receiveraddress",
+        "receivername",
+        "receiverphone",
+        "secret",
+        "signature",
+        "token",
+        "zip",
+        "zip_code",
+        "zipcode",
+    }
+    normalized_names = {
+        name.replace("-", "").replace("_", "").replace(" ", "").lower()
+        for name in _collect_json_field_names(payload)
+    } - allowed_names
+    return sorted(
+        name
+        for name in normalized_names
+        if any(fragment in name for fragment in forbidden_fragments)
+    )
+
+
+def _naver_order_refresh_preview_unknown_status(refresh_preview: dict) -> bool:
+    status_values = (
+        refresh_preview.get("order_status"),
+        refresh_preview.get("delivery_status"),
+        refresh_preview.get("claim_status"),
+    )
+    return bool(refresh_preview.get("unknown_status_observed")) or any(
+        _naver_order_timeline_status_unknown(value)
+        for value in status_values
+        if _naver_order_timeline_status_raw(value)
+    )
+
+
+def _default_naver_order_refresh_batch_mock_gate_result(
+    *,
+    refresh_previews: list[dict] | tuple[dict, ...] | None,
+    approved_order_hashes: list[str] | tuple[str, ...] | None,
+    write_enabled: bool,
+    manual_approval: bool,
+    fresh_readonly_preview: bool,
+    max_batch_size: int,
+) -> dict:
+    return {
+        "phase": "Naver-ERP-15B",
+        "order_refresh_batch_mock_gate": True,
+        "write_enabled": bool(write_enabled),
+        "manual_approval": bool(manual_approval),
+        "fresh_readonly_preview": bool(fresh_readonly_preview),
+        "max_batch_size": max_batch_size,
+        "candidate_count": len(refresh_previews) if isinstance(refresh_previews, (list, tuple)) else 0,
+        "approved_order_hash_count": len(approved_order_hashes) if isinstance(approved_order_hashes, (list, tuple)) else 0,
+        "status": "blocked",
+        "skip_reason": None,
+        "sample_ids": [],
+        "duplicate_candidate_hashes": [],
+        "candidate_results": [],
+        "matched_local_count": 0,
+        "would_update": 0,
+        "no_change_count": 0,
+        "changed_fields_by_hash": {},
+        "refreshed_count": 0,
+        "orders_written": False,
+        "orders_created": False,
+        "orders_updated": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "partial_writes_allowed": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+
+
+def _evaluate_naver_order_refresh_batch_mock_gate(
+    db: Session,
+    *,
+    refresh_previews: list[dict] | tuple[dict, ...] | None,
+    approved_order_hashes: list[str] | tuple[str, ...] | None = None,
+    write_enabled: bool = False,
+    manual_approval: bool = False,
+    fresh_readonly_preview: bool = True,
+    max_batch_size: int = 2,
+) -> dict:
+    """Mock-testable 15B batch refresh gate; not wired to public endpoints or real sync."""
+    result = _default_naver_order_refresh_batch_mock_gate_result(
+        refresh_previews=refresh_previews,
+        approved_order_hashes=approved_order_hashes,
+        write_enabled=write_enabled,
+        manual_approval=manual_approval,
+        fresh_readonly_preview=fresh_readonly_preview,
+        max_batch_size=max_batch_size,
+    )
+    if not fresh_readonly_preview:
+        result["skip_reason"] = "batch_refresh_stale_preview"
+        return result
+    if not isinstance(refresh_previews, (list, tuple)) or not refresh_previews:
+        result["skip_reason"] = "batch_refresh_candidates_missing"
+        return result
+    if len(refresh_previews) > max_batch_size:
+        result["skip_reason"] = "batch_refresh_candidate_limit_exceeded"
+        return result
+
+    candidate_hashes: list[str] = []
+    for item in refresh_previews:
+        candidate_hash = item.get("external_product_order_id_hash") if isinstance(item, dict) else None
+        if not _is_hash_identifier(candidate_hash):
+            result["skip_reason"] = "batch_refresh_missing_safe_hash"
+            return result
+        candidate_hashes.append(str(candidate_hash))
+    result["sample_ids"] = candidate_hashes
+
+    duplicate_hashes = sorted({item for item in candidate_hashes if candidate_hashes.count(item) > 1})
+    result["duplicate_candidate_hashes"] = duplicate_hashes
+    if duplicate_hashes:
+        result["skip_reason"] = "duplicate_external_product_order_hash_in_batch"
+        return result
+
+    if approved_order_hashes is not None:
+        if not isinstance(approved_order_hashes, (list, tuple)) or not approved_order_hashes:
+            result["skip_reason"] = "approved_order_hashes_missing"
+            return result
+        approved_hashes = [str(item) for item in approved_order_hashes if _is_hash_identifier(item)]
+        if len(approved_hashes) != len(approved_order_hashes):
+            result["skip_reason"] = "approved_order_hash_invalid"
+            return result
+        if set(approved_hashes) != set(candidate_hashes):
+            result["skip_reason"] = "approved_order_hashes_mismatch"
+            return result
+
+    prepared_updates: list[tuple[Order, dict, str, list[str]]] = []
+    for refresh_preview in refresh_previews:
+        safe_hash = str(refresh_preview["external_product_order_id_hash"])
+        candidate_result = {
+            "safe_hash": safe_hash,
+            "matched_local_count": 0,
+            "would_update": 0,
+            "changed_fields": [],
+            "privacy_gate_passed": False,
+            "skip_reason": None,
+        }
+
+        forbidden_fields = _naver_order_refresh_batch_forbidden_field_names(refresh_preview)
+        if forbidden_fields:
+            candidate_result["skip_reason"] = "batch_refresh_sensitive_field_blocked"
+            candidate_result["forbidden_field_names"] = forbidden_fields
+            result["candidate_results"].append(candidate_result)
+            result["skip_reason"] = "batch_refresh_sensitive_field_blocked"
+            return result
+
+        existing_orders = db.scalars(
+            select(Order).where(
+                Order.store_id == 8,
+                Order.platform == "naver",
+                Order.source_type == NAVER_ORDER_SYNC_SOURCE_TYPE,
+                Order.external_order_id == safe_hash,
+            )
+        ).all()
+        candidate_result["matched_local_count"] = len(existing_orders)
+        result["matched_local_count"] += len(existing_orders)
+        if not existing_orders:
+            candidate_result["skip_reason"] = "batch_refresh_new_order_candidate"
+            result["candidate_results"].append(candidate_result)
+            result["skip_reason"] = "batch_refresh_new_order_candidate"
+            return result
+        if len(existing_orders) > 1:
+            candidate_result["skip_reason"] = "batch_refresh_local_order_not_unique"
+            result["candidate_results"].append(candidate_result)
+            result["skip_reason"] = "batch_refresh_local_order_not_unique"
+            return result
+
+        privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+        candidate_result["privacy_gate_passed"] = privacy_gate["passed"]
+        candidate_result["privacy_gate_reasons"] = privacy_gate["reasons"]
+        if not privacy_gate["passed"]:
+            candidate_result["skip_reason"] = "batch_refresh_privacy_blocked"
+            result["candidate_results"].append(candidate_result)
+            result["skip_reason"] = "batch_refresh_privacy_blocked"
+            return result
+
+        if _naver_order_refresh_preview_unknown_status(refresh_preview):
+            candidate_result["skip_reason"] = "batch_refresh_unknown_status_observed"
+            result["candidate_results"].append(candidate_result)
+            result["skip_reason"] = "batch_refresh_unknown_status_observed"
+            return result
+
+        existing = existing_orders[0]
+        payload = _build_naver_order_refresh_payload(refresh_preview)
+        changed_fields = _changed_naver_order_refresh_fields(existing, payload)
+        candidate_result["changed_fields"] = changed_fields
+        candidate_result["would_update"] = 1 if changed_fields else 0
+        result["changed_fields_by_hash"][safe_hash] = changed_fields
+        result["would_update"] += candidate_result["would_update"]
+        if changed_fields:
+            prepared_updates.append((existing, payload, safe_hash, changed_fields))
+        else:
+            result["no_change_count"] += 1
+        result["candidate_results"].append(candidate_result)
+
+    if not result["would_update"]:
+        result["status"] = "batch_refresh_no_change"
+        return result
+    if not write_enabled:
+        result["status"] = "batch_refresh_not_requested"
+        return result
+    if not manual_approval:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+
+    for existing, payload, _safe_hash, _changed_fields in prepared_updates:
+        for field, value in payload.items():
+            setattr(existing, field, value)
+    db.commit()
+    result.update({
+        "status": "batch_refresh_updated",
+        "refreshed_count": len(prepared_updates),
+        "orders_written": bool(prepared_updates),
+        "orders_updated": bool(prepared_updates),
+        "orders_created": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "address_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
 NAVER_ORDER_TIMELINE_EVENT_TYPES = {
     "PAYED": "order_paid",
     "PLACE_PRODUCT_ORDER": "order_confirmed",

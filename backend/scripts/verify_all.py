@@ -4992,6 +4992,316 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert len(db.execute(text(
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
                     ), {"store_id": naver_store_id}).all()) == before_13a_cap_success
+
+                    before_15b_order_count = len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all())
+                    before_15b_product_count = len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all())
+                    before_15b_logs = len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all())
+                    before_15b_cap_success = len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all())
+                    before_15b_event_count = len(db.scalars(
+                        select(OrderStatusEvent).where(OrderStatusEvent.store_id == naver_store_id)
+                    ).all())
+                    batch_order_one_hash = "id-hash-ba1cf00111"
+                    batch_order_two_hash = "id-hash-ba1cf00222"
+                    batch_order_one = Order(
+                        store_id=naver_store_id,
+                        platform="naver",
+                        external_order_id=batch_order_one_hash,
+                        buyer_name="배**",
+                        buyer_masked_phone="010-****-0001",
+                        product_name="Batch refresh seed one",
+                        quantity=1,
+                        order_amount=Decimal("100000"),
+                        currency="KRW",
+                        order_status="PAYED",
+                        paid_at=datetime(2026, 7, 1, 1, 0, tzinfo=timezone.utc),
+                        ordered_at=datetime(2026, 7, 1, 1, 0, tzinfo=timezone.utc),
+                        source_type=sync_service.NAVER_ORDER_SYNC_SOURCE_TYPE,
+                        last_synced_at=datetime(2026, 7, 1, 1, 5, tzinfo=timezone.utc),
+                        raw_data={
+                            "external_product_order_id_hash": batch_order_one_hash,
+                            "external_order_id_hash": "id-hash-ba1c0d0111",
+                            "raw_response_saved": False,
+                            "privacy_fields_redacted": True,
+                            "address_saved": False,
+                        },
+                    )
+                    batch_order_two = Order(
+                        store_id=naver_store_id,
+                        platform="naver",
+                        external_order_id=batch_order_two_hash,
+                        buyer_name="박**",
+                        buyer_masked_phone="010-****-0002",
+                        product_name="Batch refresh seed two",
+                        quantity=1,
+                        order_amount=Decimal("120000"),
+                        currency="KRW",
+                        order_status="PAYED",
+                        paid_at=datetime(2026, 7, 1, 2, 0, tzinfo=timezone.utc),
+                        ordered_at=datetime(2026, 7, 1, 2, 0, tzinfo=timezone.utc),
+                        source_type=sync_service.NAVER_ORDER_SYNC_SOURCE_TYPE,
+                        last_synced_at=datetime(2026, 7, 1, 2, 5, tzinfo=timezone.utc),
+                        raw_data={
+                            "external_product_order_id_hash": batch_order_two_hash,
+                            "external_order_id_hash": "id-hash-ba1c0d0222",
+                            "raw_response_saved": False,
+                            "privacy_fields_redacted": True,
+                            "address_saved": False,
+                        },
+                    )
+                    db.add_all([batch_order_one, batch_order_two])
+                    db.commit()
+
+                    batch_preview_one = dict(selected_candidate)
+                    batch_preview_one.update({
+                        "external_product_order_id_hash": batch_order_one_hash,
+                        "product_order_id_hash": batch_order_one_hash,
+                        "external_order_id_hash": "id-hash-ba1c0d0111",
+                        "order_id_hash": "id-hash-ba1c0d0111",
+                        "order_status": {"raw": "DELIVERED", "label_zh": "配送完成", "unknown_status_observed": False},
+                        "order_status_label_zh": "配送完成",
+                        "delivery_status": {"raw": "DELIVERED", "label_zh": "配送完成", "unknown_status_observed": False},
+                        "delivery_status_label_zh": "配送完成",
+                        "claim_status": {"raw": None, "label_zh": None, "unknown_status_observed": False},
+                        "claim_status_label_zh": None,
+                        "order_amount": 101000,
+                        "quantity": 2,
+                        "last_synced_at": "2026-07-03T11:00:00+09:00",
+                        "unknown_status_observed": False,
+                    })
+                    batch_preview_two = dict(selected_candidate)
+                    batch_preview_two.update({
+                        "external_product_order_id_hash": batch_order_two_hash,
+                        "product_order_id_hash": batch_order_two_hash,
+                        "external_order_id_hash": "id-hash-ba1c0d0222",
+                        "order_id_hash": "id-hash-ba1c0d0222",
+                        "order_status": {"raw": "DISPATCHED", "label_zh": "已发货 / 配送中", "unknown_status_observed": False},
+                        "order_status_label_zh": "已发货 / 配送中",
+                        "delivery_status": {"raw": "DISPATCHED", "label_zh": "已发货 / 配送中", "unknown_status_observed": False},
+                        "delivery_status_label_zh": "已发货 / 配送中",
+                        "claim_status": {"raw": None, "label_zh": None, "unknown_status_observed": False},
+                        "claim_status_label_zh": None,
+                        "order_amount": 121000,
+                        "quantity": 3,
+                        "last_synced_at": "2026-07-03T11:05:00+09:00",
+                        "unknown_status_observed": False,
+                    })
+                    approved_batch_hashes = [batch_order_one_hash, batch_order_two_hash]
+
+                    readonly_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=False,
+                        manual_approval=False,
+                    )
+                    assert readonly_batch_gate["phase"] == "Naver-ERP-15B", readonly_batch_gate
+                    assert readonly_batch_gate["status"] == "batch_refresh_not_requested", readonly_batch_gate
+                    assert readonly_batch_gate["would_update"] == 2, readonly_batch_gate
+                    assert readonly_batch_gate["orders_written"] is False, readonly_batch_gate
+                    assert readonly_batch_gate["partial_writes_allowed"] is False, readonly_batch_gate
+                    assert readonly_batch_gate["formal_order_sync_open"] is False, readonly_batch_gate
+                    assert readonly_batch_gate["platform_writes_enabled"] is False, readonly_batch_gate
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_15b_order_count + 2
+
+                    stale_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=True,
+                        manual_approval=True,
+                        fresh_readonly_preview=False,
+                    )
+                    assert stale_batch_gate["skip_reason"] == "batch_refresh_stale_preview", stale_batch_gate
+                    assert stale_batch_gate["orders_written"] is False, stale_batch_gate
+
+                    limit_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two, dict(batch_preview_two)],
+                        approved_order_hashes=[batch_order_one_hash, batch_order_two_hash, batch_order_two_hash],
+                        write_enabled=True,
+                        manual_approval=True,
+                        max_batch_size=2,
+                    )
+                    assert limit_batch_gate["skip_reason"] == "batch_refresh_candidate_limit_exceeded", limit_batch_gate
+
+                    duplicate_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, dict(batch_preview_one)],
+                        approved_order_hashes=[batch_order_one_hash, batch_order_one_hash],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert duplicate_batch_gate["skip_reason"] == "duplicate_external_product_order_hash_in_batch", duplicate_batch_gate
+                    assert duplicate_batch_gate["orders_written"] is False, duplicate_batch_gate
+
+                    new_candidate_preview = dict(batch_preview_one)
+                    new_candidate_preview["external_product_order_id_hash"] = "id-hash-ba1c0e0111"
+                    new_candidate_preview["product_order_id_hash"] = "id-hash-ba1c0e0111"
+                    new_candidate_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[new_candidate_preview],
+                        approved_order_hashes=["id-hash-ba1c0e0111"],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert new_candidate_gate["skip_reason"] == "batch_refresh_new_order_candidate", new_candidate_gate
+                    assert new_candidate_gate["orders_written"] is False, new_candidate_gate
+
+                    bad_batch_preview = dict(batch_preview_one)
+                    bad_batch_preview["buyer_name_masked"] = "must-not-leak-batch-buyer"
+                    privacy_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[bad_batch_preview, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert privacy_batch_gate["skip_reason"] == "batch_refresh_privacy_blocked", privacy_batch_gate
+                    assert privacy_batch_gate["orders_written"] is False, privacy_batch_gate
+
+                    unknown_batch_preview = dict(batch_preview_one)
+                    unknown_batch_preview["order_status"] = {
+                        "raw": "BATCH_UNKNOWN_STATUS",
+                        "label_zh": "未识别状态，需人工确认",
+                        "unknown_status_observed": True,
+                    }
+                    unknown_batch_preview["unknown_status_observed"] = True
+                    unknown_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[unknown_batch_preview],
+                        approved_order_hashes=[batch_order_one_hash],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert unknown_batch_gate["skip_reason"] == "batch_refresh_unknown_status_observed", unknown_batch_gate
+                    assert unknown_batch_gate["orders_written"] is False, unknown_batch_gate
+
+                    sensitive_batch_preview = dict(batch_preview_one)
+                    sensitive_batch_preview["raw_response"] = "batch-raw-response-must-not-leak"
+                    sensitive_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[sensitive_batch_preview],
+                        approved_order_hashes=[batch_order_one_hash],
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert sensitive_batch_gate["skip_reason"] == "batch_refresh_sensitive_field_blocked", sensitive_batch_gate
+                    assert "rawresponse" in sensitive_batch_gate["candidate_results"][0]["forbidden_field_names"], sensitive_batch_gate
+                    assert "batch-raw-response-must-not-leak" not in json.dumps(
+                        sensitive_batch_gate,
+                        ensure_ascii=False,
+                        default=str,
+                    ).lower()
+
+                    not_approved_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=True,
+                        manual_approval=False,
+                    )
+                    assert not_approved_batch_gate["skip_reason"] == "manual_approval_required", not_approved_batch_gate
+                    assert not_approved_batch_gate["orders_written"] is False, not_approved_batch_gate
+
+                    approved_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert approved_batch_gate["status"] == "batch_refresh_updated", approved_batch_gate
+                    assert approved_batch_gate["refreshed_count"] == 2, approved_batch_gate
+                    assert approved_batch_gate["orders_written"] is True, approved_batch_gate
+                    assert approved_batch_gate["orders_updated"] is True, approved_batch_gate
+                    assert approved_batch_gate["orders_created"] is False, approved_batch_gate
+                    assert approved_batch_gate["products_written"] is False, approved_batch_gate
+                    assert approved_batch_gate["sync_log_written"] is False, approved_batch_gate
+                    assert approved_batch_gate["capability_tested_success_written"] is False, approved_batch_gate
+                    assert approved_batch_gate["timeline_events_written"] is False, approved_batch_gate
+                    assert approved_batch_gate["raw_response_saved"] is False, approved_batch_gate
+                    assert approved_batch_gate["privacy_fields_redacted"] is True, approved_batch_gate
+                    assert approved_batch_gate["address_saved"] is False, approved_batch_gate
+                    assert approved_batch_gate["formal_order_sync_open"] is False, approved_batch_gate
+                    assert approved_batch_gate["platform_writes_enabled"] is False, approved_batch_gate
+
+                    refreshed_batch_orders = db.scalars(select(Order).where(
+                        Order.store_id == naver_store_id,
+                        Order.platform == "naver",
+                        Order.external_order_id.in_(approved_batch_hashes),
+                    )).all()
+                    assert len(refreshed_batch_orders) == 2
+                    refreshed_batch_by_hash = {item.external_order_id: item for item in refreshed_batch_orders}
+                    assert refreshed_batch_by_hash[batch_order_one_hash].order_status == "DELIVERED"
+                    assert refreshed_batch_by_hash[batch_order_one_hash].quantity == 2
+                    assert refreshed_batch_by_hash[batch_order_one_hash].order_amount == Decimal("101000")
+                    assert refreshed_batch_by_hash[batch_order_two_hash].order_status == "DISPATCHED"
+                    assert refreshed_batch_by_hash[batch_order_two_hash].quantity == 3
+                    assert refreshed_batch_by_hash[batch_order_two_hash].order_amount == Decimal("121000")
+                    for refreshed_batch_order in refreshed_batch_orders:
+                        assert refreshed_batch_order.source_type == sync_service.NAVER_ORDER_SYNC_SOURCE_TYPE
+                        assert refreshed_batch_order.raw_data["orders_refreshed"] is True
+                        assert refreshed_batch_order.raw_data["raw_response_saved"] is False
+                        assert refreshed_batch_order.raw_data["privacy_fields_redacted"] is True
+                        assert refreshed_batch_order.raw_data["address_saved"] is False
+
+                    no_change_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
+                        db,
+                        refresh_previews=[batch_preview_one, batch_preview_two],
+                        approved_order_hashes=approved_batch_hashes,
+                        write_enabled=True,
+                        manual_approval=True,
+                    )
+                    assert no_change_batch_gate["status"] == "batch_refresh_no_change", no_change_batch_gate
+                    assert no_change_batch_gate["orders_written"] is False, no_change_batch_gate
+
+                    batch_gate_text = json.dumps({
+                        "approved_batch_gate": approved_batch_gate,
+                        "orders": [
+                            {
+                                "external_order_id": item.external_order_id,
+                                "buyer_name": item.buyer_name,
+                                "buyer_masked_phone": item.buyer_masked_phone,
+                                "product_name": item.product_name,
+                                "raw_data": item.raw_data,
+                            }
+                            for item in refreshed_batch_orders
+                        ],
+                    }, ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "batch-raw-response-must-not-leak",
+                        "must-not-leak-batch-buyer",
+                        "product-order-id-must-not-leak",
+                        "order-id-must-not-leak",
+                        "buyer-id-must-not-leak",
+                        "must-not-leak-receiver",
+                        "010-1111-2222",
+                        "must-not-leak-address",
+                        "zip-must-not-leak",
+                        "fake-order-token",
+                        "client_secret",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "raw response",
+                    ]:
+                        assert forbidden not in batch_gate_text, batch_gate_text
+
+                    for batch_order in refreshed_batch_orders:
+                        db.delete(batch_order)
+                    db.commit()
+                    assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_15b_order_count
+                    assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_15b_product_count
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_15b_logs
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_15b_cap_success
+                    assert len(db.scalars(
+                        select(OrderStatusEvent).where(OrderStatusEvent.store_id == naver_store_id)
+                    ).all()) == before_15b_event_count
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
