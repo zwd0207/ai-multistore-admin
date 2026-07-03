@@ -544,3 +544,9 @@ ERP-Audit-1A is planning-only. It defines a future `operation_audit_logs` trail 
 The audit log schema proposal is documented in `PHASE_ERP_AUDIT_1B_AUDIT_LOG_SCHEMA_PROPOSAL.md`.
 
 ERP-Audit-1B is proposal-only. It defines the future `operation_audit_logs` table shape, column types, status/action/target enum direction, indexes, SHA-256 backup/restore fields, safety booleans, JSON summary boundaries, and sensitive-field ban. It keeps audit logging separate from `SyncLog`, proposes no uniqueness constraint for normal audit rows because correlation chains need multiple rows, and recommends a later mock schema gate before any real migration. It does not create a table, run a migration, add a model, write audit rows, or modify runtime UI.
+
+## Phase ERP-Audit-1C - Audit Log Mock Write Gate
+
+The audit log mock write gate is documented in `PHASE_ERP_AUDIT_1C_AUDIT_LOG_MOCK_WRITE_GATE.md`.
+
+ERP-Audit-1C adds private `verify_all.py` coverage for the future `operation_audit_logs` write gate. It creates the proposed table only inside the temporary verification SQLite database, validates columns/defaults/indexes, blocks unapproved writes, rejects invalid SHA-256 and sensitive JSON, writes safe mock audit rows, records blocked-operation evidence without sensitive payloads, and confirms multiple rows can share a `correlation_id`. It does not create a real schema, add a model, run a migration, write real audit rows, call platform APIs, modify runtime UI, or change backup/restore behavior.
