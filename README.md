@@ -478,3 +478,9 @@ The order status events schema proposal is documented in `PHASE_NAVER_ERP_14D_OR
 The order status events mock schema gate is documented in `PHASE_NAVER_ERP_14E_ORDER_STATUS_EVENTS_MOCK_SCHEMA_GATE.md`.
 
 14E adds mock-only verification in Codex1 `verify_all.py` using the temporary verification SQLite database. It creates a temporary `order_status_events` table shape, verifies proposed columns, required indexes, the `store_id/platform/dedupe_key` uniqueness boundary, safe metadata, one-row mock insertion, duplicate rejection, and sensitive-field scanning. It does not modify the real database schema, add a model or migration, call Naver, write real orders, modify Codex2 runtime UI, or open formal order sync. Real schema approval remains deferred to a later 14F plan.
+
+## Phase Naver-ERP-14F - Order Status Timeline Schema Approval Plan
+
+The order status timeline schema approval plan is documented in `PHASE_NAVER_ERP_14F_ORDER_STATUS_TIMELINE_SCHEMA_APPROVAL_PLAN.md`.
+
+14F is planning-only. It defines the approval boundary, backup path, rollback steps, preflight checks, migration shape, post-migration verification, and future event-write boundary for a later `order_status_events` schema migration. It does not create the table, add a model or migration, call Naver, write local data, modify runtime UI, or open formal order sync. The actual schema migration remains deferred to a separately approved 14G phase.
