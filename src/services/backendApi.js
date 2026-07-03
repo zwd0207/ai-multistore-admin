@@ -5,6 +5,7 @@ const PARAMETER_ALIASES = {
   storeId: 'store_id',
   startDate: 'start_date',
   endDate: 'end_date',
+  includeAdvanced: 'include_advanced',
 };
 
 function normalizeParams(params = {}) {
@@ -54,6 +55,8 @@ export const backendApi = {
   getOrders: (params) => getData('/orders', params),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),
+  getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),
+  getOperationAuditLogSummary: (params) => getData('/operation-audit-logs/summary', params),
   syncProductsMock: (params) => sendData('post', '/sync/products/mock', undefined, params),
   syncOrdersMock: (params) => sendData('post', '/sync/orders/mock', undefined, params),
   syncCustomerInquiriesMock: (params) => sendData('post', '/sync/customer-inquiries/mock', undefined, params),

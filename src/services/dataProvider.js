@@ -27,6 +27,18 @@ function queryBackendRows(rows, params = {}) {
     ));
   }
   if (params.priority) filtered = filtered.filter((item) => comparable(item.priority) === comparable(params.priority));
+  if (params.module) filtered = filtered.filter((item) => comparable(item.module) === comparable(params.module));
+  if (params.actionType) filtered = filtered.filter((item) => comparable(item.actionType) === comparable(params.actionType));
+  if (params.operator) filtered = filtered.filter((item) => comparable(item.operator) === comparable(params.operator));
+  if (params.riskLevel) filtered = filtered.filter((item) => comparable(item.riskLevel) === comparable(params.riskLevel));
+  if (params.startDate || params.endDate) {
+    filtered = filtered.filter((item) => {
+      const sourceDate = String(item.time || item.createdAt || item.startedAt || '').slice(0, 10);
+      if (params.startDate && sourceDate < params.startDate) return false;
+      if (params.endDate && sourceDate > params.endDate) return false;
+      return true;
+    });
+  }
 
   const start = (page - 1) * pageSize;
   const data = filtered.slice(start, start + pageSize);
@@ -650,6 +662,44 @@ const sourceMethods = {
     if (!isBackendSource) return mockApi.getOperationLogs(params);
     const result = await backendApi.getSyncLogs(params);
     return queryBackendRows(adapters.list(result, adapters.syncLog).data, params);
+  },
+  getOperationAuditLogs: async (params = {}) => {
+    if (!isBackendSource) return mockApi.getOperationLogs(params);
+    const { store } = await resolveBackendStore(params);
+    const result = await backendApi.getOperationAuditLogs({
+      storeId: store.id,
+      limit: 50,
+      offset: 0,
+      includeAdvanced: true,
+      date_from: params.startDate || undefined,
+      date_to: params.endDate || undefined,
+    });
+    const adapted = adapters.operationAuditLogList(result);
+    return {
+      ...queryBackendRows(adapted.data, params),
+      businessMessage: adapted.businessMessage,
+      auditStatus: adapted.status,
+      auditRuntimeStatus: adapted.runtimeStatus,
+      publicEndpointEnabled: adapted.publicEndpointEnabled,
+      readonlyLocalRoute: adapted.readonlyLocalRoute,
+    };
+  },
+  getOperationAuditLogSummary: async (params = {}) => {
+    if (!isBackendSource) {
+      const rows = await mockApi.getOperationLogs({ ...params, page: 1, pageSize: 1000 });
+      const attentionCount = (rows.data || []).filter((item) => ['高', '紧急', '高风险', '需复核'].some((flag) => String(item.riskLevel || item.status || '').includes(flag))).length;
+      return {
+        status: 'mock_operation_summary',
+        runtimeStatus: rows.total ? 'available' : 'empty',
+        total: rows.total || 0,
+        needsAttentionCount: attentionCount,
+        backupEvidenceCount: 0,
+        restoreEvidenceCount: 0,
+        businessMessage: rows.total ? '当前显示演示操作记录。' : '当前没有演示操作记录。',
+      };
+    }
+    const { store } = await resolveBackendStore(params);
+    return adapters.operationAuditSummary(await backendApi.getOperationAuditLogSummary({ storeId: store.id }));
   },
   getDeviceEnvironments: async (params) => {
     if (!isBackendSource) return mockApi.getEnvironments(params);

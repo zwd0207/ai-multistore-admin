@@ -677,6 +677,12 @@ The Logs/Audit UI readonly integration plan is documented in `PHASE_ERP_AUDIT_1N
 
 ERP-Audit-1N is planning-only. It defines how Codex2 should connect the verified read-only audit API to the Logs page in a later runtime phase: backend mode should call only `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`, show `operation_audit_logs=0` as a normal Chinese empty state, keep SyncLog as a separate `同步记录` section, and keep audit diagnostics folded through `TechnicalDetails`. The plan forbids audit write/delete/export/detail calls, raw JSON display, full hashes or platform ids on the main page, frontend claims that audit writing is live, platform API calls, local data writes, and formal product/order sync approval.
 
+## Phase ERP-Audit-1O - Logs/Audit UI Readonly Implementation
+
+The Logs/Audit UI readonly implementation is documented in `PHASE_ERP_AUDIT_1O_LOGS_AUDIT_UI_READONLY_IMPLEMENTATION.md`.
+
+ERP-Audit-1O implements the Codex2 read-only Logs/Audit UI integration. Backend mode now calls only `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`, renders `operation_audit_logs=0` as a normal Chinese empty state, keeps SyncLog in a separate `同步记录` section, removes write-like sync controls from the Logs page, and keeps audit diagnostics folded in `TechnicalDetails`. Mock mode continues to show demo operation logs. Shared table, empty-state, pagination, and status badge labels were cleaned for readability. This phase does not modify Codex1 runtime code, write local data, call platform APIs, add audit write/delete/export/detail calls, or open formal product/order sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.

@@ -31,7 +31,7 @@ function renderCell(column, row) {
   return value;
 }
 
-export default function DataTable({ columns, rows, loading, rowKey = 'id', onEdit, onDelete, renderActions }) {
+export default function DataTable({ columns, rows = [], loading, rowKey = 'id', onEdit, onDelete, renderActions }) {
   if (loading) return <div className="table-state"><span className="spinner" />正在加载数据...</div>;
 
   const actionColSpan = columns.length + ((onEdit || onDelete || renderActions) ? 1 : 0);

@@ -1182,6 +1182,86 @@ export function adaptAiDailyContext(data = {}) {
   };
 }
 
+function operationAuditRiskLabel(item = {}) {
+  const statusText = String(item.status_label_zh || item.status || '');
+  const nextAction = String(item.next_action_label_zh || '');
+  if (statusText.includes('失败') || statusText.includes('阻断')) return '高风险';
+  if (statusText.includes('计划') || nextAction.includes('复核') || nextAction.includes('批准')) return '中风险';
+  return '低风险';
+}
+
+export function adaptOperationAuditLog(item = {}) {
+  const advanced = item.advanced_details || {};
+  const statusLabel = item.status_label_zh || item.status || '待确认';
+  const targetLabel = item.target_label || item.targetLabel || '业务对象';
+  const platformLabel = item.platform_label || adaptPlatform(item.platform) || '本地系统';
+  const changedFields = item.changed_fields_label_zh || [];
+  const summaryParts = [
+    item.counts_summary_label_zh,
+    changedFields.length ? `字段：${changedFields.join('、')}` : '',
+    item.safety_label_zh,
+  ].filter(Boolean);
+
+  return {
+    id: `audit-${item.id}`,
+    auditId: item.id,
+    time: item.created_at,
+    objectName: targetLabel,
+    module: `${platformLabel} / 操作审计`,
+    actionType: item.action_label_zh || '本地运营操作',
+    operator: item.actor_label || item.actor_type_label || '系统',
+    status: statusLabel,
+    rawStatus: advanced.status || item.status || statusLabel,
+    riskLevel: operationAuditRiskLabel(item),
+    summary: summaryParts.join('；') || '安全审计记录',
+    nextStep: item.next_action_label_zh || '无需处理，保留记录备查。',
+    backupEvidence: item.backup_evidence_label_zh || '暂无备份证据',
+    recoveryEvidence: item.backup_evidence_label_zh || '暂无恢复证据',
+    safetyLabel: item.safety_label_zh || '未返回敏感原文',
+    reasonLabel: item.reason_label_zh || '',
+    changedFields,
+    source: 'Codex1 操作审计',
+    auditRuntimeSource: 'operation_audit_logs',
+    advancedDetails: advanced,
+    beforeData: null,
+    afterData: null,
+  };
+}
+
+export function adaptOperationAuditLogList(data = {}) {
+  const items = (data.items || []).map(adaptOperationAuditLog);
+  return {
+    data: items,
+    items,
+    total: numberValue(data.total),
+    limit: numberValue(data.limit),
+    offset: numberValue(data.offset),
+    limitWasCapped: Boolean(data.limit_was_capped),
+    includeAdvanced: Boolean(data.include_advanced),
+    status: data.status,
+    runtimeStatus: data.status,
+    businessMessage: data.business_message || '',
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled),
+    readonlyLocalRoute: Boolean(data.readonly_local_route),
+  };
+}
+
+export function adaptOperationAuditSummary(data = {}) {
+  return {
+    status: data.status || '',
+    runtimeStatus: data.audit_runtime_status || 'empty',
+    total: numberValue(data.total),
+    statusCounts: data.status_counts_label_zh || {},
+    backupEvidenceCount: numberValue(data.backup_evidence_count),
+    restoreEvidenceCount: numberValue(data.restore_evidence_count),
+    needsAttentionCount: numberValue(data.needs_attention_count),
+    latestAuditTime: data.latest_audit_time || null,
+    businessMessage: data.business_message || '',
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled),
+    readonlyLocalRoute: Boolean(data.readonly_local_route),
+  };
+}
+
 export function adaptList(data, adapter) {
   const source = Array.isArray(data) ? { items: data, total: data.length } : (data || {});
   const items = (source.items || []).map(adapter);
@@ -1213,6 +1293,9 @@ export const adapters = {
   apiCapabilitySummary: adaptApiCapabilitySummary,
   apiCredentialReadiness: adaptApiCredentialReadiness,
   apiCredentialSmokeTest: adaptApiCredentialSmokeTest,
+  operationAuditLog: adaptOperationAuditLog,
+  operationAuditLogList: adaptOperationAuditLogList,
+  operationAuditSummary: adaptOperationAuditSummary,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
   coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,

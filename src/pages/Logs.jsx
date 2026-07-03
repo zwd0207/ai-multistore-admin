@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import InfoGrid from '../components/common/InfoGrid';
-import MockSyncPanel from '../components/common/MockSyncPanel';
 import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
@@ -15,11 +14,17 @@ import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
-const modules = ['店铺管理', '商品管理', '订单管理', '客服管理', '销售数据', '设备管理', '邮箱管理', '申诉管理', '账号管理', '系统设置'];
-const actionTypes = ['新增', '编辑', '删除', '状态变更', '绑定', '解绑', '回复', '提交', '登录', '风险检测', '配置修改'];
-const statuses = ['成功', '失败', '待处理', '已忽略', '需复核'];
-const riskLevels = ['低', '中', '高', '紧急'];
-const operators = ['系统管理员', 'Coupang 申诉处理账号', '韩国本土运营账号', '系统检测器'];
+const mockModules = ['店铺管理', '商品管理', '订单管理', '客服管理', '销售数据', '设备管理', '邮箱管理', '申诉管理', '账号管理', '系统设置'];
+const mockActions = ['新增', '编辑', '删除', '状态变更', '绑定', '解绑', '回复', '提交', '登录', '风险检测', '配置修改'];
+const mockStatuses = ['成功', '失败', '待处理', '已忽略', '需复核'];
+const mockRisks = ['低', '中', '高', '紧急'];
+const mockOperators = ['系统管理员', 'Coupang 申诉处理账号', '韩国本土运营账号', '系统检测器'];
+
+const auditModules = ['操作审计'];
+const auditActions = ['本地运营操作', '审计日志只读验证', '本地审计写入验证', '数据库备份', '订单刷新写入'];
+const auditStatuses = ['已完成', '失败，需要处理', '已阻断', '已计划', '已跳过', '已回滚'];
+const auditRisks = ['低风险', '中风险', '高风险'];
+const auditOperators = ['系统', '人工操作', '系统操作', '自动化任务', '验证测试'];
 
 const statusLabels = {
   成功: '已完成',
@@ -27,11 +32,10 @@ const statusLabels = {
   待处理: '等待处理',
   已忽略: '已忽略',
   需复核: '需要复核',
-  성공: '已完成',
-  실패: '失败，需要处理',
-  대기: '等待处理',
-  위험: '需要处理',
-  경고: '需要复核',
+  success: '已完成',
+  failed: '失败，需要处理',
+  blocked: '已阻断',
+  planned: '已计划',
 };
 
 const riskLabels = {
@@ -39,76 +43,86 @@ const riskLabels = {
   中: '中风险',
   高: '高风险',
   紧急: '紧急',
-  낮음: '低风险',
-  보통: '中风险',
-  높음: '高风险',
-  긴급: '紧急',
 };
 
 function readableStatus(value) {
   return statusLabels[value] || value || '待确认';
 }
+
 function readableRisk(value) {
   return riskLabels[value] || value || '待确认';
 }
 
 function actionNextStep(row) {
+  if (row.nextStep) return row.nextStep;
   const risk = readableRisk(row.riskLevel);
   const status = readableStatus(row.status);
   if (risk === '紧急' || risk === '高风险') return '请管理员复核后再继续相关操作。';
-  if (status.includes('失败') || status.includes('处理') || status.includes('复核')) return '请查看详情并确认处理人。';
+  if (status.includes('失败') || status.includes('处理') || status.includes('复核') || status.includes('阻断')) return '请查看详情并确认处理人。';
   return '无需处理，保留记录备查。';
 }
 
 function recoveryEvidence(row) {
+  if (row.recoveryEvidence) return row.recoveryEvidence;
+  if (row.backupEvidence) return row.backupEvidence;
   const module = String(row.module || '');
   if (module.includes('系统设置') || module.includes('设备') || module.includes('账号')) return '可查看变更摘要';
   if (module.includes('商品') || module.includes('订单')) return '后续需关联备份记录';
   return '暂无恢复记录接入';
 }
 
-function buildAuditSummary({ rows = [], total = 0, syncTotal = 0, backendMode = false }) {
-  const attentionCount = rows.filter((row) => ['紧急', '高风险'].includes(readableRisk(row.riskLevel)) || readableStatus(row.status).includes('处理') || readableStatus(row.status).includes('复核')).length;
-  const writeLikeCount = rows.filter((row) => ['新增', '编辑', '删除', '状态变更', '绑定', '解绑', '配置修改'].includes(row.actionType)).length;
+function buildAuditSummary({ rows = [], total = 0, syncTotal = 0, backendMode = false, auditSummary = null }) {
+  const attentionCount = auditSummary?.needsAttentionCount ?? rows.filter((row) => {
+    const risk = readableRisk(row.riskLevel);
+    const status = readableStatus(row.status);
+    return ['紧急', '高风险'].includes(risk) || status.includes('处理') || status.includes('复核') || status.includes('阻断');
+  }).length;
+  const backupEvidenceCount = auditSummary?.backupEvidenceCount ?? rows.filter((row) => String(row.backupEvidence || '').includes('已记录')).length;
+  const restoreEvidenceCount = auditSummary?.restoreEvidenceCount ?? rows.filter((row) => String(row.recoveryEvidence || '').includes('恢复')).length;
+  const auditTotal = auditSummary?.total ?? total;
+  const auditMessage = backendMode
+    ? (auditSummary?.businessMessage || (auditTotal ? '已显示安全操作审计记录。' : '当前还没有操作审计记录。'))
+    : (total ? '当前显示演示操作记录。' : '当前没有演示操作记录。');
+
   return [
     {
-      title: '操作记录',
-      status: `${total} 条`,
-      tone: total ? 'info' : 'muted',
-      message: total ? '当前可查看本地操作、账号、商品、设备和设置变更记录。' : '当前没有可展示的操作记录。',
-      next: '用于回答谁做了什么、什么时候做、结果如何。',
+      title: backendMode ? '操作审计' : '演示操作记录',
+      status: `${auditTotal} 条`,
+      tone: auditTotal ? 'info' : 'muted',
+      message: auditMessage,
+      next: backendMode ? '用于回答谁操作了什么、什么时候操作、结果如何。' : '演示数据不代表真实审计表。',
     },
     {
       title: '需要关注',
       status: `${attentionCount} 条`,
       tone: attentionCount ? 'warning' : 'success',
-      message: attentionCount ? '当前页存在高风险或需要复核的记录。' : '当前页没有高风险或待复核记录。',
-      next: attentionCount ? '请优先查看风险说明和处理建议。' : '保持记录备查即可。',
+      message: attentionCount ? '当前存在失败、阻断或需要复核的记录。' : '当前没有高风险或待复核记录。',
+      next: attentionCount ? '请优先查看处理建议。' : '保持记录备查即可。',
     },
     {
-      title: '写入类操作',
-      status: `${writeLikeCount} 条`,
-      tone: writeLikeCount ? 'info' : 'muted',
-      message: writeLikeCount ? '当前页包含配置、绑定、编辑或状态变更记录。' : '当前页暂无写入类操作。',
-      next: '生产版后续会关联审批、备份和恢复证据。',
+      title: '备份/恢复证据',
+      status: `${backupEvidenceCount + restoreEvidenceCount} 条`,
+      tone: backupEvidenceCount || restoreEvidenceCount ? 'info' : 'muted',
+      message: backupEvidenceCount || restoreEvidenceCount ? '已有记录关联备份或恢复证据。' : '当前暂无备份或恢复证据接入。',
+      next: '生产版会把关键写入、备份、恢复串起来。',
     },
     {
       title: '同步记录',
       status: backendMode ? `${syncTotal} 条` : '演示数据',
       tone: backendMode && syncTotal ? 'info' : 'muted',
-      message: backendMode ? '同步类任务记录单独展示，不混入普通操作记录。' : 'mock 模式不读取后端同步记录。',
+      message: backendMode ? '同步类任务记录单独展示，不混入普通操作审计。' : 'mock 模式不读取后端同步记录。',
       next: '技术细节默认折叠，主页面只保留结果摘要。',
     },
   ];
 }
 
-const columns = [
+const auditColumns = [
   { key: 'time', title: '时间' },
   { key: 'objectName', title: '业务对象', render: (value, row) => <><strong>{value}</strong><br /><small>{row.module}</small></> },
   { key: 'actionType', title: '操作' },
   { key: 'operator', title: '操作人' },
   { key: 'status', title: '结果', render: (value) => <StatusBadge value={readableStatus(value)} /> },
-  { key: 'riskLevel', title: '风险', render: (value) => <StatusBadge value={readableRisk(value)} /> },
+  { key: 'riskLevel', title: '关注度', render: (value) => <StatusBadge value={readableRisk(value)} /> },
   { key: 'summary', title: '摘要' },
   { key: 'nextStep', title: '下一步', render: (_value, row) => actionNextStep(row) },
 ];
@@ -122,31 +136,72 @@ const syncColumns = [
   { key: 'nextStep', title: '下一步', render: (_value, row) => (readableStatus(row.status).includes('失败') ? '请管理员查看高级详情。' : '无需处理，保留记录备查。') },
 ];
 
+const initialQuery = {
+  keyword: '',
+  module: '',
+  actionType: '',
+  operator: '',
+  status: '',
+  riskLevel: '',
+  startDate: '',
+  endDate: '',
+  page: 1,
+  pageSize: 5,
+};
+
 export default function Logs() {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const { versions } = useSyncRefresh();
-  const [query, setQuery] = useState({ keyword: '', module: '', actionType: '', operator: '', status: '', riskLevel: '', startDate: '', endDate: '', page: 1, pageSize: 5 });
-  const [draftQuery, setDraftQuery] = useState(query);
+  const [query, setQuery] = useState(initialQuery);
+  const [draftQuery, setDraftQuery] = useState(initialQuery);
   const [result, setResult] = useState({ data: [], total: 0 });
+  const [auditSummary, setAuditSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [auditError, setAuditError] = useState('');
   const [detail, setDetail] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [syncRecords, setSyncRecords] = useState({ data: [], total: 0 });
   const [syncLoading, setSyncLoading] = useState(isBackendSource);
   const [syncError, setSyncError] = useState('');
 
-  const load = async (nextQuery = query) => {
+  const options = useMemo(() => ({
+    modules: isBackendSource ? auditModules : mockModules,
+    actions: isBackendSource ? auditActions : mockActions,
+    statuses: isBackendSource ? auditStatuses : mockStatuses,
+    risks: isBackendSource ? auditRisks : mockRisks,
+    operators: isBackendSource ? auditOperators : mockOperators,
+  }), []);
+
+  const loadAuditRecords = async (nextQuery = query) => {
+    if (isBackendSource && storeLoading) return;
     setLoading(true);
+    setAuditError('');
     try {
-      setResult(await mockApi.getOperationLogs(nextQuery));
+      if (storeError) throw new Error(storeError);
+      if (isBackendSource && !selectedStoreId) {
+        setResult({ data: [], total: 0, businessMessage: '请选择店铺后查看操作审计。' });
+        setAuditSummary({ total: 0, needsAttentionCount: 0, backupEvidenceCount: 0, restoreEvidenceCount: 0, businessMessage: '请选择店铺后查看操作审计。' });
+        return;
+      }
+      const params = { ...nextQuery, storeId: selectedStoreId };
+      const [nextResult, nextSummary] = await Promise.all([
+        dataProvider.getOperationAuditLogs(params),
+        dataProvider.getOperationAuditLogSummary(params),
+      ]);
+      setResult(nextResult);
+      setAuditSummary(nextSummary);
+    } catch (error) {
+      setResult({ data: [], total: 0 });
+      setAuditSummary(null);
+      setAuditError(error?.detail?.business_message || error.message || '操作审计暂时无法加载，请稍后重试或联系管理员。');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
-  }, [query]);
+    loadAuditRecords(query);
+  }, [query, selectedStoreId, storeLoading, storeError]);
 
   const loadSyncRecords = async () => {
     if (!isBackendSource) return;
@@ -172,15 +227,24 @@ export default function Logs() {
     loadSyncRecords();
   }, [selectedStoreId, storeLoading, storeError, versions.syncLogs]);
 
+  const refreshAll = async () => {
+    await Promise.all([loadAuditRecords(query), loadSyncRecords()]);
+  };
+
   const openDetail = async (row) => {
-    setDetail(await mockApi.getOperationLogDetail(row.id));
+    if (isBackendSource) {
+      setDetail(row);
+    } else {
+      setDetail(await mockApi.getOperationLogDetail(row.id));
+    }
     setDetailOpen(true);
   };
 
   const markRisk = async (row) => {
+    if (isBackendSource) return;
     await mockApi.markLogRisk(row.id, { riskLevel: '紧急', status: '需复核', riskNote: '人工标记为重点风险日志。' });
     if (detail?.id === row.id) setDetail(await mockApi.getOperationLogDetail(row.id));
-    await load();
+    await loadAuditRecords(query);
   };
 
   const summaryCards = buildAuditSummary({
@@ -188,14 +252,19 @@ export default function Logs() {
     total: result.total || 0,
     syncTotal: syncRecords.total || 0,
     backendMode: isBackendSource,
+    auditSummary,
   });
+
+  const businessEmptyMessage = result.businessMessage || auditSummary?.businessMessage || (isBackendSource
+    ? '当前还没有操作审计记录。后续受控写入、备份、恢复等操作接入后，会在这里显示谁操作了什么、什么时候操作、结果如何。'
+    : '当前没有可展示的演示操作记录。');
 
   return (
     <>
       <PageHeader
         title="高级日志与审计"
-        description="用可读方式查看操作记录、同步记录和恢复证据。普通运营页面不展示这些技术细节。"
-        actions={isBackendSource ? <button className="button ghost" onClick={loadSyncRecords}>刷新同步记录</button> : null}
+        description="用可读方式查看操作审计、同步记录和恢复证据。普通运营页面不展示这些技术细节。"
+        actions={isBackendSource ? <button className="button ghost" onClick={refreshAll}>刷新只读记录</button> : null}
       />
 
       <section className="content-card">
@@ -220,6 +289,80 @@ export default function Logs() {
         </div>
       </section>
 
+      <FilterPanel>
+        <SearchBar
+          value={draftQuery.keyword}
+          onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })}
+          onSearch={() => setQuery({ ...draftQuery, page: 1 })}
+          onReset={() => {
+            setDraftQuery(initialQuery);
+            setQuery(initialQuery);
+          }}
+          placeholder={isBackendSource ? '搜索操作对象、操作人、摘要或下一步' : '搜索日志编号、模块、对象或摘要'}
+        >
+          <select value={draftQuery.module} onChange={(event) => setDraftQuery({ ...draftQuery, module: event.target.value })}>
+            <option value="">全部模块</option>
+            {options.modules.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select value={draftQuery.actionType} onChange={(event) => setDraftQuery({ ...draftQuery, actionType: event.target.value })}>
+            <option value="">全部操作类型</option>
+            {options.actions.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select value={draftQuery.operator} onChange={(event) => setDraftQuery({ ...draftQuery, operator: event.target.value })}>
+            <option value="">全部操作人</option>
+            {options.operators.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
+            <option value="">全部状态</option>
+            {options.statuses.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <select value={draftQuery.riskLevel} onChange={(event) => setDraftQuery({ ...draftQuery, riskLevel: event.target.value })}>
+            <option value="">全部关注度</option>
+            {options.risks.map((item) => <option key={item}>{item}</option>)}
+          </select>
+          <input type="date" value={draftQuery.startDate} onChange={(event) => setDraftQuery({ ...draftQuery, startDate: event.target.value })} />
+          <input type="date" value={draftQuery.endDate} onChange={(event) => setDraftQuery({ ...draftQuery, endDate: event.target.value })} />
+        </SearchBar>
+      </FilterPanel>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>{isBackendSource ? '操作审计' : '演示操作记录'}</h2>
+            <p>{isBackendSource ? '读取 Codex1 本地审计表的安全摘要，不显示原始 JSON、完整哈希或平台敏感编号。' : 'mock 模式下展示演示操作记录，不代表真实审计表。'}</p>
+          </div>
+          <span className="period-chip">共 {result.total || 0} 条</span>
+        </div>
+        {auditError ? <EmptyState title="操作审计加载失败" description={auditError} /> : null}
+        {!auditError && !loading && !(result.data || []).length ? <EmptyState title={isBackendSource ? '当前还没有操作审计记录' : '暂无演示操作记录'} description={businessEmptyMessage} /> : null}
+        <DataTable
+          columns={auditColumns}
+          rows={result.data || []}
+          loading={loading}
+          renderActions={(row) => (
+            <>
+              <button onClick={() => openDetail(row)}>详情</button>
+              {!isBackendSource && <button onClick={() => markRisk(row)}>风险标记</button>}
+            </>
+          )}
+        />
+        <Pagination page={query.page} pageSize={query.pageSize} total={result.total || 0} onChange={(page) => setQuery({ ...query, page })} />
+        {isBackendSource && (
+          <TechnicalDetails
+            title="查看审计 API 诊断"
+            description="这里只显示只读接口、安全计数和页面状态，具体审计行诊断在详情中折叠展示。"
+            items={[
+              { label: 'audit_api_list_route', value: 'GET /api/v1/operation-audit-logs' },
+              { label: 'audit_api_summary_route', value: 'GET /api/v1/operation-audit-logs/summary' },
+              { label: 'public_endpoint_enabled', value: result.publicEndpointEnabled },
+              { label: 'readonly_local_route', value: result.readonlyLocalRoute },
+              { label: 'audit_runtime_status', value: auditSummary?.runtimeStatus || result.auditRuntimeStatus || '-' },
+              { label: 'audit_total', value: auditSummary?.total ?? result.total ?? 0 },
+            ]}
+          />
+        )}
+      </section>
+
       {isBackendSource && (
         <section className="content-card">
           <div className="card-title">
@@ -229,7 +372,6 @@ export default function Logs() {
             </div>
             <span className="period-chip">共 {syncRecords.total} 条</span>
           </div>
-          <MockSyncPanel onSynced={loadSyncRecords} />
           {syncError ? <EmptyState title="同步记录加载失败" description={syncError} /> : <DataTable columns={syncColumns} rows={syncRecords.data || []} loading={syncLoading} />}
           <TechnicalDetails
             description="这里保留同步记录的管理员诊断字段，不放到普通运营页面。"
@@ -242,66 +384,7 @@ export default function Logs() {
         </section>
       )}
 
-      <FilterPanel>
-        <SearchBar
-          value={draftQuery.keyword}
-          onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })}
-          onSearch={() => setQuery({ ...draftQuery, page: 1 })}
-          onReset={() => {
-            const clean = { keyword: '', module: '', actionType: '', operator: '', status: '', riskLevel: '', startDate: '', endDate: '', page: 1, pageSize: 5 };
-            setDraftQuery(clean);
-            setQuery(clean);
-          }}
-          placeholder="搜索日志编号、模块、对象或摘要"
-        >
-          <select value={draftQuery.module} onChange={(event) => setDraftQuery({ ...draftQuery, module: event.target.value })}>
-            <option value="">全部模块</option>
-            {modules.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select value={draftQuery.actionType} onChange={(event) => setDraftQuery({ ...draftQuery, actionType: event.target.value })}>
-            <option value="">全部操作类型</option>
-            {actionTypes.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select value={draftQuery.operator} onChange={(event) => setDraftQuery({ ...draftQuery, operator: event.target.value })}>
-            <option value="">全部操作人</option>
-            {operators.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
-            <option value="">全部状态</option>
-            {statuses.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <select value={draftQuery.riskLevel} onChange={(event) => setDraftQuery({ ...draftQuery, riskLevel: event.target.value })}>
-            <option value="">全部风险等级</option>
-            {riskLevels.map((item) => <option key={item}>{item}</option>)}
-          </select>
-          <input type="date" value={draftQuery.startDate} onChange={(event) => setDraftQuery({ ...draftQuery, startDate: event.target.value })} />
-          <input type="date" value={draftQuery.endDate} onChange={(event) => setDraftQuery({ ...draftQuery, endDate: event.target.value })} />
-        </SearchBar>
-      </FilterPanel>
-
-      <section className="content-card">
-        <div className="card-title">
-          <div>
-            <h2>操作记录</h2>
-            <p>按业务对象、操作人、结果、风险和下一步查看，不需要先理解内部编号。</p>
-          </div>
-          <span className="period-chip">共 {result.total} 条</span>
-        </div>
-        <DataTable
-          columns={columns}
-          rows={result.data}
-          loading={loading}
-          renderActions={(row) => (
-            <>
-              <button onClick={() => openDetail(row)}>详情</button>
-              <button onClick={() => markRisk(row)}>风险标记</button>
-            </>
-          )}
-        />
-        <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
-      </section>
-
-      <DetailModal open={detailOpen} title={detail ? `操作记录详情 · ${detail.objectName}` : '操作记录详情'} onClose={() => setDetailOpen(false)} width="min(980px, 94vw)">
+      <DetailModal open={detailOpen} title={detail ? `${isBackendSource ? '操作审计详情' : '操作记录详情'} · ${detail.objectName}` : '操作记录详情'} onClose={() => setDetailOpen(false)} width="min(980px, 94vw)">
         {detail ? (
           <>
             <section className="detail-section">
@@ -313,44 +396,52 @@ export default function Logs() {
                 { label: '操作', value: detail.actionType },
                 { label: '操作人', value: detail.operator },
                 { label: '结果', value: <StatusBadge value={readableStatus(detail.status)} /> },
-                { label: '风险', value: <StatusBadge value={readableRisk(detail.riskLevel)} /> },
+                { label: '关注度', value: <StatusBadge value={readableRisk(detail.riskLevel)} /> },
               ]} />
             </section>
             <section className="detail-section">
               <h3>处理建议</h3>
               <InfoGrid items={[
                 { label: '下一步', value: actionNextStep(detail) },
-                { label: '恢复证据', value: recoveryEvidence(detail) },
+                { label: '备份/恢复证据', value: recoveryEvidence(detail) },
+                { label: '安全边界', value: detail.safetyLabel || '未返回敏感原文' },
               ]} />
             </section>
             <section className="detail-section">
               <h3>风险说明</h3>
-              <p>{detail.riskNote || '暂无风险说明'}</p>
+              <p>{detail.riskNote || detail.reasonLabel || '暂无风险说明'}</p>
             </section>
             <section className="detail-section">
               <h3>备注</h3>
-              <p>{detail.remarks || '暂无备注'}</p>
+              <p>{detail.remarks || detail.summary || '暂无备注'}</p>
             </section>
             <TechnicalDetails
               title="查看高级详情"
-              description="内部编号、来源、设备、IP 与 JSON 变更摘要只在管理员详情中保留，默认折叠。"
+              description="内部编号、来源、设备、IP 与安全诊断只在管理员详情中保留，默认折叠。"
               items={[
-                { label: 'log_no', value: detail.logNo },
+                { label: 'audit_id', value: detail.auditId },
                 { label: 'source', value: detail.source },
+                { label: 'audit_runtime_source', value: detail.auditRuntimeSource },
+                { label: 'raw_status', value: detail.rawStatus || detail.status },
+                { label: 'changed_fields', value: detail.changedFields || [] },
+                { label: 'advanced_details', value: detail.advancedDetails || {} },
+                { label: 'log_no', value: detail.logNo },
                 { label: 'ip_address', value: detail.ipAddress },
                 { label: 'device', value: detail.device },
-                { label: 'raw_status', value: detail.status },
-                { label: 'raw_risk_level', value: detail.riskLevel },
               ]}
             >
-              <section className="detail-section">
-                <h3>操作前数据</h3>
-                <pre>{JSON.stringify(redactTechnicalObject(detail.beforeData), null, 2)}</pre>
-              </section>
-              <section className="detail-section">
-                <h3>操作后数据</h3>
-                <pre>{JSON.stringify(redactTechnicalObject(detail.afterData), null, 2)}</pre>
-              </section>
+              {!isBackendSource && (
+                <>
+                  <section className="detail-section">
+                    <h3>操作前数据</h3>
+                    <pre>{JSON.stringify(redactTechnicalObject(detail.beforeData), null, 2)}</pre>
+                  </section>
+                  <section className="detail-section">
+                    <h3>操作后数据</h3>
+                    <pre>{JSON.stringify(redactTechnicalObject(detail.afterData), null, 2)}</pre>
+                  </section>
+                </>
+              )}
             </TechnicalDetails>
           </>
         ) : <EmptyState title="暂无日志详情" description="请选择一条日志记录查看完整内容。" />}
