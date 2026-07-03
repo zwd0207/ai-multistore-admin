@@ -659,6 +659,12 @@ The audit logs API readonly implementation approval plan is documented in `PHASE
 
 ERP-Audit-1K is documentation-only. It approves the boundary for a future local read-only audit logs route implementation, limited to list and summary endpoints, bounded filters, business-first responses, opt-in advanced details, and strict sensitive-field bans. It does not add routes, register routers, query audit logs from runtime UI, write audit rows, modify schema, call platform APIs, or open formal sync. The real `backend/codex1.db` remains `operation_audit_logs=0`.
 
+## Phase ERP-Audit-1L - Audit Logs API Readonly Local Implementation
+
+The audit logs API readonly local implementation is documented in `PHASE_ERP_AUDIT_1L_AUDIT_LOGS_API_READONLY_LOCAL_IMPLEMENTATION.md`.
+
+ERP-Audit-1L implements local read-only audit list and summary routes: `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`. The routes use the 1J business-first response shape, enforce bounded filters and capped pagination, keep advanced details opt-in, reject unsupported or unsafe filters, and expose no write/export/delete/detail routes. `verify_all.py` proves read calls write no audit rows or business rows. The real `backend/codex1.db` remains `operation_audit_logs=0`, so an empty response is currently expected.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
