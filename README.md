@@ -484,3 +484,9 @@ The order status events mock schema gate is documented in `PHASE_NAVER_ERP_14E_O
 The order status timeline schema approval plan is documented in `PHASE_NAVER_ERP_14F_ORDER_STATUS_TIMELINE_SCHEMA_APPROVAL_PLAN.md`.
 
 14F is planning-only. It defines the approval boundary, backup path, rollback steps, preflight checks, migration shape, post-migration verification, and future event-write boundary for a later `order_status_events` schema migration. It does not create the table, add a model or migration, call Naver, write local data, modify runtime UI, or open formal order sync. The actual schema migration remains deferred to a separately approved 14G phase.
+
+## Phase Naver-ERP-14G - Order Status Timeline Schema Migration
+
+The order status timeline schema migration is documented in `PHASE_NAVER_ERP_14G_ORDER_STATUS_TIMELINE_SCHEMA_MIGRATION.md`.
+
+14G creates the real `order_status_events` table in `backend/codex1.db` with the approved safe columns and dedupe/index strategy. The migration leaves the table empty, keeps existing order/product/log/capability counts unchanged, and still does not approve event writes, order refresh writes, platform writes, UI timeline display, or formal Naver order sync.
