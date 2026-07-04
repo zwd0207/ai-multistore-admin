@@ -1323,3 +1323,33 @@ Order batch evidence now uses the same readonly evidence API shape as product ba
 The batch approval UI runtime walkthrough is documented in `PHASE_ERP_BATCH_1K_BATCH_APPROVAL_UI_RUNTIME_WALKTHROUGH.md`.
 
 ERP-Batch-1K verifies the Orders batch approval evidence panel in mock and backend data-source modes. The local backend on port `8012` was refreshed to the current Codex1 code so the evidence route is available. A small UI wording fix maps the backend evidence status to Chinese seller-facing copy on the main page; technical fields remain folded.
+
+## Phase ERP-Multistore-1G - Store Membership Readonly API Mock Gate
+
+The store membership readonly API mock gate is documented in `PHASE_ERP_MULTISTORE_1G_STORE_MEMBERSHIP_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now exposes `POST /api/v1/permissions/store-membership/readonly-check` for safe membership readiness checks. The API reads existing auth tables, returns Chinese business messages, and keeps `membership_written=false`.
+
+## Phase ERP-Multistore-1H - Store Membership Readonly API Local Implementation Plan
+
+The store membership readonly API local implementation plan is documented in `PHASE_ERP_MULTISTORE_1H_STORE_MEMBERSHIP_READONLY_API_LOCAL_IMPLEMENTATION_PLAN.md`.
+
+The API is ready for a later admin UI plan, but real user creation, login/session enforcement, role assignment, and membership writes remain closed.
+
+## Phase Naver-Product-Batch-1K - Product Rollback Drill Readonly Report Plan
+
+The product rollback drill readonly report plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1K_PRODUCT_ROLLBACK_DRILL_READONLY_REPORT_PLAN.md`.
+
+The next rollback surface should show backup, rollback checklist, temporary-restore plan, readback plan, and sensitive-scan evidence only. Real restore and formal product batch sync remain closed.
+
+## Phase Naver-Order-Batch-1D - Order Batch Approval Evidence UI Walkthrough
+
+The order batch approval evidence UI walkthrough is documented in `PHASE_NAVER_ORDER_BATCH_1D_ORDER_BATCH_APPROVAL_EVIDENCE_UI_WALKTHROUGH.md`.
+
+The Orders approval evidence panel remains business-first and read-only. It can show order evidence for manual review, but it does not call Naver, write orders, or open formal order batch sync.
+
+## Phase ERP-Batch-1L - Batch Approval Evidence Backend Wording Cleanup
+
+The batch approval evidence backend wording cleanup is documented in `PHASE_ERP_BATCH_1L_BATCH_APPROVAL_EVIDENCE_BACKEND_WORDING_CLEANUP.md`.
+
+Codex1 batch evidence defaults now use Chinese business wording. The endpoint remains a readonly normalizer and does not execute product or order batch sync.
