@@ -1803,3 +1803,33 @@ Future formal batch execution should link approval decisions to readonly evidenc
 The mock gate is documented in `PHASE_NAVER_PRODUCT_BATCH_2D_PRODUCT_BATCH_EXECUTION_APPROVAL_BOUNDARY_MOCK_GATE.md`.
 
 Codex1 now verifies future Naver product batch execution approval readiness while keeping product writes and formal product batch sync closed.
+
+## Phase ERP-Batch-2P - Approval Decision Audit Linkage Mock Gate
+
+The mock gate is documented in `PHASE_ERP_BATCH_2P_APPROVAL_DECISION_AUDIT_LINKAGE_MOCK_GATE.md`.
+
+Codex1 now verifies that a future formal batch approval decision can link to sanitized audit evidence references without writing audit rows or approving execution.
+
+## Phase ERP-Batch-2Q - Approval Decision Audit Linkage Readonly API Plan
+
+The readonly API plan is documented in `PHASE_ERP_BATCH_2Q_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_API_PLAN.md`.
+
+The planned route remains future work only. No endpoint is exposed and formal product/order batch execution remains closed.
+
+## Phase Naver-Product-Batch-2E - Product Batch Execution Approval UI Plan
+
+The UI plan is documented in `PHASE_NAVER_PRODUCT_BATCH_2E_PRODUCT_BATCH_EXECUTION_APPROVAL_UI_PLAN.md`.
+
+Products should display future product batch execution approval readiness as review evidence only, with no execution button.
+
+## Phase Naver-Product-Batch-2F - Product Batch Execution Approval Readonly UI Implementation
+
+The readonly UI implementation is documented in `PHASE_NAVER_PRODUCT_BATCH_2F_PRODUCT_BATCH_EXECUTION_APPROVAL_READONLY_UI_IMPLEMENTATION.md`.
+
+Codex2 Products now shows a Naver product batch execution approval checklist. It uses local product context only and does not call Naver or write products.
+
+## Phase ERP-Multistore-2M - Invitation Approval Audit Linkage Plan
+
+The invitation audit linkage plan is documented in `PHASE_ERP_MULTISTORE_2M_INVITATION_APPROVAL_AUDIT_LINKAGE_PLAN.md`.
+
+Future real invitation approval must link approval, target user, masked login, store scope, permission, backup, readback, rollback, and audit correlation evidence before any user or membership write.

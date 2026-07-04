@@ -886,6 +886,158 @@ function ProductBatchApprovalEvidenceLinkagePanel() {
   );
 }
 
+const productBatchExecutionApprovalChecklist = [
+  {
+    key: 'fresh_candidates',
+    title: '\u6700\u65b0\u53ea\u8bfb\u5019\u9009',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u5546\u54c1\u6279\u91cf\u6267\u884c\u8303\u56f4\u5fc5\u987b\u6765\u81ea\u6700\u65b0\u53ea\u8bfb preview\uff0c\u4e0d\u80fd\u4f7f\u7528\u8fc7\u671f\u5dee\u5f02\u6216\u4eba\u5de5\u8bb0\u5fc6\u3002',
+  },
+  {
+    key: 'field_whitelist',
+    title: '\u5b57\u6bb5\u767d\u540d\u5355',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u53ea\u5141\u8bb8\u5199\u5165\u5df2\u6279\u51c6\u7684\u5546\u54c1\u4e1a\u52a1\u5b57\u6bb5\uff0c\u4ef7\u683c\u3001\u5e93\u5b58\u548c\u72b6\u6001\u8981\u6709\u660e\u786e\u53d8\u5316\u8bc1\u636e\u3002',
+  },
+  {
+    key: 'backup_rollback',
+    title: '\u5907\u4efd\u4e0e\u56de\u6eda',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u6267\u884c\u524d\u8981\u6709\u6570\u636e\u5e93\u5907\u4efd\uff0c\u6267\u884c\u540e\u8981\u6709\u56de\u8bfb\u548c\u56de\u6eda\u62a5\u544a\uff0c\u624d\u80fd\u652f\u6491\u5f02\u5e38\u6062\u590d\u3002',
+  },
+  {
+    key: 'permission_approval',
+    title: '\u6743\u9650\u4e0e\u4eba\u5de5\u5ba1\u6279',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u64cd\u4f5c\u8005\u5fc5\u987b\u5177\u5907\u5f53\u524d\u5e97\u94fa\u7684\u5546\u54c1\u6279\u91cf\u5199\u5165\u5ba1\u6279\u6743\u9650\uff0c\u4e14\u672c\u6b21\u8303\u56f4\u8981\u88ab\u660e\u786e\u6279\u51c6\u3002',
+  },
+  {
+    key: 'audit_chain',
+    title: '\u5ba1\u8ba1\u94fe',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u5fc5\u987b\u80fd\u5173\u8054\u6279\u51c6\u4eba\u3001\u5907\u4efd\u3001\u5019\u9009\u8303\u56f4\u3001\u5199\u5165\u5c1d\u8bd5\u3001\u56de\u8bfb\u7ed3\u679c\u548c\u654f\u611f\u626b\u63cf\u3002',
+  },
+  {
+    key: 'platform_write_boundary',
+    title: '\u5e73\u53f0\u5199\u64cd\u4f5c\u8fb9\u754c',
+    status: '\u5fc5\u987b\u5173\u95ed',
+    message: '\u5f53\u524d\u4ec5\u8ba1\u5212\u672c\u5730\u5546\u54c1\u6570\u636e\u5ba1\u6279\u6750\u6599\uff0c\u4e0d\u8c03\u7528 Naver \u5e73\u53f0\u5546\u54c1\u5199\u63a5\u53e3\u3002',
+  },
+];
+
+function NaverProductBatchExecutionApprovalPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({ loading: false, localProductCount: 0, error: '' });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, localProductCount: 0, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getProducts({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((productResponse) => {
+        if (cancelled) return;
+        const rows = productResponse.data || productResponse.items || [];
+        const naverProducts = rows.filter((product) => (
+          normalizePlatform(product.platform || product.rawPlatform) === 'naver'
+        ));
+        setState({ loading: false, localProductCount: naverProducts.length, error: '' });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            localProductCount: 0,
+            error: error?.message || '\u5546\u54c1\u6279\u91cf\u6267\u884c\u5ba1\u6279\u6750\u6599\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, localProductCount, error } = state;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>{'\u5546\u54c1\u6279\u91cf\u6267\u884c\u5ba1\u6279\u53ea\u8bfb\u68c0\u67e5'}</h2>
+          <p>{'\u8fd9\u91cc\u53ea\u5c55\u793a\u672a\u6765\u6b63\u5f0f\u5546\u54c1\u6279\u91cf\u6267\u884c\u524d\u9700\u8981\u590d\u6838\u7684\u4e1a\u52a1\u6750\u6599\u3002\u5f53\u524d\u4e0d\u6267\u884c\u5199\u5165\uff0c\u4e0d\u8c03\u7528 Naver\uff0c\u4e5f\u4e0d\u5f00\u653e\u6b63\u5f0f\u5546\u54c1\u6279\u91cf\u540c\u6b65\u3002'}</p>
+        </div>
+        <span className="period-chip">{loading ? '\u6574\u7406\u4e2d' : '\u53ea\u8bfb\u5ba1\u6279'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>{'\u6267\u884c\u72b6\u6001'}</strong>
+            <span>{'\u672a\u5f00\u653e'}</span>
+          </div>
+          <p>{'\u5f53\u524d\u53ea\u662f\u5546\u54c1\u6279\u91cf\u6267\u884c\u5ba1\u6279 UI\uff0c\u6ca1\u6709\u6267\u884c\u6309\u94ae\uff0c\u4e0d\u5199\u5546\u54c1\u3001\u4e0d\u5199\u8ba2\u5355\u3001\u4e0d\u5199\u5ba1\u8ba1\u8bb0\u5f55\u3002'}</p>
+          <small>{'\u771f\u6b63\u6267\u884c\u4ecd\u5fc5\u987b\u53e6\u5f00\u9636\u6bb5\u5e76\u91cd\u65b0\u5ba1\u6279\u3002'}</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>{'\u672c\u5730\u5546\u54c1\u8303\u56f4'}</strong>
+            <span>{localProductCount} {'\u6761'}</span>
+          </div>
+          <p>{'\u672c\u9762\u677f\u53ea\u6839\u636e\u5f53\u524d\u5e97\u94fa\u672c\u5730 Naver \u5546\u54c1\u6574\u7406\u590d\u6838\u63d0\u793a\uff0c\u4e0d\u4ee3\u8868\u5e73\u53f0\u6709\u65b0\u7684\u5f85\u5199\u5165\u5019\u9009\u3002'}</p>
+          <small>{'\u771f\u5b9e\u5019\u9009\u5fc5\u987b\u6765\u81ea\u5355\u72ec\u7684\u53ea\u8bfb preview\u3002'}</small>
+        </article>
+        {productBatchExecutionApprovalChecklist.map((item) => (
+          <article className="business-capability-card info" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>{'\u672a\u5168\u90e8\u590d\u6838\u524d\uff0c\u5546\u54c1\u6279\u91cf\u6267\u884c\u4fdd\u6301\u5173\u95ed\u3002'}</small>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title={"\u67e5\u770b\u5546\u54c1\u6279\u91cf\u6267\u884c\u5ba1\u6279\u6280\u672f\u8be6\u60c5"}
+        description={"\u6267\u884c\u72b6\u6001\u3001\u95e8\u7981\u548c\u5199\u5165\u5f00\u5173\u4ec5\u4f9b\u7ba1\u7406\u5458\u6392\u67e5\uff1b\u4e3b\u9875\u9762\u53ea\u5c55\u793a\u4e1a\u52a1\u590d\u6838\u63d0\u793a\u3002"}
+        items={[
+          { label: 'phase', value: 'Naver-Product-Batch-2F' },
+          { label: 'mock_gate_phase', value: 'Naver-Product-Batch-2D' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'local_product_count', value: localProductCount },
+          { label: 'checklist_item_count', value: productBatchExecutionApprovalChecklist.length },
+          { label: 'execution_approved', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'timeline_events_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'formal_product_sync_open', value: false },
+          { label: 'platform_product_writes_enabled', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          { label: 'raw_response_saved', value: false },
+          { label: 'privacy_fields_redacted', value: true },
+          ...productBatchExecutionApprovalChecklist.map((item) => ({
+            label: `product_batch_execution_check.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -896,6 +1048,7 @@ export default function Products() {
       <NaverProductPreviewStatusPanel />
       <ProductRollbackReadonlyReportRoutePanel />
       <ProductBatchApprovalEvidenceLinkagePanel />
+      <NaverProductBatchExecutionApprovalPanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"
