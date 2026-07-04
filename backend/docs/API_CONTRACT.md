@@ -1496,6 +1496,14 @@ Phase Naver-ERP-20B uses the existing `POST /api/v1/sync/orders/naver/preview` c
 
 Phase Naver-ERP-20C is planning-only. It does not execute a refresh write and does not add a new write route. A later refresh write must repeat 20B readonly evidence, verify exact identity match, require fresh backup evidence, pass the runtime permission mock gate, require sensitive action approval, write append-only audit evidence, and pass post-write readback plus sensitive scan.
 
+Phase Naver-ERP-20D is the controlled refresh write approval with permission evidence. It does not add a new route and does not write orders. The runtime permission mock API must show store-scoped permission for `orders.refresh_batch_write` and sensitive-action approval before the later refresh gate can run.
+
+Phase Naver-ERP-20E uses the existing private refresh batch gate with `max_batch_size=1`, the existing backup evidence gate, and a fresh readonly Naver preview for safe hash `id-hash-192b9c67e8`. The gate outcome is `batch_refresh_no_change`: no whitelisted business fields changed, so no local order update is forced. The operation writes five append-only audit rows with correlation id `audit-corr-20e-192b9c67e8`; the terminal row is `local_write_blocked` with reason `no_business_field_change`. This is an expected safe outcome, not a formal sync opening.
+
+Phase Naver-ERP-20F verifies the 20E result by readback only. The selected safe hash exists exactly once, business counts remain stable, and the 20E audit chain contains `approval_planned`, `pre_write_backup_verified`, `local_write_attempted`, `local_write_blocked`, and `post_write_verification_succeeded`.
+
+Phase ERP-Auth-1G is a frontend-wide visibility plan for the mock permission API. Phase ERP-Auth-1H records the production-auth boundary: the current permission API must not be treated as final authentication or authorization until user, session, role, store-membership, route-dependency, and role-assignment flows are separately designed, migrated, tested, backed up, and approved.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`

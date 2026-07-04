@@ -939,4 +939,12 @@ Naver-ERP-20C is approval planning only. It does not execute the refresh write. 
 
 ERP-Auth-1E approves a narrow runtime mock permission API surface for frontend visibility planning. ERP-Auth-1F implements `GET /api/v1/permissions/role-inventory`, `POST /api/v1/permissions/mock-check`, and `POST /api/v1/permissions/sensitive-action/mock-check`. These routes wrap the existing private permission mock gates and return only safe role, store-scope, permission, approval, and business-message fields. They do not create a real auth session, add user tables, change schema, write local data, call platform APIs, store secrets, save raw responses, or open formal sync.
 
+Naver-ERP-20D approves only one controlled existing-order refresh attempt for safe hash `id-hash-192b9c67e8`, with runtime permission mock evidence and sensitive-action approval evidence. It does not write local order data or open formal order sync.
+
+Naver-ERP-20E creates a pre-write backup, repeats the readonly Naver preview, and runs the controlled refresh gate for safe hash `id-hash-192b9c67e8`. The gate finds no business-field changes, so it does not update the order. It writes five append-only `operation_audit_logs` rows under correlation id `audit-corr-20e-192b9c67e8`, with terminal action `local_write_blocked` and reason `no_business_field_change`. Orders, products, SyncLog, tested-success rows, and order status events remain unchanged.
+
+Naver-ERP-20F verifies the 20E result by readback only: `orders_total=10`, `orders_store8=7`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=15`, and `order_status_events=0`. The selected safe hash exists exactly once. Formal Naver order sync remains closed.
+
+ERP-Auth-1G and ERP-Auth-1H are planning-only. 1G defines future frontend-wide permission visibility rules. 1H records that the runtime permission API remains mock-only and must not be treated as production authentication until user/session/role/store-membership schema, route dependencies, assignment UI, and cross-store isolation tests are separately approved.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
