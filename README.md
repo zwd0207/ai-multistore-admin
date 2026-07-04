@@ -749,6 +749,12 @@ The backup manifest mock implementation gate is documented in `PHASE_ERP_BACKUP_
 
 ERP-Backup-1E adds temporary-file `verify_all.py` coverage for a future backup manifest writer. The mock gate writes only temporary fixture manifests, computes SHA-256/size/integrity/counts from fixture backup files, validates retention and path safety, blocks sensitive fields, blocks manifest overwrite, and proves the real `backend/codex1.db` hash and size remain unchanged. It does not create production backups, write production manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
 
+## Phase ERP-Backup-1F - Real Local Backup Implementation Approval Plan
+
+The real local backup implementation approval plan is documented in `PHASE_ERP_BACKUP_1F_REAL_LOCAL_BACKUP_IMPLEMENTATION_APPROVAL_PLAN.md`.
+
+ERP-Backup-1F is planning-only. It defines the approval boundary for a later manual local backup helper for `backend/codex1.db`, including the approved backup root, source/path checks, SQLite backup method expectation, manifest generation, integrity checks, baseline counts, overwrite blocking, sensitive boundaries, and failure handling. It does not create backup files, write production manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
+
 ## Phase ERP-UX-1A - Frontend Production Usability Plan
 
 The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
