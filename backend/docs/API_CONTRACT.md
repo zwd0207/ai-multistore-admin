@@ -1892,6 +1892,52 @@ secrets_saved=false
 formal_sync_open=false
 ```
 
+### Store Membership Readonly API Contract
+
+Phase ERP-Multistore-1G exposes the readonly contract:
+
+```text
+POST /api/v1/permissions/store-membership/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "actor_context": {
+    "actor_id": "admin-safe-id",
+    "role": "admin",
+    "store_ids": [8]
+  },
+  "target_user_key_hash": "user-hash-safe",
+  "target_store_id": 8,
+  "target_role": "operator",
+  "manual_approval": true,
+  "assignment_reason": "safe business reason"
+}
+```
+
+Successful readiness response status is `membership_assignment_runtime_mock_ready`. Blocked responses may include safe `skip_reason` values such as `target_user_not_found`, `duplicate_active_membership`, `manual_approval_required`, or `membership_assignment_sensitive_material_blocked`.
+
+The response must keep:
+
+```text
+store_membership_readonly_api_mock_gate=true
+readonly_api_mock_gate=true
+public_endpoint_enabled=true
+membership_written=false
+real_database_written=false
+real_auth_session_created=false
+raw_response_saved=false
+secrets_saved=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+Main UI should show the Chinese `business_message`. Technical fields such as `phase`, `skip_reason`, `target_user_exists`, `target_role_exists`, and `duplicate_active_membership` should stay folded in diagnostics.
+
+The endpoint must not create users, create role assignments, create store memberships, open login sessions, write orders, write products, write SyncLog, write tested-success rows, or expose token, Authorization, headers, signature, bcrypt input, client secret, raw response, buyer privacy, or complete platform identifiers.
+
 ### Product Rollback Drill Mock Gate Contract
 
 Phase Naver-Product-Batch-1J adds a private mock gate:
@@ -1931,3 +1977,14 @@ formal_product_sync_open=false
 Phase Naver-Order-Batch-1C uses the shared batch readonly evidence API shape for order-batch review evidence. Order evidence may include safe changed-field names such as `order_status`, `delivery_status`, `claim_status`, and `payment_status`.
 
 This alignment is not an order sync endpoint. It must not call Naver, write orders, write timeline events, save raw responses, expose buyer privacy, or open formal order batch sync.
+
+### Batch Evidence Business Wording Contract
+
+Phase ERP-Batch-1L requires backend fallback messages for readonly batch evidence to be Chinese business wording:
+
+```text
+只读批量证据已整理，等待人工审核。
+批量同步只读证据已整理。本次不会调用平台、不会同步、不会写入商品或订单。
+```
+
+The endpoint remains a readonly normalizer. It must not use backend wording to imply that product or order batch sync is open.

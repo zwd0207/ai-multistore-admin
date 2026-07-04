@@ -5445,7 +5445,7 @@ def _evaluate_batch_readonly_evidence_api_mock_gate(
             "backup_required": True,
             "permission_required": True,
             "audit_required": True,
-            "business_message": str(item.get("business_message") or "Readonly batch evidence is ready for review.")[:240],
+            "business_message": str(item.get("business_message") or "只读批量证据已整理，等待人工审核。")[:240],
             "next_action": str(item.get("next_action") or "manual_review_required")[:160],
         })
 
@@ -5492,7 +5492,7 @@ def evaluate_batch_readonly_evidence_api_local(
     if result.get("status") == "readonly_evidence_api_mock_ready":
         result.update({
             "status": "readonly_evidence_api_ready",
-            "business_message": "Readonly batch evidence is ready for approval review. No sync or write was executed.",
+            "business_message": "批量同步只读证据已整理。本次不会调用平台、不会同步、不会写入商品或订单。",
         })
     return result
 

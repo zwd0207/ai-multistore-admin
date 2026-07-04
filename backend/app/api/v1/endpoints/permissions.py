@@ -1,10 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
-from app.schemas.permission import PermissionMockCheckRequest, SensitiveActionPermissionMockCheckRequest
+from app.database import get_db
+from app.schemas.permission import (
+    PermissionMockCheckRequest,
+    SensitiveActionPermissionMockCheckRequest,
+    StoreMembershipReadonlyCheckRequest,
+)
 from app.services.permission_service import (
     VERIFICATION_SCOPE,
     evaluate_sensitive_action_approval_mock_gate,
+    evaluate_store_membership_assignment_runtime_mock_gate,
     evaluate_store_scoped_access_mock_gate,
     role_permission_inventory,
 )
@@ -88,4 +95,44 @@ def check_sensitive_action_permission_mock_gate(payload: SensitiveActionPermissi
         "phase": "ERP-Auth-1F",
         "business_message": business_message,
         **_public_mock_safety_flags(),
+    })
+
+
+@router.post("/store-membership/readonly-check")
+def check_store_membership_readonly_gate(
+    payload: StoreMembershipReadonlyCheckRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = evaluate_store_membership_assignment_runtime_mock_gate(
+        db,
+        actor_context=payload.actor_context,
+        target_user_key_hash=payload.target_user_key_hash,
+        target_store_id=payload.target_store_id,
+        target_role=payload.target_role,
+        manual_approval=payload.manual_approval,
+        assignment_reason=payload.assignment_reason,
+    )
+    if result.get("status") == "membership_assignment_runtime_mock_ready":
+        business_message = "店铺成员分配只读检查已通过。当前不会创建用户或店铺成员关系。"
+    elif result.get("skip_reason") == "duplicate_active_membership":
+        business_message = "该用户已经拥有相同店铺角色，不需要重复分配。"
+    elif result.get("skip_reason") == "target_user_not_found":
+        business_message = "目标用户尚不存在，当前不能分配店铺权限。"
+    else:
+        business_message = "店铺成员分配只读检查未通过，请管理员查看折叠详情。"
+    return success_response(data={
+        **result,
+        "phase": "ERP-Multistore-1G",
+        "store_membership_readonly_api_mock_gate": True,
+        "readonly_api_mock_gate": True,
+        "public_endpoint_enabled": True,
+        "business_message": business_message,
+        "membership_written": False,
+        "real_database_written": False,
+        "real_auth_session_created": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
     })

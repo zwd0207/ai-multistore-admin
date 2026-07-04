@@ -59,6 +59,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/role-inventory",
     "/api/v1/permissions/mock-check",
     "/api/v1/permissions/sensitive-action/mock-check",
+    "/api/v1/permissions/store-membership/readonly-check",
     "/api/v1/batch/readonly-evidence",
     "/api/v1/products",
     "/api/v1/orders",
@@ -1256,6 +1257,7 @@ def verify_openapi() -> None:
         "/api/v1/permissions/role-inventory": {"get"},
         "/api/v1/permissions/mock-check": {"post"},
         "/api/v1/permissions/sensitive-action/mock-check": {"post"},
+        "/api/v1/permissions/store-membership/readonly-check": {"post"},
     }
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
@@ -10251,9 +10253,11 @@ def verify_role_permission_mock_gates() -> None:
 
 
 def verify_store_membership_assignment_mock_gate() -> None:
+    from fastapi.testclient import TestClient
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.main import app
     from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
     from app.models.store import Store
     from app.services import permission_service
@@ -10355,6 +10359,10 @@ def verify_store_membership_assignment_mock_gate() -> None:
     missing_user = None
     runtime_success = None
     runtime_duplicate = None
+    route_missing_user = None
+    route_success = None
+    route_duplicate = None
+    route_sensitive = None
     with SessionLocal() as db:
         store = db.get(Store, 8)
         if store is None:
@@ -10379,6 +10387,22 @@ def verify_store_membership_assignment_mock_gate() -> None:
             assignment_reason="runtime gate missing user check",
         )
         assert missing_user["skip_reason"] == "target_user_not_found", missing_user
+        with TestClient(app) as client:
+            route_missing_response = client.post("/api/v1/permissions/store-membership/readonly-check", json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": runtime_user_hash,
+                "target_store_id": 8,
+                "target_role": "operator",
+                "manual_approval": True,
+                "assignment_reason": "readonly route missing user check",
+            })
+            assert route_missing_response.status_code == 200, route_missing_response.text
+            route_missing_user = route_missing_response.json()["data"]
+            assert route_missing_user["phase"] == "ERP-Multistore-1G", route_missing_user
+            assert route_missing_user["store_membership_readonly_api_mock_gate"] is True, route_missing_user
+            assert route_missing_user["skip_reason"] == "target_user_not_found", route_missing_user
+            assert route_missing_user["membership_written"] is False, route_missing_user
+            assert route_missing_user["real_database_written"] is False, route_missing_user
 
         runtime_user = ErpUser(
             user_key_hash=runtime_user_hash,
@@ -10405,6 +10429,24 @@ def verify_store_membership_assignment_mock_gate() -> None:
         assert runtime_success["membership_would_create"] is True, runtime_success
         assert runtime_success["membership_written"] is False, runtime_success
         assert runtime_success["real_database_written"] is False, runtime_success
+        with TestClient(app) as client:
+            route_success_response = client.post("/api/v1/permissions/store-membership/readonly-check", json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": runtime_user_hash,
+                "target_store_id": 8,
+                "target_role": "operator",
+                "manual_approval": True,
+                "assignment_reason": "readonly route assignment approval",
+            })
+            assert route_success_response.status_code == 200, route_success_response.text
+            route_success = route_success_response.json()["data"]
+            assert route_success["phase"] == "ERP-Multistore-1G", route_success
+            assert route_success["status"] == "membership_assignment_runtime_mock_ready", route_success
+            assert route_success["membership_would_create"] is True, route_success
+            assert route_success["membership_written"] is False, route_success
+            assert route_success["real_auth_session_created"] is False, route_success
+            assert route_success["formal_sync_open"] is False, route_success
+            assert "不会创建用户或店铺成员关系" in route_success["business_message"], route_success
 
         db.add(ErpStoreMembership(
             user_id=runtime_user.id,
@@ -10425,6 +10467,35 @@ def verify_store_membership_assignment_mock_gate() -> None:
         )
         assert runtime_duplicate["skip_reason"] == "duplicate_active_membership", runtime_duplicate
         assert runtime_duplicate["duplicate_active_membership"] is True, runtime_duplicate
+        with TestClient(app) as client:
+            route_duplicate_response = client.post("/api/v1/permissions/store-membership/readonly-check", json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": runtime_user_hash,
+                "target_store_id": 8,
+                "target_role": "operator",
+                "manual_approval": True,
+                "assignment_reason": "readonly route duplicate check",
+            })
+            assert route_duplicate_response.status_code == 200, route_duplicate_response.text
+            route_duplicate = route_duplicate_response.json()["data"]
+            assert route_duplicate["skip_reason"] == "duplicate_active_membership", route_duplicate
+            assert route_duplicate["duplicate_active_membership"] is True, route_duplicate
+            assert route_duplicate["membership_written"] is False, route_duplicate
+            assert "不需要重复分配" in route_duplicate["business_message"], route_duplicate
+
+            route_sensitive_response = client.post("/api/v1/permissions/store-membership/readonly-check", json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": runtime_user_hash,
+                "target_store_id": 8,
+                "target_role": "operator",
+                "manual_approval": True,
+                "assignment_reason": "authorization bearer must-not-leak-route",
+            })
+            assert route_sensitive_response.status_code == 200, route_sensitive_response.text
+            route_sensitive = route_sensitive_response.json()["data"]
+            assert route_sensitive["skip_reason"] == "membership_assignment_sensitive_material_blocked", route_sensitive
+            assert route_sensitive["membership_written"] is False, route_sensitive
+            assert route_sensitive["real_database_written"] is False, route_sensitive
 
         db.query(ErpStoreMembership).filter(ErpStoreMembership.user_id == runtime_user.id).delete(synchronize_session=False)
         db.query(ErpUser).filter(ErpUser.id == runtime_user.id).delete(synchronize_session=False)
@@ -10449,6 +10520,10 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "runtime_success": runtime_success,
             "runtime_duplicate": runtime_duplicate,
             "missing_user": missing_user,
+            "route_missing_user": route_missing_user,
+            "route_success": route_success,
+            "route_duplicate": route_duplicate,
+            "route_sensitive": route_sensitive,
         },
         ensure_ascii=False,
         default=str,
@@ -10465,6 +10540,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "receiverphone",
         "zipcode",
         "must-not-leak",
+        "must-not-leak-route",
     ]:
         assert forbidden not in serialized, serialized
 
@@ -10912,6 +10988,28 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert readonly_success["evidence_count"] == 2, readonly_success
     assert readonly_success["public_endpoint_enabled"] is False, readonly_success
     assert readonly_success["items"][0]["changed_field_names"] == ["stock_quantity"], readonly_success
+    readonly_default_message = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=[{
+            "evidence_id": "naver-product-default-wording",
+            "store_id": 8,
+            "sync_kind": "naver_product_batch",
+            "candidate_count": 1,
+            "would_create": 0,
+            "would_update": 1,
+            "would_refresh_only": 0,
+            "would_skip": 0,
+            "changed_field_names": ["stock_quantity"],
+            "duplicate_check_passed": True,
+            "field_whitelist_verified": True,
+            "real_sync": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+        }],
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert readonly_default_message["status"] == "readonly_evidence_api_mock_ready", readonly_default_message
+    assert readonly_default_message["items"][0]["business_message"] == "只读批量证据已整理，等待人工审核。", readonly_default_message
 
     readonly_sensitive = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
         evidence_items=[{
@@ -11005,6 +11103,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_evidence["items"][1]["target"] == "orders", local_evidence
         assert local_evidence["items"][1]["would_update"] == 1, local_evidence
         assert local_evidence["items"][1]["changed_field_names"] == ["delivery_status", "order_status"], local_evidence
+        assert local_evidence["business_message"] == (
+            "批量同步只读证据已整理。本次不会调用平台、不会同步、不会写入商品或订单。"
+        ), local_evidence
 
         local_sensitive_response = client.post("/api/v1/batch/readonly-evidence", json={
             "evidence_items": [{
@@ -11040,6 +11141,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         {
             "success": success,
             "readonly_success": readonly_success,
+            "readonly_default_message": readonly_default_message,
             "local_evidence": local_evidence,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
@@ -11064,6 +11166,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "zipcode",
         "must-not-leak",
         "must-not-leak-route",
+        "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized
 

@@ -1074,3 +1074,19 @@ _evaluate_naver_product_batch_rollback_drill_mock_gate(...)
 It verifies a prior stock-only write summary, backup evidence, rollback checklist, temporary-restore planning, readback planning, and sensitive-scan planning. It blocks real restore requests and production database restore targets. It does not restore a database, write products, write orders, write SyncLog, write tested-success, write audit rows, or open formal product batch sync.
 
 Naver-Order-Batch-1C aligns Naver order batch readonly evidence with the shared batch evidence API shape. Order batch evidence may describe candidate counts, safe changed-field names, duplicate checks, and whitelist checks for manual review only. It does not call Naver, write orders, write timeline events, or open formal order batch sync.
+
+ERP-Multistore-1G adds a safe readonly membership assignment API:
+
+```text
+POST /api/v1/permissions/store-membership/readonly-check
+```
+
+The route reads existing auth tables through the runtime mock gate and returns business messages for missing target users, duplicate active memberships, blocked checks, or ready-for-later-assignment checks. It never creates users, sessions, role assignments, or store memberships, and keeps `membership_written=false`.
+
+ERP-Multistore-1H keeps the local implementation boundary explicit: this API may support a future admin UI, but real user creation, production login, route-level auth enforcement, and real membership writes remain separate approval phases.
+
+Naver-Product-Batch-1K plans a readonly rollback-drill report for the controlled stock-only product write path. The future report should show backup evidence, rollback checklist readiness, temporary-restore planning, readback planning, and sensitive-scan planning only. It must not execute real restore or open formal product batch sync.
+
+Naver-Order-Batch-1D confirms the Orders approval evidence UI remains a readonly review surface for Naver order batch evidence. It must not call Naver, write orders, write timeline events, or imply that formal order batch sync is open.
+
+ERP-Batch-1L cleans backend batch evidence wording. The default readonly evidence item message is now Chinese business wording, and the local evidence response says that no platform call, sync, product write, or order write was executed.
