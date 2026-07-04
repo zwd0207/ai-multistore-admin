@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `58% - 65%`
-- Naver 基础 ERP 闭环进度：约 `72% - 77%`
-- ERP 给真实用户落地使用进度：约 `62% - 69%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `55% - 60%`
+- 项目总体规划进度：约 `68% - 74%`
+- Naver 基础 ERP 闭环进度：约 `77% - 82%`
+- ERP 给真实用户落地使用进度：约 `71% - 77%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `64% - 69%`
 
 ## 当前定位
 
@@ -455,6 +455,35 @@ Next 5 recommended stages:
 3. `Phase ERP-Auth-1E: Runtime permission API approval plan`
 4. `Phase ERP-Auth-1F: Runtime permission API mock gate`
 5. `Phase ERP-UX-2A: Role-aware action visibility implementation`
+
+### Latest update after `Phase Naver-ERP-20B` to `Phase ERP-UX-2A`
+
+- Project overall planning progress: about `68% - 74%`
+- Naver basic ERP loop progress: about `77% - 82%`
+- ERP real-user landing progress: about `71% - 77%`
+- Production version for long-term non-technical use: about `64% - 69%`
+
+Implemented in this update:
+
+- Repeated the controlled Naver order refresh preview in readonly mode over a recent 3-day KST window.
+- Confirmed token/feed/detail all returned HTTP 200 and safe hash `id-hash-192b9c67e8` matched one existing local Naver order.
+- Kept `orders_total=10`, `orders_store8=7`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=10`, and `order_status_events=0` unchanged.
+- Documented that a future refresh write still needs fresh backup, fresh readonly repeat, role permission, sensitive-action approval, audit evidence, readback, and sensitive scan.
+- Added mock-only Codex1 permission API routes for role inventory, store-scoped permission checks, and sensitive action checks.
+- Added Codex2 Orders role-aware action visibility so ordinary users see business messages while permission keys stay folded in technical details.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, verified selected Naver order write evidence, mock-proven role/store approval checks, and role-aware action visibility in Orders.
+- Not suitable now: formal product/order batch sync, fully authenticated multi-user production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-ERP-20D: Controlled order refresh write execution approval with permission evidence`
+2. `Phase Naver-ERP-20E: Controlled existing-order refresh single local write with audit evidence`
+3. `Phase Naver-ERP-20F: Controlled refresh post-write verification`
+4. `Phase ERP-Auth-1G: Permission API frontend-wide visibility plan`
+5. `Phase ERP-Auth-1H: Runtime permission API production-auth boundary plan`
 
 ## 安全边界
 

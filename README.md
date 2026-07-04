@@ -12,10 +12,10 @@ PROJECT_PROGRESS.md
 
 当前固定进度口径：
 
-- 项目总体规划进度：约 `54% - 61%`
-- Naver 基础 ERP 闭环进度：约 `70% - 75%`
-- ERP 给真实用户落地使用进度：约 `58% - 65%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `49% - 54%`
+- 项目总体规划进度：约 `68% - 74%`
+- Naver 基础 ERP 闭环进度：约 `77% - 82%`
+- ERP 给真实用户落地使用进度：约 `71% - 77%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `64% - 69%`
 
 ## 环境要求
 
@@ -1015,3 +1015,33 @@ ERP-Auth-1D is planning-only. It defines how Codex2 should eventually hide, disa
 The controlled order refresh batch with audit approval plan is documented in `PHASE_NAVER_ERP_20A_CONTROLLED_ORDER_REFRESH_BATCH_WITH_AUDIT_APPROVAL_PLAN.md`.
 
 Naver-ERP-20A is planning-only. It defines the next controlled order refresh batch path after the selected new-order write: backup, readonly candidate repeat, store-scoped role gate, sensitive action approval, audit chain, post-write readback, and sensitive scan. It does not call Naver, execute `real_sync=true`, write data, write audit rows, change schema, or open formal order sync.
+
+## Phase Naver-ERP-20B - Controlled Order Refresh Batch Readonly Repeat
+
+The controlled order refresh batch readonly repeat is documented in `PHASE_NAVER_ERP_20B_CONTROLLED_ORDER_REFRESH_BATCH_READONLY_REPEAT.md`.
+
+Naver-ERP-20B reruns the real Naver order preview in readonly mode with `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. Token, feed, and detail returned HTTP 200. The observed safe hash was `id-hash-192b9c67e8`, matched exactly one existing local Naver order, and is classified as an existing local refresh candidate. Counts stayed unchanged: `orders_store8=7`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=10`, and `order_status_events=0`.
+
+## Phase Naver-ERP-20C - Controlled Order Refresh Batch Write Approval
+
+The controlled order refresh batch write approval plan is documented in `PHASE_NAVER_ERP_20C_CONTROLLED_ORDER_REFRESH_BATCH_WRITE_APPROVAL.md`.
+
+Naver-ERP-20C is planning-only. It does not write the candidate. A later refresh write still requires clean worktrees, a fresh backup, a fresh readonly repeat, exact identity match, store-scoped role permission, sensitive-action approval, audit evidence, post-write readback, and sensitive scan. Formal order sync and platform order writes remain closed.
+
+## Phase ERP-Auth-1E - Runtime Permission API Approval Plan
+
+The runtime permission API approval plan is documented in `PHASE_ERP_AUTH_1E_RUNTIME_PERMISSION_API_APPROVAL_PLAN.md`.
+
+ERP-Auth-1E approves only a mock-gate public API surface for safe role inventory, store-scoped permission checks, and sensitive-action approval checks. It does not create a production auth session, user table, schema migration, platform API call, business write, or formal sync approval.
+
+## Phase ERP-Auth-1F - Runtime Permission API Mock Gate
+
+The runtime permission API mock gate is documented in `PHASE_ERP_AUTH_1F_RUNTIME_PERMISSION_API_MOCK_GATE.md`.
+
+ERP-Auth-1F adds `GET /api/v1/permissions/role-inventory`, `POST /api/v1/permissions/mock-check`, and `POST /api/v1/permissions/sensitive-action/mock-check`. The routes expose only safe mock permission results and business messages, with `real_auth_session_created=false`, `real_database_written=false`, `raw_response_saved=false`, `formal_sync_open=false`, and `platform_writes_enabled=false`.
+
+## Phase ERP-UX-2A - Role-Aware Action Visibility Implementation
+
+The role-aware action visibility implementation is documented in `PHASE_ERP_UX_2A_ROLE_AWARE_ACTION_VISIBILITY_IMPLEMENTATION.md`.
+
+ERP-UX-2A updates the Codex2 Orders page to show business-first role/action visibility for Naver orders: current role can view orders, order refresh writes require administrator approval, backup/readonly/audit gates remain required, and formal order batch sync remains closed. Permission keys and mock diagnostics stay inside folded `TechnicalDetails`.

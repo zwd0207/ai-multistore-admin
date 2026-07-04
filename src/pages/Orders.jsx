@@ -805,6 +805,160 @@ function NaverOrderPreviewStatusPanel() {
   );
 }
 
+function NaverRoleAwareActionVisibilityPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [permissionState, setPermissionState] = useState({
+    loading: false,
+    readCheck: null,
+    approvalRequiredCheck: null,
+    adminApprovalMock: null,
+    error: '',
+  });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setPermissionState({
+        loading: false,
+        readCheck: null,
+        approvalRequiredCheck: null,
+        adminApprovalMock: null,
+        error: '',
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const storeId = Number(selectedStoreId);
+    setPermissionState((current) => ({ ...current, loading: true, error: '' }));
+
+    Promise.all([
+      dataProvider.checkPermissionMock({
+        actorContext: { actor_id: 'local-operator', role: 'operator', store_ids: [storeId] },
+        storeId,
+        operationKey: 'orders.read',
+      }),
+      dataProvider.checkSensitiveActionPermissionMock({
+        actorContext: { actor_id: 'local-admin', role: 'admin', store_ids: [storeId] },
+        storeId,
+        actionKey: 'orders.refresh_batch_write',
+        manualApproval: false,
+      }),
+      dataProvider.checkSensitiveActionPermissionMock({
+        actorContext: { actor_id: 'local-admin', role: 'admin', store_ids: [storeId] },
+        storeId,
+        actionKey: 'orders.refresh_batch_write',
+        manualApproval: true,
+      }),
+    ])
+      .then(([readCheck, approvalRequiredCheck, adminApprovalMock]) => {
+        if (cancelled) return;
+        setPermissionState({
+          loading: false,
+          readCheck,
+          approvalRequiredCheck,
+          adminApprovalMock,
+          error: '',
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPermissionState({
+            loading: false,
+            readCheck: null,
+            approvalRequiredCheck: null,
+            adminApprovalMock: null,
+            error: '角色权限展示暂时加载失败，订单查看不受影响；敏感写入仍保持关闭。',
+          });
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, readCheck, approvalRequiredCheck, adminApprovalMock, error } = permissionState;
+  const canReadOrders = Boolean(readCheck?.permissionVerified);
+  const needsManualApproval = approvalRequiredCheck?.skipReason === 'manual_approval_required'
+    || approvalRequiredCheck?.status === 'approval_blocked';
+  const adminCanApproveInMock = adminApprovalMock?.status === 'approval_allowed_mock';
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 订单操作权限</h2>
+          <p>这里用普通业务话术说明当前页面能做什么；真实写入和正式批量同步仍需要单独阶段批准。</p>
+        </div>
+        <span className="period-chip">{loading ? '检查中' : '权限规则'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={canReadOrders ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>订单查看</strong>
+            <span>{canReadOrders ? '可查看' : '需确认'}</span>
+          </div>
+          <p>{canReadOrders ? '当前角色可以查看 Naver 订单。' : '当前角色暂未确认订单查看权限，请联系管理员确认店铺范围。'}</p>
+          <small>页面只读取本地订单列表，不触发平台写操作。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>订单刷新写入</strong>
+            <span>{needsManualApproval ? '需审批' : '保持关闭'}</span>
+          </div>
+          <p>订单刷新写入需要管理员批准，并且必须先完成备份、只读复查和审计证据。</p>
+          <small>本页面不会直接写入订单，也不会写 SyncLog 或能力测试成功记录。</small>
+        </article>
+        <article className={adminCanApproveInMock ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>管理员审批条件</strong>
+            <span>{adminCanApproveInMock ? '已验证' : '待接入'}</span>
+          </div>
+          <p>{adminCanApproveInMock ? '本地审批规则已确认管理员可审批订单刷新动作。' : '管理员审批条件尚未通过本地规则确认。'}</p>
+          <small>这只是本地权限规则验证，不代表真实登录权限系统已上线。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>正式订单同步</strong>
+            <span>未开放</span>
+          </div>
+          <p>正式订单批量同步仍未开放，发货、取消、退货、换货写操作也未开放。</p>
+          <small>后续写入阶段必须单独批准。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看权限检查技术详情"
+        description="权限 key、审批状态和 mock 标记只放在折叠区，主页面只显示业务提示。"
+        items={[
+          { label: 'role_visibility_phase', value: 'ERP-UX-2A' },
+          { label: 'permission_api_phase', value: readCheck?.phase || approvalRequiredCheck?.phase || 'ERP-Auth-1F' },
+          { label: 'mock_permission_api', value: readCheck?.mockPermissionApi ?? true },
+          { label: 'public_endpoint_enabled', value: readCheck?.publicEndpointEnabled ?? true },
+          { label: 'read_check_status', value: readCheck?.status },
+          { label: 'read_operation_key', value: readCheck?.operationKey },
+          { label: 'read_permission_verified', value: readCheck?.permissionVerified },
+          { label: 'approval_required_status', value: approvalRequiredCheck?.status },
+          { label: 'approval_required_reason', value: approvalRequiredCheck?.skipReason },
+          { label: 'approval_action_key', value: approvalRequiredCheck?.operationKey },
+          { label: 'admin_approval_mock_status', value: adminApprovalMock?.status },
+          { label: 'admin_approval_role_verified', value: adminApprovalMock?.approvalRoleVerified },
+          { label: 'real_auth_session_created', value: readCheck?.realAuthSessionCreated ?? false },
+          { label: 'real_database_written', value: readCheck?.realDatabaseWritten ?? false },
+          { label: 'orders_written', value: readCheck?.ordersWritten ?? false },
+          { label: 'products_written', value: readCheck?.productsWritten ?? false },
+          { label: 'sync_log_written', value: readCheck?.syncLogWritten ?? false },
+          { label: 'tested_success_written', value: readCheck?.capabilityTestedSuccessWritten ?? false },
+          { label: 'raw_response_saved', value: readCheck?.rawResponseSaved ?? false },
+          { label: 'formal_sync_open', value: readCheck?.formalSyncOpen ?? false },
+          { label: 'platform_writes_enabled', value: readCheck?.platformWritesEnabled ?? false },
+        ]}
+      />
+    </section>
+  );
+}
+
 function DetailItem({ label, value }) {
   return (
     <div className="detail-item">
@@ -1135,6 +1289,7 @@ export default function Orders() {
   return (
     <>
       <NaverOrderPreviewStatusPanel />
+      <NaverRoleAwareActionVisibilityPanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />
       <ResourcePage

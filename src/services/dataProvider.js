@@ -415,6 +415,198 @@ async function getBackendDashboardData(params) {
   };
 }
 
+const mockRolePermissions = {
+  owner: {
+    store_scope: 'all',
+    permissions: ['*'],
+    sensitive_approval_actions: ['*'],
+  },
+  admin: {
+    store_scope: 'assigned',
+    permissions: [
+      'dashboard.read',
+      'products.read',
+      'products.preview',
+      'orders.read',
+      'orders.preview',
+      'orders.local_write',
+      'orders.refresh_batch_write',
+      'audit.read',
+      'backup.read',
+      'backup.create',
+    ],
+    sensitive_approval_actions: ['orders.local_write', 'orders.refresh_batch_write', 'backup.create'],
+  },
+  operator: {
+    store_scope: 'assigned',
+    permissions: ['dashboard.read', 'products.read', 'products.preview', 'orders.read', 'orders.preview', 'audit.read', 'backup.read'],
+    sensitive_approval_actions: [],
+  },
+  auditor: {
+    store_scope: 'assigned',
+    permissions: ['dashboard.read', 'orders.read', 'products.read', 'audit.read', 'backup.read'],
+    sensitive_approval_actions: [],
+  },
+  viewer: {
+    store_scope: 'assigned',
+    permissions: ['dashboard.read', 'orders.read', 'products.read'],
+    sensitive_approval_actions: [],
+  },
+};
+
+function permissionSafetyFlags(extra = {}) {
+  return {
+    mockPermissionApi: true,
+    publicEndpointEnabled: Boolean(extra.public_endpoint_enabled ?? extra.publicEndpointEnabled ?? true),
+    realAuthSessionCreated: false,
+    realDatabaseWritten: false,
+    ordersWritten: false,
+    productsWritten: false,
+    syncLogWritten: false,
+    capabilityTestedSuccessWritten: false,
+    rawResponseSaved: false,
+    secretsSaved: false,
+    privacyFieldsRedacted: true,
+    formalSyncOpen: false,
+    platformWritesEnabled: false,
+  };
+}
+
+function normalizeMockRole(actorContext = {}) {
+  const role = String(actorContext.role || '').trim().toLowerCase();
+  return mockRolePermissions[role] ? role : '';
+}
+
+function normalizeStoreIds(actorContext = {}) {
+  if (actorContext.store_ids === 'all' || actorContext.storeIds === 'all') return [-1];
+  const ids = actorContext.store_ids || actorContext.storeIds || [];
+  return Array.isArray(ids)
+    ? ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+}
+
+function mockPermissionGate({ actorContext = {}, storeId, operationKey }) {
+  const role = normalizeMockRole(actorContext);
+  const requestedStoreId = Number(storeId);
+  const roleDefinition = mockRolePermissions[role] || {};
+  const assignedStoreIds = normalizeStoreIds(actorContext);
+  const storeScopeVerified = roleDefinition.store_scope === 'all'
+    || assignedStoreIds.includes(-1)
+    || assignedStoreIds.includes(requestedStoreId);
+  const permissions = roleDefinition.permissions || [];
+  const operation = String(operationKey || '').trim().toLowerCase();
+  const permissionVerified = storeScopeVerified && (permissions.includes('*') || permissions.includes(operation));
+  let status = 'blocked';
+  let skipReason = null;
+  let businessMessage = '当前权限检查未通过，请检查角色、店铺范围或操作类型。';
+
+  if (!role) {
+    skipReason = 'role_not_allowed';
+  } else if (!storeScopeVerified) {
+    skipReason = 'store_scope_mismatch';
+    businessMessage = '当前角色未被分配到该店铺，不能访问该店铺数据。';
+  } else if (!permissionVerified) {
+    skipReason = 'permission_denied';
+    businessMessage = '当前角色没有该操作权限，请联系管理员处理。';
+  } else {
+    status = 'access_allowed';
+    businessMessage = '当前角色可查看该店铺的对应功能。';
+  }
+
+  return {
+    phase: 'ERP-Auth-1F',
+    status,
+    skipReason,
+    actorRole: role || null,
+    requestedStoreId,
+    operationKey: operation,
+    storeScopeVerified,
+    permissionVerified,
+    sensitiveAction: ['orders.local_write', 'orders.refresh_batch_write', 'backup.create'].includes(operation),
+    manualApproval: false,
+    approvalRoleVerified: false,
+    approvalStatus: 'blocked',
+    businessMessage,
+    ...permissionSafetyFlags(),
+  };
+}
+
+function mockSensitiveActionGate({ actorContext = {}, storeId, actionKey, manualApproval = false }) {
+  const access = mockPermissionGate({ actorContext, storeId, operationKey: actionKey });
+  const action = String(actionKey || '').trim().toLowerCase();
+  const roleDefinition = mockRolePermissions[access.actorRole] || {};
+  const approvalActions = roleDefinition.sensitive_approval_actions || [];
+  let result = {
+    ...access,
+    actionKey: action,
+    manualApproval: Boolean(manualApproval),
+    sensitiveActionApprovalGate: true,
+  };
+
+  if (access.status !== 'access_allowed') {
+    return {
+      ...result,
+      approvalStatus: 'blocked',
+      businessMessage: '当前角色不能批准该敏感操作，请由管理员或负责人审批。',
+    };
+  }
+  if (!manualApproval) {
+    return {
+      ...result,
+      status: 'approval_blocked',
+      approvalStatus: 'blocked',
+      skipReason: 'manual_approval_required',
+      businessMessage: '该操作属于敏感操作，需要管理员人工批准后才能进入后续执行阶段。',
+    };
+  }
+  if (!approvalActions.includes('*') && !approvalActions.includes(action)) {
+    return {
+      ...result,
+      status: 'approval_blocked',
+      approvalStatus: 'blocked',
+      skipReason: 'approval_role_required',
+      businessMessage: '当前角色不能批准该敏感操作，请由管理员或负责人审批。',
+    };
+  }
+  return {
+    ...result,
+    status: 'approval_allowed_mock',
+    approvalStatus: 'approved_in_mock_gate',
+    approvalRoleVerified: true,
+    businessMessage: '管理员审批条件在 mock gate 中通过；真实写入仍需要单独阶段执行。',
+  };
+}
+
+function adaptPermissionGateResult(data = {}) {
+  return {
+    ...data,
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    actorRole: data.actor_role ?? data.actorRole ?? null,
+    actorIdHash: data.actor_id_hash ?? data.actorIdHash ?? null,
+    requestedStoreId: data.requested_store_id ?? data.requestedStoreId ?? null,
+    operationKey: data.operation_key ?? data.operationKey ?? data.action_key ?? data.actionKey ?? null,
+    storeScopeVerified: Boolean(data.store_scope_verified ?? data.storeScopeVerified),
+    permissionVerified: Boolean(data.permission_verified ?? data.permissionVerified),
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    approvalRoleVerified: Boolean(data.approval_role_verified ?? data.approvalRoleVerified),
+    approvalStatus: data.approval_status ?? data.approvalStatus ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    mockPermissionApi: Boolean(data.mock_permission_api ?? data.mockPermissionApi),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    realAuthSessionCreated: Boolean(data.real_auth_session_created ?? data.realAuthSessionCreated),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: Boolean(data.privacy_fields_redacted ?? data.privacyFieldsRedacted ?? true),
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
 const sourceMethods = {
   healthCheck: backendApi.healthCheck,
   getDashboardData: (params) => (isBackendSource ? getBackendDashboardData(params) : getMockDashboardData()),
@@ -457,6 +649,60 @@ const sourceMethods = {
       includeTestOrders: adapted.includeTestOrders,
       testOrdersExcluded: adapted.testOrdersExcluded,
     };
+  },
+  getRolePermissionInventory: async () => {
+    if (!isBackendSource) {
+      return {
+        phase: 'ERP-Auth-1F',
+        status: 'role_inventory_ready',
+        businessMessage: '当前仅开放本地角色权限模型预览，用于页面展示和后续审批设计；正式登录权限系统尚未开放。',
+        roles: mockRolePermissions,
+        ...permissionSafetyFlags(),
+      };
+    }
+    const result = await backendApi.getRolePermissionInventory();
+    return {
+      ...result,
+      businessMessage: result.business_message || result.businessMessage,
+      mockPermissionApi: Boolean(result.mock_permission_api),
+      publicEndpointEnabled: Boolean(result.public_endpoint_enabled),
+      realAuthSessionCreated: Boolean(result.real_auth_session_created),
+      realDatabaseWritten: Boolean(result.real_database_written),
+      formalSyncOpen: Boolean(result.formal_sync_open),
+      platformWritesEnabled: Boolean(result.platform_writes_enabled),
+    };
+  },
+  checkPermissionMock: async (payload = {}) => {
+    const request = {
+      actor_context: payload.actorContext || payload.actor_context || {},
+      store_id: Number(payload.storeId || payload.store_id),
+      operation_key: payload.operationKey || payload.operation_key,
+    };
+    if (!isBackendSource) {
+      return adaptPermissionGateResult(mockPermissionGate({
+        actorContext: request.actor_context,
+        storeId: request.store_id,
+        operationKey: request.operation_key,
+      }));
+    }
+    return adaptPermissionGateResult(await backendApi.checkPermissionMock(request));
+  },
+  checkSensitiveActionPermissionMock: async (payload = {}) => {
+    const request = {
+      actor_context: payload.actorContext || payload.actor_context || {},
+      store_id: Number(payload.storeId || payload.store_id),
+      action_key: payload.actionKey || payload.action_key,
+      manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    };
+    if (!isBackendSource) {
+      return adaptPermissionGateResult(mockSensitiveActionGate({
+        actorContext: request.actor_context,
+        storeId: request.store_id,
+        actionKey: request.action_key,
+        manualApproval: request.manual_approval,
+      }));
+    }
+    return adaptPermissionGateResult(await backendApi.checkSensitiveActionPermissionMock(request));
   },
   previewNaverOrderCompleteFields: async (payload = {}) => {
     if (!isBackendSource) return mockNaverOrderCompletePreview(payload);
