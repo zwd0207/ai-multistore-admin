@@ -10532,6 +10532,223 @@ def verify_local_backup_list_report_readonly_helper() -> None:
     print("local backup list report readonly helper: ok")
 
 
+def verify_backup_report_readonly_api_mock_gate() -> None:
+    from scripts.create_local_backup import create_local_backup
+    from app.services.backup_service import BACKUP_REPORT_MOCK_SCOPE, list_backup_report_readonly_mock_gate
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1k-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_root = temp_dir / "approved-backups"
+        backup_root.mkdir()
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE operation_audit_logs (id INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver backup API fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Backup API fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-backup1k001', 'PAYED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'payed')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.execute("INSERT INTO operation_audit_logs (id, action) VALUES (1, 'fixture_audit')")
+            conn.commit()
+
+        backup_result = create_local_backup(
+            phase="ERP-Backup-1K",
+            operation_type="backup_report_api_mock_fixture",
+            created_by_actor_type="test",
+            created_by_actor_label="verify_all",
+            retention_class="manual_checkpoint",
+            retention_reason="backup report API mock verification",
+            source_db_path=source_db,
+            backup_root=backup_root,
+            git_commit_codex1="0" * 40,
+            git_commit_codex2="1" * 40,
+            allow_non_default_source=True,
+            allow_custom_backup_root=True,
+            created_at=datetime(2026, 7, 4, 14, 0, 0, tzinfo=timezone.utc),
+        )
+        assert backup_result["status"] == "backup_created", backup_result
+
+        missing_scope = list_backup_report_readonly_mock_gate(
+            backup_root=backup_root,
+            verification_scope=None,
+        )
+        assert missing_scope["skip_reason"] == "backup_report_mock_scope_required", missing_scope
+        assert missing_scope["public_endpoint_enabled"] is False, missing_scope
+
+        invalid_limit = list_backup_report_readonly_mock_gate(
+            backup_root=backup_root,
+            limit=0,
+            verification_scope=BACKUP_REPORT_MOCK_SCOPE,
+        )
+        assert invalid_limit["skip_reason"] == "invalid_limit", invalid_limit
+        assert invalid_limit["rows_written"] == 0, invalid_limit
+
+        report = list_backup_report_readonly_mock_gate(
+            backup_root=backup_root,
+            limit=5,
+            verification_scope=BACKUP_REPORT_MOCK_SCOPE,
+        )
+        assert report["phase"] == "ERP-Backup-1K", report
+        assert report["status"] == "backup_report_ready", report
+        assert report["backup_report_readonly"] is True, report
+        assert report["public_endpoint_enabled"] is False, report
+        assert report["backup_count"] == 1, report
+        assert report["manifest_count"] == 1, report
+        assert report["summary"]["reported_item_count"] == 1, report
+        assert report["summary"]["valid_manifest_count"] == 1, report
+        assert report["backup_deleted"] is False, report
+        assert report["real_restore_executed"] is False, report
+        assert report["production_db_touched"] is False, report
+        assert report["rows_written"] == 0, report
+        assert report["raw_response_saved"] is False, report
+        assert report["secrets_saved"] is False, report
+        assert report["privacy_fields_redacted"] is True, report
+        assert report["sensitive_scan_passed"] is True, report
+        assert "备份" in report["business_message"], report
+        assert len(report["items"][0]["backup_sha256_abbrev"]) < 64, report
+
+        serialized = json.dumps(report, ensure_ascii=False, default=str).lower()
+        for forbidden in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert forbidden not in serialized, serialized
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "productorderid",
+            "buyername",
+            "receiverphone",
+            "zipcode",
+        ]:
+            assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("backup report readonly API mock gate: ok")
+
+
+def verify_backup_report_readonly_local_api() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with TestClient(app) as client:
+        report_response = client.get("/api/v1/backups/local-report", params={"limit": 10})
+        assert report_response.status_code == 200, report_response.text
+        report_payload = report_response.json()["data"]
+        assert report_payload["phase"] == "ERP-Backup-1L", report_payload
+        assert report_payload["status"] in {"backup_report_ready", "backup_report_empty"}, report_payload
+        assert report_payload["backup_report_readonly"] is True, report_payload
+        assert report_payload["public_endpoint_enabled"] is True, report_payload
+        assert report_payload["backup_deleted"] is False, report_payload
+        assert report_payload["real_restore_executed"] is False, report_payload
+        assert report_payload["production_db_touched"] is False, report_payload
+        assert report_payload["rows_written"] == 0, report_payload
+        assert report_payload["raw_response_saved"] is False, report_payload
+        assert report_payload["secrets_saved"] is False, report_payload
+        assert report_payload["privacy_fields_redacted"] is True, report_payload
+        assert report_payload["formal_sync_open"] is False, report_payload
+        assert report_payload["platform_writes_enabled"] is False, report_payload
+        assert "备份" in report_payload["business_message"], report_payload
+
+        summary_response = client.get("/api/v1/backups/local-report/summary", params={"limit": 10})
+        assert summary_response.status_code == 200, summary_response.text
+        summary_payload = summary_response.json()["data"]
+        assert summary_payload["phase"] == "ERP-Backup-1L", summary_payload
+        assert summary_payload["status"] == "backup_summary_success", summary_payload
+        assert summary_payload["backup_report_readonly"] is True, summary_payload
+        assert summary_payload["public_endpoint_enabled"] is True, summary_payload
+        assert summary_payload["backup_deleted"] is False, summary_payload
+        assert summary_payload["real_restore_executed"] is False, summary_payload
+        assert summary_payload["production_db_touched"] is False, summary_payload
+        assert summary_payload["rows_written"] == 0, summary_payload
+        assert summary_payload["raw_response_saved"] is False, summary_payload
+        assert summary_payload["secrets_saved"] is False, summary_payload
+        assert summary_payload["privacy_fields_redacted"] is True, summary_payload
+        assert summary_payload["formal_sync_open"] is False, summary_payload
+        assert summary_payload["platform_writes_enabled"] is False, summary_payload
+
+        unsupported = client.get("/api/v1/backups/local-report", params={"backup_root": "C:/not-allowed"})
+        assert unsupported.status_code == 400, unsupported.text
+        unsupported_text = json.dumps(unsupported.json(), ensure_ascii=False).lower()
+        assert "c:/not-allowed" not in unsupported_text, unsupported_text
+        assert "backup_root" not in unsupported_text, unsupported_text
+
+        post_response = client.post("/api/v1/backups/local-report")
+        delete_response = client.delete("/api/v1/backups/local-report")
+        assert post_response.status_code == 405, post_response.text
+        assert delete_response.status_code == 405, delete_response.text
+
+        serialized = json.dumps(
+            {
+                "report": report_payload,
+                "summary": summary_payload,
+            },
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for forbidden in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert forbidden not in serialized, serialized
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "productorderid",
+            "buyername",
+            "receiverphone",
+            "zipcode",
+        ]:
+            assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("backup report readonly local API: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -10547,6 +10764,7 @@ def verify_git_tracking() -> None:
         "M  backend/README.md",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        " M backend/app/api/v1/endpoints/backups.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
         " M backend/app/api/v1/endpoints/dashboard.py",
@@ -10575,6 +10793,7 @@ def verify_git_tracking() -> None:
         " M backend/app/services/stats_service.py",
         " M backend/app/services/api_capability_service.py",
         " M backend/app/services/api_credential_readiness_service.py",
+        " M backend/app/services/backup_service.py",
         " M backend/app/services/credential_service.py",
         " M backend/app/services/operation_audit_service.py",
         "A  backend/app/services/operation_audit_service.py",
@@ -10598,6 +10817,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
+        "?? backend/app/api/v1/endpoints/backups.py",
         "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/financial.py",
@@ -10609,6 +10829,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/schemas/sync.py",
         "?? backend/app/services/api_capability_service.py",
         "?? backend/app/services/api_credential_readiness_service.py",
+        "?? backend/app/services/backup_service.py",
         "?? backend/app/services/operation_audit_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
@@ -10752,6 +10973,8 @@ def main() -> None:
         verify_real_local_backup_helper_implementation()
         verify_real_backup_restore_dry_run_using_manifest()
         verify_local_backup_list_report_readonly_helper()
+        verify_backup_report_readonly_api_mock_gate()
+        verify_backup_report_readonly_local_api()
         verify_naver_order_refresh_backup_evidence_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

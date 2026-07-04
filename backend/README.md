@@ -891,8 +891,14 @@ ERP-Backup-1H adds `scripts/restore_backup_dry_run.py` for local restore drills.
 
 ERP-Backup-1I adds `scripts/list_local_backups.py` for readonly backup reporting. It lists approved-root manifests, validates required fields and safety booleans, reports whether the backup exists inside the root, returns abbreviated SHA-256, safe counts, and retention metadata, and never deletes or restores backup files.
 
+ERP-Backup-1J approves a narrow readonly API surface for backup reports. ERP-Backup-1K adds a private mock gate in `app/services/backup_service.py` that verifies safe report output from temporary backup manifests only. ERP-Backup-1L implements `GET /api/v1/backups/local-report` and `GET /api/v1/backups/local-report/summary`. These endpoints accept only `limit`, read only the approved local backup root, reject unsupported query parameters, return safe backup evidence and Chinese business messages, and keep `backup_deleted=false`, `real_restore_executed=false`, `production_db_touched=false`, and `rows_written=0`.
+
 ERP-Audit-1W documents the future backup creation audit chain. ERP-Audit-1X adds a private mock gate that writes `backup_planned`, `backup_created`, `backup_hash_verified`, `backup_integrity_verified`, and `backup_manifest_verified` only inside the temporary `verify_all.py` database after manual approval, private scope, verified backup evidence, and safety flags. It does not write real audit rows.
 
+ERP-Audit-1Y documents the future runtime wiring approval plan for connecting successful manual backup creation to append-only audit rows. A later implementation must require explicit approval, clean worktrees, a successful backup helper result, valid SHA-256, `sqlite_integrity_check=ok`, `manifest_written=true`, safe saved flags, post-write readback, and sensitive-field scanning.
+
 Naver-ERP-18A adds a private order-refresh backup evidence gate around the existing Naver order refresh batch mock gate. Write-enabled refresh paths require safe backup evidence before the existing manual approval gate can proceed. Readonly refresh paths do not require backup evidence because they do not write data. The helper is not wired to a public endpoint and does not open formal Naver order sync.
+
+Naver-ERP-18B documents the approval plan for a future controlled Naver order refresh write with real backup evidence. It remains planning-only: no Naver call, no `real_sync=true`, no local order writes, no timeline events, no SyncLog writes, no tested-success writes, no schema change, and no formal Naver order sync opening.
 
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.

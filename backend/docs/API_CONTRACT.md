@@ -1339,6 +1339,41 @@ Allowed output fields are safe report metadata such as:
 
 The helper must not delete backups, restore backups, or write audit or business rows.
 
+### Backup Report Readonly API
+
+```text
+GET /api/v1/backups/local-report?limit={limit}
+GET /api/v1/backups/local-report/summary?limit={limit}
+```
+
+These endpoints are local readonly APIs for approved backup-root manifests. They accept only `limit`; they must not accept backup root, restore path, delete flag, cleanup flag, upload target, or arbitrary filesystem path parameters.
+
+Allowed response fields include:
+
+- `status`
+- `business_message`
+- `backup_count`
+- `manifest_count`
+- `items`
+- `summary`
+- `latest_backup`
+- `all_manifests_valid`
+- `all_sensitive_scans_passed`
+- abbreviated SHA-256
+- retention metadata
+- safe baseline counts
+- `backup_deleted=false`
+- `real_restore_executed=false`
+- `production_db_touched=false`
+- `rows_written=0`
+- `raw_response_saved=false`
+- `secrets_saved=false`
+- `privacy_fields_redacted=true`
+- `formal_sync_open=false`
+- `platform_writes_enabled=false`
+
+Unsupported query parameters return HTTP 400 with safe business copy and no raw path echo. `POST`, `PUT`, `PATCH`, and `DELETE` are not supported.
+
 ### Backup Creation Audit Mock Gate
 
 ```text

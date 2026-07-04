@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     api_capabilities,
     api_credential_readiness,
     appeal_cases,
+    backups,
     credentials,
     customer_inquiries,
     dashboard,
@@ -34,6 +35,7 @@ api_router.include_router(device_environments.router)
 api_router.include_router(email_accounts.router)
 api_router.include_router(important_emails.router)
 api_router.include_router(appeal_cases.router)
+api_router.include_router(backups.router)
 api_router.include_router(credentials.router)
 api_router.include_router(platform_logins.router)
 api_router.include_router(stores.router)
