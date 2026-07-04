@@ -234,6 +234,35 @@ Next 5 recommended stages:
 4. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
 5. `Phase ERP-Auth-1A: Role and permission model plan`
 
+### Latest update after `Phase Naver-ERP-18C`
+
+- Project overall planning progress: about `61% - 68%`
+- Naver basic ERP loop progress: about `73% - 78%`
+- ERP real-user landing progress: about `65% - 72%`
+- Production version for long-term non-technical use: about `58% - 63%`
+
+Implemented in this update:
+
+- Repeated the controlled Naver order readonly preview after outbound IP allowlist confirmation.
+- Confirmed token, feed, and one detail request all returned HTTP 200.
+- Observed safe hash `id-hash-192b9c67e8` with status `DELIVERED / 配送完成` and amount `499000 KRW`.
+- Confirmed local sync stayed `not_requested` with `real_sync=false`.
+- Confirmed counts were unchanged for orders, products, SyncLog, tested-success records, operation audit logs, and order status events.
+- Kept formal Naver order batch sync closed.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, mock-proven audit evidence, and readonly Naver order refresh candidate confirmation.
+- Not suitable now: formal product/order batch sync, multi-user permissioned production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
+2. `Phase Naver-ERP-18E: Controlled order refresh small write with audit evidence`
+3. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
+4. `Phase ERP-Auth-1A: Role and permission model plan`
+5. `Phase ERP-Auth-1B: Store-scoped access gate mock`
+
 ## 安全边界
 
 继续遵守：

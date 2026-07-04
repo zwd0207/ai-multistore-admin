@@ -943,3 +943,9 @@ ERP-Audit-2C is planning-only. It approves only the future audit coverage bounda
 The selected operation audit local implementation mock gate is documented in `PHASE_ERP_AUDIT_2D_SELECTED_OPERATION_AUDIT_LOCAL_IMPLEMENTATION_MOCK_GATE.md`.
 
 ERP-Audit-2D adds a private Codex1 mock gate for the production-shaped selected-operation audit chain: `approval_verified`, `pre_write_backup_verified`, `selected_operation_started`, `selected_operation_finished`, and `post_write_verification_finished`. It writes only to the temporary `verify_all.py` database, requires manual approval, verified backup evidence, formal sync closed, platform writes disabled, privacy redaction, and safe target hashes. It does not write the real database, call platform APIs, change schema, or open formal Naver order sync.
+
+## Phase Naver-ERP-18C - Controlled Order Refresh Readonly Repeat With Backup Evidence
+
+The controlled order refresh readonly repeat is documented in `PHASE_NAVER_ERP_18C_ORDER_REFRESH_READONLY_REPEAT_WITH_BACKUP_EVIDENCE.md`.
+
+Naver-ERP-18C reruns the real Naver order preview in readonly mode after the current outbound IP was allowlisted. The request used `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. Token, feed, and detail all returned HTTP 200, with safe hash `id-hash-192b9c67e8`, status `DELIVERED / 配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Counts stayed unchanged: `orders_store8=6`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=5`, and `order_status_events=0`. Formal order sync remains closed.
