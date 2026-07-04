@@ -7949,6 +7949,432 @@ def verify_operation_audit_writer_local_implementation() -> None:
     print("operation audit writer local implementation: ok")
 
 
+def verify_operation_audit_writer_integration_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        INTEGRATION_MOCK_SCOPE,
+        write_operation_audit_integration_mock_gate,
+    )
+
+    def make_chain(
+        *,
+        actions: list[str],
+        operation_type: str,
+        correlation_id: str,
+        request_prefix: str,
+        target_type: str,
+        target_label: str,
+        status_by_action: dict[str, str] | None = None,
+        target_hash_prefix: str = "id-hash-audit1r",
+    ) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        rows: list[dict] = []
+        for index, action in enumerate(actions):
+            status = (status_by_action or {}).get(action, "success")
+            if action.endswith("_planned") or action == "approval_planned":
+                status = (status_by_action or {}).get(action, "planned")
+            row = {
+                "created_at": (now + timedelta(seconds=index)).isoformat(),
+                "updated_at": (now + timedelta(seconds=index)).isoformat(),
+                "store_id": 8 if operation_type.startswith("naver_") else None,
+                "platform": "naver" if operation_type.startswith("naver_") else "local",
+                "environment": "local",
+                "actor_type": "human",
+                "actor_id": "operator-safe-hash-1r",
+                "actor_label": "Local operator",
+                "actor_role": "owner",
+                "action": action,
+                "operation_phase": "ERP-Audit-1R",
+                "correlation_id": correlation_id,
+                "request_id": f"{request_prefix}-{index + 1:03d}",
+                "status": status,
+                "reason_code": "integration_mock_gate",
+                "target_type": target_type,
+                "target_id": None,
+                "target_hash": f"{target_hash_prefix}-{index + 1:03d}",
+                "target_label": target_label,
+                "changed_field_names": ["action", "status", "counts_summary"],
+                "before_summary": {
+                    "operation_type": operation_type,
+                    "runtime_writer": "closed",
+                    "formal_sync_open": False,
+                },
+                "after_summary": {
+                    "operation_type": operation_type,
+                    "audit_chain_action": action,
+                    "runtime_writer": "still_closed",
+                },
+                "counts_summary": {
+                    "audit_rows_written": 1,
+                    "orders_written": 0,
+                    "products_written": 0,
+                    "sync_logs_written": 0,
+                    "capability_results_written": 0,
+                    "order_status_events_written": 0,
+                },
+                "safety_flags": {
+                    "integration_mock_scope_only": True,
+                    "real_api_called": False,
+                    "runtime_writer_enabled": False,
+                    "real_database_written": False,
+                    "raw_response_saved": False,
+                    "secrets_saved": False,
+                    "privacy_fields_redacted": True,
+                    "formal_sync_open": False,
+                },
+                "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1r",
+                "backup_sha256": "1" * 64,
+                "restore_source_path": "C:/safe-backups/codex1.db.backup-erp-audit-1r",
+                "restore_source_sha256": "2" * 64,
+                "sensitive_scan_passed": True,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "notes": "Integration mock gate writes only safe audit metadata to the temporary verification database.",
+            }
+            if status == "blocked":
+                row["sensitive_scan_passed"] = False
+                row["safety_flags"] = {
+                    **row["safety_flags"],
+                    "blocked_payload_written": False,
+                    "sensitive_scan_passed": False,
+                }
+                row["counts_summary"] = {
+                    **row["counts_summary"],
+                    "blocked_count": 1,
+                }
+            rows.append(row)
+        return rows
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        local_write_chain = make_chain(
+            actions=[
+                "approval_planned",
+                "pre_write_backup_verified",
+                "local_write_attempted",
+                "local_write_succeeded",
+                "post_write_verification_succeeded",
+            ],
+            operation_type="naver_order_local_write",
+            correlation_id="audit-corr-1r-local-write",
+            request_prefix="audit-request-1r-local-write",
+            target_type="order",
+            target_label="Selected Naver order local write evidence",
+        )
+        backup_chain = make_chain(
+            actions=[
+                "backup_planned",
+                "backup_created",
+                "backup_hash_verified",
+                "backup_integrity_verified",
+            ],
+            operation_type="database_backup",
+            correlation_id="audit-corr-1r-backup",
+            request_prefix="audit-request-1r-backup",
+            target_type="backup",
+            target_label="Database backup evidence",
+            target_hash_prefix="id-hash-audit1r-backup",
+        )
+        restore_chain = make_chain(
+            actions=[
+                "restore_dry_run_planned",
+                "restore_source_verified",
+                "restore_temp_copy_verified",
+                "restore_integrity_verified",
+            ],
+            operation_type="restore_dry_run",
+            correlation_id="audit-corr-1r-restore",
+            request_prefix="audit-request-1r-restore",
+            target_type="restore",
+            target_label="Restore dry-run evidence",
+            target_hash_prefix="id-hash-audit1r-restore",
+        )
+        schema_chain = make_chain(
+            actions=[
+                "schema_migration_planned",
+                "schema_migration_backup_verified",
+                "schema_migration_succeeded",
+                "schema_migration_verified",
+            ],
+            operation_type="schema_migration",
+            correlation_id="audit-corr-1r-schema",
+            request_prefix="audit-request-1r-schema",
+            target_type="schema",
+            target_label="Schema migration evidence",
+            target_hash_prefix="id-hash-audit1r-schema",
+        )
+
+        not_requested_gate = write_operation_audit_integration_mock_gate(
+            db,
+            local_write_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=False,
+            manual_approval=False,
+        )
+        assert not_requested_gate["status"] == "audit_write_not_requested", not_requested_gate
+        assert not_requested_gate["rows_written"] == 0, not_requested_gate
+        assert not_requested_gate["runtime_writer_enabled"] is False, not_requested_gate
+
+        readonly_gate = write_operation_audit_integration_mock_gate(
+            db,
+            local_write_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+            read_only_operation=True,
+        )
+        assert readonly_gate["status"] == "audit_integration_readonly_no_write", readonly_gate
+        assert readonly_gate["rows_written"] == 0, readonly_gate
+
+        missing_scope_gate = write_operation_audit_integration_mock_gate(
+            db,
+            local_write_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=None,
+        )
+        assert missing_scope_gate["skip_reason"] == "integration_mock_scope_required", missing_scope_gate
+
+        missing_approval_gate = write_operation_audit_integration_mock_gate(
+            db,
+            local_write_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=False,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert missing_approval_gate["skip_reason"] == "manual_approval_required", missing_approval_gate
+
+        unsupported_gate = write_operation_audit_integration_mock_gate(
+            db,
+            local_write_chain,
+            operation_type="naver_formal_batch_sync",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert unsupported_gate["skip_reason"] == "unsupported_operation_type", unsupported_gate
+        assert unsupported_gate["rows_written"] == 0, unsupported_gate
+
+        mixed_correlation_chain = [dict(row) for row in local_write_chain]
+        mixed_correlation_chain[-1] = {
+            **mixed_correlation_chain[-1],
+            "correlation_id": "audit-corr-1r-mixed",
+        }
+        mixed_correlation_gate = write_operation_audit_integration_mock_gate(
+            db,
+            mixed_correlation_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert mixed_correlation_gate["skip_reason"] == "mixed_correlation_id", mixed_correlation_gate
+
+        duplicate_request_chain = [dict(row) for row in local_write_chain]
+        duplicate_request_chain[1] = {
+            **duplicate_request_chain[1],
+            "request_id": duplicate_request_chain[0]["request_id"],
+        }
+        duplicate_request_gate = write_operation_audit_integration_mock_gate(
+            db,
+            duplicate_request_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert duplicate_request_gate["skip_reason"] == "duplicate_request_id", duplicate_request_gate
+
+        incomplete_chain = local_write_chain[:-1]
+        incomplete_gate = write_operation_audit_integration_mock_gate(
+            db,
+            incomplete_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert incomplete_gate["skip_reason"] == "incomplete_audit_chain", incomplete_gate
+        assert incomplete_gate["post_write_verification_observed"] is False, incomplete_gate
+
+        blocked_without_evidence_chain = make_chain(
+            actions=[
+                "approval_planned",
+                "pre_write_backup_verified",
+                "local_write_attempted",
+                "local_write_blocked",
+                "post_write_verification_failed",
+            ],
+            operation_type="naver_order_local_write",
+            correlation_id="audit-corr-1r-blocked",
+            request_prefix="audit-request-1r-blocked",
+            target_type="order",
+            target_label="Blocked local write evidence",
+            status_by_action={
+                "local_write_blocked": "blocked",
+                "post_write_verification_failed": "failed",
+            },
+        )
+        blocked_without_evidence_chain[3]["safety_flags"] = {
+            key: value
+            for key, value in blocked_without_evidence_chain[3]["safety_flags"].items()
+            if key != "blocked_payload_written"
+        }
+        blocked_without_evidence_gate = write_operation_audit_integration_mock_gate(
+            db,
+            blocked_without_evidence_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert blocked_without_evidence_gate["skip_reason"] == "blocked_payload_must_not_be_written", blocked_without_evidence_gate
+
+        sensitive_chain = [dict(row) for row in local_write_chain]
+        sensitive_chain[0] = {
+            **sensitive_chain[0],
+            "after_summary": {
+                "raw_response": "audit-raw-response-must-not-leak",
+                "Authorization": "authorization: bearer audit-must-not-leak",
+            },
+        }
+        sensitive_gate = write_operation_audit_integration_mock_gate(
+            db,
+            sensitive_chain,
+            operation_type="naver_order_local_write",
+            write_enabled=True,
+            manual_approval=True,
+            verification_scope=INTEGRATION_MOCK_SCOPE,
+        )
+        assert sensitive_gate["skip_reason"] == "audit_sensitive_field_blocked", sensitive_gate
+        assert sensitive_gate["rows_written"] == 0, sensitive_gate
+        sensitive_gate_text = json.dumps(sensitive_gate, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in sensitive_gate_text, sensitive_gate_text
+
+        success_chains = [
+            (local_write_chain, "naver_order_local_write", 5),
+            (backup_chain, "database_backup", 4),
+            (restore_chain, "restore_dry_run", 4),
+            (schema_chain, "schema_migration", 4),
+        ]
+        expected_rows_written = 0
+        for chain, operation_type, expected_count in success_chains:
+            gate = write_operation_audit_integration_mock_gate(
+                db,
+                chain,
+                operation_type=operation_type,
+                write_enabled=True,
+                manual_approval=True,
+                verification_scope=INTEGRATION_MOCK_SCOPE,
+            )
+            assert gate["status"] == "audit_integration_chain_written", gate
+            assert gate["rows_written"] == expected_count, gate
+            assert len(gate["audit_log_ids"]) == expected_count, gate
+            assert gate["runtime_writer_enabled"] is False, gate
+            assert gate["real_database_written"] is False, gate
+            assert gate["real_api_called"] is False, gate
+            assert gate["sync_log_written"] is False, gate
+            expected_rows_written += expected_count
+
+        persisted_rows = db.execute(text("""
+            SELECT
+                action,
+                status,
+                reason_code,
+                correlation_id,
+                request_id,
+                target_type,
+                target_hash,
+                changed_field_names,
+                before_summary,
+                after_summary,
+                counts_summary,
+                safety_flags,
+                sensitive_scan_passed,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted
+            FROM operation_audit_logs
+            WHERE correlation_id IN (
+                'audit-corr-1r-local-write',
+                'audit-corr-1r-backup',
+                'audit-corr-1r-restore',
+                'audit-corr-1r-schema'
+            )
+            ORDER BY id
+        """)).mappings().all()
+        assert len(persisted_rows) == expected_rows_written, persisted_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["secrets_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in persisted_rows), persisted_rows
+        assert all(row["sensitive_scan_passed"] in (1, True) for row in persisted_rows), persisted_rows
+
+        persisted_text = json.dumps(
+            [dict(row) for row in persisted_rows],
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+        forbidden_terms = [
+            "client_secret",
+            "authorization",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw_request",
+            "rawresponse",
+            "channelno",
+            "productorderid",
+            "buyername",
+            "receivername",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+        ]
+        for forbidden in forbidden_terms:
+            assert forbidden not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + expected_rows_written, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+            "expected_delta": expected_rows_written,
+        }
+
+    print("operation audit writer integration mock gate: ok")
+
+
 def verify_operation_audit_logs_readonly_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -8822,6 +9248,7 @@ def main() -> None:
         verify_operation_audit_log_mock_write_gate()
         verify_operation_audit_writer_service_mock_gate()
         verify_operation_audit_writer_local_implementation()
+        verify_operation_audit_writer_integration_mock_gate()
         verify_operation_audit_logs_readonly_mock_gate()
         verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()

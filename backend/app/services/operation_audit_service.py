@@ -13,6 +13,7 @@ VERIFICATION_SCOPE = "verify_all_temp_db"
 LOCAL_WRITER_SCOPE = "local_runtime_approved"
 READONLY_MOCK_SCOPE = VERIFICATION_SCOPE
 READONLY_LOCAL_SCOPE = "local_readonly_route"
+INTEGRATION_MOCK_SCOPE = VERIFICATION_SCOPE
 
 DEFAULT_AUDIT_READ_LIMIT = 20
 MAX_AUDIT_READ_LIMIT = 50
@@ -107,12 +108,32 @@ ACTOR_TYPE_LABELS_ZH = {
 }
 
 ACTION_LABELS_ZH = {
+    "approval_planned": "\u5199\u5165\u5ba1\u6279\u5df2\u8ba1\u5212",
     "audit_logs_readonly_mock_success": "\u5ba1\u8ba1\u65e5\u5fd7\u53ea\u8bfb\u9a8c\u8bc1",
     "audit_logs_readonly_mock_blocked": "\u5ba1\u8ba1\u65e5\u5fd7\u963b\u65ad\u8bb0\u5f55",
     "audit_writer_local_approved": "\u672c\u5730\u5ba1\u8ba1\u5199\u5165\u9a8c\u8bc1",
     "audit_writer_local_blocked_evidence": "\u672c\u5730\u5ba1\u8ba1\u963b\u65ad\u8bc1\u636e",
+    "backup_created": "\u5907\u4efd\u5df2\u521b\u5efa",
+    "backup_hash_verified": "\u5907\u4efd\u54c8\u5e0c\u5df2\u9a8c\u8bc1",
+    "backup_integrity_verified": "\u5907\u4efd\u5b8c\u6574\u6027\u5df2\u9a8c\u8bc1",
+    "backup_planned": "\u5907\u4efd\u5df2\u8ba1\u5212",
     "database_backup_created": "\u6570\u636e\u5e93\u5907\u4efd",
+    "local_write_attempted": "\u672c\u5730\u5199\u5165\u5df2\u5c1d\u8bd5",
+    "local_write_blocked": "\u672c\u5730\u5199\u5165\u5df2\u963b\u65ad",
+    "local_write_failed": "\u672c\u5730\u5199\u5165\u5931\u8d25",
+    "local_write_succeeded": "\u672c\u5730\u5199\u5165\u6210\u529f",
     "order_refresh_batch_write_succeeded": "\u8ba2\u5355\u5237\u65b0\u5199\u5165",
+    "post_write_verification_failed": "\u5199\u5165\u540e\u6821\u9a8c\u5931\u8d25",
+    "post_write_verification_succeeded": "\u5199\u5165\u540e\u6821\u9a8c\u6210\u529f",
+    "pre_write_backup_verified": "\u5199\u5165\u524d\u5907\u4efd\u5df2\u9a8c\u8bc1",
+    "restore_dry_run_planned": "\u6062\u590d\u6f14\u7ec3\u5df2\u8ba1\u5212",
+    "restore_integrity_verified": "\u6062\u590d\u5b8c\u6574\u6027\u5df2\u9a8c\u8bc1",
+    "restore_source_verified": "\u6062\u590d\u6e90\u5df2\u9a8c\u8bc1",
+    "restore_temp_copy_verified": "\u4e34\u65f6\u6062\u590d\u526f\u672c\u5df2\u9a8c\u8bc1",
+    "schema_migration_planned": "\u7ed3\u6784\u8fc1\u79fb\u5df2\u8ba1\u5212",
+    "schema_migration_backup_verified": "\u7ed3\u6784\u8fc1\u79fb\u524d\u5907\u4efd\u5df2\u9a8c\u8bc1",
+    "schema_migration_succeeded": "\u7ed3\u6784\u8fc1\u79fb\u6210\u529f",
+    "schema_migration_verified": "\u7ed3\u6784\u8fc1\u79fb\u540e\u6821\u9a8c\u6210\u529f",
 }
 
 TARGET_TYPE_LABELS_ZH = {
@@ -854,6 +875,187 @@ def write_operation_audit_log_mock_gate(
         "audit_rows_written": True,
         "rows_written": 1,
         "audit_log_id": row.id,
+    })
+    return result
+
+
+LOCAL_WRITE_INTEGRATION_TYPES = {
+    "naver_order_local_write",
+    "naver_order_local_refresh",
+}
+APPROVED_INTEGRATION_OPERATION_TYPES = LOCAL_WRITE_INTEGRATION_TYPES | {
+    "database_backup",
+    "restore_dry_run",
+    "schema_migration",
+}
+LOCAL_WRITE_REQUIRED_ACTIONS = {
+    "approval_planned",
+    "pre_write_backup_verified",
+    "local_write_attempted",
+}
+LOCAL_WRITE_TERMINAL_ACTIONS = {
+    "local_write_succeeded",
+    "local_write_blocked",
+    "local_write_failed",
+}
+LOCAL_WRITE_VERIFICATION_ACTIONS = {
+    "post_write_verification_succeeded",
+    "post_write_verification_failed",
+}
+BACKUP_REQUIRED_ACTIONS = {
+    "backup_planned",
+    "backup_created",
+    "backup_hash_verified",
+    "backup_integrity_verified",
+}
+RESTORE_DRY_RUN_REQUIRED_ACTIONS = {
+    "restore_dry_run_planned",
+    "restore_source_verified",
+    "restore_temp_copy_verified",
+    "restore_integrity_verified",
+}
+SCHEMA_MIGRATION_REQUIRED_ACTIONS = {
+    "schema_migration_planned",
+    "schema_migration_backup_verified",
+    "schema_migration_succeeded",
+    "schema_migration_verified",
+}
+
+
+def _validate_integration_chain(
+    audit_rows: list[dict[str, Any]],
+    *,
+    operation_type: str,
+) -> tuple[str | None, dict[str, Any]]:
+    if operation_type not in APPROVED_INTEGRATION_OPERATION_TYPES:
+        return "unsupported_operation_type", {
+            "operation_type": operation_type,
+            "approved_operation_types": sorted(APPROVED_INTEGRATION_OPERATION_TYPES),
+        }
+    if not audit_rows:
+        return "missing_audit_chain_rows", {}
+    if len(audit_rows) > 12:
+        return "too_many_audit_chain_rows", {"max_rows": 12}
+
+    correlation_ids = {
+        str(row.get("correlation_id") or "").strip()
+        for row in audit_rows
+    }
+    if "" in correlation_ids:
+        return "missing_correlation_id", {}
+    if len(correlation_ids) != 1:
+        return "mixed_correlation_id", {"correlation_id_count": len(correlation_ids)}
+
+    seen_request_ids: set[str] = set()
+    for index, row in enumerate(audit_rows):
+        skip_reason, extra = _validate_audit_row(row)
+        if skip_reason:
+            return skip_reason, {"invalid_row_index": index, **extra}
+
+        request_id = str(row.get("request_id") or "").strip()
+        if request_id:
+            if request_id in seen_request_ids:
+                return "duplicate_request_id", {"duplicate_request_id_index": index}
+            seen_request_ids.add(request_id)
+
+        if row.get("status") == "blocked":
+            safety_flags = row.get("safety_flags") or {}
+            if not isinstance(safety_flags, dict) or safety_flags.get("blocked_payload_written") is not False:
+                return "blocked_payload_must_not_be_written", {"invalid_row_index": index}
+
+    actions = {str(row.get("action") or "").strip() for row in audit_rows}
+    if operation_type in LOCAL_WRITE_INTEGRATION_TYPES:
+        missing = sorted(LOCAL_WRITE_REQUIRED_ACTIONS - actions)
+        has_terminal = bool(actions & LOCAL_WRITE_TERMINAL_ACTIONS)
+        has_verification = bool(actions & LOCAL_WRITE_VERIFICATION_ACTIONS)
+        if missing or not has_terminal or not has_verification:
+            return "incomplete_audit_chain", {
+                "missing_required_actions": missing,
+                "terminal_action_observed": has_terminal,
+                "post_write_verification_observed": has_verification,
+            }
+    elif operation_type == "database_backup":
+        missing = sorted(BACKUP_REQUIRED_ACTIONS - actions)
+        if missing:
+            return "incomplete_audit_chain", {"missing_required_actions": missing}
+    elif operation_type == "restore_dry_run":
+        missing = sorted(RESTORE_DRY_RUN_REQUIRED_ACTIONS - actions)
+        if missing:
+            return "incomplete_audit_chain", {"missing_required_actions": missing}
+    elif operation_type == "schema_migration":
+        missing = sorted(SCHEMA_MIGRATION_REQUIRED_ACTIONS - actions)
+        if missing:
+            return "incomplete_audit_chain", {"missing_required_actions": missing}
+
+    return None, {"correlation_id": next(iter(correlation_ids)), "chain_actions": [row["action"] for row in audit_rows]}
+
+
+def write_operation_audit_integration_mock_gate(
+    db: Session,
+    audit_rows: list[dict[str, Any]],
+    *,
+    operation_type: str,
+    write_enabled: bool,
+    manual_approval: bool,
+    verification_scope: str | None = None,
+    read_only_operation: bool = False,
+) -> dict[str, Any]:
+    """Private integration mock gate for future audit writer wiring.
+
+    1R verifies multi-row correlation chains only in the temporary verify_all
+    database. It does not enable runtime wiring or write the real database.
+    """
+
+    result = _base_result(phase="ERP-Audit-1R")
+    result.update({
+        "integration_mock_gate": True,
+        "operation_type": operation_type,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    if read_only_operation:
+        result.update({
+            "status": "audit_integration_readonly_no_write",
+            "skip_reason": "read_only_operation_not_audited_yet",
+        })
+        return result
+    if not write_enabled:
+        return result
+    if verification_scope != INTEGRATION_MOCK_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "integration_mock_scope_required",
+        })
+        return result
+    if not manual_approval:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+
+    skip_reason, chain_extra = _validate_integration_chain(audit_rows, operation_type=operation_type)
+    if skip_reason:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": skip_reason,
+            **chain_extra,
+        })
+        return result
+
+    inserted_ids: list[int] = []
+    for row in audit_rows:
+        inserted = _insert_audit_row(db, row)
+        inserted_ids.append(inserted.id)
+
+    result.update({
+        "status": "audit_integration_chain_written",
+        "audit_rows_written": True,
+        "rows_written": len(inserted_ids),
+        "audit_log_ids": inserted_ids,
+        "correlation_id": chain_extra["correlation_id"],
+        "chain_actions": chain_extra["chain_actions"],
+        "runtime_writer_enabled": False,
     })
     return result
 
