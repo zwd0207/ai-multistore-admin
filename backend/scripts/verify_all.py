@@ -8908,6 +8908,399 @@ def verify_selected_operation_audit_runtime_wiring_mock_gate() -> None:
     print("selected operation audit runtime wiring mock gate: ok")
 
 
+def verify_backup_creation_audit_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        BACKUP_AUDIT_MOCK_SCOPE,
+        write_backup_creation_audit_mock_gate,
+    )
+
+    backup_evidence = {
+        "backup_created": True,
+        "manifest_written": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-erp-backup-1x",
+        "backup_sha256": "5" * 64,
+        "sqlite_integrity_check": "ok",
+        "created_by_actor_type": "human",
+        "created_by_actor_label": "Local operator",
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        disabled_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=False,
+            manual_approval=False,
+        )
+        assert disabled_gate["status"] == "audit_write_not_requested", disabled_gate
+        assert disabled_gate["rows_written"] == 0, disabled_gate
+
+        missing_scope_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=None,
+        )
+        assert missing_scope_gate["skip_reason"] == "backup_audit_mock_scope_required", missing_scope_gate
+
+        missing_approval_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=False,
+            verification_scope=BACKUP_AUDIT_MOCK_SCOPE,
+        )
+        assert missing_approval_gate["skip_reason"] == "manual_approval_required", missing_approval_gate
+
+        invalid_sha_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence={**backup_evidence, "backup_sha256": "not-a-sha"},
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=BACKUP_AUDIT_MOCK_SCOPE,
+        )
+        assert invalid_sha_gate["skip_reason"] == "invalid_backup_sha256", invalid_sha_gate
+
+        unsafe_flag_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence={**backup_evidence, "manifest_written": False},
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=BACKUP_AUDIT_MOCK_SCOPE,
+        )
+        assert unsafe_flag_gate["skip_reason"] == "backup_evidence_safety_flags_failed", unsafe_flag_gate
+
+        sensitive_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence={**backup_evidence, "notes": "audit-raw-response-must-not-leak"},
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=BACKUP_AUDIT_MOCK_SCOPE,
+        )
+        assert sensitive_gate["skip_reason"] == "audit_sensitive_field_blocked", sensitive_gate
+
+        success_gate = write_backup_creation_audit_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=BACKUP_AUDIT_MOCK_SCOPE,
+        )
+        assert success_gate["status"] == "audit_integration_chain_written", success_gate
+        assert success_gate["phase"] == "ERP-Audit-1X", success_gate
+        assert success_gate["rows_written"] == 5, success_gate
+        assert success_gate["backup_creation_audit_mock_gate"] is True, success_gate
+        assert success_gate["runtime_writer_enabled"] is False, success_gate
+        assert success_gate["real_database_written"] is False, success_gate
+        assert success_gate["real_api_called"] is False, success_gate
+        assert success_gate["chain_actions"] == [
+            "backup_planned",
+            "backup_created",
+            "backup_hash_verified",
+            "backup_integrity_verified",
+            "backup_manifest_verified",
+        ], success_gate
+
+        persisted_rows = db.execute(text("""
+            SELECT
+                action,
+                status,
+                reason_code,
+                operation_phase,
+                target_type,
+                backup_sha256,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted,
+                safety_flags
+            FROM operation_audit_logs
+            WHERE operation_phase = 'ERP-Audit-1X'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(persisted_rows) == 5, persisted_rows
+        assert {row["target_type"] for row in persisted_rows} == {"backup"}, persisted_rows
+        assert all(row["backup_sha256"] == "5" * 64 for row in persisted_rows), persisted_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["secrets_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in persisted_rows), persisted_rows
+        persisted_text = json.dumps([dict(row) for row in persisted_rows], ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 5, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("backup creation audit mock gate: ok")
+
+
+def verify_naver_order_refresh_backup_evidence_gate() -> None:
+    from sqlalchemy import select, text
+
+    from app.database import SessionLocal
+    from app.models.order import Order
+    from app.services import sync_service
+
+    backup_evidence = {
+        "backup_created": True,
+        "manifest_written": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-naver-erp-18a",
+        "backup_sha256": "6" * 64,
+        "sqlite_integrity_check": "ok",
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+
+    with SessionLocal() as db:
+        store_id = 8
+        order_hash = "id-hash-18a0000001"
+        existing_order = Order(
+            store_id=store_id,
+            platform="naver",
+            external_order_id=order_hash,
+            buyer_name="김*",
+            buyer_masked_phone="****1800",
+            product_name="18A refresh seed",
+            quantity=1,
+            order_amount=Decimal("180000"),
+            currency="KRW",
+            order_status="PAYED",
+            paid_at=datetime(2026, 7, 1, 1, 0, tzinfo=timezone.utc),
+            ordered_at=datetime(2026, 7, 1, 1, 0, tzinfo=timezone.utc),
+            source_type=sync_service.NAVER_ORDER_SYNC_SOURCE_TYPE,
+            last_synced_at=datetime(2026, 7, 1, 1, 5, tzinfo=timezone.utc),
+            raw_data={
+                "external_product_order_id_hash": order_hash,
+                "external_order_id_hash": "id-hash-18a0000002",
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "address_saved": False,
+            },
+        )
+        db.add(existing_order)
+        db.commit()
+
+        refresh_preview = {
+            "store_id": store_id,
+            "platform": "naver",
+            "external_product_order_id_hash": order_hash,
+            "product_order_id_hash": order_hash,
+            "external_order_id_hash": "id-hash-18a0000002",
+            "order_id_hash": "id-hash-18a0000002",
+            "order_status": {"raw": "DELIVERED", "label_zh": "配送完成", "unknown_status_observed": False},
+            "order_status_label_zh": "配送完成",
+            "payment_status": "PAYED",
+            "delivery_status": {"raw": "DELIVERED", "label_zh": "配送完成", "unknown_status_observed": False},
+            "delivery_status_label_zh": "配送完成",
+            "claim_status": {"raw": None, "label_zh": None, "unknown_status_observed": False},
+            "claim_status_label_zh": None,
+            "product_name": "18A refresh seed",
+            "option_name": "safe option",
+            "quantity": 2,
+            "order_amount": 181000,
+            "currency": "KRW",
+            "ordered_at": "2026-07-01T10:00:00+09:00",
+            "paid_at": "2026-07-01T10:00:00+09:00",
+            "last_changed_at": "2026-07-03T11:00:00+09:00",
+            "last_synced_at": "2026-07-03T11:00:00+09:00",
+            "buyer_name_masked": "김*",
+            "buyer_phone_masked": "****1800",
+            "receiver_name_masked": "김*",
+            "receiver_phone_masked": "****1801",
+            "address_observed": True,
+            "address_saved": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "mapping_version": "naver_order_detail_preview_v1",
+            "unknown_status_observed": False,
+        }
+
+        before_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+
+        readonly_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=False,
+            manual_approval=False,
+            backup_evidence=None,
+        )
+        assert readonly_gate["phase"] == "Naver-ERP-18A", readonly_gate
+        assert readonly_gate["status"] == "batch_refresh_not_requested", readonly_gate
+        assert readonly_gate["backup_evidence_required"] is False, readonly_gate
+        assert readonly_gate["orders_written"] is False, readonly_gate
+
+        missing_backup_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=True,
+            manual_approval=True,
+            backup_evidence=None,
+        )
+        assert missing_backup_gate["skip_reason"] == "backup_evidence_missing", missing_backup_gate
+        assert missing_backup_gate["orders_written"] is False, missing_backup_gate
+        assert missing_backup_gate["backup_evidence_required"] is True, missing_backup_gate
+        assert missing_backup_gate["backup_evidence_verified"] is False, missing_backup_gate
+
+        unsafe_backup_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=True,
+            manual_approval=True,
+            backup_evidence={**backup_evidence, "raw_response_saved": True},
+        )
+        assert unsafe_backup_gate["skip_reason"] == "backup_evidence_safety_flags_failed", unsafe_backup_gate
+        assert unsafe_backup_gate["orders_written"] is False, unsafe_backup_gate
+
+        sensitive_backup_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=True,
+            manual_approval=True,
+            backup_evidence={**backup_evidence, "notes": "authorization: bearer audit-must-not-leak"},
+        )
+        assert sensitive_backup_gate["skip_reason"] == "backup_evidence_sensitive_field_blocked", sensitive_backup_gate
+
+        no_approval_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=True,
+            manual_approval=False,
+            backup_evidence=backup_evidence,
+        )
+        assert no_approval_gate["skip_reason"] == "manual_approval_required", no_approval_gate
+        assert no_approval_gate["backup_evidence_verified"] is True, no_approval_gate
+        assert no_approval_gate["orders_written"] is False, no_approval_gate
+
+        success_gate = sync_service._evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+            db,
+            refresh_previews=[refresh_preview],
+            approved_order_hashes=[order_hash],
+            write_enabled=True,
+            manual_approval=True,
+            backup_evidence=backup_evidence,
+        )
+        assert success_gate["phase"] == "Naver-ERP-18A", success_gate
+        assert success_gate["status"] == "batch_refresh_updated", success_gate
+        assert success_gate["backup_evidence_required"] is True, success_gate
+        assert success_gate["backup_evidence_verified"] is True, success_gate
+        assert success_gate["orders_written"] is True, success_gate
+        assert success_gate["orders_updated"] is True, success_gate
+        assert success_gate["orders_created"] is False, success_gate
+        assert success_gate["products_written"] is False, success_gate
+        assert success_gate["sync_log_written"] is False, success_gate
+        assert success_gate["capability_tested_success_written"] is False, success_gate
+        assert success_gate["timeline_events_written"] is False, success_gate
+        assert success_gate["raw_response_saved"] is False, success_gate
+        assert success_gate["privacy_fields_redacted"] is True, success_gate
+        assert success_gate["formal_order_sync_open"] is False, success_gate
+
+        refreshed_order = db.scalar(select(Order).where(Order.external_order_id == order_hash))
+        assert refreshed_order is not None
+        assert refreshed_order.order_status == "DELIVERED"
+        assert refreshed_order.quantity == 2
+        assert refreshed_order.order_amount == Decimal("181000")
+        assert refreshed_order.raw_data["raw_response_saved"] is False
+        assert refreshed_order.raw_data["privacy_fields_redacted"] is True
+        assert refreshed_order.raw_data["address_saved"] is False
+
+        after_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        assert after_counts == before_counts, {
+            "before": before_counts,
+            "after": after_counts,
+        }
+        gate_text = json.dumps(success_gate, ensure_ascii=False, default=str).lower()
+        for forbidden in [
+            "authorization: bearer audit-must-not-leak",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "productorderid",
+            "buyername",
+            "receivername",
+            "zipcode",
+        ]:
+            assert forbidden not in gate_text, gate_text
+
+        db.delete(refreshed_order)
+        db.commit()
+        assert len(db.scalars(select(Order).where(Order.external_order_id == order_hash)).all()) == 0
+        cleanup_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        assert cleanup_counts["orders"] == before_counts["orders"] - 1, {
+            "before": before_counts,
+            "after_cleanup": cleanup_counts,
+        }
+        assert cleanup_counts["products"] == before_counts["products"], cleanup_counts
+        assert cleanup_counts["sync_logs"] == before_counts["sync_logs"], cleanup_counts
+        assert cleanup_counts["tested_success"] == before_counts["tested_success"], cleanup_counts
+        assert cleanup_counts["order_status_events"] == before_counts["order_status_events"], cleanup_counts
+
+    print("Naver order refresh backup evidence gate: ok")
+
+
 def verify_operation_audit_logs_readonly_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -9932,6 +10325,213 @@ def verify_real_local_backup_helper_implementation() -> None:
     print("real local backup helper implementation: ok")
 
 
+def verify_real_backup_restore_dry_run_using_manifest() -> None:
+    from scripts.create_local_backup import create_local_backup
+    from scripts.restore_backup_dry_run import restore_backup_dry_run
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1h-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_root = temp_dir / "approved-backups"
+        restore_root = temp_dir / "restore-dry-run"
+        backup_root.mkdir()
+        restore_root.mkdir()
+
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE operation_audit_logs (id INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver restore fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Restore fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-backup1h001', 'PAYED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'payed')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.execute("INSERT INTO operation_audit_logs (id, action) VALUES (1, 'fixture_audit')")
+            conn.commit()
+
+        backup_result = create_local_backup(
+            phase="ERP-Backup-1H",
+            operation_type="restore_dry_run_manifest_fixture",
+            created_by_actor_type="test",
+            created_by_actor_label="verify_all",
+            retention_class="manual_checkpoint",
+            retention_reason="restore dry-run fixture verification",
+            source_db_path=source_db,
+            backup_root=backup_root,
+            git_commit_codex1="0" * 40,
+            git_commit_codex2="1" * 40,
+            allow_non_default_source=True,
+            allow_custom_backup_root=True,
+            created_at=datetime(2026, 7, 4, 13, 0, 0, tzinfo=timezone.utc),
+        )
+        assert backup_result["status"] == "backup_created", backup_result
+        restore_result = restore_backup_dry_run(
+            manifest_path=Path(backup_result["manifest_path"]),
+            backup_root=backup_root,
+            restore_root=restore_root,
+            allow_custom_roots=True,
+        )
+        assert restore_result["status"] == "restore_dry_run_verified", restore_result
+        assert restore_result["manifest_valid"] is True, restore_result
+        assert restore_result["backup_verified"] is True, restore_result
+        assert restore_result["temporary_restore_verified"] is True, restore_result
+        assert restore_result["temporary_restore_deleted"] is True, restore_result
+        assert restore_result["real_restore_executed"] is False, restore_result
+        assert restore_result["production_db_touched"] is False, restore_result
+        assert restore_result["backup_deleted"] is False, restore_result
+        assert restore_result["raw_response_saved"] is False, restore_result
+        assert restore_result["secrets_saved"] is False, restore_result
+        assert restore_result["privacy_fields_redacted"] is True, restore_result
+        assert restore_result["observed_counts"]["orders"] == 1, restore_result
+        assert restore_result["observed_counts"]["operation_audit_logs"] == 1, restore_result
+
+        production_target_gate = restore_backup_dry_run(
+            manifest_path=Path(backup_result["manifest_path"]),
+            backup_root=backup_root,
+            restore_path=production_db_path,
+            allow_custom_roots=True,
+        )
+        assert production_target_gate["skip_reason"] == "restore_target_is_production_db", production_target_gate
+        assert production_target_gate["real_restore_executed"] is False, production_target_gate
+
+        outside_manifest_gate = restore_backup_dry_run(
+            manifest_path=temp_dir / "outside.manifest.json",
+            backup_root=backup_root,
+            allow_custom_roots=True,
+        )
+        assert outside_manifest_gate["skip_reason"] in {"manifest_outside_approved_root", "manifest_missing"}, outside_manifest_gate
+
+        unsafe_manifest_path = backup_root / "unsafe.manifest.json"
+        unsafe_manifest = json.loads(Path(backup_result["manifest_path"]).read_text(encoding="utf-8"))
+        unsafe_manifest["notes"] = "backup-token-must-not-leak"
+        unsafe_manifest_path.write_text(json.dumps(unsafe_manifest, ensure_ascii=False), encoding="utf-8")
+        unsafe_gate = restore_backup_dry_run(
+            manifest_path=unsafe_manifest_path,
+            backup_root=backup_root,
+            allow_custom_roots=True,
+        )
+        assert unsafe_gate["skip_reason"] == "manifest_sensitive_field_blocked", unsafe_gate
+
+        serialized = json.dumps(restore_result, ensure_ascii=False, default=str).lower()
+        for forbidden in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("real backup restore dry-run using manifest: ok")
+
+
+def verify_local_backup_list_report_readonly_helper() -> None:
+    from scripts.create_local_backup import create_local_backup
+    from scripts.list_local_backups import list_local_backups
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1i-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_root = temp_dir / "approved-backups"
+        backup_root.mkdir()
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE operation_audit_logs (id INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver backup report fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Report fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-backup1i001', 'PAYED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'payed')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.execute("INSERT INTO operation_audit_logs (id, action) VALUES (1, 'fixture_audit')")
+            conn.commit()
+
+        for minute in (0, 1):
+            backup_result = create_local_backup(
+                phase=f"ERP-Backup-1I-{minute}",
+                operation_type="backup_report_fixture",
+                created_by_actor_type="test",
+                created_by_actor_label="verify_all",
+                retention_class="manual_checkpoint",
+                retention_reason="backup report fixture verification",
+                source_db_path=source_db,
+                backup_root=backup_root,
+                git_commit_codex1="0" * 40,
+                git_commit_codex2="1" * 40,
+                allow_non_default_source=True,
+                allow_custom_backup_root=True,
+                created_at=datetime(2026, 7, 4, 13, minute, 0, tzinfo=timezone.utc),
+            )
+            assert backup_result["status"] == "backup_created", backup_result
+
+        blocked_root = list_local_backups(backup_root=backup_root)
+        assert blocked_root["skip_reason"] == "backup_root_not_approved", blocked_root
+        report = list_local_backups(backup_root=backup_root, limit=10, allow_custom_root=True)
+        assert report["status"] == "backup_report_ready", report
+        assert report["backup_count"] == 2, report
+        assert report["manifest_count"] == 2, report
+        assert len(report["items"]) == 2, report
+        assert report["backup_deleted"] is False, report
+        assert report["real_restore_executed"] is False, report
+        assert report["production_db_touched"] is False, report
+        assert report["raw_response_saved"] is False, report
+        assert report["secrets_saved"] is False, report
+        assert report["privacy_fields_redacted"] is True, report
+        assert all(item["manifest_valid"] for item in report["items"]), report
+        assert all(item["sensitive_scan_passed"] for item in report["items"]), report
+        assert all("backup_sha256_abbrev" in item and len(item["backup_sha256_abbrev"]) < 64 for item in report["items"]), report
+        assert all(item["backup_exists"] is True for item in report["items"]), report
+        assert all(item["backup_inside_root"] is True for item in report["items"]), report
+
+        serialized = json.dumps(report, ensure_ascii=False, default=str).lower()
+        for forbidden in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert forbidden not in serialized, serialized
+        for forbidden in ["authorization", "client_secret", "headers", "signature", "bcrypt", "raw response"]:
+            assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("local backup list report readonly helper: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -9986,6 +10586,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_all.py",
         "M  backend/scripts/verify_all.py",
         "?? backend/scripts/create_local_backup.py",
+        "?? backend/scripts/list_local_backups.py",
+        "?? backend/scripts/restore_backup_dry_run.py",
         " M backend/scripts/verify_stage_1c.py",
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
@@ -10142,11 +10744,15 @@ def main() -> None:
         verify_operation_audit_writer_local_implementation()
         verify_operation_audit_writer_integration_mock_gate()
         verify_selected_operation_audit_runtime_wiring_mock_gate()
+        verify_backup_creation_audit_mock_gate()
         verify_operation_audit_logs_readonly_mock_gate()
         verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()
         verify_backup_manifest_mock_implementation_gate()
         verify_real_local_backup_helper_implementation()
+        verify_real_backup_restore_dry_run_using_manifest()
+        verify_local_backup_list_report_readonly_helper()
+        verify_naver_order_refresh_backup_evidence_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()

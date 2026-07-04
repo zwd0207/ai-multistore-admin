@@ -884,3 +884,15 @@ Do not commit local secrets or runtime data:
 - virtual environments
 - `__pycache__`
 - logs and raw API response files
+
+## Backup, Restore, and Audit Guardrails
+
+ERP-Backup-1H adds `scripts/restore_backup_dry_run.py` for local restore drills. It accepts only approved-root manifests by default, validates the manifest and backup SHA-256/size, copies the backup to a temporary restore file, checks SQLite integrity and baseline counts, blocks the production database path as a restore target, and deletes only the temporary restore copy. The real 1G manifest drill completed with `status=restore_dry_run_verified`, `real_restore_executed=false`, `production_db_touched=false`, and `backup_deleted=false`.
+
+ERP-Backup-1I adds `scripts/list_local_backups.py` for readonly backup reporting. It lists approved-root manifests, validates required fields and safety booleans, reports whether the backup exists inside the root, returns abbreviated SHA-256, safe counts, and retention metadata, and never deletes or restores backup files.
+
+ERP-Audit-1W documents the future backup creation audit chain. ERP-Audit-1X adds a private mock gate that writes `backup_planned`, `backup_created`, `backup_hash_verified`, `backup_integrity_verified`, and `backup_manifest_verified` only inside the temporary `verify_all.py` database after manual approval, private scope, verified backup evidence, and safety flags. It does not write real audit rows.
+
+Naver-ERP-18A adds a private order-refresh backup evidence gate around the existing Naver order refresh batch mock gate. Write-enabled refresh paths require safe backup evidence before the existing manual approval gate can proceed. Readonly refresh paths do not require backup evidence because they do not write data. The helper is not wired to a public endpoint and does not open formal Naver order sync.
+
+These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.

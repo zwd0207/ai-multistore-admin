@@ -15,6 +15,7 @@ READONLY_MOCK_SCOPE = VERIFICATION_SCOPE
 READONLY_LOCAL_SCOPE = "local_readonly_route"
 INTEGRATION_MOCK_SCOPE = VERIFICATION_SCOPE
 SELECTED_OPERATION_MOCK_SCOPE = VERIFICATION_SCOPE
+BACKUP_AUDIT_MOCK_SCOPE = VERIFICATION_SCOPE
 
 DEFAULT_AUDIT_READ_LIMIT = 20
 MAX_AUDIT_READ_LIMIT = 50
@@ -117,6 +118,7 @@ ACTION_LABELS_ZH = {
     "backup_created": "\u5907\u4efd\u5df2\u521b\u5efa",
     "backup_hash_verified": "\u5907\u4efd\u54c8\u5e0c\u5df2\u9a8c\u8bc1",
     "backup_integrity_verified": "\u5907\u4efd\u5b8c\u6574\u6027\u5df2\u9a8c\u8bc1",
+    "backup_manifest_verified": "\u5907\u4efd\u6e05\u5355\u5df2\u9a8c\u8bc1",
     "backup_planned": "\u5907\u4efd\u5df2\u8ba1\u5212",
     "database_backup_created": "\u6570\u636e\u5e93\u5907\u4efd",
     "local_write_attempted": "\u672c\u5730\u5199\u5165\u5df2\u5c1d\u8bd5",
@@ -1286,6 +1288,167 @@ def write_selected_operation_audit_runtime_wiring_mock_gate(
         "runtime_writer_enabled": False,
         "real_database_written": False,
         "operation_type": operation_type,
+    })
+    return result
+
+
+def write_backup_creation_audit_mock_gate(
+    db: Session,
+    *,
+    backup_evidence: dict[str, Any] | None,
+    audit_write_enabled: bool,
+    manual_approval: bool,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private 1X mock gate for future backup creation audit evidence."""
+
+    result = _base_result(phase="ERP-Audit-1X")
+    result.update({
+        "backup_creation_audit_mock_gate": True,
+        "operation_type": "database_backup",
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    if not audit_write_enabled:
+        return result
+    if verification_scope != BACKUP_AUDIT_MOCK_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_audit_mock_scope_required",
+        })
+        return result
+    if manual_approval is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+    if not isinstance(backup_evidence, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_evidence_missing",
+        })
+        return result
+
+    backup_sha256 = str(backup_evidence.get("backup_sha256") or "")
+    if not _valid_sha256(backup_sha256):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_backup_sha256",
+        })
+        return result
+    if backup_evidence.get("sqlite_integrity_check") != "ok":
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_integrity_not_verified",
+        })
+        return result
+    required_flags = {
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+    for key, expected in required_flags.items():
+        if backup_evidence.get(key) is not expected:
+            result.update({
+                "status": "audit_write_blocked",
+                "skip_reason": "backup_evidence_safety_flags_failed",
+                "failed_flag": key,
+            })
+            return result
+    if _sensitive_fields(backup_evidence):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "audit_sensitive_field_blocked",
+        })
+        return result
+
+    now = datetime.now()
+    correlation_id = f"audit-corr-1x-{backup_sha256[:16]}"
+    actions = [
+        "backup_planned",
+        "backup_created",
+        "backup_hash_verified",
+        "backup_integrity_verified",
+        "backup_manifest_verified",
+    ]
+    audit_rows: list[dict[str, Any]] = []
+    for index, action in enumerate(actions):
+        audit_rows.append({
+            "created_at": now,
+            "updated_at": now,
+            "store_id": None,
+            "platform": "local",
+            "environment": "local",
+            "actor_type": str(backup_evidence.get("created_by_actor_type") or "human")[:40],
+            "actor_id": "operator-safe-hash-1x",
+            "actor_label": str(backup_evidence.get("created_by_actor_label") or "Local operator")[:120],
+            "actor_role": "owner",
+            "action": action,
+            "operation_phase": "ERP-Audit-1X",
+            "correlation_id": correlation_id,
+            "request_id": f"audit-request-1x-{index + 1:03d}",
+            "status": "success",
+            "reason_code": "backup_creation_audit_mock_gate",
+            "target_type": "backup",
+            "target_id": None,
+            "target_hash": f"id-hash-{backup_sha256[:10]}",
+            "target_label": "Local database backup evidence",
+            "changed_field_names": ["backup_sha256", "sqlite_integrity_check", "manifest_written"],
+            "before_summary": {
+                "backup_audit": "not_recorded",
+                "formal_sync_open": False,
+            },
+            "after_summary": {
+                "audit_chain_action": action,
+                "backup_verified": True,
+                "manifest_verified": True,
+            },
+            "counts_summary": {
+                "audit_rows_written": 1,
+                "orders_written": 0,
+                "products_written": 0,
+                "sync_logs_written": 0,
+                "capability_results_written": 0,
+                "order_status_events_written": 0,
+            },
+            "safety_flags": {
+                "backup_audit_mock_scope_only": True,
+                "real_api_called": False,
+                "runtime_writer_enabled": False,
+                "real_database_written": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+            },
+            "backup_path": backup_evidence.get("backup_path"),
+            "backup_sha256": backup_sha256,
+            "restore_source_path": backup_evidence.get("backup_path"),
+            "restore_source_sha256": backup_sha256,
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Backup creation audit mock writes only safe evidence in the temporary verification database.",
+        })
+
+    gate = write_operation_audit_integration_mock_gate(
+        db,
+        audit_rows,
+        operation_type="database_backup",
+        write_enabled=True,
+        manual_approval=True,
+        verification_scope=INTEGRATION_MOCK_SCOPE,
+    )
+    result.update(gate)
+    result.update({
+        "phase": "ERP-Audit-1X",
+        "backup_creation_audit_mock_gate": True,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
     })
     return result
 

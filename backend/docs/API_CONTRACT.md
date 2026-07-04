@@ -1288,3 +1288,94 @@ Create body:
   "action_required": "准备采购表、销售明细、沟通邮件"
 }
 ```
+
+## Local Backup, Restore, and Audit Helpers
+
+These helpers are local scripts and private service gates. They are not public business APIs and are not wired to platform sync endpoints.
+
+### Restore Dry-Run Helper
+
+```text
+scripts/restore_backup_dry_run.py
+```
+
+Allowed output fields are safe operational metadata such as:
+
+- `status`
+- `manifest_valid`
+- `backup_verified`
+- `temporary_restore_verified`
+- `temporary_restore_deleted`
+- `real_restore_executed`
+- `production_db_touched`
+- `production_db_unchanged`
+- `backup_deleted`
+- `sqlite_integrity_check`
+- safe baseline counts
+- backup/manifest paths inside the approved local backup root
+- SHA-256 values for backup verification
+
+The helper must block the production database as a restore target and must never restore over `backend/codex1.db`.
+
+### Backup List/Report Helper
+
+```text
+scripts/list_local_backups.py
+```
+
+Allowed output fields are safe report metadata such as:
+
+- `status`
+- `backup_count`
+- `manifest_count`
+- `all_manifests_valid`
+- `all_sensitive_scans_passed`
+- `backup_exists`
+- `backup_inside_root`
+- `backup_size_matches`
+- abbreviated SHA-256
+- retention metadata
+- safe baseline counts
+
+The helper must not delete backups, restore backups, or write audit or business rows.
+
+### Backup Creation Audit Mock Gate
+
+```text
+write_backup_creation_audit_mock_gate(...)
+```
+
+This private service helper may write only to the temporary verification database. It requires private scope, manual approval, safe backup evidence, valid SHA-256, `sqlite_integrity_check=ok`, `backup_created=true`, `manifest_written=true`, `raw_response_saved=false`, `secrets_saved=false`, and `privacy_fields_redacted=true`.
+
+The mock audit chain is:
+
+```text
+backup_planned
+backup_created
+backup_hash_verified
+backup_integrity_verified
+backup_manifest_verified
+```
+
+### Naver Order Refresh Backup Evidence Gate
+
+```text
+_evaluate_naver_order_refresh_batch_with_backup_evidence_gate(...)
+```
+
+This private helper wraps the existing Naver order refresh batch mock gate. Write-enabled paths require safe backup evidence before manual approval can proceed. Readonly paths do not require backup evidence because they do not write local data.
+
+The helper must keep:
+
+- `formal_order_sync_open=false`
+- `platform_writes_enabled=false`
+- `raw_response_saved=false`
+- `privacy_fields_redacted=true`
+- `products_written=false`
+- `sync_log_written=false`
+- `capability_tested_success_written=false`
+- `timeline_events_written=false`
+
+### Sensitive Boundary
+
+Local backup, restore, audit, and order-refresh gate responses must not include tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.

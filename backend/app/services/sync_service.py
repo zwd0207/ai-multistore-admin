@@ -4415,6 +4415,8 @@ def _default_naver_order_refresh_batch_mock_gate_result(
         "status": "blocked",
         "skip_reason": None,
         "sample_ids": [],
+        "backup_evidence_required": False,
+        "backup_evidence_verified": False,
         "duplicate_candidate_hashes": [],
         "candidate_results": [],
         "matched_local_count": 0,
@@ -4436,6 +4438,138 @@ def _default_naver_order_refresh_batch_mock_gate_result(
         "formal_order_sync_open": False,
         "platform_writes_enabled": False,
     }
+
+
+def _validate_naver_order_refresh_backup_evidence(
+    backup_evidence: dict | None,
+    *,
+    require_backup: bool,
+) -> dict:
+    result = {
+        "phase": "Naver-ERP-18A",
+        "order_refresh_backup_evidence_gate": True,
+        "require_backup": bool(require_backup),
+        "backup_evidence_verified": False,
+        "status": "backup_not_required" if not require_backup else "blocked",
+        "skip_reason": None,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "secrets_saved": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if not require_backup:
+        return result
+    if not isinstance(backup_evidence, dict):
+        result["skip_reason"] = "backup_evidence_missing"
+        return result
+    backup_sha256 = str(backup_evidence.get("backup_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", backup_sha256):
+        result["skip_reason"] = "invalid_backup_sha256"
+        return result
+    if backup_evidence.get("sqlite_integrity_check") != "ok":
+        result["skip_reason"] = "backup_integrity_not_verified"
+        return result
+    required_flags = {
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+    for key, expected in required_flags.items():
+        if backup_evidence.get(key) is not expected:
+            result.update({
+                "skip_reason": "backup_evidence_safety_flags_failed",
+                "failed_flag": key,
+            })
+            return result
+    serialized = json.dumps(backup_evidence, ensure_ascii=False, default=str).lower()
+    for forbidden in (
+        "authorization",
+        "client_secret",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "raw_request",
+        "rawresponse",
+        "buyername",
+        "buyerphone",
+        "receivername",
+        "receiverphone",
+        "zipcode",
+        "productorderid",
+        "orderid-must-not-leak",
+    ):
+        if forbidden in serialized:
+            result["skip_reason"] = "backup_evidence_sensitive_field_blocked"
+            return result
+    result.update({
+        "status": "backup_evidence_verified",
+        "backup_evidence_verified": True,
+        "backup_sha256_abbrev": f"{backup_sha256[:12]}...",
+        "backup_path_present": bool(backup_evidence.get("backup_path")),
+    })
+    return result
+
+
+def _evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
+    db: Session,
+    *,
+    refresh_previews: list[dict] | tuple[dict, ...] | None,
+    approved_order_hashes: list[str] | tuple[str, ...] | None = None,
+    write_enabled: bool = False,
+    manual_approval: bool = False,
+    fresh_readonly_preview: bool = True,
+    max_batch_size: int = 2,
+    backup_evidence: dict | None = None,
+    require_backup: bool = True,
+) -> dict:
+    backup_gate = _validate_naver_order_refresh_backup_evidence(
+        backup_evidence,
+        require_backup=require_backup and bool(write_enabled),
+    )
+    if write_enabled and require_backup and backup_gate["status"] != "backup_evidence_verified":
+        result = _default_naver_order_refresh_batch_mock_gate_result(
+            refresh_previews=refresh_previews,
+            approved_order_hashes=approved_order_hashes,
+            write_enabled=write_enabled,
+            manual_approval=manual_approval,
+            fresh_readonly_preview=fresh_readonly_preview,
+            max_batch_size=max_batch_size,
+        )
+        result.update({
+            "phase": "Naver-ERP-18A",
+            "order_refresh_backup_evidence_gate": True,
+            "backup_evidence_required": True,
+            "backup_evidence_verified": False,
+            "skip_reason": backup_gate["skip_reason"],
+            "backup_gate": backup_gate,
+            "orders_written": False,
+            "formal_order_sync_open": False,
+            "platform_writes_enabled": False,
+        })
+        return result
+
+    result = _evaluate_naver_order_refresh_batch_mock_gate(
+        db,
+        refresh_previews=refresh_previews,
+        approved_order_hashes=approved_order_hashes,
+        write_enabled=write_enabled,
+        manual_approval=manual_approval,
+        fresh_readonly_preview=fresh_readonly_preview,
+        max_batch_size=max_batch_size,
+    )
+    result.update({
+        "phase": "Naver-ERP-18A",
+        "order_refresh_backup_evidence_gate": True,
+        "backup_evidence_required": bool(require_backup and write_enabled),
+        "backup_evidence_verified": bool(backup_gate["backup_evidence_verified"]),
+        "backup_gate": backup_gate,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
 
 
 def _evaluate_naver_order_refresh_batch_mock_gate(
