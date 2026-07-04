@@ -1165,6 +1165,7 @@ function NaverBatchApprovalEvidencePanel() {
           { label: 'orders_written', value: result?.ordersWritten },
           { label: 'sync_log_written', value: result?.syncLogWritten },
           { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_planned', value: result?.operationAuditRowsPlanned },
           { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
           { label: 'raw_response_saved', value: result?.rawResponseSaved },
           { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted },

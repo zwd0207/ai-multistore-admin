@@ -587,6 +587,62 @@ function mockSensitiveActionGate({ actorContext = {}, storeId, actionKey, manual
   };
 }
 
+function mockStoreMembershipReadonlyGate(payload = {}) {
+  const access = mockSensitiveActionGate({
+    actorContext: payload.actor_context || payload.actorContext || {},
+    storeId: payload.target_store_id ?? payload.targetStoreId,
+    actionKey: 'store_membership.assign',
+    manualApproval: payload.manual_approval ?? payload.manualApproval,
+  });
+  const targetUserHash = payload.target_user_key_hash || payload.targetUserKeyHash || '';
+  const targetRole = String(payload.target_role || payload.targetRole || '').trim().toLowerCase();
+  const targetStoreId = Number(payload.target_store_id ?? payload.targetStoreId ?? 0);
+  const validUserHash = /^user-hash-[a-f0-9]{8,64}$/.test(targetUserHash);
+  const roleExists = ['owner', 'admin', 'operator', 'auditor', 'viewer'].includes(targetRole);
+  const duplicate = targetUserHash === 'user-hash-aaaaaaaaaaaaaaaa';
+
+  let status = 'blocked';
+  let skipReason = null;
+  let businessMessage = '店铺成员分配只读检查未通过，请管理员查看折叠详情。';
+  if (!validUserHash) {
+    skipReason = 'target_user_hash_invalid';
+  } else if (!targetStoreId) {
+    skipReason = 'target_store_invalid';
+  } else if (!roleExists) {
+    skipReason = 'target_role_not_allowed';
+  } else if (duplicate) {
+    skipReason = 'duplicate_active_membership';
+    businessMessage = '该用户已经拥有相同店铺角色，不需要重复分配。';
+  } else if (access.status !== 'approval_allowed_mock') {
+    skipReason = access.skipReason || 'membership_assignment_runtime_gate_blocked';
+  } else {
+    status = 'membership_assignment_runtime_mock_ready';
+    businessMessage = '店铺成员分配只读检查已通过。当前不会创建用户或店铺成员关系。';
+  }
+
+  return {
+    phase: 'ERP-Multistore-1G',
+    store_membership_readonly_api_mock_gate: true,
+    readonly_api_mock_gate: true,
+    public_endpoint_enabled: true,
+    status,
+    skip_reason: skipReason,
+    target_user_key_hash: targetUserHash,
+    target_store_id: targetStoreId,
+    target_role: roleExists ? targetRole : null,
+    manual_approval: Boolean(payload.manual_approval ?? payload.manualApproval),
+    assignment_reason_present: Boolean(payload.assignment_reason || payload.assignmentReason),
+    target_user_exists: validUserHash && !duplicate,
+    target_role_exists: roleExists,
+    existing_active_membership_count: duplicate ? 1 : 0,
+    duplicate_active_membership: duplicate,
+    membership_would_create: status === 'membership_assignment_runtime_mock_ready',
+    membership_written: false,
+    business_message: businessMessage,
+    ...permissionSafetyFlags(),
+  };
+}
+
 function adaptPermissionGateResult(data = {}) {
   return {
     ...data,
@@ -617,6 +673,40 @@ function adaptPermissionGateResult(data = {}) {
   };
 }
 
+function adaptStoreMembershipReadonlyResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'ERP-Multistore-1G',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    targetUserKeyHash: data.target_user_key_hash ?? data.targetUserKeyHash ?? null,
+    targetStoreId: Number(data.target_store_id ?? data.targetStoreId ?? 0),
+    targetRole: data.target_role ?? data.targetRole ?? null,
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    assignmentReasonPresent: Boolean(data.assignment_reason_present ?? data.assignmentReasonPresent),
+    targetUserExists: Boolean(data.target_user_exists ?? data.targetUserExists),
+    targetRoleExists: Boolean(data.target_role_exists ?? data.targetRoleExists),
+    duplicateActiveMembership: Boolean(data.duplicate_active_membership ?? data.duplicateActiveMembership),
+    existingActiveMembershipCount: Number(data.existing_active_membership_count ?? data.existingActiveMembershipCount ?? 0),
+    membershipWouldCreate: Boolean(data.membership_would_create ?? data.membershipWouldCreate),
+    membershipWritten: Boolean(data.membership_written ?? data.membershipWritten),
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyApiMockGate: Boolean(data.readonly_api_mock_gate ?? data.readonlyApiMockGate),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    realAuthSessionCreated: Boolean(data.real_auth_session_created ?? data.realAuthSessionCreated),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
 function adaptBatchReadonlyEvidenceResult(data = {}) {
   const items = (Array.isArray(data.items) ? data.items : []).map((item, index) => ({
     evidenceId: item.evidence_id || item.evidenceId || `evidence-${index + 1}`,
@@ -638,6 +728,7 @@ function adaptBatchReadonlyEvidenceResult(data = {}) {
     backupRequired: item.backup_required !== false && item.backupRequired !== false,
     permissionRequired: item.permission_required !== false && item.permissionRequired !== false,
     auditRequired: item.audit_required !== false && item.auditRequired !== false,
+    operationAuditRowsPlanned: item.operation_audit_rows_planned !== false && item.operationAuditRowsPlanned !== false,
     businessMessage: item.business_message || item.businessMessage || '只读证据已整理，等待人工审核。',
     nextAction: item.next_action || item.nextAction || 'manual_review_required',
   }));
@@ -657,6 +748,7 @@ function adaptBatchReadonlyEvidenceResult(data = {}) {
     syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
     capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
     operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    operationAuditRowsPlanned: Boolean(data.operation_audit_rows_planned ?? data.operationAuditRowsPlanned),
     timelineEventsWritten: Boolean(data.timeline_events_written ?? data.timelineEventsWritten),
     rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
     secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
@@ -692,6 +784,7 @@ function mockBatchReadonlyEvidence(payload = {}) {
     backup_required: true,
     permission_required: true,
     audit_required: true,
+    operation_audit_rows_planned: true,
     business_message: item.business_message || item.businessMessage || 'mock 只读证据已整理。',
     next_action: item.next_action || item.nextAction || 'manual_review_required',
   }));
@@ -710,6 +803,7 @@ function mockBatchReadonlyEvidence(payload = {}) {
     sync_log_written: false,
     capability_tested_success_written: false,
     operation_audit_rows_written: false,
+    operation_audit_rows_planned: true,
     timeline_events_written: false,
     raw_response_saved: false,
     secrets_saved: false,
@@ -817,6 +911,18 @@ const sourceMethods = {
       }));
     }
     return adaptPermissionGateResult(await backendApi.checkSensitiveActionPermissionMock(request));
+  },
+  checkStoreMembershipReadonly: async (payload = {}) => {
+    const request = {
+      actor_context: payload.actorContext || payload.actor_context || {},
+      target_user_key_hash: payload.targetUserKeyHash || payload.target_user_key_hash,
+      target_store_id: Number(payload.targetStoreId || payload.target_store_id),
+      target_role: payload.targetRole || payload.target_role,
+      manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+      assignment_reason: payload.assignmentReason || payload.assignment_reason || 'readonly membership check',
+    };
+    if (!isBackendSource) return adaptStoreMembershipReadonlyResult(mockStoreMembershipReadonlyGate(request));
+    return adaptStoreMembershipReadonlyResult(await backendApi.checkStoreMembershipReadonly(request));
   },
   normalizeBatchReadonlyEvidence: async (payload = {}) => {
     const request = {

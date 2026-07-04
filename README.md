@@ -1353,3 +1353,33 @@ The Orders approval evidence panel remains business-first and read-only. It can 
 The batch approval evidence backend wording cleanup is documented in `PHASE_ERP_BATCH_1L_BATCH_APPROVAL_EVIDENCE_BACKEND_WORDING_CLEANUP.md`.
 
 Codex1 batch evidence defaults now use Chinese business wording. The endpoint remains a readonly normalizer and does not execute product or order batch sync.
+
+## Phase ERP-Multistore-1I - Store Membership Readonly API UI Plan
+
+The store membership readonly API UI plan is documented in `PHASE_ERP_MULTISTORE_1I_STORE_MEMBERSHIP_READONLY_API_UI_PLAN.md`.
+
+ERP-Multistore-1I defines the Accounts-page display boundary for membership readiness: business conclusion on the main page, technical gate details folded, and no real users or memberships created.
+
+## Phase ERP-Multistore-1J - Store Membership Readonly UI Display
+
+The store membership readonly UI display is documented in `PHASE_ERP_MULTISTORE_1J_STORE_MEMBERSHIP_READONLY_UI_DISPLAY.md`.
+
+Codex2 Accounts now shows a store membership readonly check panel in backend and mock modes. Backend mode calls the local readonly API; mock mode returns a safe local shape. The panel does not create users, sessions, roles, or memberships.
+
+## Phase Naver-Product-Batch-1L - Product Rollback Drill Mock Report Gate
+
+The product rollback drill mock report gate is documented in `PHASE_NAVER_PRODUCT_BATCH_1L_PRODUCT_ROLLBACK_DRILL_MOCK_REPORT_GATE.md`.
+
+Codex1 now has a private readonly rollback report gate for the controlled stock-only product write path. It summarizes backup, rollback checklist, temporary restore plan, readback plan, and sensitive-scan plan without restoring or writing products.
+
+## Phase Naver-Order-Batch-1E - Order Batch Evidence Backend Wording Alignment
+
+The order batch evidence backend wording alignment is documented in `PHASE_NAVER_ORDER_BATCH_1E_ORDER_BATCH_EVIDENCE_BACKEND_WORDING_ALIGNMENT.md`.
+
+Naver order batch evidence defaults now use Chinese business wording and an explicit next action that keeps formal order batch sync closed.
+
+## Phase ERP-Batch-1M - Batch Approval Evidence Audit Linkage Plan
+
+The batch approval evidence audit linkage plan is documented in `PHASE_ERP_BATCH_1M_BATCH_APPROVAL_EVIDENCE_AUDIT_LINKAGE_PLAN.md`.
+
+Batch evidence now marks audit linkage as planned. No audit rows are written in this phase; future batch writes must still create append-only audit chains under separate approval.

@@ -12,6 +12,7 @@ import Pagination from '../components/common/Pagination';
 import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
+import StoreMembershipReadonlyPanel from '../components/common/StoreMembershipReadonlyPanel';
 import mockApi from '../services/mockApi';
 import { formatKstDateTimeWithLabel, getKstNowText } from '../utils/time';
 
@@ -199,6 +200,7 @@ export default function Accounts() {
         description="统一管理平台账号、权限角色、绑定对象和风险记录。"
         actions={<button className="button primary" onClick={openCreateModal}>新增账号</button>}
       />
+      <StoreMembershipReadonlyPanel />
 
       <FilterPanel>
         <SearchBar

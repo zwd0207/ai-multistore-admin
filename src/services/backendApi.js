@@ -63,6 +63,7 @@ export const backendApi = {
   getRolePermissionInventory: () => getData('/permissions/role-inventory'),
   checkPermissionMock: (payload) => sendData('post', '/permissions/mock-check', payload),
   checkSensitiveActionPermissionMock: (payload) => sendData('post', '/permissions/sensitive-action/mock-check', payload),
+  checkStoreMembershipReadonly: (payload) => sendData('post', '/permissions/store-membership/readonly-check', payload),
   syncProductsMock: (params) => sendData('post', '/sync/products/mock', undefined, params),
   syncOrdersMock: (params) => sendData('post', '/sync/orders/mock', undefined, params),
   syncCustomerInquiriesMock: (params) => sendData('post', '/sync/customer-inquiries/mock', undefined, params),
