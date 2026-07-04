@@ -1427,6 +1427,8 @@ This private helper wraps the existing Naver order refresh batch mock gate. Writ
 
 Phase Naver-ERP-18C is the controlled readonly repeat result. It uses the existing public `POST /api/v1/sync/orders/naver/preview` contract with `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. It returned HTTP 200 for token, feed, and detail. The safe observed hash was `id-hash-192b9c67e8`, with `DELIVERED / 配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. It did not write orders, products, SyncLog, `ApiCapabilityTestResult tested_success`, operation audit rows, or order status events, and it did not open formal order sync or execute any platform write operation.
 
+Phase Naver-ERP-18D is the controlled refresh-write approval review result. It does not change the public API surface and does not approve a refresh write for safe hash `id-hash-192b9c67e8`, because local readback shows that hash does not match an existing real local Naver order. Existing-order refresh writes remain limited to exactly matched local real Naver orders only. A later selected new-order candidate approval plan is required before this candidate can be considered for a single new-order local write. 18D does not call Naver, execute `real_sync=true`, write local data, write audit rows, change schema, or open formal order sync.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`
