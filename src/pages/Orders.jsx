@@ -1082,6 +1082,118 @@ function batchAuditStatusMessage(auditResult) {
   return '批量审批审计证据已返回，写入动作保持关闭。';
 }
 
+const formalBatchOperatorChecklist = [
+  {
+    key: 'manual_approval',
+    title: '人工批准',
+    status: '必须完成',
+    message: '商品或订单批量写入前，必须由管理员明确批准本次范围。',
+  },
+  {
+    key: 'store_permission',
+    title: '店铺权限',
+    status: '必须完成',
+    message: '操作者必须具备当前店铺的批量写入权限，不能跨店铺自动执行。',
+  },
+  {
+    key: 'fresh_backup',
+    title: '数据库备份',
+    status: '必须完成',
+    message: '写入前必须生成并校验最新数据库备份，备份证据要能回查。',
+  },
+  {
+    key: 'readonly_candidates',
+    title: '只读候选',
+    status: '必须完成',
+    message: '写入范围必须来自最新只读预览，不能使用过期候选或口头范围。',
+  },
+  {
+    key: 'field_whitelist',
+    title: '字段白名单',
+    status: '必须完成',
+    message: '只能写入已批准的业务字段，平台原始响应和敏感字段不得入库。',
+  },
+  {
+    key: 'duplicate_protection',
+    title: '重复保护',
+    status: '必须完成',
+    message: '必须确认不会重复创建商品或订单，异常候选应整批阻断。',
+  },
+  {
+    key: 'rollback_plan',
+    title: '回滚方案',
+    status: '必须完成',
+    message: '必须有可执行的回滚或恢复方案，并先完成只读/临时库演练。',
+  },
+  {
+    key: 'audit_evidence',
+    title: '审计证据',
+    status: '必须完成',
+    message: '批准、备份、写入尝试、回读和敏感扫描都要能形成审计链。',
+  },
+];
+
+function FormalBatchOperatorChecklistPanel() {
+  const { selectedStore } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>正式批量同步操作员检查清单</h2>
+          <p>这是给管理员开放正式批量同步前使用的只读检查清单。当前只展示门禁要求，不执行同步、不调用 Naver、不写入本地业务数据。</p>
+        </div>
+        <span className="period-chip">只读清单</span>
+      </div>
+      <div className="business-capability-grid compact">
+        {formalBatchOperatorChecklist.map((item) => (
+          <article className="business-capability-card warning" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>未全部满足前，正式商品/订单批量同步保持关闭。</small>
+          </article>
+        ))}
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>当前状态</strong>
+            <span>未开放</span>
+          </div>
+          <p>本清单只是生产操作前的说明和复核入口，不代表已经批准任何批量写入。</p>
+          <small>后续仍需要单独的审批、备份、写入和回读阶段。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看正式批量同步清单技术详情"
+        description="这些字段仅供管理员核对清单版本和保护边界。"
+        items={[
+          { label: 'phase', value: 'ERP-Batch-2B' },
+          { label: 'checklist_version', value: 'formal_batch_operator_checklist_v1' },
+          { label: 'checklist_item_count', value: formalBatchOperatorChecklist.length },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'formal_product_sync_open', value: false },
+          { label: 'formal_order_sync_open', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          ...formalBatchOperatorChecklist.map((item) => ({
+            label: `checklist.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
 function NaverBatchApprovalEvidencePanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({
@@ -1701,6 +1813,7 @@ export default function Orders() {
     <>
       <NaverOrderPreviewStatusPanel />
       <NaverRoleAwareActionVisibilityPanel />
+      <FormalBatchOperatorChecklistPanel />
       <NaverBatchApprovalEvidencePanel />
       <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderCompleteDetailPanel />

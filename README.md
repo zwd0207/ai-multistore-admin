@@ -1593,3 +1593,33 @@ Codex2 Accounts now shows the user invitation approval role gate in business wor
 The user invitation audit evidence plan is documented in `PHASE_ERP_MULTISTORE_1V_USER_INVITATION_AUDIT_EVIDENCE_PLAN.md`.
 
 Codex2 Accounts now shows the audit evidence plan for a future real invitation: backup evidence planned, audit evidence planned, membership assignment plan ready, and operation audit rows planned but not written.
+
+## Phase ERP-Batch-2A - Formal Batch Sync Operator Checklist Consolidation
+
+The operator checklist consolidation is documented in `PHASE_ERP_BATCH_2A_FORMAL_BATCH_SYNC_OPERATOR_CHECKLIST_CONSOLIDATION.md`.
+
+The formal batch sync checklist now requires human approval, store-scoped permission, fresh backup, latest readonly candidates, field whitelist, duplicate protection, rollback plan, audit evidence, post-write readback, and sensitive-field scan. Formal product and order batch sync remain closed.
+
+## Phase ERP-Batch-2B - Formal Batch Sync Checklist UI Display
+
+The checklist UI display is documented in `PHASE_ERP_BATCH_2B_FORMAL_BATCH_SYNC_CHECKLIST_UI_DISPLAY.md`.
+
+Codex2 Orders now shows a readonly `正式批量同步操作员检查清单` panel. It does not call Naver, execute `real_sync=true`, write local data, write audit rows, or open formal product/order batch sync.
+
+## Phase Naver-Product-Batch-2A - Product Batch Approval Evidence Linkage UI Plan
+
+The product batch approval evidence linkage UI plan is documented in `PHASE_NAVER_PRODUCT_BATCH_2A_PRODUCT_BATCH_APPROVAL_EVIDENCE_LINKAGE_UI_PLAN.md`.
+
+Future Naver product batch approval should link readonly candidates, changed fields, field whitelist, backup evidence, rollback report, restore drill evidence, audit correlation, readback, and sensitive-field scan.
+
+## Phase Naver-Product-Batch-2B - Product Batch Approval Evidence Linkage UI Implementation
+
+The product batch approval evidence linkage UI implementation is documented in `PHASE_NAVER_PRODUCT_BATCH_2B_PRODUCT_BATCH_APPROVAL_EVIDENCE_LINKAGE_UI_IMPLEMENTATION.md`.
+
+Codex2 Products now shows a readonly `Naver 商品批量审批证据联动` panel. It keeps product writes, restore, platform calls, audit writes, and formal product batch sync closed.
+
+## Phase ERP-Multistore-2A - Real User Invitation Production Gate Plan
+
+The real user invitation production gate plan is documented in `PHASE_ERP_MULTISTORE_2A_REAL_USER_INVITATION_PRODUCTION_GATE_PLAN.md`.
+
+Real user invitation remains closed. A future implementation must require explicit approval, admin/owner role, store-scoped permission, masked login identifiers, backup evidence, append-only audit evidence, invite expiry, one-time consumption design, post-create readback, and rollback or disable-user instructions.

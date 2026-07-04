@@ -798,6 +798,94 @@ function ProductRollbackReadonlyReportRoutePanel() {
   );
 }
 
+const productBatchApprovalEvidenceLinks = [
+  {
+    key: 'readonly_candidates',
+    title: '只读候选',
+    status: '需要最新预览',
+    message: '商品批量审批必须引用最新只读候选结果，不能直接使用旧截图或旧 dry-run。',
+  },
+  {
+    key: 'backup_and_rollback',
+    title: '备份与回滚',
+    status: '必须关联',
+    message: '审批材料必须关联数据库备份、回滚只读报告和临时库恢复演练结果。',
+  },
+  {
+    key: 'field_whitelist',
+    title: '字段白名单',
+    status: '必须校验',
+    message: '只允许写入已批准的商品业务字段，平台原始响应、密钥、请求头和完整平台编号不得入库。',
+  },
+  {
+    key: 'audit_correlation',
+    title: '审计关联',
+    status: '必须留痕',
+    message: '后续真实写入必须能关联批准人、备份、写入尝试、回读结果和敏感扫描。',
+  },
+];
+
+function ProductBatchApprovalEvidenceLinkagePanel() {
+  const { selectedStore } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 商品批量审批证据联动</h2>
+          <p>这里说明商品批量写入审批前必须串联哪些证据。当前只做展示和规划，不写商品、不恢复数据库，也不开放正式商品批量同步。</p>
+        </div>
+        <span className="period-chip">只读联动</span>
+      </div>
+      <div className="business-capability-grid compact">
+        {productBatchApprovalEvidenceLinks.map((item) => (
+          <article className="business-capability-card warning" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>当前页面不会触发真实商品写入。</small>
+          </article>
+        ))}
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>正式商品批量同步</strong>
+            <span>未开放</span>
+          </div>
+          <p>商品批量审批证据还在联动展示阶段，不能作为直接写入批准。</p>
+          <small>真实写入必须另开阶段，并重新确认候选、备份、权限和回读。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看商品批量审批证据联动技术详情"
+        description="这些字段仅用于管理员确认联动清单，不代表任何写入已批准。"
+        items={[
+          { label: 'phase', value: 'Naver-Product-Batch-2B' },
+          { label: 'linkage_version', value: 'product_batch_approval_evidence_linkage_v1' },
+          { label: 'linkage_item_count', value: productBatchApprovalEvidenceLinks.length },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'real_restore_executed', value: false },
+          { label: 'formal_product_sync_open', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          ...productBatchApprovalEvidenceLinks.map((item) => ({
+            label: `evidence_link.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -807,6 +895,7 @@ export default function Products() {
     <>
       <NaverProductPreviewStatusPanel />
       <ProductRollbackReadonlyReportRoutePanel />
+      <ProductBatchApprovalEvidenceLinkagePanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"
