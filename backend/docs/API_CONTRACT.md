@@ -1429,6 +1429,8 @@ Phase Naver-ERP-18C is the controlled readonly repeat result. It uses the existi
 
 Phase Naver-ERP-18D is the controlled refresh-write approval review result. It does not change the public API surface and does not approve a refresh write for safe hash `id-hash-192b9c67e8`, because local readback shows that hash does not match an existing real local Naver order. Existing-order refresh writes remain limited to exactly matched local real Naver orders only. A later selected new-order candidate approval plan is required before this candidate can be considered for a single new-order local write. 18D does not call Naver, execute `real_sync=true`, write local data, write audit rows, change schema, or open formal order sync.
 
+Phase Naver-ERP-19A is the selected new-order candidate approval contract for safe hash `id-hash-192b9c67e8`. It does not change the public API surface, call Naver, execute `real_sync=true`, write data, write audit rows, change schema, or open formal sync. It approves only a later readonly repeat for the selected hash. A future single new-order local write must require exact selected-hash repeat, duplicate count zero, privacy and status gates, fresh database backup, one-order limit, post-write readback, audit evidence, no SyncLog write, no tested-success write, no product write, and no Naver platform write operation.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`
