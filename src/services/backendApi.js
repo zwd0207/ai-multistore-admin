@@ -59,6 +59,7 @@ export const backendApi = {
   getOperationAuditLogSummary: (params) => getData('/operation-audit-logs/summary', params),
   getBackupLocalReport: (params) => getData('/backups/local-report', params),
   getBackupLocalReportSummary: (params) => getData('/backups/local-report/summary', params),
+  normalizeBatchReadonlyEvidence: (payload) => sendData('post', '/batch/readonly-evidence', payload),
   getRolePermissionInventory: () => getData('/permissions/role-inventory'),
   checkPermissionMock: (payload) => sendData('post', '/permissions/mock-check', payload),
   checkSensitiveActionPermissionMock: (payload) => sendData('post', '/permissions/sensitive-action/mock-check', payload),

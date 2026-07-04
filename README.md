@@ -1257,3 +1257,33 @@ ERP-Batch-1F keeps the future readonly evidence API in plan status. No public ev
 The store membership real assignment approval is documented in `PHASE_ERP_MULTISTORE_1D_STORE_MEMBERSHIP_REAL_ASSIGNMENT_APPROVAL.md`.
 
 ERP-Multistore-1D defines the approval boundary for future real membership assignment. No users or store memberships are created in this phase, and large-scale multi-store production remains closed.
+
+## Phase ERP-Batch-1G - Readonly Evidence API Mock Route Gate
+
+The readonly evidence API mock route gate is documented in `PHASE_ERP_BATCH_1G_READONLY_EVIDENCE_API_MOCK_ROUTE_GATE.md`.
+
+ERP-Batch-1G verifies the safe route shape and sensitive-field blocking for batch evidence review. It does not execute sync and does not write data.
+
+## Phase ERP-Batch-1H - Readonly Evidence API Local Route Implementation
+
+The readonly evidence API local route implementation is documented in `PHASE_ERP_BATCH_1H_READONLY_EVIDENCE_API_LOCAL_ROUTE_IMPLEMENTATION.md`.
+
+ERP-Batch-1H adds `POST /api/v1/batch/readonly-evidence` and a Codex2 backend API adapter method. The route normalizes safe evidence only; it does not call platforms, write data, or open formal sync.
+
+## Phase ERP-Multistore-1E - Store Membership Runtime Assignment Mock Gate
+
+The store membership runtime assignment mock gate is documented in `PHASE_ERP_MULTISTORE_1E_STORE_MEMBERSHIP_RUNTIME_ASSIGNMENT_MOCK_GATE.md`.
+
+ERP-Multistore-1E checks the real auth tables for user existence, role existence, approval, and duplicate active membership, but still does not create real users or memberships.
+
+## Phase Naver-Product-Batch-1H - Product Stock-Change UI Verification
+
+The product stock-change UI verification is documented in `PHASE_NAVER_PRODUCT_BATCH_1H_PRODUCT_STOCK_CHANGE_UI_VERIFICATION.md`.
+
+Naver-Product-Batch-1H confirms Products should now show no pending product business update after the stock-only write evidence, while inventory reminders remain separate and formal product batch sync remains closed.
+
+## Phase Naver-Product-Batch-1I - Product Batch Sync Rollback Drill Plan
+
+The product batch sync rollback drill plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1I_PRODUCT_BATCH_SYNC_ROLLBACK_DRILL_PLAN.md`.
+
+Naver-Product-Batch-1I defines the future temporary-restore rollback drill required before formal product batch sync can be considered. Real restore remains closed.
