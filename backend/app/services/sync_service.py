@@ -5334,6 +5334,46 @@ def _evaluate_batch_readonly_evidence_api_mock_gate(
     return result
 
 
+def evaluate_batch_readonly_evidence_api_local(
+    *,
+    evidence_items: list[dict] | tuple[dict, ...] | None,
+    max_items: int = 10,
+) -> dict:
+    """Public local readonly evidence normalizer; never calls platforms or writes rows."""
+
+    result = _evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=evidence_items,
+        verification_scope="verify_all_temp_db",
+        max_items=max_items,
+    )
+    result.update({
+        "phase": "ERP-Batch-1H",
+        "readonly_evidence_api_local": True,
+        "public_endpoint_enabled": True,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "timeline_events_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "readonly_evidence_api_mock_ready":
+        result.update({
+            "status": "readonly_evidence_api_ready",
+            "business_message": "Readonly batch evidence is ready for approval review. No sync or write was executed.",
+        })
+    return result
+
+
 def _evaluate_naver_order_refresh_batch_mock_gate(
     db: Session,
     *,

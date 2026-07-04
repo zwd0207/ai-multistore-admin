@@ -454,3 +454,128 @@ def evaluate_store_membership_assignment_mock_gate(
         "business_message": "Store membership assignment passed the private mock gate only; no user or membership row was written.",
     })
     return result
+
+
+def evaluate_store_membership_assignment_runtime_mock_gate(
+    db: Any,
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    target_store_id: int | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    assignment_reason: str | None = None,
+) -> dict[str, Any]:
+    """Read real auth tables for a future assignment, but never write membership rows."""
+
+    from sqlalchemy import select
+
+    from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
+
+    normalized_role = _normalize_role(target_role)
+    result = {
+        "phase": "ERP-Multistore-1E",
+        "store_membership_assignment_runtime_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "target_user_key_hash": target_user_key_hash if isinstance(target_user_key_hash, str) else None,
+        "target_store_id": target_store_id,
+        "target_role": normalized_role,
+        "manual_approval": bool(manual_approval),
+        "assignment_reason_present": bool(assignment_reason),
+        "target_user_exists": False,
+        "target_role_exists": False,
+        "existing_active_membership_count": 0,
+        "duplicate_active_membership": False,
+        "membership_would_create": False,
+        "membership_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if db is None:
+        result["skip_reason"] = "db_session_required"
+        return result
+    if not isinstance(target_user_key_hash, str) or not SAFE_USER_HASH_PATTERN.fullmatch(target_user_key_hash):
+        result["skip_reason"] = "target_user_hash_invalid"
+        return result
+    if not isinstance(target_store_id, int) or target_store_id <= 0:
+        result["skip_reason"] = "target_store_invalid"
+        return result
+    if normalized_role is None:
+        result["skip_reason"] = "target_role_not_allowed"
+        return result
+    if not isinstance(assignment_reason, str) or not assignment_reason.strip():
+        result["skip_reason"] = "assignment_reason_required"
+        return result
+    if _contains_sensitive_material({
+        "actor_context": actor_context,
+        "target_user_key_hash": target_user_key_hash,
+        "assignment_reason": assignment_reason,
+    }):
+        result["skip_reason"] = "membership_assignment_sensitive_material_blocked"
+        return result
+
+    user = db.scalar(select(ErpUser).where(ErpUser.user_key_hash == target_user_key_hash))
+    if user is None:
+        result["skip_reason"] = "target_user_not_found"
+        return result
+    if str(user.status).lower() not in {"active", "invited"}:
+        result["skip_reason"] = "target_user_status_not_assignable"
+        return result
+    result["target_user_exists"] = True
+
+    role = db.scalar(select(ErpRole).where(ErpRole.role_key == normalized_role, ErpRole.status == "active"))
+    if role is None:
+        result["skip_reason"] = "target_role_not_found"
+        return result
+    result["target_role_exists"] = True
+
+    active_memberships = db.scalars(
+        select(ErpStoreMembership).where(
+            ErpStoreMembership.store_id == target_store_id,
+            ErpStoreMembership.membership_status == "active",
+        )
+    ).all()
+    existing_memberships: list[dict[str, Any]] = []
+    for membership in active_memberships:
+        existing_user = getattr(membership, "user", None)
+        existing_role = getattr(membership, "role", None)
+        existing_memberships.append({
+            "user_key_hash": getattr(existing_user, "user_key_hash", None),
+            "store_id": membership.store_id,
+            "role": getattr(existing_role, "role_key", None),
+            "membership_status": membership.membership_status,
+        })
+    result["existing_active_membership_count"] = len(existing_memberships)
+
+    gate = evaluate_store_membership_assignment_mock_gate(
+        actor_context=actor_context,
+        target_user_key_hash=target_user_key_hash,
+        target_store_id=target_store_id,
+        target_role=normalized_role,
+        existing_memberships=existing_memberships,
+        manual_approval=manual_approval,
+        assignment_reason=assignment_reason,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    result["approval_gate"] = gate.get("approval_gate")
+    result["duplicate_active_membership"] = bool(gate.get("duplicate_active_membership"))
+    if gate.get("status") != "membership_assignment_mock_ready":
+        result["skip_reason"] = gate.get("skip_reason") or "membership_assignment_runtime_gate_blocked"
+        return result
+
+    result.update({
+        "status": "membership_assignment_runtime_mock_ready",
+        "membership_would_create": True,
+        "business_message": "Store membership assignment passed runtime mock checks. No user or membership row was written.",
+    })
+    return result

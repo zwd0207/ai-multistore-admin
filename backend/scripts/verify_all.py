@@ -59,6 +59,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/role-inventory",
     "/api/v1/permissions/mock-check",
     "/api/v1/permissions/sensitive-action/mock-check",
+    "/api/v1/batch/readonly-evidence",
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/customer-inquiries",
@@ -1259,6 +1260,8 @@ def verify_openapi() -> None:
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
         assert methods == expected_methods, {permission_path: methods}
+    batch_methods = set(openapi_json["paths"]["/api/v1/batch/readonly-evidence"].keys())
+    assert batch_methods == {"post"}, {"/api/v1/batch/readonly-evidence": batch_methods}
     print("openapi/docs: ok")
 
 
@@ -10251,6 +10254,8 @@ def verify_store_membership_assignment_mock_gate() -> None:
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
+    from app.models.store import Store
     from app.services import permission_service
 
     admin_store8 = {
@@ -10346,6 +10351,85 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert success["real_database_written"] is False, success
     assert success["formal_sync_open"] is False, success
 
+    runtime_user_hash = "user-hash-cccccccccccccccc"
+    missing_user = None
+    runtime_success = None
+    runtime_duplicate = None
+    with SessionLocal() as db:
+        store = db.get(Store, 8)
+        if store is None:
+            db.add(Store(id=8, name="Membership runtime fixture store", platform="naver"))
+        operator_role = db.query(ErpRole).filter(ErpRole.role_key == "operator").first()
+        assert operator_role is not None, "operator role should be seeded"
+        db.query(ErpStoreMembership).filter(
+            ErpStoreMembership.user_id.in_(
+                db.query(ErpUser.id).filter(ErpUser.user_key_hash == runtime_user_hash)
+            )
+        ).delete(synchronize_session=False)
+        db.query(ErpUser).filter(ErpUser.user_key_hash == runtime_user_hash).delete(synchronize_session=False)
+        db.commit()
+
+        missing_user = permission_service.evaluate_store_membership_assignment_runtime_mock_gate(
+            db,
+            actor_context=admin_store8,
+            target_user_key_hash=runtime_user_hash,
+            target_store_id=8,
+            target_role="operator",
+            manual_approval=True,
+            assignment_reason="runtime gate missing user check",
+        )
+        assert missing_user["skip_reason"] == "target_user_not_found", missing_user
+
+        runtime_user = ErpUser(
+            user_key_hash=runtime_user_hash,
+            display_name="Runtime safe fixture user",
+            status="active",
+            auth_provider="local_pending",
+        )
+        db.add(runtime_user)
+        db.commit()
+        db.refresh(runtime_user)
+
+        runtime_success = permission_service.evaluate_store_membership_assignment_runtime_mock_gate(
+            db,
+            actor_context=admin_store8,
+            target_user_key_hash=runtime_user_hash,
+            target_store_id=8,
+            target_role="operator",
+            manual_approval=True,
+            assignment_reason="runtime gate assignment approval",
+        )
+        assert runtime_success["status"] == "membership_assignment_runtime_mock_ready", runtime_success
+        assert runtime_success["target_user_exists"] is True, runtime_success
+        assert runtime_success["target_role_exists"] is True, runtime_success
+        assert runtime_success["membership_would_create"] is True, runtime_success
+        assert runtime_success["membership_written"] is False, runtime_success
+        assert runtime_success["real_database_written"] is False, runtime_success
+
+        db.add(ErpStoreMembership(
+            user_id=runtime_user.id,
+            store_id=8,
+            role_id=operator_role.id,
+            scope_type="assigned",
+            membership_status="active",
+        ))
+        db.commit()
+        runtime_duplicate = permission_service.evaluate_store_membership_assignment_runtime_mock_gate(
+            db,
+            actor_context=admin_store8,
+            target_user_key_hash=runtime_user_hash,
+            target_store_id=8,
+            target_role="operator",
+            manual_approval=True,
+            assignment_reason="runtime gate duplicate check",
+        )
+        assert runtime_duplicate["skip_reason"] == "duplicate_active_membership", runtime_duplicate
+        assert runtime_duplicate["duplicate_active_membership"] is True, runtime_duplicate
+
+        db.query(ErpStoreMembership).filter(ErpStoreMembership.user_id == runtime_user.id).delete(synchronize_session=False)
+        db.query(ErpUser).filter(ErpUser.id == runtime_user.id).delete(synchronize_session=False)
+        db.commit()
+
     with SessionLocal() as db:
         after_counts = {
             "erp_users": db.execute(text("SELECT COUNT(*) FROM erp_users")).scalar_one(),
@@ -10362,6 +10446,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "operator_blocked": operator_blocked,
             "duplicate": duplicate,
             "success": success,
+            "runtime_success": runtime_success,
+            "runtime_duplicate": runtime_duplicate,
+            "missing_user": missing_user,
         },
         ensure_ascii=False,
         default=str,
@@ -10632,9 +10719,11 @@ def verify_formal_batch_sync_production_gate() -> None:
 
 
 def verify_product_stock_change_and_readonly_evidence_gates() -> None:
+    from fastapi.testclient import TestClient
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.main import app
     from app.models.product import Product
     from app.models.store import Store
     from app.services import sync_service
@@ -10853,6 +10942,62 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     )
     assert readonly_invalid_kind["skip_reason"] == "sync_kind_not_allowed", readonly_invalid_kind
 
+    with TestClient(app) as client:
+        local_evidence_response = client.post("/api/v1/batch/readonly-evidence", json={
+            "max_items": 10,
+            "evidence_items": [
+                {
+                    "evidence_id": "naver-product-post-stock-write",
+                    "store_id": 8,
+                    "sync_kind": "naver_product_batch",
+                    "window_label": "page=1,size=5 post-write",
+                    "candidate_count": 5,
+                    "would_create": 0,
+                    "would_update": 0,
+                    "would_refresh_only": 5,
+                    "would_skip": 0,
+                    "changed_field_names": [],
+                    "duplicate_check_passed": True,
+                    "field_whitelist_verified": True,
+                    "real_sync": False,
+                    "raw_response_saved": False,
+                    "privacy_fields_redacted": True,
+                    "formal_sync_open": False,
+                    "business_message": "No product business field changes remain after stock-only local write.",
+                    "next_action": "continue_readonly_monitoring",
+                }
+            ],
+        })
+        assert local_evidence_response.status_code == 200, local_evidence_response.text
+        local_evidence = local_evidence_response.json()["data"]
+        assert local_evidence["phase"] == "ERP-Batch-1H", local_evidence
+        assert local_evidence["status"] == "readonly_evidence_api_ready", local_evidence
+        assert local_evidence["public_endpoint_enabled"] is True, local_evidence
+        assert local_evidence["real_api_called"] is False, local_evidence
+        assert local_evidence["real_database_written"] is False, local_evidence
+        assert local_evidence["products_written"] is False, local_evidence
+        assert local_evidence["formal_product_sync_open"] is False, local_evidence
+        assert local_evidence["items"][0]["would_update"] == 0, local_evidence
+        assert local_evidence["items"][0]["would_refresh_only"] == 5, local_evidence
+
+        local_sensitive_response = client.post("/api/v1/batch/readonly-evidence", json={
+            "evidence_items": [{
+                "store_id": 8,
+                "sync_kind": "naver_product_batch",
+                "candidate_count": 1,
+                "productOrderId": "must-not-leak-route",
+                "real_sync": False,
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+            }],
+        })
+        assert local_sensitive_response.status_code == 200, local_sensitive_response.text
+        local_sensitive = local_sensitive_response.json()["data"]
+        assert local_sensitive["skip_reason"] == "evidence_item_sensitive_field_blocked", local_sensitive
+        assert local_sensitive["public_endpoint_enabled"] is True, local_sensitive
+        assert local_sensitive["real_database_written"] is False, local_sensitive
+
     with SessionLocal() as db:
         after_counts = {
             "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
@@ -10869,8 +11014,10 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         {
             "success": success,
             "readonly_success": readonly_success,
+            "local_evidence": local_evidence,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
+            "local_sensitive": local_sensitive,
         },
         ensure_ascii=False,
         default=str,
@@ -10890,6 +11037,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "receiverphone",
         "zipcode",
         "must-not-leak",
+        "must-not-leak-route",
     ]:
         assert forbidden not in serialized, serialized
 
@@ -13170,6 +13318,7 @@ def verify_git_tracking() -> None:
         "M  backend/README.md",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        "A  backend/app/api/v1/endpoints/batch.py",
         " M backend/app/api/v1/endpoints/backups.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
@@ -13196,6 +13345,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/store.py",
         "M  backend/app/models/store.py",
         " M backend/app/schemas/api_credential_readiness.py",
+        "A  backend/app/schemas/batch.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",
         " M backend/app/schemas/permission.py",
@@ -13233,6 +13383,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
+        "?? backend/app/api/v1/endpoints/batch.py",
         "?? backend/app/api/v1/endpoints/backups.py",
         "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
         "?? backend/app/api/v1/endpoints/permissions.py",
@@ -13244,6 +13395,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
+        "?? backend/app/schemas/batch.py",
         "?? backend/app/schemas/permission.py",
         "?? backend/app/schemas/sync.py",
         "?? backend/app/services/api_capability_service.py",

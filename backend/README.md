@@ -1040,3 +1040,23 @@ Naver-Product-Batch-1G verifies the post-write state: `products_store8` stays at
 ERP-Batch-1F remains an implementation plan for a future local readonly evidence API. The current code only has the private evidence normalizer; no public evidence API route is open.
 
 ERP-Multistore-1D remains an approval plan for future real store membership assignment. No `erp_users` or `erp_store_memberships` rows are created by this phase, and large-scale multi-store production operation remains closed.
+
+ERP-Batch-1G and ERP-Batch-1H add the local readonly batch evidence route:
+
+```text
+POST /api/v1/batch/readonly-evidence
+```
+
+The route normalizes safe approval evidence only. It does not call Naver or other platforms, does not write business rows, does not expose raw responses or secrets, and does not open formal product or order batch sync.
+
+ERP-Multistore-1E adds a runtime mock gate:
+
+```text
+evaluate_store_membership_assignment_runtime_mock_gate(...)
+```
+
+It reads the real auth tables to verify target user existence, active role, approval, and duplicate active memberships. It still returns only `membership_would_create=true` and keeps `membership_written=false`.
+
+Naver-Product-Batch-1H verifies that Products UI wording remains safe after the stock-only write: no pending product business update should be shown after post-write evidence, inventory reminders remain separate, and formal product batch sync stays closed.
+
+Naver-Product-Batch-1I plans the rollback drill required before any future product batch sync opening. The drill must restore only to a temporary copy and compare safe product summaries; real restore remains closed.

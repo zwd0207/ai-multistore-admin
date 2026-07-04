@@ -1780,3 +1780,70 @@ It must not write orders, SyncLog, tested-success, operation audit rows, timelin
 Phase ERP-Batch-1F is still a plan for a future readonly evidence API. No public readonly evidence route is available yet.
 
 Phase ERP-Multistore-1D is still an approval plan. Real user creation and real store membership assignment remain closed.
+
+### Batch Readonly Evidence API Contract
+
+Phase ERP-Batch-1H exposes a local readonly endpoint:
+
+```text
+POST /api/v1/batch/readonly-evidence
+```
+
+Request body:
+
+```json
+{
+  "max_items": 10,
+  "evidence_items": [
+    {
+      "evidence_id": "safe-label",
+      "store_id": 8,
+      "sync_kind": "naver_product_batch",
+      "window_label": "page=1,size=5 post-write",
+      "candidate_count": 5,
+      "would_create": 0,
+      "would_update": 0,
+      "would_refresh_only": 5,
+      "would_skip": 0,
+      "changed_field_names": [],
+      "duplicate_check_passed": true,
+      "field_whitelist_verified": true,
+      "real_sync": false,
+      "raw_response_saved": false,
+      "privacy_fields_redacted": true,
+      "formal_sync_open": false
+    }
+  ]
+}
+```
+
+Successful response status is `readonly_evidence_api_ready`. Blocked unsafe input returns a safe blocked payload with `skip_reason`, not raw input.
+
+The endpoint must keep:
+
+```text
+real_api_called=false
+real_database_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+timeline_events_written=false
+raw_response_saved=false
+secrets_saved=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+It must not return token, Authorization, headers, signature, bcrypt input, client secret, raw response, full channel id, full platform order id, full product id, buyer/receiver privacy, phone, address, or zip code.
+
+### Store Membership Runtime Mock Contract
+
+Phase ERP-Multistore-1E adds:
+
+```text
+evaluate_store_membership_assignment_runtime_mock_gate(...)
+```
+
+It reads existing auth tables to check target user existence, active role, approval, and duplicate memberships. It does not create users, memberships, sessions, or role assignments.
