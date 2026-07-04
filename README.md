@@ -755,6 +755,12 @@ The real local backup implementation approval plan is documented in `PHASE_ERP_B
 
 ERP-Backup-1F is planning-only. It defines the approval boundary for a later manual local backup helper for `backend/codex1.db`, including the approved backup root, source/path checks, SQLite backup method expectation, manifest generation, integrity checks, baseline counts, overwrite blocking, sensitive boundaries, and failure handling. It does not create backup files, write production manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
 
+## Phase ERP-Backup-1G - Real Local Backup Helper Implementation
+
+The real local backup helper implementation is documented in `PHASE_ERP_BACKUP_1G_REAL_LOCAL_BACKUP_HELPER_IMPLEMENTATION.md`.
+
+ERP-Backup-1G implements `backend/scripts/create_local_backup.py` for manual local backups of `backend/codex1.db`. The helper uses SQLite online backup, validates the temporary backup before finalizing, writes a side-by-side UTF-8 manifest, records safe SHA-256/size/integrity/count metadata, blocks unsupported paths/retention/sensitive inputs/overwrites, and is covered by `verify_all.py` fixture tests. This phase creates one real local backup file and manifest under the approved local backup root, but it does not restore a database, delete backups, modify schema, write business rows, write `operation_audit_logs`, call platform APIs, modify runtime UI, or open formal sync.
+
 ## Phase ERP-UX-1A - Frontend Production Usability Plan
 
 The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
