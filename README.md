@@ -1148,7 +1148,7 @@ The batch sync approval and backup mock gate is documented in `PHASE_ERP_BATCH_1
 
 ERP-Batch-1B adds a private Codex1 mock gate for future formal batch sync readiness. It supports Naver order batch, Naver order refresh batch, and Naver product batch gate checks. A passing result can only say the gate is ready for a later execution phase; it still returns `formal_sync_open=false`, `formal_order_sync_open=false`, `formal_product_sync_open=false`, `orders_written=false`, and `products_written=false`.
 
-The local auth permission metadata now includes `products.batch_sync_write` and `orders.batch_sync_write`, with `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
+The local auth permission metadata now includes `products.batch_sync_write`, `orders.batch_sync_write`, and `store_membership.assign`, with `erp_permissions=13`, `erp_role_permissions=41`, `erp_users=0`, and `erp_store_memberships=0`.
 
 ## Phase Naver-Order-Batch-1A - Naver Order Batch Refresh Production Plan
 
@@ -1197,3 +1197,33 @@ Naver-Product-Batch-1B ran protected readonly product previews for `page=1,size=
 The store membership assignment approval plan is documented in `PHASE_ERP_MULTISTORE_1B_STORE_MEMBERSHIP_ASSIGNMENT_APPROVAL_PLAN.md`.
 
 ERP-Multistore-1B plans the first production-safe store membership assignment flow. It does not create users, assign memberships, activate login, or enable large-scale multi-store production operation.
+
+## Phase Naver-Product-Batch-1C - Product Stock-Change Approval Plan
+
+The product stock-change approval plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1C_PRODUCT_STOCK_CHANGE_APPROVAL_PLAN.md`.
+
+Naver-Product-Batch-1C plans the approval boundary for the 3 stock-only Naver product changes observed in readonly preview. It does not approve local writes and does not open formal product batch sync.
+
+## Phase Naver-Product-Batch-1D - Product Stock-Change Mock Write Gate
+
+The product stock-change mock write gate is documented in `PHASE_NAVER_PRODUCT_BATCH_1D_PRODUCT_STOCK_CHANGE_MOCK_WRITE_GATE.md`.
+
+Naver-Product-Batch-1D adds a private Codex1 helper for stock-only product update readiness: `_evaluate_naver_product_stock_change_mock_write_gate(...)`. It verifies exact `stock_quantity` changes, backup evidence, audit/rollback readiness, and admin approval for `products.batch_sync_write`. It never writes products.
+
+## Phase ERP-Batch-1E - Readonly Evidence API Mock Gate
+
+The readonly evidence API mock gate is documented in `PHASE_ERP_BATCH_1E_READONLY_EVIDENCE_API_MOCK_GATE.md`.
+
+ERP-Batch-1E adds `_evaluate_batch_readonly_evidence_api_mock_gate(...)` for future batch approval screens. It normalizes safe evidence while keeping `public_endpoint_enabled=false`, `formal_sync_open=false`, `orders_written=false`, and `products_written=false`.
+
+## Phase ERP-Multistore-1C - Store Membership Mock Assignment Gate
+
+The store membership mock assignment gate is documented in `PHASE_ERP_MULTISTORE_1C_STORE_MEMBERSHIP_MOCK_ASSIGNMENT_GATE.md`.
+
+ERP-Multistore-1C adds `evaluate_store_membership_assignment_mock_gate(...)`. It checks safe target user hash, target store, target role, assignment reason, admin approval for `store_membership.assign`, and duplicate active membership. It does not create users or memberships.
+
+## Phase ERP-Auth-1O - Auth Role Assignment Approval Plan
+
+The auth role assignment approval plan is documented in `PHASE_ERP_AUTH_1O_AUTH_ROLE_ASSIGNMENT_APPROVAL_PLAN.md`.
+
+ERP-Auth-1O documents the future role assignment approval flow. Production login, user creation, role assignment UI, route-level authorization, and real store memberships remain closed.

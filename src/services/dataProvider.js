@@ -436,6 +436,7 @@ const mockRolePermissions = {
       'audit.read',
       'backup.read',
       'backup.create',
+      'store_membership.assign',
     ],
     sensitive_approval_actions: [
       'products.batch_sync_write',
@@ -443,6 +444,7 @@ const mockRolePermissions = {
       'orders.local_write',
       'orders.refresh_batch_write',
       'backup.create',
+      'store_membership.assign',
     ],
   },
   operator: {

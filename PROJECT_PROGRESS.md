@@ -646,3 +646,32 @@ Next 5 recommended stages:
 3. `Phase ERP-Batch-1E: Readonly evidence API mock gate`
 4. `Phase ERP-Multistore-1C: Store membership mock assignment gate`
 5. `Phase ERP-Auth-1O: Auth role assignment approval plan`
+
+### Latest update after `Phase Naver-Product-Batch-1C` to `Phase ERP-Auth-1O`
+
+- Project overall planning progress: about `75% - 81%`
+- Naver basic ERP loop progress: about `83% - 88%`
+- ERP real-user landing progress: about `77% - 83%`
+- Production version for long-term non-technical use: about `71% - 77%`
+
+Implemented in this update:
+
+- Planned the approval boundary for the 3 stock-only Naver product changes observed in readonly preview.
+- Added private Codex1 mock gate `_evaluate_naver_product_stock_change_mock_write_gate(...)`.
+- Added private Codex1 mock gate `_evaluate_batch_readonly_evidence_api_mock_gate(...)` for future readonly evidence API design.
+- Added private Codex1 mock gate `evaluate_store_membership_assignment_mock_gate(...)`.
+- Added safe auth permission metadata for `store_membership.assign`; current auth metadata is `erp_permissions=13`, `erp_role_permissions=41`, `erp_users=0`, and `erp_store_memberships=0`.
+- Planned future auth role assignment approval.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, mock-proven formal batch sync production gate design, readonly evidence for future batch approval, and mock-proven stock-change/membership gates.
+- Not suitable now: actually writing the 3 product stock changes, opening formal product/order batch sync, active multi-user login production use, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-1E: Product stock-change real write approval`
+2. `Phase Naver-Product-Batch-1F: Product stock-change small local write`
+3. `Phase Naver-Product-Batch-1G: Product stock-change post-write verification`
+4. `Phase ERP-Batch-1F: Readonly evidence API local implementation plan`
+5. `Phase ERP-Multistore-1D: Store membership real assignment approval`
