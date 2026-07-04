@@ -734,3 +734,32 @@ Next 5 recommended stages:
 3. `Phase ERP-Multistore-1F: Store membership assignment readonly API plan`
 4. `Phase Naver-Product-Batch-1J: Product rollback drill mock gate`
 5. `Phase Naver-Order-Batch-1C: Order batch readonly evidence API alignment`
+
+### Latest update after `Phase ERP-Batch-1I` to `Phase Naver-Order-Batch-1C`
+
+- Project overall planning progress: about `78% - 84%`
+- Naver basic ERP loop progress: about `86% - 91%`
+- ERP real-user landing progress: about `80% - 86%`
+- Production version for long-term non-technical use: about `74% - 80%`
+
+Implemented in this update:
+
+- Added a Codex2 Orders panel for Naver batch approval readonly evidence.
+- Added `dataProvider.normalizeBatchReadonlyEvidence(...)` so backend and mock mode can display the same evidence shape.
+- Kept product/order evidence as approval material only; no batch sync execute button was added.
+- Planned the future store-membership assignment readonly API.
+- Added the private Codex1 product rollback drill mock gate for the controlled stock-only product write path.
+- Aligned Naver order batch readonly evidence with the shared batch evidence API shape.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, mock-proven formal batch sync gate design, readonly evidence API normalization, approval evidence display, controlled stock-only local product update, and runtime mock checks for future store membership assignment.
+- Not suitable now: opening formal product/order batch sync, broad product writes, active multi-user login production use, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Batch-1K: Batch approval UI runtime walkthrough`
+2. `Phase ERP-Multistore-1G: Store membership readonly API mock gate`
+3. `Phase ERP-Multistore-1H: Store membership readonly API local implementation plan`
+4. `Phase Naver-Product-Batch-1K: Product rollback drill readonly report plan`
+5. `Phase Naver-Order-Batch-1D: Order batch approval evidence UI walkthrough`

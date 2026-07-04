@@ -959,6 +959,227 @@ function NaverRoleAwareActionVisibilityPanel() {
   );
 }
 
+const batchEvidenceFieldLabels = {
+  stock_quantity: '库存',
+  price: '售价',
+  currency: '币种',
+  order_status: '订单状态',
+  delivery_status: '配送状态',
+  claim_status: '售后状态',
+  payment_status: '付款状态',
+};
+
+function batchEvidenceTargetLabel(item = {}) {
+  if (item.target === 'products' || String(item.syncKind || '').includes('product')) return 'Naver 商品';
+  if (item.target === 'orders' || String(item.syncKind || '').includes('order')) return 'Naver 订单';
+  return 'Naver 业务数据';
+}
+
+function batchEvidenceChangeLabel(item = {}) {
+  const fields = Array.isArray(item.changedFieldNames) ? item.changedFieldNames : [];
+  if (!fields.length && item.wouldUpdate === 0) return '暂无业务字段变化';
+  if (!fields.length) return '需要人工复核变化字段';
+  return fields.map((field) => batchEvidenceFieldLabels[field] || field).join('、');
+}
+
+function buildNaverBatchEvidencePayload({ storeId, localOrderCount }) {
+  const orderCount = Math.max(Number(localOrderCount || 0), 0);
+  return {
+    maxItems: 5,
+    evidenceItems: [
+      {
+        evidence_id: 'naver-product-post-stock-write-ui',
+        store_id: Number(storeId),
+        sync_kind: 'naver_product_batch',
+        window_label: '商品 page=1,size=5 收口结果',
+        candidate_count: 5,
+        would_create: 0,
+        would_update: 0,
+        would_refresh_only: 5,
+        would_skip: 0,
+        changed_field_names: [],
+        duplicate_check_passed: true,
+        field_whitelist_verified: true,
+        real_sync: false,
+        raw_response_saved: false,
+        privacy_fields_redacted: true,
+        formal_sync_open: false,
+        business_message: '商品小批量写入后的只读证据已整理：当前没有新增或业务字段更新。',
+        next_action: '继续只读观察，正式商品批量同步仍需单独审批。',
+      },
+      {
+        evidence_id: 'naver-order-batch-readonly-ui',
+        store_id: Number(storeId),
+        sync_kind: 'naver_order_batch',
+        window_label: '本地 Naver 订单刷新复核',
+        candidate_count: orderCount,
+        would_create: 0,
+        would_update: 0,
+        would_refresh_only: orderCount,
+        would_skip: 0,
+        changed_field_names: [],
+        duplicate_check_passed: true,
+        field_whitelist_verified: true,
+        real_sync: false,
+        raw_response_saved: false,
+        privacy_fields_redacted: true,
+        formal_sync_open: false,
+        business_message: orderCount
+          ? `已整理 ${orderCount} 条本地 Naver 订单的只读复核证据。`
+          : '当前没有可整理的本地 Naver 订单复核证据。',
+        next_action: '订单正式批量同步仍未开放，后续写入必须重新审批。',
+      },
+    ],
+  };
+}
+
+function NaverBatchApprovalEvidencePanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({
+    loading: false,
+    result: null,
+    error: '',
+    localOrderCount: 0,
+  });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, result: null, error: '', localOrderCount: 0 });
+      return undefined;
+    }
+    let cancelled = false;
+    const loadEvidence = async () => {
+      setState((current) => ({ ...current, loading: true, error: '' }));
+      try {
+        const orderResponse = await dataProvider.getOrders({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          page: 1,
+          pageSize: 100,
+        });
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        const result = await dataProvider.normalizeBatchReadonlyEvidence(buildNaverBatchEvidencePayload({
+          storeId: selectedStoreId,
+          localOrderCount: naverOrders.length,
+        }));
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result,
+            error: '',
+            localOrderCount: naverOrders.length,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result: null,
+            error: error?.message || '批量同步审批证据暂时无法加载。',
+            localOrderCount: 0,
+          });
+        }
+      }
+    };
+    loadEvidence();
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, result, error, localOrderCount } = state;
+  const evidenceItems = result?.items || [];
+  const hasEvidence = result?.status === 'readonly_evidence_api_ready';
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 批量同步审批证据</h2>
+          <p>这里把商品和订单的只读复核结果整理成人工审批材料；当前不会写入商品、订单或审计记录，也不会开放正式批量同步。</p>
+        </div>
+        <span className="period-chip">{loading ? '整理中' : '只读证据'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={hasEvidence ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审批材料状态</strong>
+            <span>{hasEvidence ? '已整理' : '待确认'}</span>
+          </div>
+          <p>{result?.businessMessage || '正在整理只读证据，写入动作保持关闭。'}</p>
+          <small>商品和订单的正式批量同步都仍然需要单独审批。</small>
+        </article>
+        {evidenceItems.map((item) => (
+          <article className="business-capability-card info" key={item.evidenceId}>
+            <div className="business-capability-head">
+              <strong>{batchEvidenceTargetLabel(item)}</strong>
+              <span>{item.candidateCount} 条</span>
+            </div>
+            <p>{item.businessMessage}</p>
+            <small>{batchEvidenceChangeLabel(item)}；{item.nextAction}</small>
+          </article>
+        ))}
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>写入保护</strong>
+            <span>未开放</span>
+          </div>
+          <p>后续任何批量写入都必须重新确认人工审批、数据库备份、权限、审计证据和回滚方案。</p>
+          <small>本面板不会调用 Naver，也不会执行 real_sync。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>订单复核范围</strong>
+            <span>{localOrderCount} 条</span>
+          </div>
+          <p>这里只根据本地 Naver 运营订单整理复核证据，不代表平台有新的待写入订单。</p>
+          <small>需要真实候选时，仍要走单独的只读预览阶段。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看批量审批证据技术详情"
+        description="phase、sync kind、would_* 和安全标记仅供管理员排查，主页面只展示业务含义。"
+        items={[
+          { label: 'batch_evidence_phase', value: result?.phase || 'ERP-Batch-1J' },
+          { label: 'batch_evidence_status', value: result?.status },
+          { label: 'public_endpoint_enabled', value: result?.publicEndpointEnabled },
+          { label: 'evidence_count', value: result?.evidenceCount },
+          { label: 'real_api_called', value: result?.realApiCalled },
+          { label: 'real_database_written', value: result?.realDatabaseWritten },
+          { label: 'products_written', value: result?.productsWritten },
+          { label: 'orders_written', value: result?.ordersWritten },
+          { label: 'sync_log_written', value: result?.syncLogWritten },
+          { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
+          { label: 'raw_response_saved', value: result?.rawResponseSaved },
+          { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted },
+          { label: 'formal_product_sync_open', value: result?.formalProductSyncOpen },
+          { label: 'formal_order_sync_open', value: result?.formalOrderSyncOpen },
+          { label: 'platform_writes_enabled', value: result?.platformWritesEnabled },
+          ...evidenceItems.flatMap((item, index) => [
+            { label: `evidence_${index + 1}.sync_kind`, value: item.syncKind },
+            { label: `evidence_${index + 1}.target`, value: item.target },
+            { label: `evidence_${index + 1}.candidate_count`, value: item.candidateCount },
+            { label: `evidence_${index + 1}.would_create`, value: item.wouldCreate },
+            { label: `evidence_${index + 1}.would_update`, value: item.wouldUpdate },
+            { label: `evidence_${index + 1}.would_refresh_only`, value: item.wouldRefreshOnly },
+            { label: `evidence_${index + 1}.would_skip`, value: item.wouldSkip },
+            { label: `evidence_${index + 1}.changed_fields`, value: item.changedFieldNames.join(', ') || '[]' },
+            { label: `evidence_${index + 1}.duplicate_check_passed`, value: item.duplicateCheckPassed },
+            { label: `evidence_${index + 1}.field_whitelist_verified`, value: item.fieldWhitelistVerified },
+          ]),
+        ]}
+      />
+    </section>
+  );
+}
+
 function DetailItem({ label, value }) {
   return (
     <div className="detail-item">
@@ -1290,6 +1511,7 @@ export default function Orders() {
     <>
       <NaverOrderPreviewStatusPanel />
       <NaverRoleAwareActionVisibilityPanel />
+      <NaverBatchApprovalEvidencePanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />
       <ResourcePage

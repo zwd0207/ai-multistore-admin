@@ -617,6 +617,110 @@ function adaptPermissionGateResult(data = {}) {
   };
 }
 
+function adaptBatchReadonlyEvidenceResult(data = {}) {
+  const items = (Array.isArray(data.items) ? data.items : []).map((item, index) => ({
+    evidenceId: item.evidence_id || item.evidenceId || `evidence-${index + 1}`,
+    storeId: Number(item.store_id ?? item.storeId ?? 0),
+    platform: item.platform || 'naver',
+    syncKind: item.sync_kind || item.syncKind || '',
+    target: item.target || '',
+    windowLabel: item.window_label || item.windowLabel || '只读窗口',
+    candidateCount: Number(item.candidate_count ?? item.candidateCount ?? 0),
+    wouldCreate: Number(item.would_create ?? item.wouldCreate ?? 0),
+    wouldUpdate: Number(item.would_update ?? item.wouldUpdate ?? 0),
+    wouldRefreshOnly: Number(item.would_refresh_only ?? item.wouldRefreshOnly ?? 0),
+    wouldSkip: Number(item.would_skip ?? item.wouldSkip ?? 0),
+    changedFieldNames: Array.isArray(item.changed_field_names)
+      ? item.changed_field_names
+      : (Array.isArray(item.changedFieldNames) ? item.changedFieldNames : []),
+    duplicateCheckPassed: Boolean(item.duplicate_check_passed ?? item.duplicateCheckPassed),
+    fieldWhitelistVerified: Boolean(item.field_whitelist_verified ?? item.fieldWhitelistVerified),
+    backupRequired: item.backup_required !== false && item.backupRequired !== false,
+    permissionRequired: item.permission_required !== false && item.permissionRequired !== false,
+    auditRequired: item.audit_required !== false && item.auditRequired !== false,
+    businessMessage: item.business_message || item.businessMessage || '只读证据已整理，等待人工审核。',
+    nextAction: item.next_action || item.nextAction || 'manual_review_required',
+  }));
+  return {
+    phase: data.phase || 'ERP-Batch-1J',
+    status: data.status || 'readonly_evidence_api_ready',
+    businessMessage: data.business_message || data.businessMessage || '批量同步只读证据已整理，本次不会写入商品或订单。',
+    skipReason: data.skip_reason || data.skipReason || null,
+    evidenceCount: Number(data.evidence_count ?? data.evidenceCount ?? items.length),
+    maxItems: Number(data.max_items ?? data.maxItems ?? 10),
+    items,
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    timelineEventsWritten: Boolean(data.timeline_events_written ?? data.timelineEventsWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function mockBatchReadonlyEvidence(payload = {}) {
+  const rawItems = Array.isArray(payload.evidence_items || payload.evidenceItems)
+    ? (payload.evidence_items || payload.evidenceItems)
+    : [];
+  const items = rawItems.map((item, index) => ({
+    evidence_id: item.evidence_id || `mock-evidence-${index + 1}`,
+    store_id: Number(item.store_id ?? item.storeId ?? 0),
+    platform: item.platform || 'naver',
+    sync_kind: item.sync_kind || item.syncKind || '',
+    target: String(item.sync_kind || item.syncKind || '').includes('order') ? 'orders' : 'products',
+    window_label: item.window_label || item.windowLabel || 'mock 只读窗口',
+    candidate_count: Number(item.candidate_count ?? item.candidateCount ?? 0),
+    would_create: Number(item.would_create ?? item.wouldCreate ?? 0),
+    would_update: Number(item.would_update ?? item.wouldUpdate ?? 0),
+    would_refresh_only: Number(item.would_refresh_only ?? item.wouldRefreshOnly ?? 0),
+    would_skip: Number(item.would_skip ?? item.wouldSkip ?? 0),
+    changed_field_names: Array.isArray(item.changed_field_names)
+      ? item.changed_field_names
+      : (Array.isArray(item.changedFieldNames) ? item.changedFieldNames : []),
+    duplicate_check_passed: item.duplicate_check_passed !== false && item.duplicateCheckPassed !== false,
+    field_whitelist_verified: item.field_whitelist_verified !== false && item.fieldWhitelistVerified !== false,
+    backup_required: true,
+    permission_required: true,
+    audit_required: true,
+    business_message: item.business_message || item.businessMessage || 'mock 只读证据已整理。',
+    next_action: item.next_action || item.nextAction || 'manual_review_required',
+  }));
+  return adaptBatchReadonlyEvidenceResult({
+    phase: 'ERP-Batch-1J',
+    status: 'readonly_evidence_api_ready',
+    business_message: 'mock 批量同步只读证据已整理，本次不会写入商品或订单。',
+    evidence_count: items.length,
+    max_items: Number(payload.max_items ?? payload.maxItems ?? 10),
+    items,
+    public_endpoint_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    operation_audit_rows_written: false,
+    timeline_events_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    formal_order_sync_open: false,
+    formal_product_sync_open: false,
+    platform_writes_enabled: false,
+  });
+}
+
 const sourceMethods = {
   healthCheck: backendApi.healthCheck,
   getDashboardData: (params) => (isBackendSource ? getBackendDashboardData(params) : getMockDashboardData()),
@@ -713,6 +817,14 @@ const sourceMethods = {
       }));
     }
     return adaptPermissionGateResult(await backendApi.checkSensitiveActionPermissionMock(request));
+  },
+  normalizeBatchReadonlyEvidence: async (payload = {}) => {
+    const request = {
+      max_items: Number(payload.maxItems ?? payload.max_items ?? 10),
+      evidence_items: payload.evidenceItems || payload.evidence_items || [],
+    };
+    if (!isBackendSource) return mockBatchReadonlyEvidence(request);
+    return adaptBatchReadonlyEvidenceResult(await backendApi.normalizeBatchReadonlyEvidence(request));
   },
   previewNaverOrderCompleteFields: async (payload = {}) => {
     if (!isBackendSource) return mockNaverOrderCompletePreview(payload);

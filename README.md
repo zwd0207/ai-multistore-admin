@@ -1287,3 +1287,33 @@ Naver-Product-Batch-1H confirms Products should now show no pending product busi
 The product batch sync rollback drill plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1I_PRODUCT_BATCH_SYNC_ROLLBACK_DRILL_PLAN.md`.
 
 Naver-Product-Batch-1I defines the future temporary-restore rollback drill required before formal product batch sync can be considered. Real restore remains closed.
+
+## Phase ERP-Batch-1I - Batch Approval UI Evidence Integration Plan
+
+The batch approval UI evidence integration plan is documented in `PHASE_ERP_BATCH_1I_BATCH_APPROVAL_UI_EVIDENCE_INTEGRATION_PLAN.md`.
+
+ERP-Batch-1I keeps the UI direction business-first: operators should see whether evidence is ready, what still requires approval, and that formal product/order batch sync is still closed. Technical fields remain folded.
+
+## Phase ERP-Batch-1J - Batch Approval UI Readonly Evidence Display
+
+The batch approval UI readonly evidence display is documented in `PHASE_ERP_BATCH_1J_BATCH_APPROVAL_UI_READONLY_EVIDENCE_DISPLAY.md`.
+
+Codex2 Orders now shows a Naver batch approval evidence panel. It calls the local readonly evidence normalizer, shows product/order evidence in business wording, and keeps `phase`, `sync_kind`, `would_*`, and safety flags inside TechnicalDetails. It does not execute real sync, call Naver, or write data.
+
+## Phase ERP-Multistore-1F - Store Membership Assignment Readonly API Plan
+
+The store membership assignment readonly API plan is documented in `PHASE_ERP_MULTISTORE_1F_STORE_MEMBERSHIP_ASSIGNMENT_READONLY_API_PLAN.md`.
+
+ERP-Multistore-1F plans a future safe readonly API for membership assignment readiness. Real user creation, login, role assignment, and store membership creation remain closed.
+
+## Phase Naver-Product-Batch-1J - Product Rollback Drill Mock Gate
+
+The product rollback drill mock gate is documented in `PHASE_NAVER_PRODUCT_BATCH_1J_PRODUCT_ROLLBACK_DRILL_MOCK_GATE.md`.
+
+Codex1 now has a private rollback drill mock gate for the controlled stock-only product write path. It verifies backup evidence and rollback checklist readiness, blocks real restore, and does not write products.
+
+## Phase Naver-Order-Batch-1C - Order Batch Readonly Evidence API Alignment
+
+The order batch readonly evidence API alignment is documented in `PHASE_NAVER_ORDER_BATCH_1C_ORDER_BATCH_READONLY_EVIDENCE_API_ALIGNMENT.md`.
+
+Order batch evidence now uses the same readonly evidence API shape as product batch evidence. It is only approval material; formal order batch sync remains closed.
