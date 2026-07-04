@@ -707,6 +707,12 @@ The selected-operation runtime wiring mock plan is documented in `PHASE_ERP_AUDI
 
 ERP-Audit-1T is planning-only. It selects `controlled_naver_order_local_refresh` as the first future mock wiring target and defines the fake call-site shape, required five-row audit chain, success criteria, block cases, safe flags, forbidden data, and public API boundary. It does not add code, connect audit writer calls to runtime order flows, write audit or business rows, modify schema, call platform APIs, execute backup/restore, add public audit write routes, or open formal sync.
 
+## Phase ERP-Audit-1U - Selected Operation Runtime Wiring Mock Gate
+
+The selected-operation runtime wiring mock gate is documented in `PHASE_ERP_AUDIT_1U_SELECTED_OPERATION_RUNTIME_WIRING_MOCK_GATE.md`.
+
+ERP-Audit-1U adds a private Codex1 mock helper for `controlled_naver_order_local_refresh` and verifies it only in the temporary `verify_all.py` database. It requires store 8, platform Naver, a safe target order hash, manual approval, backup evidence, fake write result, fake post-write readback, audit write intent, and private verification scope. It writes a five-row audit chain only in the temporary verification database and confirms business counts remain unchanged. It does not connect real runtime order flows, write the real `operation_audit_logs` table, call platform APIs, modify schema, execute backup/restore, add public audit write routes, or open formal sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
