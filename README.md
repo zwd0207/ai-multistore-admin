@@ -1503,3 +1503,33 @@ Codex1 now has a service-level mock gate for a future readonly rollback-report r
 The order batch audit readiness UI walkthrough is documented in `PHASE_NAVER_ORDER_BATCH_1I_ORDER_BATCH_AUDIT_READINESS_UI_WALKTHROUGH.md`.
 
 The Orders audit readiness panel remains a readonly business display and does not open formal order batch sync.
+
+## Phase ERP-Batch-1R - Batch Approval Audit Evidence Readonly Route Mock Gate
+
+The batch approval audit evidence readonly route mock gate is documented in `PHASE_ERP_BATCH_1R_BATCH_APPROVAL_AUDIT_EVIDENCE_READONLY_ROUTE_MOCK_GATE.md`.
+
+The existing Codex1 gate is now verified as the boundary for the readonly route implementation. It keeps audit rows, products, orders, SyncLog, tested-success rows, and formal sync closed.
+
+## Phase ERP-Batch-1S - Batch Approval Audit Evidence Readonly Route Implementation
+
+The batch approval audit evidence readonly route implementation is documented in `PHASE_ERP_BATCH_1S_BATCH_APPROVAL_AUDIT_EVIDENCE_READONLY_ROUTE_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/batch/approval-audit-evidence` as a local readonly review route. It writes no audit rows and does not open product or order batch sync.
+
+## Phase Naver-Product-Batch-1Q - Product Rollback Readonly Report Backend Route Plan
+
+The product rollback readonly report backend route plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1Q_PRODUCT_ROLLBACK_READONLY_REPORT_BACKEND_ROUTE_PLAN.md`.
+
+The route is limited to readonly rollback readiness reporting. Real restore and product writes remain closed.
+
+## Phase Naver-Product-Batch-1R - Product Rollback Readonly Report Backend Route Implementation
+
+The product rollback readonly report backend route implementation is documented in `PHASE_NAVER_PRODUCT_BATCH_1R_PRODUCT_ROLLBACK_READONLY_REPORT_BACKEND_ROUTE_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/batch/naver/products/rollback-readonly-report` as a local readonly report route. It executes no restore and writes no products.
+
+## Phase ERP-Multistore-1S - User Invitation Readonly UI Walkthrough
+
+The user invitation readonly UI walkthrough is documented in `PHASE_ERP_MULTISTORE_1S_USER_INVITATION_READONLY_UI_WALKTHROUGH.md`.
+
+The Accounts invitation readiness panel remains display-only in backend and mock modes. Real invitation, user creation, role assignment, and store membership writes remain closed.
