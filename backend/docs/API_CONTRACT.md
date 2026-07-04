@@ -1988,3 +1988,54 @@ Phase ERP-Batch-1L requires backend fallback messages for readonly batch evidenc
 ```
 
 The endpoint remains a readonly normalizer. It must not use backend wording to imply that product or order batch sync is open.
+
+### Product Rollback Drill Readonly Report Contract
+
+Phase Naver-Product-Batch-1L adds a private report gate:
+
+```text
+_evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(...)
+```
+
+The report may include safe sections such as backup evidence, stock-only write summary, rollback checklist, temporary restore planning, readback planning, and sensitive-scan planning.
+
+It must keep:
+
+```text
+report_ready=true
+real_restore_executed=false
+rollback_executed=false
+production_db_touched=false
+products_written=false
+orders_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+raw_response_saved=false
+secrets_saved=false
+formal_product_sync_open=false
+```
+
+The report must not restore a database, write products, write orders, expose raw responses, expose full product ids, or imply formal Naver product batch sync is open.
+
+### Order Batch Evidence Wording Contract
+
+Phase Naver-Order-Batch-1E requires order-batch readonly evidence defaults to be business-readable Chinese. Missing order evidence messages should default to:
+
+```text
+Naver 订单批量只读证据已整理，等待人工审核。
+继续人工审核订单证据；正式订单批量同步仍未开放。
+```
+
+This is only approval evidence wording. It must not call Naver, write orders, write timeline events, or open formal order batch sync.
+
+### Batch Evidence Audit Linkage Contract
+
+Phase ERP-Batch-1M adds audit-linkage planning to readonly batch evidence:
+
+```text
+operation_audit_rows_planned=true
+operation_audit_rows_written=false
+```
+
+Future product or order batch writes must create append-only audit rows in a separately approved execution phase. The readonly evidence route must not write audit rows by itself.

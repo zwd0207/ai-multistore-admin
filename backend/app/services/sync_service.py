@@ -5349,6 +5349,105 @@ def _evaluate_naver_product_batch_rollback_drill_mock_gate(
     return result
 
 
+def _evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(
+    *,
+    rollback_drill_gate: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Private readonly report gate for product rollback drill evidence; never restores or writes rows."""
+
+    result = {
+        "phase": "Naver-Product-Batch-1L",
+        "product_rollback_drill_readonly_report_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "report_ready": False,
+        "report_sections": [],
+        "rollback_drill_ready": False,
+        "backup_evidence_verified": False,
+        "updated_count": 0,
+        "created_count": 0,
+        "stock_only_write_verified": False,
+        "temporary_restore_required": True,
+        "real_restore_executed": False,
+        "rollback_executed": False,
+        "production_db_touched": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "timeline_events_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(rollback_drill_gate, dict):
+        result["skip_reason"] = "rollback_drill_gate_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(rollback_drill_gate):
+        result["skip_reason"] = "rollback_report_sensitive_field_blocked"
+        return result
+    if rollback_drill_gate.get("status") != "product_batch_rollback_drill_mock_ready":
+        result["skip_reason"] = rollback_drill_gate.get("skip_reason") or "rollback_drill_not_ready"
+        return result
+    if rollback_drill_gate.get("rollback_executed") is not False:
+        result["skip_reason"] = "rollback_execution_not_allowed_in_report"
+        return result
+    if rollback_drill_gate.get("real_restore_executed") is not False:
+        result["skip_reason"] = "real_restore_not_allowed_in_report"
+        return result
+    if rollback_drill_gate.get("products_written") is not False:
+        result["skip_reason"] = "product_write_not_allowed_in_report"
+        return result
+
+    result.update({
+        "status": "product_rollback_drill_readonly_report_ready",
+        "report_ready": True,
+        "rollback_drill_ready": True,
+        "backup_evidence_verified": bool(rollback_drill_gate.get("backup_evidence_verified")),
+        "updated_count": int(rollback_drill_gate.get("updated_count") or 0),
+        "created_count": int(rollback_drill_gate.get("created_count") or 0),
+        "stock_only_write_verified": bool(rollback_drill_gate.get("stock_only_write_verified")),
+        "report_sections": [
+            "备份证据",
+            "库存变更摘要",
+            "回滚清单",
+            "临时恢复演练计划",
+            "回读校验计划",
+            "敏感字段扫描计划",
+        ],
+        "business_message": "Naver 商品回滚演练只读报告已整理。当前不会恢复数据库，也不会写入商品。",
+    })
+    return result
+
+
+def _batch_readonly_default_business_message(sync_kind: str) -> str:
+    if sync_kind == "naver_order_batch":
+        return "Naver 订单批量只读证据已整理，等待人工审核。"
+    if sync_kind == "naver_order_refresh_batch":
+        return "Naver 订单刷新只读证据已整理，等待人工审核。"
+    if sync_kind == "naver_product_batch":
+        return "只读批量证据已整理，等待人工审核。"
+    return "只读批量证据已整理，等待人工审核。"
+
+
+def _batch_readonly_default_next_action(sync_kind: str) -> str:
+    if sync_kind in {"naver_order_batch", "naver_order_refresh_batch"}:
+        return "继续人工审核订单证据；正式订单批量同步仍未开放。"
+    if sync_kind == "naver_product_batch":
+        return "继续人工审核商品证据；正式商品批量同步仍未开放。"
+    return "manual_review_required"
+
+
 def _evaluate_batch_readonly_evidence_api_mock_gate(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,
@@ -5445,8 +5544,11 @@ def _evaluate_batch_readonly_evidence_api_mock_gate(
             "backup_required": True,
             "permission_required": True,
             "audit_required": True,
-            "business_message": str(item.get("business_message") or "只读批量证据已整理，等待人工审核。")[:240],
-            "next_action": str(item.get("next_action") or "manual_review_required")[:160],
+            "operation_audit_rows_planned": True,
+            "business_message": str(
+                item.get("business_message") or _batch_readonly_default_business_message(sync_kind)
+            )[:240],
+            "next_action": str(item.get("next_action") or _batch_readonly_default_next_action(sync_kind))[:160],
         })
 
     result.update({
@@ -5480,6 +5582,7 @@ def evaluate_batch_readonly_evidence_api_local(
         "sync_log_written": False,
         "capability_tested_success_written": False,
         "operation_audit_rows_written": False,
+        "operation_audit_rows_planned": True,
         "timeline_events_written": False,
         "raw_response_saved": False,
         "secrets_saved": False,

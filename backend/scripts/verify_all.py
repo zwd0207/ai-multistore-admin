@@ -11009,7 +11009,35 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         verification_scope=VERIFICATION_SCOPE,
     )
     assert readonly_default_message["status"] == "readonly_evidence_api_mock_ready", readonly_default_message
+    assert readonly_default_message["items"][0]["operation_audit_rows_planned"] is True, readonly_default_message
+    assert "正式商品批量同步仍未开放" in readonly_default_message["items"][0]["next_action"], readonly_default_message
     assert readonly_default_message["items"][0]["business_message"] == "只读批量证据已整理，等待人工审核。", readonly_default_message
+
+    readonly_order_default_message = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=[{
+            "evidence_id": "naver-order-default-wording",
+            "store_id": 8,
+            "sync_kind": "naver_order_batch",
+            "candidate_count": 1,
+            "would_create": 0,
+            "would_update": 1,
+            "would_refresh_only": 0,
+            "would_skip": 0,
+            "changed_field_names": ["order_status"],
+            "duplicate_check_passed": True,
+            "field_whitelist_verified": True,
+            "real_sync": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+        }],
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert readonly_order_default_message["status"] == "readonly_evidence_api_mock_ready", readonly_order_default_message
+    assert readonly_order_default_message["items"][0]["business_message"] == (
+        "Naver 订单批量只读证据已整理，等待人工审核。"
+    ), readonly_order_default_message
+    assert "正式订单批量同步仍未开放" in readonly_order_default_message["items"][0]["next_action"], readonly_order_default_message
 
     readonly_sensitive = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
         evidence_items=[{
@@ -11097,6 +11125,8 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_evidence["formal_product_sync_open"] is False, local_evidence
         assert local_evidence["orders_written"] is False, local_evidence
         assert local_evidence["formal_order_sync_open"] is False, local_evidence
+        assert local_evidence["operation_audit_rows_planned"] is True, local_evidence
+        assert local_evidence["operation_audit_rows_written"] is False, local_evidence
         assert local_evidence["evidence_count"] == 2, local_evidence
         assert local_evidence["items"][0]["would_update"] == 0, local_evidence
         assert local_evidence["items"][0]["would_refresh_only"] == 5, local_evidence
@@ -11142,6 +11172,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "success": success,
             "readonly_success": readonly_success,
             "readonly_default_message": readonly_default_message,
+            "readonly_order_default_message": readonly_order_default_message,
             "local_evidence": local_evidence,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
@@ -11343,6 +11374,28 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert rollback_ready["real_restore_executed"] is False, rollback_ready
         assert rollback_ready["products_written"] is False, rollback_ready
         assert rollback_ready["formal_product_sync_open"] is False, rollback_ready
+        rollback_report = sync_service._evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(
+            rollback_drill_gate=rollback_ready,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert rollback_report["status"] == "product_rollback_drill_readonly_report_ready", rollback_report
+        assert rollback_report["report_ready"] is True, rollback_report
+        assert rollback_report["backup_evidence_verified"] is True, rollback_report
+        assert rollback_report["updated_count"] == 3, rollback_report
+        assert rollback_report["created_count"] == 0, rollback_report
+        assert rollback_report["stock_only_write_verified"] is True, rollback_report
+        assert rollback_report["real_restore_executed"] is False, rollback_report
+        assert rollback_report["rollback_executed"] is False, rollback_report
+        assert rollback_report["products_written"] is False, rollback_report
+        assert rollback_report["operation_audit_rows_written"] is False, rollback_report
+        assert "回滚演练只读报告已整理" in rollback_report["business_message"], rollback_report
+
+        rollback_report_blocked = sync_service._evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(
+            rollback_drill_gate=missing_rollback_flag,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert rollback_report_blocked["skip_reason"] == "rollback_checklist_incomplete", rollback_report_blocked
+        assert rollback_report_blocked["real_restore_executed"] is False, rollback_report_blocked
 
         create_blocked = sync_service._sync_naver_product_stock_change_local_write(
             db,
@@ -11414,6 +11467,8 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     rollback_serialized = json.dumps(
         {
             "rollback_ready": rollback_ready,
+            "rollback_report": rollback_report,
+            "rollback_report_blocked": rollback_report_blocked,
             "restore_blocked": restore_blocked,
             "sensitive_rollback": sensitive_rollback,
             "missing_rollback_flag": missing_rollback_flag,

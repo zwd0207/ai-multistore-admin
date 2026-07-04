@@ -1090,3 +1090,15 @@ Naver-Product-Batch-1K plans a readonly rollback-drill report for the controlled
 Naver-Order-Batch-1D confirms the Orders approval evidence UI remains a readonly review surface for Naver order batch evidence. It must not call Naver, write orders, write timeline events, or imply that formal order batch sync is open.
 
 ERP-Batch-1L cleans backend batch evidence wording. The default readonly evidence item message is now Chinese business wording, and the local evidence response says that no platform call, sync, product write, or order write was executed.
+
+Naver-Product-Batch-1L adds a private readonly rollback report mock gate:
+
+```text
+_evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(...)
+```
+
+It consumes the existing rollback drill gate output and produces a safe report shape with backup evidence, stock-only write summary, rollback checklist, temporary restore plan, readback plan, and sensitive-scan plan. It never restores a database, touches the production database, writes products, writes orders, writes SyncLog, writes tested-success rows, or opens formal product batch sync.
+
+Naver-Order-Batch-1E aligns order-batch evidence wording. If an order evidence item does not provide its own business message, the backend now returns Chinese business wording and a next action that keeps formal order batch sync closed.
+
+ERP-Batch-1M adds audit-linkage planning to readonly batch evidence through `operation_audit_rows_planned=true` while keeping `operation_audit_rows_written=false`. Future formal batch writes must still be separately approved and must create append-only audit chains.
