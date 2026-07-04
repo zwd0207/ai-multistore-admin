@@ -6541,6 +6541,131 @@ def evaluate_naver_order_batch_execution_approval_mock_gate(
     return result
 
 
+def evaluate_naver_product_batch_execution_approval_mock_gate(
+    *,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    execution_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock approval gate for a later Naver product batch execution phase; never writes."""
+
+    required_execution_flags = [
+        "product_batch_candidates_fresh",
+        "product_field_whitelist_verified",
+        "price_stock_status_mapping_reviewed",
+        "duplicate_protection_ready",
+        "audit_chain_ready",
+        "post_write_readback_required",
+        "rollback_plan_ready",
+        "sensitive_scan_passed",
+        "platform_product_write_actions_excluded",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "Naver-Product-Batch-2D",
+        "naver_product_batch_execution_approval_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "required_execution_flags": required_execution_flags,
+        "missing_execution_flags": [],
+        "product_batch_execution_approval_ready": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(execution_context, dict):
+        result["skip_reason"] = "execution_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "readonly_evidence": readonly_evidence,
+        "backup_evidence": backup_evidence,
+        "execution_context": execution_context,
+    }):
+        result["skip_reason"] = "naver_product_batch_execution_sensitive_field_blocked"
+        return result
+
+    missing_flags = [
+        flag for flag in required_execution_flags
+        if execution_context.get(flag) is not True
+    ]
+    result["missing_execution_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "product_batch_execution_context_incomplete"
+        return result
+    if execution_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if execution_context.get("formal_sync_open") is True or execution_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    production_gate = _evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_product_batch",
+        actor_context=actor_context,
+        store_ids=store_ids,
+        candidate_count=candidate_count,
+        batch_size=batch_size,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=manual_approval,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=verification_scope,
+        write_requested=True,
+    )
+    result["production_gate"] = production_gate
+    result.update({
+        "store_ids": production_gate.get("store_ids") or [],
+        "candidate_count": production_gate.get("candidate_count"),
+        "batch_size": production_gate.get("batch_size"),
+        "permission_verified": bool(production_gate.get("permission_verified")),
+        "approval_role_verified": bool(production_gate.get("approval_role_verified")),
+        "backup_evidence_verified": bool(production_gate.get("backup_evidence_verified")),
+        "readonly_evidence_verified": bool(production_gate.get("readonly_evidence_verified")),
+    })
+    if production_gate.get("status") != "formal_batch_gate_ready_for_later_execution":
+        result["skip_reason"] = production_gate.get("skip_reason") or "formal_batch_gate_not_ready"
+        return result
+
+    result.update({
+        "status": "naver_product_batch_execution_approval_mock_ready",
+        "product_batch_execution_approval_ready": True,
+        "business_message": (
+            "Naver product batch execution approval mock gate passed. It only means future execution review materials are ready; no products are written and no platform write API is called."
+        ),
+        "next_action": (
+            "Open a separate execution phase before any real product batch write, and re-check backup, audit, readback, rollback, and sensitive-scan evidence."
+        ),
+    })
+    return result
+
+
 def evaluate_batch_readonly_evidence_api_local(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

@@ -11286,6 +11286,71 @@ def verify_formal_batch_sync_production_gate() -> None:
     assert order_execution_sensitive["skip_reason"] == "naver_order_batch_execution_sensitive_field_blocked", order_execution_sensitive
     assert order_execution_sensitive["orders_written"] is False, order_execution_sensitive
 
+    product_execution_context = {
+        "product_batch_candidates_fresh": True,
+        "product_field_whitelist_verified": True,
+        "price_stock_status_mapping_reviewed": True,
+        "duplicate_protection_ready": True,
+        "audit_chain_ready": True,
+        "post_write_readback_required": True,
+        "rollback_plan_ready": True,
+        "sensitive_scan_passed": True,
+        "platform_product_write_actions_excluded": True,
+        "formal_sync_remains_closed": True,
+        "execution_approved": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    product_execution_ready = sync_service.evaluate_naver_product_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=5,
+        batch_size=5,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context=product_execution_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert product_execution_ready["phase"] == "Naver-Product-Batch-2D", product_execution_ready
+    assert product_execution_ready["status"] == "naver_product_batch_execution_approval_mock_ready", product_execution_ready
+    assert product_execution_ready["product_batch_execution_approval_ready"] is True, product_execution_ready
+    assert product_execution_ready["execution_approved"] is False, product_execution_ready
+    assert product_execution_ready["products_written"] is False, product_execution_ready
+    assert product_execution_ready["orders_written"] is False, product_execution_ready
+    assert product_execution_ready["operation_audit_rows_written"] is False, product_execution_ready
+    assert product_execution_ready["formal_product_sync_open"] is False, product_execution_ready
+    assert product_execution_ready["platform_product_writes_enabled"] is False, product_execution_ready
+
+    product_execution_missing_whitelist = sync_service.evaluate_naver_product_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=5,
+        batch_size=5,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context={**product_execution_context, "product_field_whitelist_verified": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert product_execution_missing_whitelist["skip_reason"] == "product_batch_execution_context_incomplete", product_execution_missing_whitelist
+    assert "product_field_whitelist_verified" in product_execution_missing_whitelist["missing_execution_flags"], product_execution_missing_whitelist
+    assert product_execution_missing_whitelist["products_written"] is False, product_execution_missing_whitelist
+
+    product_execution_sensitive = sync_service.evaluate_naver_product_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=5,
+        batch_size=5,
+        readonly_evidence={**readonly_evidence, "external_product_id_full": "must-not-leak-product-execution"},
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context=product_execution_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert product_execution_sensitive["skip_reason"] == "naver_product_batch_execution_sensitive_field_blocked", product_execution_sensitive
+    assert product_execution_sensitive["products_written"] is False, product_execution_sensitive
+
     oversized = sync_service._evaluate_formal_batch_sync_production_gate(
         sync_kind="naver_product_batch",
         actor_context=admin_multi_store,
@@ -11324,6 +11389,9 @@ def verify_formal_batch_sync_production_gate() -> None:
             "order_execution_ready": order_execution_ready,
             "order_execution_missing_privacy": order_execution_missing_privacy,
             "order_execution_sensitive": order_execution_sensitive,
+            "product_execution_ready": product_execution_ready,
+            "product_execution_missing_whitelist": product_execution_missing_whitelist,
+            "product_execution_sensitive": product_execution_sensitive,
             "no_approval": no_approval,
             "missing_backup": missing_backup,
             "operator_blocked": operator_blocked,
@@ -11340,6 +11408,7 @@ def verify_formal_batch_sync_production_gate() -> None:
         "raw response",
         "bearer ",
         "productorderid",
+        "external_product_id_full",
         "buyername",
         "buyerphone",
         "receivername",

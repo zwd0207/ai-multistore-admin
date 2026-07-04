@@ -2584,3 +2584,74 @@ It returns local review readiness only. Real invitation creation, auth session c
 ### Order Batch Execution Approval Readonly UI Plan
 
 Phase Naver-Order-Batch-2C is a UI planning boundary only. Future UI must present Naver order batch execution readiness as a checklist and must not imply order batch execution approval. It performs no Naver call, local order write, shipment write, cancel write, return write, or exchange write.
+
+### Invitation Approval Checklist Readonly API Frontend Integration
+
+Phases ERP-Multistore-2K and ERP-Multistore-2L connect Codex2 Accounts to:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-checklist/readonly-check
+```
+
+The integration is readonly and review-only. It must keep:
+
+```text
+invitation_sent=false
+users_written=false
+membership_written=false
+role_assignment_written=false
+real_auth_session_created=false
+real_database_written=false
+operation_audit_rows_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+### Naver Order Batch Execution Approval Readonly UI
+
+Phase Naver-Order-Batch-2D adds Codex2 UI only. It displays future execution approval readiness but must keep Naver calls, local order writes, timeline writes, audit-row writes, and shipment/cancel/return/exchange writes closed.
+
+### Formal Batch Approval Decision Audit Linkage Plan
+
+Phase ERP-Batch-2O is plan-only. Future formal batch execution should link approval decisions to:
+
+```text
+approval_decision_record_id
+readonly_evidence_snapshot_hash
+backup_manifest_reference
+permission_approval_evidence
+sensitive_scan_evidence
+readback_plan_reference
+rollback_report_reference
+operator_identity_hash
+store_scope
+```
+
+No audit rows are written in this phase and no execution is approved.
+
+### Naver Product Batch Execution Approval Mock Gate
+
+Phase Naver-Product-Batch-2D adds:
+
+```text
+evaluate_naver_product_batch_execution_approval_mock_gate(...)
+```
+
+The gate requires fresh product batch readonly candidates, product field whitelist, price/stock/status mapping review, duplicate protection, audit chain, post-write readback, rollback plan, sensitive scan, closed platform product writes, backup evidence, permission gate, and manual approval.
+
+It must keep:
+
+```text
+execution_approved=false
+products_written=false
+orders_written=false
+sync_log_written=false
+capability_tested_success_written=false
+timeline_events_written=false
+operation_audit_rows_written=false
+formal_product_sync_open=false
+platform_product_writes_enabled=false
+platform_writes_enabled=false
+```
+
+Passing this mock gate does not approve product batch execution. It only proves future review materials are ready.
