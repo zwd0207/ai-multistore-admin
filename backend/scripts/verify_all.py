@@ -56,6 +56,9 @@ EXPECTED_API_PATHS = {
     "/api/v1/sync-logs",
     "/api/v1/operation-audit-logs",
     "/api/v1/operation-audit-logs/summary",
+    "/api/v1/permissions/role-inventory",
+    "/api/v1/permissions/mock-check",
+    "/api/v1/permissions/sensitive-action/mock-check",
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/customer-inquiries",
@@ -1248,6 +1251,14 @@ def verify_openapi() -> None:
     for audit_path in ["/api/v1/operation-audit-logs", "/api/v1/operation-audit-logs/summary"]:
         methods = set(openapi_json["paths"][audit_path].keys())
         assert methods == {"get"}, {audit_path: methods}
+    permission_methods = {
+        "/api/v1/permissions/role-inventory": {"get"},
+        "/api/v1/permissions/mock-check": {"post"},
+        "/api/v1/permissions/sensitive-action/mock-check": {"post"},
+    }
+    for permission_path, expected_methods in permission_methods.items():
+        methods = set(openapi_json["paths"][permission_path].keys())
+        assert methods == expected_methods, {permission_path: methods}
     print("openapi/docs: ok")
 
 
@@ -9983,6 +9994,9 @@ def verify_naver_order_refresh_backup_evidence_gate() -> None:
 
 
 def verify_role_permission_mock_gates() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
     from app.services import permission_service
 
     owner = {
@@ -10100,6 +10114,110 @@ def verify_role_permission_mock_gates() -> None:
     assert "owner" in inventory and "operator" in inventory and "viewer" in inventory, inventory
     assert "orders.refresh_batch_write" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert inventory["operator"]["sensitive_approval_actions"] == [], inventory
+
+    with TestClient(app) as client:
+        inventory_response = client.get("/api/v1/permissions/role-inventory")
+        assert inventory_response.status_code == 200, inventory_response.text
+        inventory_payload = inventory_response.json()["data"]
+        assert inventory_payload["phase"] == "ERP-Auth-1F", inventory_payload
+        assert inventory_payload["status"] == "role_inventory_ready", inventory_payload
+        assert inventory_payload["mock_permission_api"] is True, inventory_payload
+        assert inventory_payload["public_endpoint_enabled"] is True, inventory_payload
+        assert inventory_payload["real_auth_session_created"] is False, inventory_payload
+        assert inventory_payload["real_database_written"] is False, inventory_payload
+        assert "admin" in inventory_payload["roles"], inventory_payload
+
+        admin_read_response = client.post("/api/v1/permissions/mock-check", json={
+            "actor_context": admin_store8,
+            "store_id": 8,
+            "operation_key": "orders.preview",
+        })
+        assert admin_read_response.status_code == 200, admin_read_response.text
+        admin_read_payload = admin_read_response.json()["data"]
+        assert admin_read_payload["phase"] == "ERP-Auth-1F", admin_read_payload
+        assert admin_read_payload["status"] == "access_allowed", admin_read_payload
+        assert admin_read_payload["store_scope_verified"] is True, admin_read_payload
+        assert admin_read_payload["permission_verified"] is True, admin_read_payload
+        assert admin_read_payload["real_database_written"] is False, admin_read_payload
+
+        viewer_write_response = client.post("/api/v1/permissions/mock-check", json={
+            "actor_context": viewer_store8,
+            "store_id": 8,
+            "operation_key": "orders.refresh_batch_write",
+        })
+        assert viewer_write_response.status_code == 200, viewer_write_response.text
+        viewer_write_payload = viewer_write_response.json()["data"]
+        assert viewer_write_payload["status"] == "blocked", viewer_write_payload
+        assert viewer_write_payload["skip_reason"] == "permission_denied", viewer_write_payload
+        assert viewer_write_payload["permission_verified"] is False, viewer_write_payload
+        assert viewer_write_payload["orders_written"] is False, viewer_write_payload
+
+        no_approval_response = client.post("/api/v1/permissions/sensitive-action/mock-check", json={
+            "actor_context": admin_store8,
+            "store_id": 8,
+            "action_key": "orders.refresh_batch_write",
+            "manual_approval": False,
+        })
+        assert no_approval_response.status_code == 200, no_approval_response.text
+        no_approval_payload = no_approval_response.json()["data"]
+        assert no_approval_payload["status"] == "approval_blocked", no_approval_payload
+        assert no_approval_payload["skip_reason"] == "manual_approval_required", no_approval_payload
+        assert no_approval_payload["formal_sync_open"] is False, no_approval_payload
+
+        approval_response = client.post("/api/v1/permissions/sensitive-action/mock-check", json={
+            "actor_context": admin_store8,
+            "store_id": 8,
+            "action_key": "orders.refresh_batch_write",
+            "manual_approval": True,
+        })
+        assert approval_response.status_code == 200, approval_response.text
+        approval_payload = approval_response.json()["data"]
+        assert approval_payload["status"] == "approval_allowed_mock", approval_payload
+        assert approval_payload["approval_role_verified"] is True, approval_payload
+        assert approval_payload["real_auth_session_created"] is False, approval_payload
+        assert approval_payload["real_database_written"] is False, approval_payload
+        assert approval_payload["orders_written"] is False, approval_payload
+        assert approval_payload["products_written"] is False, approval_payload
+        assert approval_payload["sync_log_written"] is False, approval_payload
+        assert approval_payload["capability_tested_success_written"] is False, approval_payload
+        assert approval_payload["formal_sync_open"] is False, approval_payload
+        assert approval_payload["platform_writes_enabled"] is False, approval_payload
+
+        sensitive_actor_response = client.post("/api/v1/permissions/mock-check", json={
+            "actor_context": {**owner, "client_secret": "must-not-leak"},
+            "store_id": 8,
+            "operation_key": "orders.read",
+        })
+        assert sensitive_actor_response.status_code == 200, sensitive_actor_response.text
+        sensitive_actor_payload = sensitive_actor_response.json()["data"]
+        assert sensitive_actor_payload["skip_reason"] == "actor_context_sensitive_material_blocked", sensitive_actor_payload
+
+        api_serialized = json.dumps(
+            {
+                "inventory": inventory_payload,
+                "admin_read": admin_read_payload,
+                "viewer_write": viewer_write_payload,
+                "no_approval": no_approval_payload,
+                "approval": approval_payload,
+                "sensitive_actor": sensitive_actor_payload,
+            },
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "bearer ",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+            "must-not-leak",
+        ]:
+            assert forbidden not in api_serialized, api_serialized
 
     serialized = json.dumps(
         {
@@ -11594,6 +11712,8 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
         " M backend/app/api/v1/endpoints/dashboard.py",
         " M backend/app/api/v1/endpoints/orders.py",
+        " M backend/app/api/v1/endpoints/permissions.py",
+        "A  backend/app/api/v1/endpoints/permissions.py",
         " M backend/app/api/v1/endpoints/stats.py",
         " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
@@ -11613,6 +11733,8 @@ def verify_git_tracking() -> None:
         " M backend/app/schemas/api_credential_readiness.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",
+        " M backend/app/schemas/permission.py",
+        "A  backend/app/schemas/permission.py",
         " M backend/app/schemas/product.py",
         " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
@@ -11646,6 +11768,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
         "?? backend/app/api/v1/endpoints/backups.py",
         "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
+        "?? backend/app/api/v1/endpoints/permissions.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/financial.py",
         "?? backend/app/models/order_status_event.py",
@@ -11653,6 +11776,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
+        "?? backend/app/schemas/permission.py",
         "?? backend/app/schemas/sync.py",
         "?? backend/app/services/api_capability_service.py",
         "?? backend/app/services/api_credential_readiness_service.py",

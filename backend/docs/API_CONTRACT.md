@@ -1447,7 +1447,7 @@ evaluate_sensitive_action_approval_mock_gate(...)
 role_permission_inventory()
 ```
 
-ERP-Auth-1B and ERP-Auth-1C add private backend service helpers only. They are not public API routes, do not create sessions, do not add user tables, do not change schema, and are not connected to runtime route dependencies.
+ERP-Auth-1B and ERP-Auth-1C add private backend service helpers. ERP-Auth-1F exposes a narrow mock-only API wrapper around those helpers for frontend role/action visibility. These routes do not create sessions, do not add user tables, do not change schema, and are not production auth dependencies.
 
 `evaluate_store_scoped_access_mock_gate(...)` verifies private verification scope, safe actor context, known role, requested store scope, and operation permission. `evaluate_sensitive_action_approval_mock_gate(...)` additionally verifies that a sensitive action has manual approval and an approving role.
 
@@ -1455,9 +1455,46 @@ The first roles are `owner`, `admin`, `operator`, `auditor`, and `viewer`. Sensi
 
 The mock gate response must keep `real_database_written=false`, `orders_written=false`, `products_written=false`, `sync_log_written=false`, `capability_tested_success_written=false`, `raw_response_saved=false`, `secrets_saved=false`, `privacy_fields_redacted=true`, `formal_sync_open=false`, and `platform_writes_enabled=false`.
 
+Runtime mock permission API:
+
+```text
+GET /api/v1/permissions/role-inventory
+POST /api/v1/permissions/mock-check
+POST /api/v1/permissions/sensitive-action/mock-check
+```
+
+`POST /api/v1/permissions/mock-check` accepts:
+
+```json
+{
+  "actor_context": {
+    "actor_id": "safe local actor label",
+    "role": "operator",
+    "store_ids": [8]
+  },
+  "store_id": 8,
+  "operation_key": "orders.read"
+}
+```
+
+`POST /api/v1/permissions/sensitive-action/mock-check` accepts the same safe actor context plus:
+
+```json
+{
+  "action_key": "orders.refresh_batch_write",
+  "manual_approval": false
+}
+```
+
+Allowed response data is limited to safe role label, actor hash, requested store id, operation/action key, booleans for store-scope/permission/approval status, safe `skip_reason`, business message, and safety flags. Responses must include `mock_permission_api=true`, `public_endpoint_enabled=true`, `real_auth_session_created=false`, `real_database_written=false`, `raw_response_saved=false`, `formal_sync_open=false`, and `platform_writes_enabled=false`. The API must not return token, Authorization, request or response headers, signatures, bcrypt inputs, client secrets, raw responses, complete channel/order/product-order ids, complete buyer/receiver privacy, phones, addresses, or zip codes.
+
 ### Naver Order Refresh Batch Approval Plan
 
 Phase Naver-ERP-20A does not change the public API surface. A later controlled refresh batch write may be considered only after backup evidence, fresh readonly preview, existing-order identity match, store-scoped role permission, sensitive-action approval, audit chain preparation, post-write readback, and sensitive scan all pass. Formal order sync remains closed.
+
+Phase Naver-ERP-20B uses the existing `POST /api/v1/sync/orders/naver/preview` contract in readonly mode with a recent 3-day KST window, `store_id=8`, `credential_id=7`, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. Token, feed, and detail returned HTTP 200. The safe hash `id-hash-192b9c67e8` matched exactly one existing local Naver order, so it is an existing local refresh candidate. It did not write orders, products, SyncLog, tested-success rows, audit rows, or timeline events.
+
+Phase Naver-ERP-20C is planning-only. It does not execute a refresh write and does not add a new write route. A later refresh write must repeat 20B readonly evidence, verify exact identity match, require fresh backup evidence, pass the runtime permission mock gate, require sensitive action approval, write append-only audit evidence, and pass post-write readback plus sensitive scan.
 
 The helper must keep:
 
