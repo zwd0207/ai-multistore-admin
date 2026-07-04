@@ -1504,6 +1504,35 @@ Phase Naver-ERP-20F verifies the 20E result by readback only. The selected safe 
 
 Phase ERP-Auth-1G is a frontend-wide visibility plan for the mock permission API. Phase ERP-Auth-1H records the production-auth boundary: the current permission API must not be treated as final authentication or authorization until user, session, role, store-membership, route-dependency, and role-assignment flows are separately designed, migrated, tested, backed up, and approved.
 
+### Future Auth Schema Proposal and Mock Migration Gate
+
+ERP-Auth-1I proposes future auth tables:
+
+```text
+erp_users
+erp_roles
+erp_permissions
+erp_role_permissions
+```
+
+ERP-Auth-1J proposes:
+
+```text
+erp_store_memberships
+```
+
+The proposed schema stores safe identifiers such as user hashes, masked login identifiers, role keys, permission keys, and store membership status. It must not store tokens, Authorization values, headers, signatures, bcrypt inputs, client secrets, raw responses, full platform order or product-order ids, buyer or receiver names, phones, addresses, or zip codes.
+
+ERP-Auth-1K adds only a `verify_all.py` temporary-database mock migration gate. It verifies the future table shape, seed roles, permission links, admin approval capability, store 8 membership, store 9 isolation, sensitive-column exclusions, and unchanged business counts. It does not expose a public auth API, create sessions, write production auth rows, migrate `backend/codex1.db`, call platform APIs, or open formal sync.
+
+### Restore Runbook Boundary
+
+ERP-Backup-2A is planning-only. Real restore remains closed. Any later restore implementation must require source backup manifest verification, SHA-256 and size checks, temporary restore dry-run, baseline-count review, pre-restore backup, human approval, audit evidence, rollback instructions, and post-restore verification.
+
+### No-Change Order Refresh Display Boundary
+
+Naver-ERP-21A is a display check for the 20E/20F result. A no-change refresh should be shown as a checked order with no business-field changes and no forced local update. The audit rows may be displayed as evidence, but the UI and APIs must not describe that outcome as formal Naver order sync availability.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`

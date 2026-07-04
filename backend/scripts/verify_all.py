@@ -10244,6 +10244,366 @@ def verify_role_permission_mock_gates() -> None:
     print("role permission mock gates: ok")
 
 
+def verify_auth_schema_mock_migration_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.permission_service import ROLE_DEFINITIONS, SENSITIVE_ACTIONS
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    proposed_tables = {
+        "erp_users",
+        "erp_roles",
+        "erp_permissions",
+        "erp_role_permissions",
+        "erp_store_memberships",
+    }
+    forbidden_column_markers = {
+        "access_token",
+        "authorization",
+        "bcrypt",
+        "buyer",
+        "channel_no",
+        "client_secret",
+        "detailed_address",
+        "external_order_id",
+        "external_product_id",
+        "header",
+        "order_no",
+        "phone",
+        "product_order_id",
+        "raw_data",
+        "raw_request",
+        "raw_response",
+        "receiver",
+        "refresh_token",
+        "secret_key",
+        "signature",
+        "token",
+        "zip",
+    }
+
+    def table_exists(db, table_name: str) -> bool:
+        return bool(db.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name"),
+            {"name": table_name},
+        ).first())
+
+    def count_if_exists(db, table_name: str) -> int:
+        if not table_exists(db, table_name):
+            return 0
+        return int(db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one())
+
+    def table_columns(db, table_name: str) -> set[str]:
+        return {
+            str(row[1])
+            for row in db.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+        }
+
+    with SessionLocal() as db:
+        before_counts = {
+            "orders": count_if_exists(db, "orders"),
+            "products": count_if_exists(db, "products"),
+            "sync_logs": count_if_exists(db, "sync_logs"),
+            "api_capability_test_results": count_if_exists(db, "api_capability_test_results"),
+            "operation_audit_logs": count_if_exists(db, "operation_audit_logs"),
+            "order_status_events": count_if_exists(db, "order_status_events"),
+        }
+
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS erp_users (
+                id INTEGER PRIMARY KEY,
+                user_key_hash TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                login_identifier_hash TEXT,
+                login_identifier_masked TEXT,
+                status TEXT NOT NULL DEFAULT 'invited',
+                auth_provider TEXT NOT NULL DEFAULT 'local_pending',
+                last_login_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (status IN ('invited', 'active', 'inactive', 'locked')),
+                CHECK (auth_provider IN ('local_pending', 'password', 'sso', 'api_operator'))
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS erp_roles (
+                id INTEGER PRIMARY KEY,
+                role_key TEXT NOT NULL UNIQUE,
+                role_label_zh TEXT NOT NULL,
+                role_label_en TEXT NOT NULL,
+                system_role INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (status IN ('active', 'inactive'))
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS erp_permissions (
+                id INTEGER PRIMARY KEY,
+                permission_key TEXT NOT NULL UNIQUE,
+                permission_group TEXT NOT NULL,
+                permission_label_zh TEXT NOT NULL,
+                sensitive_action INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (status IN ('active', 'inactive'))
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS erp_role_permissions (
+                id INTEGER PRIMARY KEY,
+                role_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                can_approve_sensitive INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (role_id, permission_id),
+                FOREIGN KEY (role_id) REFERENCES erp_roles(id),
+                FOREIGN KEY (permission_id) REFERENCES erp_permissions(id)
+            )
+        """))
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS erp_store_memberships (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                store_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                scope_type TEXT NOT NULL DEFAULT 'assigned',
+                membership_status TEXT NOT NULL DEFAULT 'active',
+                assigned_by_user_id INTEGER,
+                assigned_at TEXT NOT NULL,
+                revoked_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, store_id, role_id),
+                CHECK (store_id > 0),
+                CHECK (scope_type IN ('all', 'assigned')),
+                CHECK (membership_status IN ('active', 'inactive', 'revoked')),
+                FOREIGN KEY (user_id) REFERENCES erp_users(id),
+                FOREIGN KEY (role_id) REFERENCES erp_roles(id)
+            )
+        """))
+        for statement in [
+            "CREATE INDEX IF NOT EXISTS ix_erp_users_status ON erp_users(status)",
+            "CREATE INDEX IF NOT EXISTS ix_erp_roles_status ON erp_roles(status)",
+            "CREATE INDEX IF NOT EXISTS ix_erp_permissions_group ON erp_permissions(permission_group)",
+            "CREATE INDEX IF NOT EXISTS ix_erp_role_permissions_role ON erp_role_permissions(role_id)",
+            "CREATE INDEX IF NOT EXISTS ix_erp_store_memberships_store_status ON erp_store_memberships(store_id, membership_status)",
+            "CREATE INDEX IF NOT EXISTS ix_erp_store_memberships_user_status ON erp_store_memberships(user_id, membership_status)",
+        ]:
+            db.execute(text(statement))
+
+        now = "2026-07-04T00:00:00+00:00"
+        role_labels = {
+            "owner": ("所有者", "Owner"),
+            "admin": ("管理员", "Admin"),
+            "operator": ("运营", "Operator"),
+            "auditor": ("审计员", "Auditor"),
+            "viewer": ("只读查看", "Viewer"),
+        }
+        for role_key, definition in ROLE_DEFINITIONS.items():
+            label_zh, label_en = role_labels.get(role_key, (role_key, role_key.title()))
+            db.execute(text("""
+                INSERT OR IGNORE INTO erp_roles (
+                    role_key, role_label_zh, role_label_en, system_role, status, created_at, updated_at
+                ) VALUES (
+                    :role_key, :role_label_zh, :role_label_en, 1, 'active', :created_at, :updated_at
+                )
+            """), {
+                "role_key": role_key,
+                "role_label_zh": label_zh,
+                "role_label_en": label_en,
+                "created_at": now,
+                "updated_at": now,
+            })
+            for permission_key in sorted(definition["permissions"]):
+                if permission_key == "*":
+                    continue
+                permission_group = permission_key.split(".", 1)[0]
+                db.execute(text("""
+                    INSERT OR IGNORE INTO erp_permissions (
+                        permission_key, permission_group, permission_label_zh, sensitive_action, status, created_at, updated_at
+                    ) VALUES (
+                        :permission_key, :permission_group, :permission_label_zh, :sensitive_action, 'active', :created_at, :updated_at
+                    )
+                """), {
+                    "permission_key": permission_key,
+                    "permission_group": permission_group,
+                    "permission_label_zh": permission_key,
+                    "sensitive_action": int(permission_key in SENSITIVE_ACTIONS),
+                    "created_at": now,
+                    "updated_at": now,
+                })
+
+        role_rows = db.execute(text("SELECT id, role_key FROM erp_roles")).fetchall()
+        permission_rows = db.execute(text("SELECT id, permission_key FROM erp_permissions")).fetchall()
+        role_ids = {str(row[1]): int(row[0]) for row in role_rows}
+        permission_ids = {str(row[1]): int(row[0]) for row in permission_rows}
+        for role_key, definition in ROLE_DEFINITIONS.items():
+            role_id = role_ids[role_key]
+            for permission_key, permission_id in permission_ids.items():
+                has_permission = "*" in definition["permissions"] or permission_key in definition["permissions"]
+                if not has_permission:
+                    continue
+                approval_actions = definition.get("sensitive_approval_actions", set())
+                can_approve = "*" in approval_actions or permission_key in approval_actions
+                db.execute(text("""
+                    INSERT OR IGNORE INTO erp_role_permissions (
+                        role_id, permission_id, can_approve_sensitive, created_at, updated_at
+                    ) VALUES (
+                        :role_id, :permission_id, :can_approve_sensitive, :created_at, :updated_at
+                    )
+                """), {
+                    "role_id": role_id,
+                    "permission_id": permission_id,
+                    "can_approve_sensitive": int(can_approve),
+                    "created_at": now,
+                    "updated_at": now,
+                })
+
+        db.execute(text("""
+            INSERT OR IGNORE INTO erp_users (
+                user_key_hash, display_name, login_identifier_hash, login_identifier_masked,
+                status, auth_provider, created_at, updated_at
+            ) VALUES (
+                'user-hash-auth1k-admin', 'Local admin operator', 'login-hash-auth1k',
+                'lo***@example.local', 'active', 'local_pending', :created_at, :updated_at
+            )
+        """), {"created_at": now, "updated_at": now})
+        admin_user_id = int(db.execute(text(
+            "SELECT id FROM erp_users WHERE user_key_hash='user-hash-auth1k-admin'"
+        )).scalar_one())
+        admin_role_id = role_ids["admin"]
+        db.execute(text("""
+            INSERT OR IGNORE INTO erp_store_memberships (
+                user_id, store_id, role_id, scope_type, membership_status,
+                assigned_at, created_at, updated_at
+            ) VALUES (
+                :user_id, 8, :role_id, 'assigned', 'active', :assigned_at, :created_at, :updated_at
+            )
+        """), {
+            "user_id": admin_user_id,
+            "role_id": admin_role_id,
+            "assigned_at": now,
+            "created_at": now,
+            "updated_at": now,
+        })
+        db.commit()
+
+        for table_name in proposed_tables:
+            assert table_exists(db, table_name), table_name
+            for column_name in table_columns(db, table_name):
+                normalized = column_name.lower()
+                assert not any(marker in normalized for marker in forbidden_column_markers), {
+                    "table": table_name,
+                    "column": column_name,
+                }
+
+        assert {"owner", "admin", "operator", "auditor", "viewer"} <= set(role_ids), role_ids
+        assert "orders.refresh_batch_write" in permission_ids, permission_ids
+        assert "backup.create" in permission_ids, permission_ids
+
+        admin_refresh_approval = db.execute(text("""
+            SELECT rp.can_approve_sensitive
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='admin' AND p.permission_key='orders.refresh_batch_write'
+        """)).scalar_one()
+        operator_refresh_permission = db.execute(text("""
+            SELECT COUNT(*)
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='operator' AND p.permission_key='orders.refresh_batch_write'
+        """)).scalar_one()
+        store8_membership = db.execute(text("""
+            SELECT COUNT(*)
+            FROM erp_store_memberships m
+            JOIN erp_users u ON u.id = m.user_id
+            WHERE u.user_key_hash='user-hash-auth1k-admin'
+              AND m.store_id=8
+              AND m.membership_status='active'
+        """)).scalar_one()
+        store9_membership = db.execute(text("""
+            SELECT COUNT(*)
+            FROM erp_store_memberships m
+            JOIN erp_users u ON u.id = m.user_id
+            WHERE u.user_key_hash='user-hash-auth1k-admin'
+              AND m.store_id=9
+              AND m.membership_status='active'
+        """)).scalar_one()
+        assert admin_refresh_approval == 1, admin_refresh_approval
+        assert operator_refresh_permission == 0, operator_refresh_permission
+        assert store8_membership == 1, store8_membership
+        assert store9_membership == 0, store9_membership
+
+        after_counts = {
+            "orders": count_if_exists(db, "orders"),
+            "products": count_if_exists(db, "products"),
+            "sync_logs": count_if_exists(db, "sync_logs"),
+            "api_capability_test_results": count_if_exists(db, "api_capability_test_results"),
+            "operation_audit_logs": count_if_exists(db, "operation_audit_logs"),
+            "order_status_events": count_if_exists(db, "order_status_events"),
+        }
+        assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+        schema_summary = {
+            "phase": "ERP-Auth-1K",
+            "status": "auth_schema_mock_migration_verified",
+            "tables": sorted(proposed_tables),
+            "roles": sorted(role_ids),
+            "permission_count": len(permission_ids),
+            "store8_membership": store8_membership,
+            "store9_membership": store9_membership,
+            "real_auth_session_created": False,
+            "real_database_written": False,
+            "production_db_touched": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        serialized = json.dumps(schema_summary, ensure_ascii=False, default=str).lower()
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "bearer ",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+            "token",
+        ]:
+            assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("auth schema mock migration gate: ok")
+
+
 def verify_operation_audit_logs_readonly_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -11933,6 +12293,7 @@ def main() -> None:
         verify_backup_report_readonly_local_api()
         verify_naver_order_refresh_backup_evidence_gate()
         verify_role_permission_mock_gates()
+        verify_auth_schema_mock_migration_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()

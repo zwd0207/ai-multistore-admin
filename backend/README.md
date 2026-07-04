@@ -947,4 +947,12 @@ Naver-ERP-20F verifies the 20E result by readback only: `orders_total=10`, `orde
 
 ERP-Auth-1G and ERP-Auth-1H are planning-only. 1G defines future frontend-wide permission visibility rules. 1H records that the runtime permission API remains mock-only and must not be treated as production authentication until user/session/role/store-membership schema, route dependencies, assignment UI, and cross-store isolation tests are separately approved.
 
+ERP-Auth-1I proposes the future production-auth user/role schema: `erp_users`, `erp_roles`, `erp_permissions`, and `erp_role_permissions`. ERP-Auth-1J proposes `erp_store_memberships` so every permission decision can prove store scope before a preview, local write, backup, restore, migration, or formal-sync approval. These two phases are proposal-only and do not create real auth sessions or migrate schema.
+
+ERP-Auth-1K adds a temporary-database auth schema mock migration gate in `scripts/verify_all.py`. The gate creates the proposed auth tables only inside the isolated verification database, seeds owner/admin/operator/auditor/viewer role evidence, checks store 8 membership and cross-store isolation, blocks sensitive column names, confirms business counts are unchanged, and verifies the real `backend/codex1.db` file is not touched.
+
+ERP-Backup-2A documents the future restore runbook and operator checklist. Real restore remains closed. A later restore must require backup manifest verification, SHA-256/size checks, temporary restore dry-run, baseline-count review, pre-restore backup, human approval, audit evidence, rollback instructions, and post-restore verification.
+
+Naver-ERP-21A records the display boundary for the 20E/20F no-change refresh result. The operator-facing wording should say the selected order was checked, no business fields changed, no local update was forced, and audit evidence was recorded. It must not imply formal Naver order sync is open.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
