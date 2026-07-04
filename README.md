@@ -683,6 +683,12 @@ The Logs/Audit UI readonly implementation is documented in `PHASE_ERP_AUDIT_1O_L
 
 ERP-Audit-1O implements the Codex2 read-only Logs/Audit UI integration. Backend mode now calls only `GET /api/v1/operation-audit-logs` and `GET /api/v1/operation-audit-logs/summary`, renders `operation_audit_logs=0` as a normal Chinese empty state, keeps SyncLog in a separate `同步记录` section, removes write-like sync controls from the Logs page, and keeps audit diagnostics folded in `TechnicalDetails`. Mock mode continues to show demo operation logs. Shared table, empty-state, pagination, and status badge labels were cleaned for readability. This phase does not modify Codex1 runtime code, write local data, call platform APIs, add audit write/delete/export/detail calls, or open formal product/order sync.
 
+## Phase ERP-Audit-1Q - Audit Writer Integration Approval Plan
+
+The audit writer integration approval plan is documented in `PHASE_ERP_AUDIT_1Q_AUDIT_WRITER_INTEGRATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-1Q is planning-only. It defines how the existing controlled local audit writer may later be connected to selected runtime operations through a separate mock gate first. The first approved target direction is narrow local accountability for controlled Naver order writes/refreshes, backup creation, restore dry-run evidence, and schema migration evidence. Any future real audit write must require explicit approval, clean worktrees, database backup when applicable, safe correlation-chain rows, sensitive scans, and post-write verification. This phase does not write `operation_audit_logs`, change schema, modify Codex2 runtime behavior, call platform APIs, execute backups/restores, or open formal product/order sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
