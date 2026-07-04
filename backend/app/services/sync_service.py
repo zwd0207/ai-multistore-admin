@@ -6196,6 +6196,121 @@ def evaluate_formal_batch_approval_decision_mock_gate(
     return result
 
 
+def evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+    *,
+    readonly_evidence: dict | None,
+    approval_audit_evidence: dict | None,
+    decision_context: dict | None,
+    readonly_api_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for a future readonly decision API contract; no route is exposed."""
+
+    result = evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence=readonly_evidence,
+        approval_audit_evidence=approval_audit_evidence,
+        decision_context=decision_context,
+        verification_scope=verification_scope,
+    )
+    required_api_flags = [
+        "readonly_api_contract_planned",
+        "business_wording_required",
+        "technical_details_folded",
+        "execution_button_excluded",
+        "write_endpoint_excluded",
+        "sensitive_fields_hidden_from_main_page",
+        "route_requires_separate_implementation",
+        "formal_sync_remains_closed",
+    ]
+    result.update({
+        "phase": "ERP-Batch-2I",
+        "formal_batch_approval_decision_readonly_api_mock_gate": True,
+        "readonly_api_mock_gate": True,
+        "required_api_flags": required_api_flags,
+        "missing_api_flags": [],
+        "route_path_planned": "/api/v1/batch/approval-decision/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") != "formal_batch_approval_decision_mock_ready":
+        return result
+    if verification_scope != "verify_all_temp_db":
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(readonly_api_context, dict):
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(readonly_api_context):
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "approval_decision_readonly_api_sensitive_field_blocked"
+        return result
+
+    missing_api_flags = [
+        flag for flag in required_api_flags
+        if readonly_api_context.get(flag) is not True
+    ]
+    result["missing_api_flags"] = missing_api_flags
+    if missing_api_flags:
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_incomplete"
+        return result
+    if readonly_api_context.get("public_endpoint_enabled") is True:
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "public_endpoint_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("backend_route_implemented") is True:
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "backend_route_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("execution_approved") is True:
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("formal_sync_open") is True or readonly_api_context.get("platform_writes_enabled") is True:
+        result["status"] = "blocked"
+        result["decision_status"] = "blocked"
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    result.update({
+        "status": "formal_batch_approval_decision_readonly_api_mock_ready",
+        "decision_status": "ready_for_readonly_api_planning",
+        "business_message": (
+            "正式批量审批决策只读 API 的 mock 门禁已通过；当前只规划只读审查接口，不开放路由、不批准执行。"
+        ),
+        "next_action": (
+            "后续可单独规划本地只读 API 实现；执行商品或订单批量写入仍必须另开阶段。"
+        ),
+    })
+    return result
+
+
 def evaluate_batch_readonly_evidence_api_local(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

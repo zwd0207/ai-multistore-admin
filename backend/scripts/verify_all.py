@@ -11490,6 +11490,70 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_decision_sensitive["skip_reason"] == "formal_batch_decision_sensitive_field_blocked", batch_decision_sensitive
     assert batch_decision_sensitive["real_database_written"] is False, batch_decision_sensitive
 
+    batch_decision_api_context = {
+        "readonly_api_contract_planned": True,
+        "business_wording_required": True,
+        "technical_details_folded": True,
+        "execution_button_excluded": True,
+        "write_endpoint_excluded": True,
+        "sensitive_fields_hidden_from_main_page": True,
+        "route_requires_separate_implementation": True,
+        "formal_sync_remains_closed": True,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    batch_decision_api_ready = sync_service.evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        readonly_api_context=batch_decision_api_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_api_ready["phase"] == "ERP-Batch-2I", batch_decision_api_ready
+    assert batch_decision_api_ready["status"] == "formal_batch_approval_decision_readonly_api_mock_ready", batch_decision_api_ready
+    assert batch_decision_api_ready["decision_status"] == "ready_for_readonly_api_planning", batch_decision_api_ready
+    assert batch_decision_api_ready["public_endpoint_enabled"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["backend_route_implemented"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["execution_approved"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["operation_audit_rows_written"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["orders_written"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["products_written"] is False, batch_decision_api_ready
+    assert batch_decision_api_ready["formal_sync_open"] is False, batch_decision_api_ready
+
+    batch_decision_api_missing_fold = sync_service.evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        readonly_api_context={**batch_decision_api_context, "technical_details_folded": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_api_missing_fold["skip_reason"] == "readonly_api_context_incomplete", batch_decision_api_missing_fold
+    assert "technical_details_folded" in batch_decision_api_missing_fold["missing_api_flags"], batch_decision_api_missing_fold
+    assert batch_decision_api_missing_fold["real_database_written"] is False, batch_decision_api_missing_fold
+
+    batch_decision_api_public_endpoint = sync_service.evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        readonly_api_context={**batch_decision_api_context, "public_endpoint_enabled": True},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_api_public_endpoint["skip_reason"] == "public_endpoint_not_allowed_in_mock_gate", batch_decision_api_public_endpoint
+    assert batch_decision_api_public_endpoint["public_endpoint_enabled"] is False, batch_decision_api_public_endpoint
+
+    batch_decision_api_sensitive = sync_service.evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        readonly_api_context={**batch_decision_api_context, "rawResponse": "must-not-leak-decision-api"},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_api_sensitive["skip_reason"] == "approval_decision_readonly_api_sensitive_field_blocked", batch_decision_api_sensitive
+    assert batch_decision_api_sensitive["orders_written"] is False, batch_decision_api_sensitive
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -11756,6 +11820,10 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_decision_stale_readonly": batch_decision_stale_readonly,
             "batch_decision_missing_audit": batch_decision_missing_audit,
             "batch_decision_sensitive": batch_decision_sensitive,
+            "batch_decision_api_ready": batch_decision_api_ready,
+            "batch_decision_api_missing_fold": batch_decision_api_missing_fold,
+            "batch_decision_api_public_endpoint": batch_decision_api_public_endpoint,
+            "batch_decision_api_sensitive": batch_decision_api_sensitive,
             "local_evidence": local_evidence,
             "local_audit": local_audit,
             "local_audit_sensitive": local_audit_sensitive,

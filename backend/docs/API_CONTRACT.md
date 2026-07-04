@@ -2373,3 +2373,58 @@ platform_writes_enabled=false
 ```
 
 Phase ERP-Multistore-2D is a UI implementation plan only. It does not send invitations or change auth/session behavior.
+
+### Formal Batch Approval Decision Readonly API Mock Gate
+
+Phase ERP-Batch-2I adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_readonly_api_mock_gate(...)
+```
+
+Input shape:
+
+```text
+readonly_evidence: object
+approval_audit_evidence: object
+decision_context: object
+readonly_api_context: object
+verification_scope: "verify_all_temp_db"
+```
+
+The `readonly_api_context` must include business wording, folded technical details, no execution button, no write endpoint, main-page sensitive hiding, separate route implementation, and closed formal execution boundary. It must keep:
+
+```text
+public_endpoint_enabled=false
+backend_route_implemented=false
+execution_approved=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+Phase ERP-Batch-2J plans the future local readonly route only:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+No route is implemented in 2J.
+
+### Invitation Approval Checklist Readonly API Plan
+
+Phase ERP-Multistore-2E plans a future readonly route only:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-checklist/readonly-check
+```
+
+The future route should wrap the invitation approval checklist mock gate and keep user creation, invitation sending, auth session creation, role assignment, membership writes, and audit-row writes closed. Phase ERP-Multistore-2F adds frontend mock display only and does not change backend contracts.
+
+### Naver Order Batch Execution Approval Boundary
+
+Phase Naver-Order-Batch-2A is a planning boundary for future order batch execution. Execution must require fresh readonly candidates, store-scoped approval, permission gate, verified backup, privacy gate, whitelist, duplicate protection, audit chain, readback, rollback plan, and sensitive scan. This phase performs no Naver call, no order write, no timeline write, and no platform order write.

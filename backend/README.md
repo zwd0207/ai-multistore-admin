@@ -1222,3 +1222,25 @@ evaluate_real_user_invitation_approval_checklist_mock_gate(...)
 The gate verifies masked login display, target user/login hashes, target stores, target role, admin approval, backup evidence, audit plan, membership assignment plan, invite expiry, one-time invite planning, post-create readback, rollback/disable-user readiness, privacy display, and login boundary acknowledgement. It creates no user, sends no invitation, creates no auth session, assigns no role, writes no membership, and writes no audit row.
 
 ERP-Multistore-2D is a Codex2 UI implementation plan only. Real user invitation remains closed.
+
+ERP-Batch-2I adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_readonly_api_mock_gate(...)
+```
+
+It wraps the 2F approval decision gate and verifies the future readonly API shape: business wording, folded technical details, no execution button, no write endpoint, hidden sensitive fields on the main page, separate route implementation, and closed formal execution boundary. It keeps `public_endpoint_enabled=false`, `backend_route_implemented=false`, `execution_approved=false`, `orders_written=false`, `products_written=false`, `operation_audit_rows_written=false`, and `formal_sync_open=false`.
+
+ERP-Batch-2J is a local readonly API implementation plan only for:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+No route is added in this phase.
+
+ERP-Multistore-2E is a readonly API plan only for a future invitation approval checklist route. Real invitation, user creation, auth sessions, role assignment, membership writes, and audit-row writes remain closed.
+
+ERP-Multistore-2F adds Codex2 Accounts mock display for invitation approval checklist wording. It does not change backend write contracts.
+
+Naver-Order-Batch-2A documents the approval boundary for any future Naver order batch execution. Future execution requires fresh readonly candidates, store-scoped approval, permission checks, backup, privacy gate, whitelist, duplicate protection, audit chain, readback, and rollback planning. No Naver call or local order write is performed in this phase.
