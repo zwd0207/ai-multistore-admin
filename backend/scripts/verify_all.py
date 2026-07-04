@@ -11039,6 +11039,87 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     ), readonly_order_default_message
     assert "正式订单批量同步仍未开放" in readonly_order_default_message["items"][0]["next_action"], readonly_order_default_message
 
+    batch_audit_plan = {
+        "approval_record_planned": True,
+        "backup_verification_record_planned": True,
+        "permission_check_record_planned": True,
+        "write_attempt_record_planned": True,
+        "post_write_verification_record_planned": True,
+        "sensitive_scan_record_planned": True,
+        "rollback_reference_planned": True,
+        "failure_record_planned": True,
+        "formal_sync_remains_closed": True,
+        "operation_audit_rows_written": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    batch_audit_ready = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan=batch_audit_plan,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_ready["status"] == "batch_approval_audit_evidence_mock_ready", batch_audit_ready
+    assert batch_audit_ready["audit_evidence_ready"] is True, batch_audit_ready
+    assert batch_audit_ready["operation_audit_rows_planned"] is True, batch_audit_ready
+    assert batch_audit_ready["operation_audit_rows_written"] is False, batch_audit_ready
+    assert batch_audit_ready["orders_written"] is False, batch_audit_ready
+    assert batch_audit_ready["products_written"] is False, batch_audit_ready
+    assert batch_audit_ready["formal_sync_open"] is False, batch_audit_ready
+    assert batch_audit_ready["required_actions"] == ["orders.batch_sync_write", "products.batch_sync_write"], batch_audit_ready
+
+    batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan={**batch_audit_plan, "write_attempt_record_planned": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_missing_plan["skip_reason"] == "audit_evidence_plan_incomplete", batch_audit_missing_plan
+    assert "write_attempt_record_planned" in batch_audit_missing_plan["missing_audit_plan_flags"], batch_audit_missing_plan
+    assert batch_audit_missing_plan["operation_audit_rows_written"] is False, batch_audit_missing_plan
+
+    batch_audit_missing_permission = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["orders.batch_sync_write"],
+        },
+        audit_evidence_plan=batch_audit_plan,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_missing_permission["skip_reason"] == "approval_action_missing", batch_audit_missing_permission
+    assert batch_audit_missing_permission["operation_audit_rows_written"] is False, batch_audit_missing_permission
+
+    batch_audit_sensitive = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
+        readonly_evidence={**readonly_success, "productOrderId": "must-not-leak-audit"},
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan=batch_audit_plan,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_sensitive["skip_reason"] == "batch_approval_audit_sensitive_field_blocked", batch_audit_sensitive
+    assert batch_audit_sensitive["operation_audit_rows_written"] is False, batch_audit_sensitive
+
     readonly_sensitive = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
         evidence_items=[{
             "store_id": 8,
@@ -11173,6 +11254,10 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "readonly_success": readonly_success,
             "readonly_default_message": readonly_default_message,
             "readonly_order_default_message": readonly_order_default_message,
+            "batch_audit_ready": batch_audit_ready,
+            "batch_audit_missing_plan": batch_audit_missing_plan,
+            "batch_audit_missing_permission": batch_audit_missing_permission,
+            "batch_audit_sensitive": batch_audit_sensitive,
             "local_evidence": local_evidence,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
@@ -11197,6 +11282,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "zipcode",
         "must-not-leak",
         "must-not-leak-route",
+        "must-not-leak-audit",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

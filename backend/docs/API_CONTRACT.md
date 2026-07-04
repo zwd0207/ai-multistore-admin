@@ -2039,3 +2039,64 @@ operation_audit_rows_written=false
 ```
 
 Future product or order batch writes must create append-only audit rows in a separately approved execution phase. The readonly evidence route must not write audit rows by itself.
+
+### Store Membership Readonly UI Walkthrough Contract
+
+Phase ERP-Multistore-1K is a UI walkthrough contract only. The Accounts page may call `POST /api/v1/permissions/store-membership/readonly-check` and show a business conclusion, but it must keep technical gate fields folded and must not create users, sessions, roles, memberships, orders, products, SyncLog rows, tested-success rows, or platform writes.
+
+### Real User Invitation Approval Boundary
+
+Phase ERP-Multistore-1L is planning-only. A future user invitation API must not be implemented until a separate phase approves user schema usage, invite expiry, one-time invite consumption, store-scoped permission, backup evidence, append-only audit evidence, post-create readback, safe identifier display, and rollback or disable-user instructions.
+
+### Product Rollback Readonly Report UI Contract
+
+Phase Naver-Product-Batch-1M plans a future UI surface for product rollback readonly reports. The main UI should show backup evidence, stock-only write summary, rollback checklist readiness, temporary restore planning, readback planning, and sensitive-scan planning. Diagnostic fields such as `phase`, `skip_reason`, `updated_count`, `created_count`, `rollback_drill_ready`, and `operation_audit_rows_written` must remain folded. The UI must not execute restore, write products, or imply formal product batch sync is open.
+
+### Batch Approval Audit Evidence Mock Gate
+
+Phase ERP-Batch-1N adds a private service-level mock gate:
+
+```text
+_evaluate_batch_approval_audit_evidence_mock_gate(...)
+```
+
+The helper accepts readonly batch evidence, approval context, and an audit evidence plan. It verifies:
+
+```text
+approval_record_planned
+backup_verification_record_planned
+permission_check_record_planned
+write_attempt_record_planned
+post_write_verification_record_planned
+sensitive_scan_record_planned
+rollback_reference_planned
+failure_record_planned
+formal_sync_remains_closed
+```
+
+It may return `batch_approval_audit_evidence_mock_ready` only when the readonly evidence is ready, audit linkage is planned, the actor store scope covers every evidence item, required product/order batch permission keys are present, duplicate and field-whitelist checks passed, and no sensitive markers are present.
+
+It must keep:
+
+```text
+public_endpoint_enabled=false
+real_api_called=false
+real_database_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+timeline_events_written=false
+operation_audit_rows_planned=true
+operation_audit_rows_written=false
+raw_response_saved=false
+secrets_saved=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+This helper is not a public route and does not open formal product or order batch sync.
+
+### Naver Order Batch Approval Audit Readiness
+
+Phase Naver-Order-Batch-1F documents the order-specific readiness boundary. Future Naver order batch refresh writes require fresh readonly candidate evidence, store-scoped permission, human approval, verified backup, privacy gate, field whitelist, duplicate protection, append-only audit chain, post-write readback, sensitive scan, and rollback reference. Shipment, cancel, return, exchange, refund, settlement, customer-service, mail, appeal, and AI automation writes remain closed.

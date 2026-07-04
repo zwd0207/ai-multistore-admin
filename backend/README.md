@@ -1102,3 +1102,19 @@ It consumes the existing rollback drill gate output and produces a safe report s
 Naver-Order-Batch-1E aligns order-batch evidence wording. If an order evidence item does not provide its own business message, the backend now returns Chinese business wording and a next action that keeps formal order batch sync closed.
 
 ERP-Batch-1M adds audit-linkage planning to readonly batch evidence through `operation_audit_rows_planned=true` while keeping `operation_audit_rows_written=false`. Future formal batch writes must still be separately approved and must create append-only audit chains.
+
+ERP-Multistore-1K is a Codex2 walkthrough phase for the Accounts store-membership readonly panel. It verifies the UI can show membership readiness in business wording while keeping real user creation, login sessions, role assignment, and store membership writes closed.
+
+ERP-Multistore-1L is a planning-only approval boundary for future real user invitation. A later implementation must require explicit approval, store-scoped permission, backup evidence, append-only audit evidence, invite expiry, post-create readback, and safe identifier display. This phase creates no users and writes no memberships.
+
+Naver-Product-Batch-1M plans a future rollback readonly report UI. The UI should show backup evidence, stock-only write summary, rollback checklist readiness, temporary restore planning, readback planning, sensitive-scan planning, and the fact that formal product batch sync remains closed.
+
+ERP-Batch-1N adds a private mock gate:
+
+```text
+_evaluate_batch_approval_audit_evidence_mock_gate(...)
+```
+
+It verifies that future batch approval evidence includes store scope, required product/order batch permissions, duplicate and whitelist checks, human approval planning, and a complete audit evidence plan. It keeps `operation_audit_rows_planned=true`, `operation_audit_rows_written=false`, `orders_written=false`, `products_written=false`, and `formal_sync_open=false`.
+
+Naver-Order-Batch-1F is a planning-only readiness contract for order batch approval evidence. Future order batch refresh writes still require fresh readonly evidence, backup, permission, privacy gates, field whitelist, duplicate protection, append-only audit chain, readback, sensitive scan, and rollback reference. Formal order batch sync remains closed.
