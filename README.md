@@ -12,10 +12,10 @@ PROJECT_PROGRESS.md
 
 当前固定进度口径：
 
-- 项目总体规划进度：约 `69% - 75%`
-- Naver 基础 ERP 闭环进度：约 `78% - 83%`
-- ERP 给真实用户落地使用进度：约 `72% - 78%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `65% - 70%`
+- 项目总体规划进度：约 `70% - 76%`
+- Naver 基础 ERP 闭环进度：约 `79% - 84%`
+- ERP 给真实用户落地使用进度：约 `73% - 79%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `66% - 72%`
 
 ## 环境要求
 
@@ -1075,3 +1075,33 @@ ERP-Auth-1G is planning-only. It defines how Dashboard, Products, Orders, Sales,
 The production auth boundary plan is documented in `PHASE_ERP_AUTH_1H_RUNTIME_PERMISSION_API_PRODUCTION_AUTH_BOUNDARY_PLAN.md`.
 
 ERP-Auth-1H is planning-only. It records that the current permission API is a mock visibility and approval-planning API, not a production authentication system. Future production auth still needs user/session/role/store-membership schema, route dependencies, role assignment UI, cross-store isolation tests, backups, and rollback plans.
+
+## Phase ERP-Auth-1I - User and Role Schema Proposal
+
+The user and role schema proposal is documented in `PHASE_ERP_AUTH_1I_USER_ROLE_SCHEMA_PROPOSAL.md`.
+
+ERP-Auth-1I defines the future production-auth shape for `erp_users`, `erp_roles`, `erp_permissions`, and `erp_role_permissions`. It is proposal-only and does not create real auth sessions, migrate schema, write production rows, call platform APIs, or open formal sync.
+
+## Phase ERP-Auth-1J - Store Membership Schema Proposal
+
+The store membership schema proposal is documented in `PHASE_ERP_AUTH_1J_STORE_MEMBERSHIP_SCHEMA_PROPOSAL.md`.
+
+ERP-Auth-1J defines the future `erp_store_memberships` boundary so every permission decision can prove store scope. It remains proposal-only with no database write and no runtime UI change.
+
+## Phase ERP-Auth-1K - Auth Schema Mock Migration Gate
+
+The auth schema mock migration gate is documented in `PHASE_ERP_AUTH_1K_AUTH_SCHEMA_MOCK_MIGRATION_GATE.md`.
+
+ERP-Auth-1K adds a `verify_all.py` temporary-database gate for the proposed auth tables. It verifies roles, permissions, store membership, sensitive-column exclusions, and unchanged business counts without touching `backend/codex1.db`.
+
+## Phase ERP-Backup-2A - Restore Runbook and Operator Checklist Plan
+
+The restore runbook and operator checklist plan is documented in `PHASE_ERP_BACKUP_2A_RESTORE_RUNBOOK_OPERATOR_CHECKLIST_PLAN.md`.
+
+ERP-Backup-2A defines the checklist for a future real restore: source backup manifest, SHA-256, temp restore dry-run, baseline counts, pre-restore backup, approval, audit evidence, and rollback plan. Real restore remains closed.
+
+## Phase Naver-ERP-21A - Existing-Order Refresh No-Change UI/Audit Display Check
+
+The no-change refresh UI/audit display check is documented in `PHASE_NAVER_ERP_21A_EXISTING_ORDER_REFRESH_NO_CHANGE_UI_AUDIT_DISPLAY_CHECK.md`.
+
+Naver-ERP-21A records how to explain the 20E/20F no-change refresh: the selected order was checked, no business fields changed, no local update was forced, and audit evidence was recorded. It must not be displayed as formal order sync availability.

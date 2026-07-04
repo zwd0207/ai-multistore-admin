@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `69% - 75%`
-- Naver 基础 ERP 闭环进度：约 `78% - 83%`
-- ERP 给真实用户落地使用进度：约 `72% - 78%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `65% - 70%`
+- 项目总体规划进度：约 `70% - 76%`
+- Naver 基础 ERP 闭环进度：约 `79% - 84%`
+- ERP 给真实用户落地使用进度：约 `73% - 79%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `66% - 72%`
 
 ## 当前定位
 
@@ -529,3 +529,31 @@ Next 5 recommended stages:
 - 所有业务数据必须绑定 store。
 - preview 优先、dry-run 优先、小窗口优先、单条写库优先。
 - 正式批量同步必须单独批准。
+
+### Latest update after `Phase ERP-Auth-1I` to `Phase Naver-ERP-21A`
+
+- Project overall planning progress: about `70% - 76%`
+- Naver basic ERP loop progress: about `79% - 84%`
+- ERP real-user landing progress: about `73% - 79%`
+- Production version for long-term non-technical use: about `66% - 72%`
+
+Implemented in this update:
+
+- Proposed the future production-auth user, role, permission, role-permission, and store-membership schema.
+- Added a temporary-database `verify_all.py` mock migration gate for the auth schema proposal.
+- Verified the mock auth schema creates roles, permissions, store 8 membership evidence, cross-store isolation, and sensitive-column exclusions without touching `backend/codex1.db`.
+- Planned the production restore runbook and operator checklist while keeping real restore closed.
+- Checked how the 20E/20F no-change Naver order refresh should be displayed: no business-field change, no forced local update, audit evidence recorded, formal sync still closed.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, controlled no-change refresh audit evidence, and mock-proven auth schema gate.
+- Not suitable now: formal product/order batch sync, fully authenticated multi-user production use, large-scale multi-store production, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Auth-1L: Auth schema migration approval plan`
+2. `Phase ERP-Auth-1M: Auth schema migration implementation`
+3. `Phase ERP-Auth-1N: Auth schema post-migration verification`
+4. `Phase ERP-Backup-2B: Restore runbook mock drill gate`
+5. `Phase Naver-ERP-21B: Existing-order no-change audit UI runtime walkthrough`
