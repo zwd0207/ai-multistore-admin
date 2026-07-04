@@ -1190,6 +1190,115 @@ function NaverBatchApprovalEvidencePanel() {
   );
 }
 
+function NaverOrderBatchAuditReadinessPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({
+    loading: false,
+    localOrderCount: 0,
+    error: '',
+  });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, localOrderCount: 0, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getOrders({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((orderResponse) => {
+        if (cancelled) return;
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        setState({ loading: false, localOrderCount: naverOrders.length, error: '' });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            localOrderCount: 0,
+            error: '订单批量审计准备展示暂时无法读取本地订单数量；写入保护仍保持关闭。',
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, localOrderCount, error } = state;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 订单批量审计准备</h2>
+          <p>订单批量审计准备已整理。当前不会写入订单，正式订单批量同步仍未开放。</p>
+        </div>
+        <span className="period-chip">{loading ? '读取中' : '只读展示'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>审计准备</strong>
+            <span>已整理</span>
+          </div>
+          <p>后续写入前需要先完成备份、权限、审计和回读校验。</p>
+          <small>这些材料用于人工确认，不会自动触发同步。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>订单写入</strong>
+            <span>未开放</span>
+          </div>
+          <p>当前不会写入订单，也不会执行发货、取消、退货或换货写操作。</p>
+          <small>正式订单批量同步需要单独批准。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>本地订单范围</strong>
+            <span>{localOrderCount} 条</span>
+          </div>
+          <p>当前只按本地 Naver 订单数量展示审计准备范围，不代表平台有新的待写入订单。</p>
+          <small>真实候选仍需走只读 preview 和人工审核。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看订单批量审计准备技术详情"
+        description="阶段、写入开关和审计标记只放在折叠详情中；主页面只展示业务提示。"
+        items={[
+          { label: 'phase', value: 'Naver-Order-Batch-1H' },
+          { label: 'sync_kind', value: 'naver_order_batch' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'local_order_count', value: localOrderCount },
+          { label: 'operation_audit_rows_planned', value: true },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'real_sync', value: false },
+          { label: 'formal_order_sync_open', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          { label: 'raw_response_saved', value: false },
+          { label: 'privacy_fields_redacted', value: true },
+        ]}
+      />
+    </section>
+  );
+}
+
 function DetailItem({ label, value }) {
   return (
     <div className="detail-item">
@@ -1522,6 +1631,7 @@ export default function Orders() {
       <NaverOrderPreviewStatusPanel />
       <NaverRoleAwareActionVisibilityPanel />
       <NaverBatchApprovalEvidencePanel />
+      <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />
       <ResourcePage

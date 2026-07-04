@@ -1443,3 +1443,33 @@ The audit evidence gate remains private. No public route is added and no audit r
 The order batch audit readiness UI wording plan is documented in `PHASE_NAVER_ORDER_BATCH_1G_ORDER_BATCH_AUDIT_READINESS_UI_WORDING_PLAN.md`.
 
 Future order batch audit readiness should be shown with business-first wording. Formal order batch sync remains closed.
+
+## Phase ERP-Multistore-1O - User Invitation Readonly API Mock Gate
+
+The user invitation readonly API mock gate is documented in `PHASE_ERP_MULTISTORE_1O_USER_INVITATION_READONLY_API_MOCK_GATE.md`.
+
+The future user invitation API shape is now covered by mock-gate expectations: safe hashes, masked login identifier, approval, backup, audit, and membership-plan evidence are required before any later implementation can proceed.
+
+## Phase ERP-Multistore-1P - User Invitation Readonly API Local Implementation
+
+The user invitation readonly API local implementation is documented in `PHASE_ERP_MULTISTORE_1P_USER_INVITATION_READONLY_API_LOCAL_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/permissions/user-invitation/readonly-check`; Codex2 has a data-provider method and mock fallback. The endpoint is readonly and does not create users, send invitations, create sessions, or assign store memberships.
+
+## Phase Naver-Product-Batch-1O - Product Rollback Readonly Report Backend Route Plan
+
+The product rollback readonly report backend route plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1O_PRODUCT_ROLLBACK_READONLY_REPORT_BACKEND_ROUTE_PLAN.md`.
+
+No route is added yet. The future route must remain readonly and must not restore a database, write products, write audit rows, or open formal product batch sync.
+
+## Phase ERP-Batch-1P - Batch Approval Audit Evidence Local Route Mock Gate
+
+The batch approval audit evidence local route mock gate is documented in `PHASE_ERP_BATCH_1P_BATCH_APPROVAL_AUDIT_EVIDENCE_LOCAL_ROUTE_MOCK_GATE.md`.
+
+Codex1 now has a service-level mock gate for the future local route. It keeps the route unexposed, writes no audit rows, and keeps product/order formal batch sync closed.
+
+## Phase Naver-Order-Batch-1H - Order Batch Audit Readiness UI Mock Display
+
+The order batch audit readiness UI mock display is documented in `PHASE_NAVER_ORDER_BATCH_1H_ORDER_BATCH_AUDIT_READINESS_UI_MOCK_DISPLAY.md`.
+
+Codex2 Orders now shows a Naver order batch audit readiness panel. The main panel uses business wording; write flags and audit readiness flags stay folded in `TechnicalDetails`.

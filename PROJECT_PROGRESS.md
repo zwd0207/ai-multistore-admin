@@ -906,3 +906,31 @@ Next 5 recommended stages:
 3. `Phase Naver-Product-Batch-1O: Product rollback readonly report backend route plan`
 4. `Phase ERP-Batch-1P: Batch approval audit evidence local route mock gate`
 5. `Phase Naver-Order-Batch-1H: Order batch audit readiness UI mock display`
+
+### Latest update after `Phase ERP-Multistore-1O` to `Phase Naver-Order-Batch-1H`
+
+- Project overall planning progress: about `84% - 89%`
+- Naver basic ERP loop progress: about `91% - 96%`
+- ERP real-user landing progress: about `86% - 91%`
+- Production version for long-term non-technical use: about `80% - 85%`
+
+Implemented in this update:
+
+- Added a local readonly user-invitation API endpoint in Codex1.
+- Added Codex2 data-provider support and mock fallback for user-invitation readonly checks.
+- Planned the future product rollback readonly report backend route boundary.
+- Added a service-level mock gate for the future batch approval audit-evidence local route.
+- Added a Codex2 Orders panel for Naver order batch audit readiness with business-first wording.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, readonly batch evidence API normalization, approval evidence UI display, controlled stock-only local product update, readonly membership assignment readiness checks, rollback report mock display, mock-proven invitation readiness, and readonly user-invitation readiness checks.
+- Not suitable now: opening formal product/order batch sync, broad product writes, active multi-user login production use, sending real user invitations, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Multistore-1Q: User invitation readonly UI plan`
+2. `Phase ERP-Multistore-1R: User invitation readonly UI display`
+3. `Phase ERP-Batch-1Q: Batch approval audit evidence local route plan`
+4. `Phase Naver-Product-Batch-1P: Product rollback readonly report backend route mock gate`
+5. `Phase Naver-Order-Batch-1I: Order batch audit readiness UI walkthrough`

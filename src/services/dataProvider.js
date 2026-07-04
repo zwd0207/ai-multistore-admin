@@ -643,6 +643,97 @@ function mockStoreMembershipReadonlyGate(payload = {}) {
   };
 }
 
+function mockUserInvitationReadonlyGate(payload = {}) {
+  const actorContext = payload.actor_context || payload.actorContext || {};
+  const targetStoreIds = Array.isArray(payload.target_store_ids || payload.targetStoreIds)
+    ? (payload.target_store_ids || payload.targetStoreIds).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+  const firstStoreId = targetStoreIds[0] || 0;
+  const access = mockSensitiveActionGate({
+    actorContext,
+    storeId: firstStoreId,
+    actionKey: 'store_membership.assign',
+    manualApproval: payload.manual_approval ?? payload.manualApproval,
+  });
+  const targetUserHash = payload.target_user_key_hash || payload.targetUserKeyHash || '';
+  const loginHash = payload.login_identifier_hash || payload.loginIdentifierHash || '';
+  const maskedLogin = payload.login_identifier_masked || payload.loginIdentifierMasked || '';
+  const existingHashes = Array.isArray(payload.existing_user_hashes || payload.existingUserHashes)
+    ? (payload.existing_user_hashes || payload.existingUserHashes)
+    : [];
+  const targetRole = String(payload.target_role || payload.targetRole || '').trim().toLowerCase();
+  const validUserHash = /^user-hash-[a-f0-9]{8,64}$/.test(targetUserHash);
+  const validLoginHash = /^login-hash-[a-f0-9]{8,64}$/.test(loginHash);
+  const loginMasked = Boolean(maskedLogin && (!maskedLogin.includes('@') || maskedLogin.includes('*')) && !/\b01[016789]-?\d{3,4}-?\d{4}\b/.test(maskedLogin));
+  const roleExists = ['owner', 'admin', 'operator', 'auditor', 'viewer'].includes(targetRole);
+  const duplicate = existingHashes.includes(targetUserHash);
+  const backupPlanned = Boolean(payload.backup_evidence_planned ?? payload.backupEvidencePlanned);
+  const auditPlanned = Boolean(payload.audit_evidence_planned ?? payload.auditEvidencePlanned);
+  const membershipPlanReady = Boolean(payload.membership_assignment_plan_ready ?? payload.membershipAssignmentPlanReady);
+
+  let status = 'blocked';
+  let skipReason = null;
+  let businessMessage = '用户邀请只读检查未通过，请管理员查看折叠详情。';
+  if (!validUserHash) {
+    skipReason = 'target_user_hash_invalid';
+  } else if (!validLoginHash) {
+    skipReason = 'login_identifier_hash_invalid';
+  } else if (!loginMasked) {
+    skipReason = 'login_identifier_must_be_masked';
+    businessMessage = '登录标识必须脱敏后才能展示。';
+  } else if (!targetStoreIds.length) {
+    skipReason = 'target_store_ids_required';
+  } else if (!roleExists) {
+    skipReason = 'target_role_not_allowed';
+  } else if (!payload.invitation_reason && !payload.invitationReason) {
+    skipReason = 'invitation_reason_required';
+  } else if (!backupPlanned) {
+    skipReason = 'backup_evidence_plan_required';
+  } else if (!auditPlanned) {
+    skipReason = 'audit_evidence_plan_required';
+  } else if (!membershipPlanReady) {
+    skipReason = 'membership_assignment_plan_required';
+  } else if (duplicate) {
+    skipReason = 'target_user_already_exists';
+    businessMessage = '目标用户已存在，当前不会重复创建邀请。';
+  } else if (access.status !== 'approval_allowed_mock') {
+    skipReason = access.skipReason || 'user_invitation_approval_blocked';
+    businessMessage = access.businessMessage || businessMessage;
+  } else {
+    status = 'user_invitation_mock_ready';
+    businessMessage = '用户邀请只读检查已通过。当前不会创建用户、发送邀请或分配店铺成员。';
+  }
+
+  return {
+    phase: 'ERP-Multistore-1P',
+    user_invitation_readonly_api_mock_gate: true,
+    readonly_api_mock_gate: true,
+    public_endpoint_enabled: false,
+    status,
+    skip_reason: skipReason,
+    target_user_key_hash: validUserHash ? targetUserHash : null,
+    login_identifier_hash: validLoginHash ? loginHash : null,
+    login_identifier_masked: loginMasked ? maskedLogin : null,
+    target_store_ids: targetStoreIds,
+    target_role: roleExists ? targetRole : null,
+    manual_approval: Boolean(payload.manual_approval ?? payload.manualApproval),
+    invitation_reason_present: Boolean(payload.invitation_reason || payload.invitationReason),
+    backup_evidence_planned: backupPlanned,
+    audit_evidence_planned: auditPlanned,
+    membership_assignment_plan_ready: membershipPlanReady,
+    invitation_would_create_user: status === 'user_invitation_mock_ready',
+    invitation_would_send: status === 'user_invitation_mock_ready',
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    role_assignment_written: false,
+    operation_audit_rows_planned: true,
+    operation_audit_rows_written: false,
+    business_message: businessMessage,
+    ...permissionSafetyFlags(),
+  };
+}
+
 function adaptPermissionGateResult(data = {}) {
   return {
     ...data,
@@ -690,6 +781,46 @@ function adaptStoreMembershipReadonlyResult(data = {}) {
     existingActiveMembershipCount: Number(data.existing_active_membership_count ?? data.existingActiveMembershipCount ?? 0),
     membershipWouldCreate: Boolean(data.membership_would_create ?? data.membershipWouldCreate),
     membershipWritten: Boolean(data.membership_written ?? data.membershipWritten),
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyApiMockGate: Boolean(data.readonly_api_mock_gate ?? data.readonlyApiMockGate),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    realAuthSessionCreated: Boolean(data.real_auth_session_created ?? data.realAuthSessionCreated),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function adaptUserInvitationReadonlyResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'ERP-Multistore-1P',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    targetUserKeyHash: data.target_user_key_hash ?? data.targetUserKeyHash ?? null,
+    loginIdentifierHash: data.login_identifier_hash ?? data.loginIdentifierHash ?? null,
+    loginIdentifierMasked: data.login_identifier_masked ?? data.loginIdentifierMasked ?? null,
+    targetStoreIds: Array.isArray(data.target_store_ids || data.targetStoreIds) ? (data.target_store_ids || data.targetStoreIds) : [],
+    targetRole: data.target_role ?? data.targetRole ?? null,
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    invitationReasonPresent: Boolean(data.invitation_reason_present ?? data.invitationReasonPresent),
+    backupEvidencePlanned: Boolean(data.backup_evidence_planned ?? data.backupEvidencePlanned),
+    auditEvidencePlanned: Boolean(data.audit_evidence_planned ?? data.auditEvidencePlanned),
+    membershipAssignmentPlanReady: Boolean(data.membership_assignment_plan_ready ?? data.membershipAssignmentPlanReady),
+    invitationWouldCreateUser: Boolean(data.invitation_would_create_user ?? data.invitationWouldCreateUser),
+    invitationWouldSend: Boolean(data.invitation_would_send ?? data.invitationWouldSend),
+    invitationSent: Boolean(data.invitation_sent ?? data.invitationSent),
+    usersWritten: Boolean(data.users_written ?? data.usersWritten),
+    membershipWritten: Boolean(data.membership_written ?? data.membershipWritten),
+    roleAssignmentWritten: Boolean(data.role_assignment_written ?? data.roleAssignmentWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
     businessMessage: data.business_message ?? data.businessMessage ?? '',
     readonlyApiMockGate: Boolean(data.readonly_api_mock_gate ?? data.readonlyApiMockGate),
     publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
@@ -923,6 +1054,24 @@ const sourceMethods = {
     };
     if (!isBackendSource) return adaptStoreMembershipReadonlyResult(mockStoreMembershipReadonlyGate(request));
     return adaptStoreMembershipReadonlyResult(await backendApi.checkStoreMembershipReadonly(request));
+  },
+  checkUserInvitationReadonly: async (payload = {}) => {
+    const request = {
+      actor_context: payload.actorContext || payload.actor_context || {},
+      target_user_key_hash: payload.targetUserKeyHash || payload.target_user_key_hash,
+      login_identifier_hash: payload.loginIdentifierHash || payload.login_identifier_hash,
+      login_identifier_masked: payload.loginIdentifierMasked || payload.login_identifier_masked,
+      target_store_ids: payload.targetStoreIds || payload.target_store_ids || [],
+      target_role: payload.targetRole || payload.target_role,
+      manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+      invitation_reason: payload.invitationReason || payload.invitation_reason || 'readonly user invitation check',
+      backup_evidence_planned: Boolean(payload.backupEvidencePlanned ?? payload.backup_evidence_planned),
+      audit_evidence_planned: Boolean(payload.auditEvidencePlanned ?? payload.audit_evidence_planned),
+      membership_assignment_plan_ready: Boolean(payload.membershipAssignmentPlanReady ?? payload.membership_assignment_plan_ready),
+      existing_user_hashes: payload.existingUserHashes || payload.existing_user_hashes || [],
+    };
+    if (!isBackendSource) return adaptUserInvitationReadonlyResult(mockUserInvitationReadonlyGate(request));
+    return adaptUserInvitationReadonlyResult(await backendApi.checkUserInvitationReadonly(request));
   },
   normalizeBatchReadonlyEvidence: async (payload = {}) => {
     const request = {
