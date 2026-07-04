@@ -896,8 +896,38 @@ The backup creation audit runtime wiring approval plan is documented in `PHASE_E
 
 ERP-Audit-1Y is planning-only. It defines the future narrow runtime connection from successful manual backup creation to append-only audit rows: `backup_planned`, `backup_created`, `backup_hash_verified`, `backup_integrity_verified`, and `backup_manifest_verified`. It does not write audit rows, create backups, restore/delete backups, call platform APIs, change schema, or open formal sync.
 
+## Phase ERP-Audit-1Z - Backup Creation Audit Runtime Wiring Mock Gate
+
+The backup creation audit runtime wiring mock gate is documented in `PHASE_ERP_AUDIT_1Z_BACKUP_CREATION_AUDIT_RUNTIME_WIRING_MOCK_GATE.md`.
+
+ERP-Audit-1Z adds a private Codex1 mock gate that proves a successful backup helper result can be converted into the five-row backup audit chain in the temporary verification database only. It does not write the real audit table, create backups, restore/delete backups, write business rows, call platform APIs, change schema, or open formal sync.
+
+## Phase ERP-Audit-2A - Backup Creation Audit Local Implementation
+
+The backup creation audit local implementation is documented in `PHASE_ERP_AUDIT_2A_BACKUP_CREATION_AUDIT_LOCAL_IMPLEMENTATION.md`.
+
+ERP-Audit-2A creates a real local backup and writes five append-only rows to `operation_audit_logs` for the backup evidence chain. Only audit rows are written; products, orders, SyncLog, tested-success records, order timeline rows, schema, platform APIs, restore/delete actions, and formal sync remain untouched.
+
+## Phase ERP-Audit-2B - Backup Audit Post-Write Verification
+
+The backup audit post-write verification is documented in `PHASE_ERP_AUDIT_2B_BACKUP_AUDIT_POST_WRITE_VERIFICATION.md`.
+
+ERP-Audit-2B verifies the 2A audit chain by readback only: five actions, one correlation id, backup target type, safe backup hash evidence, false raw/secret flags, privacy redaction, sensitive scan pass, and unchanged business counts. It does not write new rows.
+
 ## Phase Naver-ERP-18B - Controlled Order Refresh With Real Backup Evidence Approval Plan
 
 The controlled order refresh with real backup evidence approval plan is documented in `PHASE_NAVER_ERP_18B_CONTROLLED_ORDER_REFRESH_WITH_REAL_BACKUP_EVIDENCE_APPROVAL_PLAN.md`.
 
 Naver-ERP-18B is planning-only. It defines the approval gate for a later controlled Naver order refresh write that must use fresh real backup evidence before any local update. The future write remains capped, manually approved, privacy-gated, and limited to existing local real Naver orders. This phase does not call Naver, execute `real_sync=true`, write local data, create timeline events, write SyncLog or tested-success records, change schema, modify Codex2 runtime UI, or open formal Naver order sync.
+
+## Phase ERP-Backup-1M - Backup Report Frontend Readonly Display Plan
+
+The backup report frontend readonly display plan is documented in `PHASE_ERP_BACKUP_1M_BACKUP_REPORT_FRONTEND_READONLY_DISPLAY_PLAN.md`.
+
+ERP-Backup-1M defines how the Logs/Audit administrator page should show backup evidence in business language while keeping restore/delete/cleanup actions out of scope.
+
+## Phase ERP-Backup-1N - Backup Report Frontend Readonly Implementation
+
+The backup report frontend readonly implementation is documented in `PHASE_ERP_BACKUP_1N_BACKUP_REPORT_FRONTEND_READONLY_IMPLEMENTATION.md`.
+
+ERP-Backup-1N connects Codex2 to the existing readonly backup report APIs and adds a `本地备份报告` section to Logs/Audit. It shows backup counts, manifest safety, latest backup evidence, and folded diagnostics, without restore/delete/cleanup controls and without any platform API or business-data write.

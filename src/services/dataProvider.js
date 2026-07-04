@@ -701,6 +701,57 @@ const sourceMethods = {
     const { store } = await resolveBackendStore(params);
     return adapters.operationAuditSummary(await backendApi.getOperationAuditLogSummary({ storeId: store.id }));
   },
+  getBackupLocalReport: async (params = {}) => {
+    if (!isBackendSource) {
+      return adapters.backupLocalReport({
+        status: 'mock_backup_report_unavailable',
+        business_message: 'mock 模式不读取本地真实备份报告。',
+        backup_report_readonly: true,
+        public_endpoint_enabled: false,
+        backup_count: 0,
+        manifest_count: 0,
+        items: [],
+        summary: {},
+        backup_deleted: false,
+        real_restore_executed: false,
+        production_db_touched: false,
+        rows_written: 0,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    }
+    return adapters.backupLocalReport(await backendApi.getBackupLocalReport({ limit: params.limit || 20 }));
+  },
+  getBackupLocalReportSummary: async (params = {}) => {
+    if (!isBackendSource) {
+      return adapters.backupLocalReportSummary({
+        status: 'mock_backup_summary_unavailable',
+        business_message: 'mock 模式不读取本地真实备份摘要。',
+        backup_report_readonly: true,
+        public_endpoint_enabled: false,
+        backup_count: 0,
+        manifest_count: 0,
+        reported_item_count: 0,
+        valid_manifest_count: 0,
+        sensitive_scan_passed_count: 0,
+        existing_backup_count: 0,
+        needs_attention_count: 0,
+        backup_deleted: false,
+        real_restore_executed: false,
+        production_db_touched: false,
+        rows_written: 0,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    }
+    return adapters.backupLocalReportSummary(await backendApi.getBackupLocalReportSummary({ limit: params.limit || 20 }));
+  },
   getDeviceEnvironments: async (params) => {
     if (!isBackendSource) return mockApi.getEnvironments(params);
     const { store, stores } = await resolveBackendStore(params);

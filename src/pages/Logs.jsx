@@ -116,6 +116,45 @@ function buildAuditSummary({ rows = [], total = 0, syncTotal = 0, backendMode = 
   ];
 }
 
+function buildBackupSummary({ report = {}, summary = null }) {
+  const backupCount = summary?.backupCount ?? report.backupCount ?? 0;
+  const manifestCount = summary?.manifestCount ?? report.manifestCount ?? 0;
+  const needsAttentionCount = summary?.needsAttentionCount ?? report.summary?.needs_attention_count ?? 0;
+  const latestBackup = summary?.latestBackup || report.latestBackup || null;
+  const allSafe = Boolean((summary?.allManifestsValid ?? report.allManifestsValid) && (summary?.allSensitiveScansPassed ?? report.allSensitiveScansPassed));
+
+  return [
+    {
+      title: '本地备份',
+      status: `${backupCount} 个`,
+      tone: backupCount ? 'info' : 'muted',
+      message: summary?.businessMessage || report.businessMessage || (backupCount ? '已读取本地备份报告。' : '当前还没有可读取的本地备份记录。'),
+      next: '这里只展示备份证据，不提供恢复或删除操作。',
+    },
+    {
+      title: '备份清单',
+      status: `${manifestCount} 个`,
+      tone: allSafe ? 'success' : (manifestCount ? 'warning' : 'muted'),
+      message: allSafe ? '备份清单和安全检查通过。' : '存在需要管理员复核的备份清单或安全检查。',
+      next: '恢复数据库仍需要单独审批和 dry-run。',
+    },
+    {
+      title: '需要复核',
+      status: `${needsAttentionCount} 个`,
+      tone: needsAttentionCount ? 'warning' : 'success',
+      message: needsAttentionCount ? '有备份记录需要检查。' : '当前备份报告没有复核项。',
+      next: needsAttentionCount ? '请查看折叠详情中的安全状态。' : '保留备份证据即可。',
+    },
+    {
+      title: '最近备份',
+      status: latestBackup?.createdAt ? latestBackup.createdAt.slice(0, 10) : '暂无',
+      tone: latestBackup ? 'info' : 'muted',
+      message: latestBackup ? `${latestBackup.phase} · ${latestBackup.status}` : '尚无本地备份记录。',
+      next: latestBackup ? latestBackup.nextStep : '后续写库或迁移前应先创建备份。',
+    },
+  ];
+}
+
 const auditColumns = [
   { key: 'time', title: '时间' },
   { key: 'objectName', title: '业务对象', render: (value, row) => <><strong>{value}</strong><br /><small>{row.module}</small></> },
@@ -134,6 +173,16 @@ const syncColumns = [
   { key: 'message', title: '摘要' },
   { key: 'status', title: '结果', render: (value) => <StatusBadge value={readableStatus(value)} /> },
   { key: 'nextStep', title: '下一步', render: (_value, row) => (readableStatus(row.status).includes('失败') ? '请管理员查看高级详情。' : '无需处理，保留记录备查。') },
+];
+
+const backupColumns = [
+  { key: 'createdAt', title: '创建时间' },
+  { key: 'phase', title: '阶段' },
+  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'backupSizeLabel', title: '大小' },
+  { key: 'evidence', title: '证据' },
+  { key: 'retentionUntil', title: '保留到期' },
+  { key: 'nextStep', title: '下一步' },
 ];
 
 const initialQuery = {
@@ -163,6 +212,10 @@ export default function Logs() {
   const [syncRecords, setSyncRecords] = useState({ data: [], total: 0 });
   const [syncLoading, setSyncLoading] = useState(isBackendSource);
   const [syncError, setSyncError] = useState('');
+  const [backupReport, setBackupReport] = useState({ items: [], backupCount: 0, manifestCount: 0 });
+  const [backupSummary, setBackupSummary] = useState(null);
+  const [backupLoading, setBackupLoading] = useState(isBackendSource);
+  const [backupError, setBackupError] = useState('');
 
   const options = useMemo(() => ({
     modules: isBackendSource ? auditModules : mockModules,
@@ -227,8 +280,32 @@ export default function Logs() {
     loadSyncRecords();
   }, [selectedStoreId, storeLoading, storeError, versions.syncLogs]);
 
+  const loadBackupReport = async () => {
+    if (!isBackendSource) return;
+    setBackupLoading(true);
+    setBackupError('');
+    try {
+      const [nextReport, nextSummary] = await Promise.all([
+        dataProvider.getBackupLocalReport({ limit: 20 }),
+        dataProvider.getBackupLocalReportSummary({ limit: 20 }),
+      ]);
+      setBackupReport(nextReport);
+      setBackupSummary(nextSummary);
+    } catch (error) {
+      setBackupReport({ items: [], backupCount: 0, manifestCount: 0 });
+      setBackupSummary(null);
+      setBackupError(error?.detail?.business_message || error.message || '本地备份报告加载失败，请稍后重试。');
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBackupReport();
+  }, []);
+
   const refreshAll = async () => {
-    await Promise.all([loadAuditRecords(query), loadSyncRecords()]);
+    await Promise.all([loadAuditRecords(query), loadSyncRecords(), loadBackupReport()]);
   };
 
   const openDetail = async (row) => {
@@ -254,6 +331,7 @@ export default function Logs() {
     backendMode: isBackendSource,
     auditSummary,
   });
+  const backupCards = buildBackupSummary({ report: backupReport, summary: backupSummary });
 
   const businessEmptyMessage = result.businessMessage || auditSummary?.businessMessage || (isBackendSource
     ? '当前还没有操作审计记录。后续受控写入、备份、恢复等操作接入后，会在这里显示谁操作了什么、什么时候操作、结果如何。'
@@ -288,6 +366,53 @@ export default function Logs() {
           ))}
         </div>
       </section>
+
+      {isBackendSource && (
+        <section className="content-card">
+          <div className="card-title">
+            <div>
+              <h2>本地备份报告</h2>
+              <p>展示本机备份清单、安全检查和最近备份证据；恢复、删除和清理操作仍需单独审批。</p>
+            </div>
+            <span className="period-chip">只读</span>
+          </div>
+          <div className="business-capability-grid compact">
+            {backupCards.map((card) => (
+              <article className={`business-capability-card ${card.tone}`} key={card.title}>
+                <div className="business-capability-head">
+                  <strong>{card.title}</strong>
+                  <span>{card.status}</span>
+                </div>
+                <p>{card.message}</p>
+                <small>{card.next}</small>
+              </article>
+            ))}
+          </div>
+          {backupError ? <EmptyState title="备份报告加载失败" description={backupError} /> : null}
+          {!backupError && !backupLoading && !(backupReport.items || []).length ? (
+            <EmptyState title="当前还没有本地备份记录" description="创建受控备份后，这里会显示备份清单和安全检查结果。" />
+          ) : null}
+          <DataTable columns={backupColumns} rows={backupReport.items || []} loading={backupLoading} />
+          <TechnicalDetails
+            title="查看备份报告诊断"
+            description="这里只保留只读接口、安全计数和最近备份的安全摘要，不提供恢复或删除入口。"
+            items={[
+              { label: 'backup_report_route', value: 'GET /api/v1/backups/local-report' },
+              { label: 'backup_report_summary_route', value: 'GET /api/v1/backups/local-report/summary' },
+              { label: 'backup_count', value: backupSummary?.backupCount ?? backupReport.backupCount ?? 0 },
+              { label: 'manifest_count', value: backupSummary?.manifestCount ?? backupReport.manifestCount ?? 0 },
+              { label: 'needs_attention_count', value: backupSummary?.needsAttentionCount ?? 0 },
+              { label: 'all_manifests_valid', value: backupSummary?.allManifestsValid ?? backupReport.allManifestsValid },
+              { label: 'all_sensitive_scans_passed', value: backupSummary?.allSensitiveScansPassed ?? backupReport.allSensitiveScansPassed },
+              { label: 'backup_deleted', value: backupReport.backupDeleted },
+              { label: 'real_restore_executed', value: backupReport.realRestoreExecuted },
+              { label: 'production_db_touched', value: backupReport.productionDbTouched },
+              { label: 'rows_written', value: backupReport.rowsWritten },
+              { label: 'latest_backup', value: backupSummary?.latestBackup?.advancedDetails || backupReport.latestBackup?.advancedDetails || {} },
+            ]}
+          />
+        </section>
+      )}
 
       <FilterPanel>
         <SearchBar

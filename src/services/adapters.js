@@ -1262,6 +1262,140 @@ export function adaptOperationAuditSummary(data = {}) {
   };
 }
 
+function backupStatusLabel(item = {}) {
+  if (item.manifestValid && item.sensitiveScanPassed && item.backupExists && item.backupSizeMatches) {
+    return '备份可用';
+  }
+  if (!item.backupExists) return '备份文件缺失';
+  if (!item.manifestValid || !item.sensitiveScanPassed) return '需要复核';
+  if (!item.backupSizeMatches) return '大小不一致';
+  return '待确认';
+}
+
+function formatBytes(value) {
+  const bytes = numberValue(value);
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function adaptBackupReportItem(item = {}) {
+  const adapted = {
+    id: item.backup_id || item.manifest_path || item.backup_path,
+    backupId: item.backup_id,
+    createdAt: item.created_at,
+    phase: item.phase || '未标记阶段',
+    operationType: item.operation_type || 'local_backup',
+    actorLabel: item.created_by_actor_label || '本地操作人',
+    backupLocation: item.backup_inside_root === false ? '备份目录外，需复核' : '本地备份目录内',
+    backupSha256Abbrev: item.backup_sha256_abbrev || '',
+    backupSizeBytes: numberValue(item.backup_size_bytes),
+    backupSizeLabel: formatBytes(item.backup_size_bytes),
+    sqliteIntegrityCheck: item.sqlite_integrity_check || 'unknown',
+    retentionClass: item.retention_class || '',
+    retentionUntil: item.retention_until || '',
+    protectedFromAutoDelete: Boolean(item.protected_from_auto_delete),
+    restoreDrillStatus: item.restore_drill_status || 'pending',
+    baselineCounts: item.baseline_counts || {},
+    manifestValid: Boolean(item.manifest_valid),
+    sensitiveScanPassed: Boolean(item.sensitive_scan_passed),
+    backupExists: Boolean(item.backup_exists),
+    backupInsideRoot: item.backup_inside_root !== false,
+    backupSizeMatches: Boolean(item.backup_size_matches),
+    rawResponseSaved: Boolean(item.raw_response_saved),
+    secretsSaved: Boolean(item.secrets_saved),
+    privacyFieldsRedacted: item.privacy_fields_redacted !== false,
+    advancedDetails: {
+      backup_id: item.backup_id,
+      phase: item.phase,
+      operation_type: item.operation_type,
+      created_at: item.created_at,
+      backup_location: item.backup_inside_root === false ? 'outside_root' : 'approved_root',
+      backup_sha256_abbrev: item.backup_sha256_abbrev,
+      backup_size_bytes: item.backup_size_bytes,
+      sqlite_integrity_check: item.sqlite_integrity_check,
+      retention_class: item.retention_class,
+      retention_until: item.retention_until,
+      protected_from_auto_delete: item.protected_from_auto_delete,
+      restore_drill_status: item.restore_drill_status,
+      baseline_counts: item.baseline_counts || {},
+      manifest_valid: item.manifest_valid,
+      sensitive_scan_passed: item.sensitive_scan_passed,
+      backup_exists: item.backup_exists,
+      backup_inside_root: item.backup_inside_root,
+      backup_size_matches: item.backup_size_matches,
+      raw_response_saved: false,
+      secrets_saved: false,
+      privacy_fields_redacted: item.privacy_fields_redacted !== false,
+    },
+  };
+  return {
+    ...adapted,
+    status: backupStatusLabel(adapted),
+    evidence: adapted.manifestValid && adapted.sensitiveScanPassed ? '清单和安全检查通过' : '需要管理员复核',
+    nextStep: adapted.manifestValid && adapted.sensitiveScanPassed && adapted.backupExists
+      ? '保留备份证据，恢复操作仍需单独审批。'
+      : '请管理员检查备份清单和文件状态。',
+  };
+}
+
+export function adaptBackupLocalReport(data = {}) {
+  const items = (data.items || []).map(adaptBackupReportItem);
+  return {
+    status: data.status || '',
+    businessMessage: data.business_message || '',
+    backupReportReadonly: data.backup_report_readonly !== false,
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled),
+    backupCount: numberValue(data.backup_count),
+    manifestCount: numberValue(data.manifest_count),
+    allManifestsValid: Boolean(data.all_manifests_valid),
+    allSensitiveScansPassed: Boolean(data.all_sensitive_scans_passed),
+    items,
+    latestBackup: data.latest_backup ? adaptBackupReportItem(data.latest_backup) : null,
+    summary: data.summary || {},
+    backupDeleted: Boolean(data.backup_deleted),
+    realRestoreExecuted: Boolean(data.real_restore_executed),
+    productionDbTouched: Boolean(data.production_db_touched),
+    rowsWritten: numberValue(data.rows_written),
+    rawResponseSaved: Boolean(data.raw_response_saved),
+    secretsSaved: Boolean(data.secrets_saved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled),
+    sensitiveScanPassed: data.sensitive_scan_passed !== false,
+  };
+}
+
+export function adaptBackupLocalReportSummary(data = {}) {
+  return {
+    status: data.status || '',
+    businessMessage: data.business_message || '',
+    backupReportReadonly: data.backup_report_readonly !== false,
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled),
+    backupCount: numberValue(data.backup_count),
+    manifestCount: numberValue(data.manifest_count),
+    reportedItemCount: numberValue(data.reported_item_count),
+    validManifestCount: numberValue(data.valid_manifest_count),
+    sensitiveScanPassedCount: numberValue(data.sensitive_scan_passed_count),
+    existingBackupCount: numberValue(data.existing_backup_count),
+    needsAttentionCount: numberValue(data.needs_attention_count),
+    allManifestsValid: Boolean(data.all_manifests_valid),
+    allSensitiveScansPassed: Boolean(data.all_sensitive_scans_passed),
+    latestBackup: data.latest_backup ? adaptBackupReportItem(data.latest_backup) : null,
+    backupDeleted: Boolean(data.backup_deleted),
+    realRestoreExecuted: Boolean(data.real_restore_executed),
+    productionDbTouched: Boolean(data.production_db_touched),
+    rowsWritten: numberValue(data.rows_written),
+    rawResponseSaved: Boolean(data.raw_response_saved),
+    secretsSaved: Boolean(data.secrets_saved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled),
+    sensitiveScanPassed: data.sensitive_scan_passed !== false,
+  };
+}
+
 export function adaptList(data, adapter) {
   const source = Array.isArray(data) ? { items: data, total: data.length } : (data || {});
   const items = (source.items || []).map(adapter);
@@ -1296,6 +1430,9 @@ export const adapters = {
   operationAuditLog: adaptOperationAuditLog,
   operationAuditLogList: adaptOperationAuditLogList,
   operationAuditSummary: adaptOperationAuditSummary,
+  backupReportItem: adaptBackupReportItem,
+  backupLocalReport: adaptBackupLocalReport,
+  backupLocalReportSummary: adaptBackupLocalReportSummary,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
   coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,

@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `55% - 62%`
-- Naver 基础 ERP 闭环进度：约 `71% - 76%`
-- ERP 给真实用户落地使用进度：约 `59% - 66%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `51% - 56%`
+- 项目总体规划进度：约 `58% - 65%`
+- Naver 基础 ERP 闭环进度：约 `72% - 77%`
+- ERP 给真实用户落地使用进度：约 `62% - 69%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `55% - 60%`
 
 ## 当前定位
 
@@ -19,7 +19,7 @@
 - 查看本地商品、订单、库存、销售额。
 - 做受控 preview、单条写入、小批量 refresh、人工审核。
 - 演示 Naver-first ERP 工作台方向。
-- 演示备份、恢复 dry-run、审计门禁和安全边界。
+- 演示备份报告、恢复 dry-run、真实备份创建审计链和安全边界。
 
 现在不适合：
 
@@ -77,6 +77,10 @@
 - Backup report readonly API approval plan、mock gate、本地只读 API 已完成。
 - Backup creation audit mock gate 已完成。
 - Backup creation audit runtime wiring approval plan 已完成。
+- Backup creation audit runtime wiring mock gate 已完成。
+- Backup creation audit local implementation 已完成，真实 `operation_audit_logs` 已写入 5 条备份审计链。
+- Backup audit post-write verification 已完成。
+- Backup report frontend readonly display plan 和 Codex2 只读展示实现已完成。
 - Naver order refresh backup evidence gate 已完成。
 - Naver order refresh with real backup evidence approval plan 已完成。
 
@@ -91,14 +95,12 @@
 
 ### 审计
 
-- Backup creation audit 还停留在 mock gate，未接入真实 backup helper runtime。
 - Selected operation audit runtime wiring 仍需要从 approval/mock 进入受控真实写入路径。
-- 审计日志还需要覆盖更多真实操作类型，例如备份创建、订单 refresh 写入、恢复演练、人工审批。
+- 审计日志还需要覆盖更多真实操作类型，例如订单 refresh 写入、恢复演练、人工审批。
 - Audit UI 仍需要在真实生产数据量下继续可读性走查。
 
 ### 备份和恢复
 
-- Backup report 还未接入前端。
 - 真实 restore 仍未开放，只允许 dry-run。
 - 备份保留策略目前未执行自动清理，后续必须先做 report-only，再由人工审批。
 - 还没有完整的恢复操作手册和生产演练 runbook。
@@ -128,53 +130,53 @@
 
 ### 接下来 5 个阶段
 
-1. `Phase ERP-Audit-1Z: Backup creation audit runtime wiring mock gate`
-   - 目的：先用临时库验证真实 backup helper 未来写 audit chain 的调用边界。
+1. `Phase ERP-Audit-2C: Selected operation audit local implementation approval plan`
+   - 目的：为 Naver 订单 refresh 写入补真实操作审计审批边界。
+   - 风险：低。
+   - 真实 API：否。
+   - 写库：否。
+   - Codex2：否。
+
+2. `Phase ERP-Audit-2D: Selected operation audit local implementation mock gate`
+   - 目的：先在临时库验证订单 refresh 审计链真实接入前的调用形态。
    - 风险：中。
    - 真实 API：否。
    - 写库：只写临时验证库。
    - Codex2：否。
 
-2. `Phase ERP-Audit-2A: Backup creation audit local implementation`
-   - 目的：把真实手动备份成功事件接入 append-only audit rows。
-   - 风险：中高。
-   - 真实 API：否。
-   - 写库：写 `operation_audit_logs`。
-   - Codex2：否。
-
-3. `Phase ERP-Audit-2B: Backup audit post-write verification`
-   - 目的：回读验证备份审计链、业务表不变、敏感字段不泄露。
-   - 风险：低。
-   - 真实 API：否。
+3. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
+   - 目的：重新只读确认可刷新的 Naver 订单候选，并关联可用备份证据。
+   - 风险：中。
+   - 真实 API：是，只读。
    - 写库：否。
    - Codex2：否。
 
-4. `Phase ERP-Backup-1M: Backup report frontend readonly display plan`
-   - 目的：规划前端如何给非技术用户展示备份证据和恢复状态。
-   - 风险：低。
-   - 真实 API：否。
-   - 写库：否。
-   - Codex2：计划阶段。
-
-5. `Phase ERP-Backup-1N: Backup report frontend readonly implementation`
-   - 目的：在前端只读展示备份报告，不提供恢复/删除按钮。
+4. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
+   - 目的：为极小范围订单 refresh 写入做人工批准计划。
    - 风险：中。
    - 真实 API：否。
    - 写库：否。
-   - Codex2：是。
+   - Codex2：否。
+
+5. `Phase Naver-ERP-18E: Controlled order refresh small write with audit evidence`
+   - 目的：在备份和审计证据齐备后执行受控小范围本地订单 refresh 写入。
+   - 风险：高。
+   - 真实 API：是，只读 detail。
+   - 写库：是，小范围订单 refresh 与审计行。
+   - Codex2：后续展示复核。
 
 ### 后续 10 个阶段候选
 
-1. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
-2. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
-3. `Phase Naver-ERP-18E: Controlled order refresh small write`
-4. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
-5. `Phase ERP-Auth-1A: Role and permission model plan`
-6. `Phase ERP-Auth-1B: Store-scoped access gate mock`
-7. `Phase ERP-Auth-1C: Sensitive action approval roles`
-8. `Phase ERP-Auth-1D: Multi-store data isolation verification`
-9. `Phase Prod-Ready-1A: Production readiness checklist`
-10. `Phase Prod-Ready-1B: End-to-end rehearsal with backup`
+1. `Phase ERP-Audit-2C: Selected operation audit local implementation approval plan`
+2. `Phase ERP-Audit-2D: Selected operation audit local implementation mock gate`
+3. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
+4. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
+5. `Phase Naver-ERP-18E: Controlled order refresh small write with audit evidence`
+6. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
+7. `Phase ERP-Auth-1A: Role and permission model plan`
+8. `Phase ERP-Auth-1B: Store-scoped access gate mock`
+9. `Phase ERP-Auth-1C: Sensitive action approval roles`
+10. `Phase ERP-Auth-1D: Multi-store data isolation verification`
 
 ## 安全边界
 
