@@ -5000,6 +5000,232 @@ def _evaluate_naver_product_stock_change_mock_write_gate(
     return result
 
 
+def _evaluate_naver_product_stock_change_real_write_approval(
+    *,
+    dry_run_diff: dict | None,
+    actor_context: dict | None,
+    store_id: int,
+    approved_changed_fields: list[str] | tuple[str, ...] | set[str] | None,
+    manual_approval: bool,
+    backup_evidence: dict | None,
+    audit_plan_ready: bool,
+    rollback_plan_ready: bool,
+) -> dict:
+    """Controlled local-write approval wrapper; does not open formal batch sync."""
+
+    from app.services.permission_service import VERIFICATION_SCOPE
+
+    gate = _evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff=dry_run_diff,
+        actor_context=actor_context,
+        store_id=store_id,
+        approved_changed_fields=approved_changed_fields,
+        manual_approval=manual_approval,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=audit_plan_ready,
+        rollback_plan_ready=rollback_plan_ready,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    result = {
+        **gate,
+        "phase": "Naver-Product-Batch-1E",
+        "product_stock_change_real_write_approval": True,
+        "permission_model": "current_mock_role_metadata_only",
+        "real_database_write_allowed": False,
+        "products_written": False,
+        "real_database_written": False,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if gate.get("status") != "stock_change_mock_gate_ready_for_later_write_phase":
+        return result
+    result.update({
+        "status": "stock_change_real_write_approved",
+        "real_database_write_allowed": True,
+        "business_message": (
+            "Controlled stock-only local write is approved for this phase. "
+            "Formal product batch sync remains closed."
+        ),
+    })
+    return result
+
+
+def _sync_naver_product_stock_change_local_write(
+    db: Session,
+    *,
+    store_id: int,
+    payload: object | None,
+    dry_run_diff: dict | None,
+    approval_gate: dict | None,
+    backup_evidence: dict | None,
+    max_write_count: int = 3,
+) -> dict:
+    """Apply a narrow stock-only local write for existing Naver products."""
+
+    result = {
+        "phase": "Naver-Product-Batch-1F",
+        "product_stock_change_local_write": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "store_id": store_id,
+        "max_write_count": max_write_count,
+        "updated_count": 0,
+        "created_count": 0,
+        "skipped_count": 0,
+        "stock_only_write": False,
+        "product_fields_written": [],
+        "updated_products": [],
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "real_database_written": False,
+        "real_api_called": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if store_id != 8:
+        result["skip_reason"] = "store_scope_not_approved_for_stock_write"
+        return result
+    if not isinstance(approval_gate, dict) or approval_gate.get("status") not in {
+        "stock_change_mock_gate_ready_for_later_write_phase",
+        "stock_change_real_write_approved",
+    }:
+        result["skip_reason"] = "stock_change_approval_gate_required"
+        return result
+    if approval_gate.get("status") == "stock_change_real_write_approved" and approval_gate.get("real_database_write_allowed") is not True:
+        result["skip_reason"] = "stock_change_real_write_not_allowed"
+        return result
+    backup_gate = _validate_naver_order_refresh_backup_evidence(backup_evidence, require_backup=True)
+    result["backup_gate"] = backup_gate
+    if backup_gate.get("status") != "backup_evidence_verified":
+        result["skip_reason"] = backup_gate.get("skip_reason") or "backup_evidence_required"
+        return result
+    if not isinstance(dry_run_diff, dict):
+        result["skip_reason"] = "dry_run_diff_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(dry_run_diff):
+        result["skip_reason"] = "dry_run_diff_sensitive_field_blocked"
+        return result
+
+    observed_changed_fields = _normalize_safe_changed_fields(dry_run_diff.get("changed_fields"))
+    if observed_changed_fields != ["stock_quantity"]:
+        result["skip_reason"] = "non_stock_field_change_requires_separate_plan"
+        return result
+    try:
+        would_update = int(dry_run_diff.get("would_update") or 0)
+        would_create = int(dry_run_diff.get("would_create") or 0)
+        would_skip = int(dry_run_diff.get("would_skip") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "dry_run_counts_invalid"
+        return result
+    if would_update <= 0:
+        result["skip_reason"] = "stock_change_candidates_missing"
+        return result
+    if would_update > max_write_count:
+        result["skip_reason"] = "stock_change_write_limit_exceeded"
+        return result
+    if would_create != 0:
+        result["skip_reason"] = "product_create_not_allowed_in_stock_write"
+        return result
+    if would_skip != 0:
+        result["skip_reason"] = "skipped_candidates_require_review"
+        return result
+
+    candidates, skip_reasons = _extract_naver_product_sync_candidates(payload)
+    hard_skip_total = sum(
+        int(skip_reasons.get(reason, 0) or 0)
+        for reason in (
+            "multiple_channel_products",
+            "missing_external_product_id",
+            "missing_product_name",
+            "duplicate_external_product_id_in_same_batch",
+            "invalid_status_shape",
+            "invalid_numeric_shape_for_price",
+            "invalid_numeric_shape_for_stock",
+        )
+    )
+    if hard_skip_total:
+        result["skip_reason"] = "payload_candidates_not_safe_for_stock_write"
+        result["skipped_count"] = hard_skip_total
+        return result
+
+    pending_updates: list[tuple[Product, int, int, str]] = []
+    non_stock_changed_fields: set[str] = set()
+    seen_external_product_ids: set[str] = set()
+    for candidate in candidates[:5]:
+        external_product_id = candidate.get("external_product_id")
+        if not isinstance(external_product_id, str) or not external_product_id:
+            result["skip_reason"] = "candidate_external_product_id_missing"
+            return result
+        if external_product_id in seen_external_product_ids:
+            result["skip_reason"] = "duplicate_external_product_id_in_same_batch"
+            return result
+        seen_external_product_ids.add(external_product_id)
+        product = db.scalar(
+            select(Product).where(
+                Product.store_id == store_id,
+                Product.platform == "naver",
+                Product.external_product_id == external_product_id,
+            )
+        )
+        if product is None:
+            result["skip_reason"] = "product_create_not_allowed_in_stock_write"
+            return result
+        for field in ("name", "status", "currency"):
+            if candidate.get(field) is not None and getattr(product, field) != candidate.get(field):
+                non_stock_changed_fields.add(field)
+        if candidate.get("price") is not None and Decimal(str(product.price)) != Decimal(str(candidate.get("price"))):
+            non_stock_changed_fields.add("price")
+        incoming_stock = candidate.get("stock_quantity")
+        if incoming_stock is None:
+            result["skip_reason"] = "stock_quantity_missing"
+            return result
+        safe_stock = int(incoming_stock)
+        existing_stock = int(product.stock_quantity)
+        if safe_stock != existing_stock:
+            pending_updates.append((product, existing_stock, safe_stock, _mask_external_identifier(external_product_id)))
+
+    if non_stock_changed_fields:
+        result["skip_reason"] = "non_stock_field_change_requires_separate_plan"
+        result["blocked_changed_fields"] = sorted(non_stock_changed_fields)
+        return result
+    if len(pending_updates) != would_update:
+        result["skip_reason"] = "stock_change_candidate_count_mismatch"
+        result["observed_update_count"] = len(pending_updates)
+        result["dry_run_would_update"] = would_update
+        return result
+
+    for product, before_stock, after_stock, sample_id in pending_updates:
+        product.stock_quantity = after_stock
+        result["updated_products"].append({
+            "local_product_id": product.id,
+            "sample_id": sample_id,
+            "stock_quantity_before": before_stock,
+            "stock_quantity_after": after_stock,
+        })
+    db.commit()
+
+    result.update({
+        "status": "success",
+        "updated_count": len(pending_updates),
+        "stock_only_write": True,
+        "product_fields_written": ["stock_quantity"] if pending_updates else [],
+        "products_written": bool(pending_updates),
+        "real_database_written": bool(pending_updates),
+        "business_message": "Controlled Naver stock-only local product update completed. Formal product batch sync remains closed.",
+    })
+    return result
+
+
 def _evaluate_batch_readonly_evidence_api_mock_gate(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

@@ -10635,6 +10635,8 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.models.product import Product
+    from app.models.store import Store
     from app.services import sync_service
     from app.services.permission_service import VERIFICATION_SCOPE
 
@@ -10757,6 +10759,20 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert success["would_refresh_only"] == 2, success
     assert success["products_written"] is False, success
     assert success["formal_product_sync_open"] is False, success
+    real_approval = sync_service._evaluate_naver_product_stock_change_real_write_approval(
+        dry_run_diff=stock_diff,
+        actor_context=admin_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity"],
+        manual_approval=True,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+    )
+    assert real_approval["status"] == "stock_change_real_write_approved", real_approval
+    assert real_approval["real_database_write_allowed"] is True, real_approval
+    assert real_approval["products_written"] is False, real_approval
+    assert real_approval["formal_product_sync_open"] is False, real_approval
 
     readonly_success = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
         evidence_items=[
@@ -10876,6 +10892,190 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak",
     ]:
         assert forbidden not in serialized, serialized
+
+    fixture_ids = [
+        "stock-safe-001",
+        "stock-safe-002",
+        "stock-safe-003",
+        "stock-safe-004",
+        "stock-safe-005",
+    ]
+    stock_payload = {
+        "contents": [
+            {
+                "originProductNo": f"origin-{index + 1}",
+                "channelProducts": [
+                    {
+                        "channelProductNo": external_id,
+                        "productName": f"Safe product {index + 1}",
+                        "statusType": "SALE",
+                        "salePrice": 1000 + index,
+                        "stockQuantity": incoming_stock,
+                    }
+                ],
+            }
+            for index, (external_id, incoming_stock) in enumerate(zip(fixture_ids, [11, 12, 13, 14, 15]))
+        ]
+    }
+    with SessionLocal() as db:
+        store = db.get(Store, 8)
+        if store is None:
+            db.add(Store(id=8, name="Naver stock safe fixture store", platform="naver"))
+        db.query(Product).filter(
+            Product.store_id == 8,
+            Product.platform == "naver",
+            Product.external_product_id.in_(fixture_ids),
+        ).delete(synchronize_session=False)
+        for index, external_id in enumerate(fixture_ids):
+            db.add(Product(
+                store_id=8,
+                platform="naver",
+                external_product_id=external_id,
+                name=f"Safe product {index + 1}",
+                status="SALE",
+                price=Decimal(str(1000 + index)),
+                currency="KRW",
+                stock_quantity=[1, 2, 3, 14, 15][index],
+                source_type="naver_real_sync",
+                raw_data={"raw_response_saved": False, "mapping_version": "stock_fixture_v1"},
+            ))
+        db.commit()
+        fixture_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        write_result = sync_service._sync_naver_product_stock_change_local_write(
+            db,
+            store_id=8,
+            payload=stock_payload,
+            dry_run_diff=stock_diff,
+            approval_gate=real_approval,
+            backup_evidence=backup_evidence,
+            max_write_count=3,
+        )
+        assert write_result["status"] == "success", write_result
+        assert write_result["updated_count"] == 3, write_result
+        assert write_result["created_count"] == 0, write_result
+        assert write_result["stock_only_write"] is True, write_result
+        assert write_result["product_fields_written"] == ["stock_quantity"], write_result
+        assert write_result["products_written"] is True, write_result
+        assert write_result["orders_written"] is False, write_result
+        assert write_result["sync_log_written"] is False, write_result
+        assert write_result["capability_tested_success_written"] is False, write_result
+        assert write_result["operation_audit_rows_written"] is False, write_result
+        assert write_result["timeline_events_written"] is False, write_result
+        updated_stocks = {
+            product.external_product_id: product.stock_quantity
+            for product in db.query(Product).filter(
+                Product.store_id == 8,
+                Product.platform == "naver",
+                Product.external_product_id.in_(fixture_ids),
+            ).all()
+        }
+        assert updated_stocks == {
+            "stock-safe-001": 11,
+            "stock-safe-002": 12,
+            "stock-safe-003": 13,
+            "stock-safe-004": 14,
+            "stock-safe-005": 15,
+        }, updated_stocks
+        for product in db.query(Product).filter(
+            Product.store_id == 8,
+            Product.platform == "naver",
+            Product.external_product_id.in_(fixture_ids),
+        ).all():
+            assert product.name.startswith("Safe product "), product.name
+            assert product.status == "SALE", product.status
+            assert product.currency == "KRW", product.currency
+            assert product.source_type == "naver_real_sync", product.source_type
+            assert product.raw_data == {"raw_response_saved": False, "mapping_version": "stock_fixture_v1"}, product.raw_data
+        fixture_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        assert fixture_counts_after == fixture_counts_before, {
+            "before": fixture_counts_before,
+            "after": fixture_counts_after,
+        }
+
+        create_blocked = sync_service._sync_naver_product_stock_change_local_write(
+            db,
+            store_id=8,
+            payload={
+                "contents": [{
+                    "channelProducts": [{
+                        "channelProductNo": "stock-safe-missing",
+                        "productName": "Safe missing product",
+                        "statusType": "SALE",
+                        "salePrice": 999,
+                        "stockQuantity": 1,
+                    }],
+                }],
+            },
+            dry_run_diff={**stock_diff, "would_update": 1},
+            approval_gate=real_approval,
+            backup_evidence=backup_evidence,
+            max_write_count=3,
+        )
+        assert create_blocked["skip_reason"] == "product_create_not_allowed_in_stock_write", create_blocked
+
+        non_stock_payload = {
+            "contents": [{
+                "channelProducts": [{
+                    "channelProductNo": "stock-safe-001",
+                    "productName": "Changed product name",
+                    "statusType": "SALE",
+                    "salePrice": 1000,
+                    "stockQuantity": 16,
+                }],
+            }]
+        }
+        non_stock_blocked = sync_service._sync_naver_product_stock_change_local_write(
+            db,
+            store_id=8,
+            payload=non_stock_payload,
+            dry_run_diff={**stock_diff, "would_update": 1},
+            approval_gate=real_approval,
+            backup_evidence=backup_evidence,
+            max_write_count=3,
+        )
+        assert non_stock_blocked["skip_reason"] == "non_stock_field_change_requires_separate_plan", non_stock_blocked
+
+        db.query(Product).filter(
+            Product.store_id == 8,
+            Product.platform == "naver",
+            Product.external_product_id.in_(fixture_ids),
+        ).delete(synchronize_session=False)
+        db.commit()
+
+    write_serialized = json.dumps(write_result, ensure_ascii=False, default=str).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "channelno",
+        "external_product_id",
+        "stock-safe-001",
+        "stock-safe-002",
+        "stock-safe-003",
+    ]:
+        assert forbidden not in write_serialized, write_serialized
 
     print("product stock change and readonly evidence gates: ok")
 

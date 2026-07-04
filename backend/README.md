@@ -1024,3 +1024,19 @@ evaluate_store_membership_assignment_mock_gate(...)
 It checks safe target user hash, target store, target role, assignment reason, admin approval for `store_membership.assign`, and duplicate active membership. It does not create users or memberships.
 
 ERP-Auth-1O remains planning-only for future role assignment approval. Production login, user creation, route-level authorization, and real store memberships remain closed.
+
+Naver-Product-Batch-1E approves a controlled stock-only local write for the latest Naver product readonly evidence. The approval is limited to `store_id=8`, `credential_id=7`, `page=1,size=5`, `would_create=0`, `would_skip=0`, and `changed_fields=["stock_quantity"]`. It requires a verified database backup, admin approval for `products.batch_sync_write`, audit/rollback readiness, and does not write products by itself.
+
+Naver-Product-Batch-1F adds a narrow private local writer:
+
+```text
+_sync_naver_product_stock_change_local_write(...)
+```
+
+The writer updates only `products.stock_quantity` on already-existing local Naver products. It blocks creates, skipped candidates, non-stock field changes, missing backup evidence, missing approval, and writes above the phase limit. It does not update product name, status, price, currency, source type, raw data, SyncLog, tested-success, orders, timeline events, operation audit rows, users, or store memberships. Formal Naver product batch sync remains closed.
+
+Naver-Product-Batch-1G verifies the post-write state: `products_store8` stays at 5, only the approved stock values may change, page 2 remains readonly/empty evidence, no raw response or secrets are saved, and formal product sync remains closed.
+
+ERP-Batch-1F remains an implementation plan for a future local readonly evidence API. The current code only has the private evidence normalizer; no public evidence API route is open.
+
+ERP-Multistore-1D remains an approval plan for future real store membership assignment. No `erp_users` or `erp_store_memberships` rows are created by this phase, and large-scale multi-store production operation remains closed.

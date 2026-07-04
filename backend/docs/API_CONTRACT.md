@@ -1742,3 +1742,41 @@ platform_writes_enabled=false
 ```
 
 No public user, role, login, or membership assignment endpoint is open yet.
+
+### Product Stock-Change Local Write Contract
+
+Phase Naver-Product-Batch-1E adds a controlled approval wrapper:
+
+```text
+_evaluate_naver_product_stock_change_real_write_approval(...)
+```
+
+The wrapper may return `stock_change_real_write_approved` only when the stock-change evidence already passes the private gate, backup evidence is verified, an admin role approves `products.batch_sync_write`, and rollback/audit planning is ready. It does not write products by itself and keeps:
+
+```text
+products_written=false
+real_database_written=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+Phase Naver-Product-Batch-1F adds:
+
+```text
+_sync_naver_product_stock_change_local_write(...)
+```
+
+The helper is private and may update only `products.stock_quantity` for existing `store_id=8`, `platform=naver` products. It must block:
+
+- product creates
+- skipped candidates
+- non-stock field changes
+- missing backup evidence
+- missing approval gate
+- write counts above the phase limit
+
+It must not write orders, SyncLog, tested-success, operation audit rows, timeline events, users, or store memberships. It must not save raw response, token, Authorization, headers, signature, client secret, full channel id, or full external product id in its result.
+
+Phase ERP-Batch-1F is still a plan for a future readonly evidence API. No public readonly evidence route is available yet.
+
+Phase ERP-Multistore-1D is still an approval plan. Real user creation and real store membership assignment remain closed.
