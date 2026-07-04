@@ -587,3 +587,33 @@ Next 5 recommended stages:
 3. `Phase ERP-Auth-1Q: Auth readonly users/roles API approval plan`
 4. `Phase ERP-Backup-2C: Restore runbook readonly UI plan`
 5. `Phase Naver-ERP-21C: No-change audit display implementation check`
+
+### Latest update after `Phase ERP-Batch-1A` to `Phase ERP-Multistore-1A`
+
+- Project overall planning progress: about `73% - 79%`
+- Naver basic ERP loop progress: about `81% - 86%`
+- ERP real-user landing progress: about `75% - 81%`
+- Production version for long-term non-technical use: about `69% - 75%`
+
+Implemented in this update:
+
+- Shifted the near-term priority to formal product/order batch sync readiness and large-scale multi-store production operation.
+- Documented the production gate for formal batch sync: human approval, store-scoped permission, sensitive-action approval, fresh readonly preview, verified backup, duplicate protection, field whitelist, rollback plan, failure isolation, audit evidence, readback, and sensitive scan.
+- Added private Codex1 mock gate coverage for Naver order batch, Naver order refresh batch, and Naver product batch readiness.
+- Added safe permission keys for `products.batch_sync_write` and `orders.batch_sync_write` to the role model.
+- Applied the safe auth permission metadata seed locally: `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
+- Documented Naver order batch refresh and Naver product batch sync production plans.
+- Documented the multi-store production operation model with actor identity, active store membership, per-store task isolation, audit, backup, and business-safe summaries.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, controlled no-change refresh audit evidence, migrated auth foundation tables, and mock-proven formal batch sync production gate design.
+- Not suitable now: actually opening formal product/order batch sync, active multi-user login production use, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Batch-1C: Formal batch sync readonly evidence API plan`
+2. `Phase ERP-Batch-1D: Batch sync approval UI plan`
+3. `Phase Naver-Order-Batch-1B: Order batch readonly candidate window`
+4. `Phase Naver-Product-Batch-1B: Product batch page expansion readonly repeat`
+5. `Phase ERP-Multistore-1B: Store membership assignment approval plan`

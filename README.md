@@ -1135,3 +1135,35 @@ ERP-Backup-2B adds a private restore checklist gate to Codex1. It verifies a fut
 The existing-order no-change audit UI walkthrough is documented in `PHASE_NAVER_ERP_21B_EXISTING_ORDER_NO_CHANGE_AUDIT_UI_RUNTIME_WALKTHROUGH.md`.
 
 Naver-ERP-21B confirms the expected UI wording for the 20E/20F no-change refresh: checked again, no business fields changed, no forced local update, audit evidence recorded, formal order sync still closed.
+
+## Phase ERP-Batch-1A - Formal Batch Sync Production Gate Plan
+
+The formal batch sync production gate plan is documented in `PHASE_ERP_BATCH_1A_FORMAL_BATCH_SYNC_PRODUCTION_GATE_PLAN.md`.
+
+ERP-Batch-1A shifts the next priority toward formal product/order batch sync readiness. It defines the required production gates: human approval, store-scoped permission, sensitive-action approval, fresh readonly evidence, verified backup, duplicate protection, field whitelist, rollback plan, failure isolation, append-only audit, readback, and sensitive scan. Formal product and order batch sync remain closed.
+
+## Phase ERP-Batch-1B - Batch Sync Approval and Backup Mock Gate
+
+The batch sync approval and backup mock gate is documented in `PHASE_ERP_BATCH_1B_BATCH_SYNC_APPROVAL_AND_BACKUP_MOCK_GATE.md`.
+
+ERP-Batch-1B adds a private Codex1 mock gate for future formal batch sync readiness. It supports Naver order batch, Naver order refresh batch, and Naver product batch gate checks. A passing result can only say the gate is ready for a later execution phase; it still returns `formal_sync_open=false`, `formal_order_sync_open=false`, `formal_product_sync_open=false`, `orders_written=false`, and `products_written=false`.
+
+The local auth permission metadata now includes `products.batch_sync_write` and `orders.batch_sync_write`, with `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
+
+## Phase Naver-Order-Batch-1A - Naver Order Batch Refresh Production Plan
+
+The Naver order batch refresh production plan is documented in `PHASE_NAVER_ORDER_BATCH_1A_NAVER_ORDER_BATCH_REFRESH_PRODUCTION_PLAN.md`.
+
+Naver-Order-Batch-1A defines how selected-order and small-batch refresh evidence can evolve into a controlled production order batch path. The path requires fresh readonly feed/detail evidence, exact hash matching, privacy/status gates, whitelist-only changes, backup evidence, role permission, sensitive approval, audit chain, and post-write readback. Shipment, cancel, return, exchange, refund, settlement, customer service, mail, appeal, and AI automation writes remain closed.
+
+## Phase Naver-Product-Batch-1A - Naver Product Batch Sync Production Plan
+
+The Naver product batch sync production plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1A_NAVER_PRODUCT_BATCH_SYNC_PRODUCTION_PLAN.md`.
+
+Naver-Product-Batch-1A defines the path from the current 5-row product proof toward future batch sync: page/window preview, duplicate detection, field whitelist, price/stock/status change classification, backup, role permission, sensitive approval, audit chain, rollback plan, and readback. The existing `products_store8=5` result remains a small-batch proof, not a formal opening.
+
+## Phase ERP-Multistore-1A - Multi-Store Production Operation Model Plan
+
+The multi-store production operation model plan is documented in `PHASE_ERP_MULTISTORE_1A_MULTI_STORE_PRODUCTION_OPERATION_MODEL_PLAN.md`.
+
+ERP-Multistore-1A defines the production model for large-scale multi-store operations: known actor identity, active store membership, role scope, per-store task state, failure isolation, audit evidence, backup/restore evidence, and business-safe dashboard summaries. Auth foundation tables exist, but real users and store memberships are still not active.
