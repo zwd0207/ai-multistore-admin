@@ -2230,3 +2230,70 @@ It does not expose a route, restore a database, write products, or open formal p
 ### Order Batch Audit Readiness UI Walkthrough
 
 Phase Naver-Order-Batch-1I verifies the Codex2 Orders audit readiness display. It is a readonly walkthrough phase and does not change backend write contracts.
+
+### Batch Approval Audit Evidence Readonly Route
+
+Phase ERP-Batch-1R keeps the mock-gate boundary for the future route. Phase ERP-Batch-1S exposes the local readonly route:
+
+```text
+POST /api/v1/batch/approval-audit-evidence
+```
+
+Request shape:
+
+```text
+readonly_evidence: object
+approval_context: object
+audit_evidence_plan: object
+```
+
+The route wraps the existing batch approval audit evidence gate. It may return `batch_approval_audit_evidence_ready` only when readonly evidence, manual approval planning, required permission keys, duplicate/whitelist checks, and audit evidence planning pass. It must keep:
+
+```text
+public_endpoint_enabled=true
+operation_audit_rows_planned=true
+operation_audit_rows_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+It does not write audit rows or open formal product/order batch sync.
+
+### Product Rollback Readonly Report Backend Route
+
+Phase Naver-Product-Batch-1Q plans the route. Phase Naver-Product-Batch-1R exposes:
+
+```text
+POST /api/v1/batch/naver/products/rollback-readonly-report
+```
+
+Request shape:
+
+```text
+rollback_drill_gate: object
+```
+
+The route wraps the product rollback readonly report gate and may return a readonly report only when the rollback drill evidence is ready. It must keep:
+
+```text
+public_endpoint_enabled=true
+real_restore_executed=false
+rollback_executed=false
+production_db_touched=false
+real_database_written=false
+products_written=false
+orders_written=false
+operation_audit_rows_written=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+It executes no restore, writes no products, and does not open formal product batch sync.
+
+### User Invitation Readonly UI Walkthrough
+
+Phase ERP-Multistore-1S verifies the Codex2 Accounts user invitation readiness panel in backend and mock modes. It does not change backend write contracts. Real user invitation and store membership writes remain closed.

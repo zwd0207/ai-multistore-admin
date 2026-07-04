@@ -62,6 +62,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/store-membership/readonly-check",
     "/api/v1/permissions/user-invitation/readonly-check",
     "/api/v1/batch/readonly-evidence",
+    "/api/v1/batch/approval-audit-evidence",
+    "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/customer-inquiries",
@@ -1264,8 +1266,14 @@ def verify_openapi() -> None:
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
         assert methods == expected_methods, {permission_path: methods}
-    batch_methods = set(openapi_json["paths"]["/api/v1/batch/readonly-evidence"].keys())
-    assert batch_methods == {"post"}, {"/api/v1/batch/readonly-evidence": batch_methods}
+    batch_methods = {
+        "/api/v1/batch/readonly-evidence": {"post"},
+        "/api/v1/batch/approval-audit-evidence": {"post"},
+        "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
+    }
+    for batch_path, expected_methods in batch_methods.items():
+        methods = set(openapi_json["paths"][batch_path].keys())
+        assert methods == expected_methods, {batch_path: methods}
     print("openapi/docs: ok")
 
 
@@ -11509,6 +11517,52 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_sensitive["public_endpoint_enabled"] is True, local_sensitive
         assert local_sensitive["real_database_written"] is False, local_sensitive
 
+        local_audit_response = client.post("/api/v1/batch/approval-audit-evidence", json={
+            "readonly_evidence": local_evidence,
+            "approval_context": {
+                "actor_id": "batch-admin",
+                "role": "admin",
+                "store_ids": [8],
+                "manual_approval_planned": True,
+                "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            },
+            "audit_evidence_plan": batch_audit_plan,
+        })
+        assert local_audit_response.status_code == 200, local_audit_response.text
+        local_audit = local_audit_response.json()["data"]
+        assert local_audit["phase"] == "ERP-Batch-1S", local_audit
+        assert local_audit["status"] == "batch_approval_audit_evidence_ready", local_audit
+        assert local_audit["batch_approval_audit_evidence_readonly_route_local"] is True, local_audit
+        assert local_audit["backend_route_implemented"] is True, local_audit
+        assert local_audit["public_endpoint_enabled"] is True, local_audit
+        assert local_audit["route_path"] == "/api/v1/batch/approval-audit-evidence", local_audit
+        assert local_audit["operation_audit_rows_planned"] is True, local_audit
+        assert local_audit["operation_audit_rows_written"] is False, local_audit
+        assert local_audit["real_database_written"] is False, local_audit
+        assert local_audit["orders_written"] is False, local_audit
+        assert local_audit["products_written"] is False, local_audit
+        assert local_audit["sync_log_written"] is False, local_audit
+        assert local_audit["capability_tested_success_written"] is False, local_audit
+        assert local_audit["formal_sync_open"] is False, local_audit
+
+        local_audit_sensitive_response = client.post("/api/v1/batch/approval-audit-evidence", json={
+            "readonly_evidence": {**local_evidence, "productOrderId": "must-not-leak-local-audit"},
+            "approval_context": {
+                "actor_id": "batch-admin",
+                "role": "admin",
+                "store_ids": [8],
+                "manual_approval_planned": True,
+                "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            },
+            "audit_evidence_plan": batch_audit_plan,
+        })
+        assert local_audit_sensitive_response.status_code == 200, local_audit_sensitive_response.text
+        local_audit_sensitive = local_audit_sensitive_response.json()["data"]
+        assert local_audit_sensitive["phase"] == "ERP-Batch-1S", local_audit_sensitive
+        assert local_audit_sensitive["skip_reason"] == "batch_approval_audit_sensitive_field_blocked", local_audit_sensitive
+        assert local_audit_sensitive["operation_audit_rows_written"] is False, local_audit_sensitive
+        assert local_audit_sensitive["real_database_written"] is False, local_audit_sensitive
+
     with SessionLocal() as db:
         after_counts = {
             "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
@@ -11532,6 +11586,8 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_audit_missing_permission": batch_audit_missing_permission,
             "batch_audit_sensitive": batch_audit_sensitive,
             "local_evidence": local_evidence,
+            "local_audit": local_audit,
+            "local_audit_sensitive": local_audit_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
@@ -11556,6 +11612,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak",
         "must-not-leak-route",
         "must-not-leak-audit",
+        "must-not-leak-local-audit",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized
@@ -11854,9 +11911,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
 
 
 def verify_product_rollback_backend_route_mock_gate() -> None:
+    from fastapi.testclient import TestClient
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.main import app
     from app.services import sync_service
     from app.services.permission_service import VERIFICATION_SCOPE
 
@@ -11941,6 +12000,40 @@ def verify_product_rollback_backend_route_mock_gate() -> None:
     assert route_blocked["real_restore_executed"] is False, route_blocked
     assert route_blocked["products_written"] is False, route_blocked
 
+    with TestClient(app) as client:
+        local_report_response = client.post(
+            "/api/v1/batch/naver/products/rollback-readonly-report",
+            json={"rollback_drill_gate": rollback_ready},
+        )
+        assert local_report_response.status_code == 200, local_report_response.text
+        local_report = local_report_response.json()["data"]
+        assert local_report["phase"] == "Naver-Product-Batch-1R", local_report
+        assert local_report["status"] == "product_rollback_drill_readonly_report_ready", local_report
+        assert local_report["product_rollback_readonly_report_route_local"] is True, local_report
+        assert local_report["backend_route_implemented"] is True, local_report
+        assert local_report["public_endpoint_enabled"] is True, local_report
+        assert local_report["route_path"] == "/api/v1/batch/naver/products/rollback-readonly-report", local_report
+        assert local_report["real_restore_executed"] is False, local_report
+        assert local_report["rollback_executed"] is False, local_report
+        assert local_report["production_db_touched"] is False, local_report
+        assert local_report["real_database_written"] is False, local_report
+        assert local_report["products_written"] is False, local_report
+        assert local_report["orders_written"] is False, local_report
+        assert local_report["operation_audit_rows_written"] is False, local_report
+        assert local_report["formal_product_sync_open"] is False, local_report
+
+        local_report_sensitive_response = client.post(
+            "/api/v1/batch/naver/products/rollback-readonly-report",
+            json={"rollback_drill_gate": {**rollback_ready, "rawResponse": "must-not-leak-local-rollback"}},
+        )
+        assert local_report_sensitive_response.status_code == 200, local_report_sensitive_response.text
+        local_report_sensitive = local_report_sensitive_response.json()["data"]
+        assert local_report_sensitive["phase"] == "Naver-Product-Batch-1R", local_report_sensitive
+        assert local_report_sensitive["skip_reason"] == "rollback_report_sensitive_field_blocked", local_report_sensitive
+        assert local_report_sensitive["real_restore_executed"] is False, local_report_sensitive
+        assert local_report_sensitive["products_written"] is False, local_report_sensitive
+        assert local_report_sensitive["real_database_written"] is False, local_report_sensitive
+
     with SessionLocal() as db:
         after_counts = {
             "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
@@ -11954,7 +12047,12 @@ def verify_product_rollback_backend_route_mock_gate() -> None:
     assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
 
     serialized = json.dumps(
-        {"route_ready": route_ready, "route_blocked": route_blocked},
+        {
+            "route_ready": route_ready,
+            "route_blocked": route_blocked,
+            "local_report": local_report,
+            "local_report_sensitive": local_report_sensitive,
+        },
         ensure_ascii=False,
         default=str,
     ).lower()
@@ -11969,6 +12067,7 @@ def verify_product_rollback_backend_route_mock_gate() -> None:
         "channelno",
         "external_product_id",
         "must-not-leak-route",
+        "must-not-leak-local-rollback",
     ]:
         assert forbidden not in serialized, serialized
 
@@ -14065,6 +14164,7 @@ def verify_git_tracking() -> None:
         "M  backend/README.md",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        " M backend/app/api/v1/endpoints/batch.py",
         "A  backend/app/api/v1/endpoints/batch.py",
         " M backend/app/api/v1/endpoints/backups.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
@@ -14092,6 +14192,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/store.py",
         "M  backend/app/models/store.py",
         " M backend/app/schemas/api_credential_readiness.py",
+        " M backend/app/schemas/batch.py",
         "A  backend/app/schemas/batch.py",
         " M backend/app/schemas/credential.py",
         " M backend/app/schemas/order.py",

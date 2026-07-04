@@ -5474,6 +5474,52 @@ def evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(
     return result
 
 
+def evaluate_naver_product_rollback_readonly_report_route_local(
+    *,
+    rollback_drill_gate: dict | None,
+) -> dict:
+    """Public local readonly rollback-report route helper; never restores or writes product rows."""
+
+    result = evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(
+        rollback_drill_gate=rollback_drill_gate,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "Naver-Product-Batch-1R",
+        "product_rollback_readonly_report_route_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/naver/products/rollback-readonly-report",
+        "http_method": "POST",
+        "real_restore_executed": False,
+        "rollback_executed": False,
+        "production_db_touched": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "timeline_events_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "product_rollback_drill_readonly_report_ready":
+        result["business_message"] = (
+            "Naver product rollback readonly report is available for local review. "
+            "No restore, product write, audit write, or formal batch sync is opened."
+        )
+        result["next_action"] = (
+            "Review backup, rollback checklist, readback, and sensitive-scan evidence before any later production decision."
+        )
+    return result
+
+
 def _batch_readonly_default_business_message(sync_kind: str) -> str:
     if sync_kind == "naver_order_batch":
         return "Naver 订单批量只读证据已整理，等待人工审核。"
@@ -5864,6 +5910,56 @@ def evaluate_batch_approval_audit_evidence_local_route_mock_gate(
             "批量审批审计证据本地 route mock gate 已通过；当前不会开放接口、不会写入审计记录，也不会开启正式批量同步。"
         )
         result["next_action"] = "单独阶段再实现只读本地 route，并继续保持写入关闭。"
+    return result
+
+
+def evaluate_batch_approval_audit_evidence_readonly_route_local(
+    *,
+    readonly_evidence: dict | None,
+    approval_context: dict | None,
+    audit_evidence_plan: dict | None,
+) -> dict:
+    """Public local readonly batch approval audit-evidence route helper; never writes audit rows."""
+
+    result = evaluate_batch_approval_audit_evidence_local_route_mock_gate(
+        readonly_evidence=readonly_evidence,
+        approval_context=approval_context,
+        audit_evidence_plan=audit_evidence_plan,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "ERP-Batch-1S",
+        "batch_approval_audit_evidence_readonly_route_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/approval-audit-evidence",
+        "http_method": "POST",
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "batch_approval_audit_evidence_mock_ready":
+        result["status"] = "batch_approval_audit_evidence_ready"
+        result["business_message"] = (
+            "Batch approval audit evidence is ready for local readonly review. "
+            "No audit row, order, product, SyncLog, or tested-success record is written."
+        )
+        result["next_action"] = (
+            "Continue manual approval review with backup, permission, readback, sensitive-scan, and rollback evidence."
+        )
     return result
 
 
