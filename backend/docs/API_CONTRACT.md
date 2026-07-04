@@ -1525,13 +1525,49 @@ The proposed schema stores safe identifiers such as user hashes, masked login id
 
 ERP-Auth-1K adds only a `verify_all.py` temporary-database mock migration gate. It verifies the future table shape, seed roles, permission links, admin approval capability, store 8 membership, store 9 isolation, sensitive-column exclusions, and unchanged business counts. It does not expose a public auth API, create sessions, write production auth rows, migrate `backend/codex1.db`, call platform APIs, or open formal sync.
 
+ERP-Auth-1L approves the real local migration only after clean worktrees, a pre-migration backup, manifest evidence, and `verify_all.py` success. ERP-Auth-1M implements and applies the schema through:
+
+```text
+scripts/upgrade_auth_schema.py
+```
+
+The real local migration may seed system role/permission metadata, but it must keep:
+
+- `erp_users=0`
+- `erp_store_memberships=0`
+- `real_auth_session_created=false`
+- `formal_sync_open=false`
+- `platform_writes_enabled=false`
+
+ERP-Auth-1N verifies the applied local schema by readback. The current verified counts are:
+
+```text
+erp_roles=5
+erp_permissions=10
+erp_role_permissions=35
+erp_users=0
+erp_store_memberships=0
+```
+
+No public user, role, login, or store-membership API is available yet.
+
 ### Restore Runbook Boundary
 
 ERP-Backup-2A is planning-only. Real restore remains closed. Any later restore implementation must require source backup manifest verification, SHA-256 and size checks, temporary restore dry-run, baseline-count review, pre-restore backup, human approval, audit evidence, rollback instructions, and post-restore verification.
 
+ERP-Backup-2B adds a private restore runbook mock drill gate:
+
+```text
+evaluate_restore_runbook_mock_drill_gate(...)
+```
+
+It verifies checklist readiness only. It must keep `real_restore_executed=false`, `production_db_touched=false`, `backup_deleted=false`, `rows_written=0`, `raw_response_saved=false`, `secrets_saved=false`, and `privacy_fields_redacted=true`.
+
 ### No-Change Order Refresh Display Boundary
 
 Naver-ERP-21A is a display check for the 20E/20F result. A no-change refresh should be shown as a checked order with no business-field changes and no forced local update. The audit rows may be displayed as evidence, but the UI and APIs must not describe that outcome as formal Naver order sync availability.
+
+Naver-ERP-21B keeps the same runtime wording boundary: `no_business_field_change` is an audit reason and administrator diagnostic, not a seller-facing error.
 
 The helper must keep:
 

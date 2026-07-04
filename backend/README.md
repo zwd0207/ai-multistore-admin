@@ -955,4 +955,12 @@ ERP-Backup-2A documents the future restore runbook and operator checklist. Real 
 
 Naver-ERP-21A records the display boundary for the 20E/20F no-change refresh result. The operator-facing wording should say the selected order was checked, no business fields changed, no local update was forced, and audit evidence was recorded. It must not imply formal Naver order sync is open.
 
+ERP-Auth-1L approves only the narrow auth schema migration. ERP-Auth-1M implements `app/models/auth.py` and `scripts/upgrade_auth_schema.py`, then applies the migration to the real local SQLite database after creating a pre-migration backup. The migration creates auth foundation tables and seeds only safe role/permission metadata. It keeps `erp_users=0` and `erp_store_memberships=0`, so no production login or store membership assignment is active.
+
+ERP-Auth-1N verifies the real local migration by readback: `erp_roles=5`, `erp_permissions=10`, `erp_role_permissions=35`, `erp_users=0`, and `erp_store_memberships=0`. The admin role can approve `orders.refresh_batch_write`; the operator role cannot receive that permission. Business counts stay stable.
+
+ERP-Backup-2B adds a private restore runbook mock drill gate in `app/services/backup_service.py`. It checks manifest/hash/temp-restore/approval/audit/rollback/post-restore checklist readiness but never executes a real restore, touches the production database, deletes backups, writes rows, exposes a public API, or opens formal sync.
+
+Naver-ERP-21B records the expected UI/audit display for a no-change Naver order refresh. The result should be treated as "checked, no business fields changed, no forced update, audit evidence recorded", not as an error and not as formal sync availability.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
