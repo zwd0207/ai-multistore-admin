@@ -701,6 +701,12 @@ The audit writer runtime integration approval plan is documented in `PHASE_ERP_A
 
 ERP-Audit-1S is planning-only. It approves only the future direction for a narrow local runtime integration: controlled Naver selected-order local write/refresh evidence, linked pre-write backup evidence, and post-write verification evidence. It keeps automatic middleware, blanket endpoint logging, public audit write/delete/export/detail routes, backup/restore execution, schema changes, platform API calls, and formal product/order sync closed. A later mock-only phase must still prove the exact selected-operation call site before any real runtime audit writer is connected.
 
+## Phase ERP-Audit-1T - Selected Operation Runtime Wiring Mock Plan
+
+The selected-operation runtime wiring mock plan is documented in `PHASE_ERP_AUDIT_1T_SELECTED_OPERATION_RUNTIME_WIRING_MOCK_PLAN.md`.
+
+ERP-Audit-1T is planning-only. It selects `controlled_naver_order_local_refresh` as the first future mock wiring target and defines the fake call-site shape, required five-row audit chain, success criteria, block cases, safe flags, forbidden data, and public API boundary. It does not add code, connect audit writer calls to runtime order flows, write audit or business rows, modify schema, call platform APIs, execute backup/restore, add public audit write routes, or open formal sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
