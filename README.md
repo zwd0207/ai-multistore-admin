@@ -955,3 +955,9 @@ Naver-ERP-18C reruns the real Naver order preview in readonly mode after the cur
 The controlled order refresh small write approval review is documented in `PHASE_NAVER_ERP_18D_CONTROLLED_ORDER_REFRESH_SMALL_WRITE_APPROVAL.md`.
 
 Naver-ERP-18D does not approve a refresh write for the 18C candidate. Local readback showed that safe hash `id-hash-192b9c67e8` does not match an existing real local Naver order, while refresh writes are only for existing local orders. This phase did not call Naver, execute `real_sync=true`, write local data, write audit rows, change schema, or open formal order sync. The safe next direction is a separate selected new-order candidate approval plan if the operator wants to consider writing this candidate.
+
+## Phase Naver-ERP-19A - Selected New-Order Candidate Approval Plan
+
+The selected new-order candidate approval plan is documented in `PHASE_NAVER_ERP_19A_SELECTED_NEW_ORDER_CANDIDATE_APPROVAL_PLAN.md`.
+
+Naver-ERP-19A is planning-only. It approves safe hash `id-hash-192b9c67e8` only for a fresh readonly repeat as a selected new-order candidate, not as an existing-order refresh candidate. Any later write requires exact hash repeat, duplicate count zero, privacy gate pass, fresh database backup, one-order limit, post-write readback, audit evidence, no SyncLog write, no tested-success write, no product write, no platform write, and no formal order sync opening.
