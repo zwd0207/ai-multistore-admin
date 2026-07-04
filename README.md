@@ -12,10 +12,10 @@ PROJECT_PROGRESS.md
 
 当前固定进度口径：
 
-- 项目总体规划进度：约 `68% - 74%`
-- Naver 基础 ERP 闭环进度：约 `77% - 82%`
-- ERP 给真实用户落地使用进度：约 `71% - 77%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `64% - 69%`
+- 项目总体规划进度：约 `69% - 75%`
+- Naver 基础 ERP 闭环进度：约 `78% - 83%`
+- ERP 给真实用户落地使用进度：约 `72% - 78%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `65% - 70%`
 
 ## 环境要求
 
@@ -1045,3 +1045,33 @@ ERP-Auth-1F adds `GET /api/v1/permissions/role-inventory`, `POST /api/v1/permiss
 The role-aware action visibility implementation is documented in `PHASE_ERP_UX_2A_ROLE_AWARE_ACTION_VISIBILITY_IMPLEMENTATION.md`.
 
 ERP-UX-2A updates the Codex2 Orders page to show business-first role/action visibility for Naver orders: current role can view orders, order refresh writes require administrator approval, backup/readonly/audit gates remain required, and formal order batch sync remains closed. Permission keys and mock diagnostics stay inside folded `TechnicalDetails`.
+
+## Phase Naver-ERP-20D - Controlled Order Refresh Write Execution Approval With Permission Evidence
+
+The controlled order refresh write execution approval is documented in `PHASE_NAVER_ERP_20D_CONTROLLED_ORDER_REFRESH_WRITE_EXECUTION_APPROVAL_WITH_PERMISSION_EVIDENCE.md`.
+
+Naver-ERP-20D approves only one controlled existing-order refresh attempt for safe hash `id-hash-192b9c67e8`. Runtime permission evidence confirmed store-scoped access and sensitive-action approval in the mock permission API. The approval still requires backup, fresh readonly preview, exact identity match, privacy gate, audit chain, readback, and sensitive scan.
+
+## Phase Naver-ERP-20E - Controlled Existing-Order Refresh Single Local Write With Audit Evidence
+
+The controlled existing-order refresh execution is documented in `PHASE_NAVER_ERP_20E_CONTROLLED_EXISTING_ORDER_REFRESH_SINGLE_LOCAL_WRITE_WITH_AUDIT_EVIDENCE.md`.
+
+Naver-ERP-20E created a pre-write backup, repeated the readonly Naver preview, and executed the controlled refresh gate for safe hash `id-hash-192b9c67e8`. The gate found no business-field changes, so it correctly did not update the order. Five audit evidence rows were written with terminal action `local_write_blocked` and reason `no_business_field_change`. Orders, products, SyncLog, tested-success rows, and order timeline events were not changed.
+
+## Phase Naver-ERP-20F - Controlled Refresh Post-Write Verification
+
+The controlled refresh post-write verification is documented in `PHASE_NAVER_ERP_20F_CONTROLLED_REFRESH_POST_WRITE_VERIFICATION.md`.
+
+Naver-ERP-20F verified the no-change refresh outcome by readback. Current counts are `orders_total=10`, `orders_store8=7`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=15`, and `order_status_events=0`. The selected safe hash exists exactly once and the 20E audit chain has five rows under one correlation id.
+
+## Phase ERP-Auth-1G - Permission API Frontend-Wide Visibility Plan
+
+The frontend-wide permission visibility plan is documented in `PHASE_ERP_AUTH_1G_PERMISSION_API_FRONTEND_WIDE_VISIBILITY_PLAN.md`.
+
+ERP-Auth-1G is planning-only. It defines how Dashboard, Products, Orders, Sales, Credentials/API, Logs/Audit, Backups, and Settings should use business wording for permission states while keeping permission keys and gate diagnostics folded.
+
+## Phase ERP-Auth-1H - Runtime Permission API Production Auth Boundary Plan
+
+The production auth boundary plan is documented in `PHASE_ERP_AUTH_1H_RUNTIME_PERMISSION_API_PRODUCTION_AUTH_BOUNDARY_PLAN.md`.
+
+ERP-Auth-1H is planning-only. It records that the current permission API is a mock visibility and approval-planning API, not a production authentication system. Future production auth still needs user/session/role/store-membership schema, route dependencies, role assignment UI, cross-store isolation tests, backups, and rollback plans.

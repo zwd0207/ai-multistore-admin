@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `68% - 74%`
-- Naver 基础 ERP 闭环进度：约 `77% - 82%`
-- ERP 给真实用户落地使用进度：约 `71% - 77%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `64% - 69%`
+- 项目总体规划进度：约 `69% - 75%`
+- Naver 基础 ERP 闭环进度：约 `78% - 83%`
+- ERP 给真实用户落地使用进度：约 `72% - 78%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `65% - 70%`
 
 ## 当前定位
 
@@ -484,6 +484,36 @@ Next 5 recommended stages:
 3. `Phase Naver-ERP-20F: Controlled refresh post-write verification`
 4. `Phase ERP-Auth-1G: Permission API frontend-wide visibility plan`
 5. `Phase ERP-Auth-1H: Runtime permission API production-auth boundary plan`
+
+### Latest update after `Phase Naver-ERP-20D` to `Phase ERP-Auth-1H`
+
+- Project overall planning progress: about `69% - 75%`
+- Naver basic ERP loop progress: about `78% - 83%`
+- ERP real-user landing progress: about `72% - 78%`
+- Production version for long-term non-technical use: about `65% - 70%`
+
+Implemented in this update:
+
+- Approved one controlled existing-order refresh attempt for safe hash `id-hash-192b9c67e8` with permission evidence.
+- Created a pre-write database backup and manifest before running the refresh gate.
+- Repeated a real readonly Naver preview. Token/feed/detail returned HTTP 200 and the selected safe hash matched exactly one existing local Naver order.
+- Ran the controlled refresh gate. It found no business-field changes, so no local order update was forced.
+- Wrote five append-only audit evidence rows: `approval_planned`, `pre_write_backup_verified`, `local_write_attempted`, `local_write_blocked`, and `post_write_verification_succeeded`.
+- Verified current counts: `orders_total=10`, `orders_store8=7`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=15`, and `order_status_events=0`.
+- Planned frontend-wide permission visibility and clarified that the current permission API is not production authentication.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, and controlled no-change refresh audit evidence.
+- Not suitable now: formal product/order batch sync, fully authenticated multi-user production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Auth-1I: User and role schema proposal`
+2. `Phase ERP-Auth-1J: Store membership schema proposal`
+3. `Phase ERP-Auth-1K: Auth schema mock migration gate`
+4. `Phase ERP-Backup-2A: Restore runbook and operator checklist plan`
+5. `Phase Naver-ERP-21A: Existing-order refresh no-change UI/audit display check`
 
 ## 安全边界
 
