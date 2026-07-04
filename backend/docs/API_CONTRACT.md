@@ -2100,3 +2100,45 @@ This helper is not a public route and does not open formal product or order batc
 ### Naver Order Batch Approval Audit Readiness
 
 Phase Naver-Order-Batch-1F documents the order-specific readiness boundary. Future Naver order batch refresh writes require fresh readonly candidate evidence, store-scoped permission, human approval, verified backup, privacy gate, field whitelist, duplicate protection, append-only audit chain, post-write readback, sensitive scan, and rollback reference. Shipment, cancel, return, exchange, refund, settlement, customer-service, mail, appeal, and AI automation writes remain closed.
+
+### Real User Invitation Mock Gate
+
+Phase ERP-Multistore-1M adds a private service-level helper:
+
+```text
+evaluate_real_user_invitation_mock_gate(...)
+```
+
+The helper verifies safe target user hash, safe login identifier hash, masked login identifier display, target store ids, target role, manual approval, backup planning, audit planning, future membership assignment planning, and duplicate existing-user blocking.
+
+It may return `user_invitation_mock_ready` only inside the private verification scope and must keep:
+
+```text
+users_written=false
+membership_written=false
+role_assignment_written=false
+real_auth_session_created=false
+real_database_written=false
+operation_audit_rows_planned=true
+operation_audit_rows_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+It must not create a user, send an invitation, create a session, assign a role, create a store membership, call a platform API, or expose a plain login identifier.
+
+### User Invitation Readonly API Plan
+
+Phase ERP-Multistore-1N is planning-only. A future readonly API may expose safe invitation readiness for administrators, but it must not send invitations or create users. Main response fields should be business message, target role, target store count, masked login identifier, readiness booleans, and safe skip reason. Technical fields should remain folded in Codex2.
+
+### Product Rollback Readonly Report UI Mock Display
+
+Phase Naver-Product-Batch-1N adds a Codex2 mock display surface for the product rollback readonly report. It is frontend-only display and must keep restore execution, production database restore, product writes, order writes, audit-row writes, and formal product batch sync closed.
+
+### Batch Approval Audit Evidence Local Route Plan
+
+Phase ERP-Batch-1O is route planning only. A future local route may wrap `_evaluate_batch_approval_audit_evidence_mock_gate(...)` for readonly approval screens, but this phase does not add the route. The future route must not write audit rows, products, orders, SyncLog, tested-success rows, or platform data.
+
+### Naver Order Batch Audit Readiness UI Wording
+
+Phase Naver-Order-Batch-1G is wording planning only. Future UI should show order batch approval evidence in seller-facing language and keep `phase`, `sync_kind`, `would_*`, changed fields, audit flags, and formal-sync flags folded. It does not call Naver or open formal order batch sync.

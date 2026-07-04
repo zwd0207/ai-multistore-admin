@@ -1118,3 +1118,19 @@ _evaluate_batch_approval_audit_evidence_mock_gate(...)
 It verifies that future batch approval evidence includes store scope, required product/order batch permissions, duplicate and whitelist checks, human approval planning, and a complete audit evidence plan. It keeps `operation_audit_rows_planned=true`, `operation_audit_rows_written=false`, `orders_written=false`, `products_written=false`, and `formal_sync_open=false`.
 
 Naver-Order-Batch-1F is a planning-only readiness contract for order batch approval evidence. Future order batch refresh writes still require fresh readonly evidence, backup, permission, privacy gates, field whitelist, duplicate protection, append-only audit chain, readback, sensitive scan, and rollback reference. Formal order batch sync remains closed.
+
+ERP-Multistore-1M adds a private mock gate:
+
+```text
+evaluate_real_user_invitation_mock_gate(...)
+```
+
+It verifies safe user and login hashes, masked login identifier display, target stores, target role, manual approval, backup planning, audit planning, and future membership assignment planning. It keeps `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, and `operation_audit_rows_written=false`.
+
+ERP-Multistore-1N is a readonly API plan only. A later user-invitation readiness route may wrap the private gate for administrator review, but no public route is added in this phase and real invitations remain closed.
+
+Naver-Product-Batch-1N adds a Codex2 mock display plan for product rollback readonly reports. The UI may show backup evidence, stock-only impact, restore status, and next manual review action, while keeping restore/write/audit flags folded in technical details. It does not call Naver, restore a database, write products, or open formal product batch sync.
+
+ERP-Batch-1O is a route plan only for a future batch approval audit-readiness local route. The current private audit evidence gate remains private; no public route is added and no audit rows are written.
+
+Naver-Order-Batch-1G is a UI wording plan only. Future order batch audit readiness should be shown in business language while keeping `sync_kind`, `would_*`, changed fields, and audit flags folded. Formal order batch sync remains closed.

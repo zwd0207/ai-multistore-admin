@@ -10355,6 +10355,140 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert success["real_database_written"] is False, success
     assert success["formal_sync_open"] is False, success
 
+    invitation_no_approval = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=False,
+        invitation_reason="invite operator for store 8 readonly trial",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_no_approval["phase"] == "ERP-Multistore-1M", invitation_no_approval
+    assert invitation_no_approval["skip_reason"] == "manual_approval_required", invitation_no_approval
+    assert invitation_no_approval["users_written"] is False, invitation_no_approval
+    assert invitation_no_approval["membership_written"] is False, invitation_no_approval
+
+    invitation_operator_blocked = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=operator_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="operator cannot invite users",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_operator_blocked["skip_reason"] == "permission_denied", invitation_operator_blocked
+    assert invitation_operator_blocked["real_database_written"] is False, invitation_operator_blocked
+
+    invitation_existing_user = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="duplicate user should be blocked",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=["user-hash-dddddddddddddddd"],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_existing_user["skip_reason"] == "target_user_already_exists", invitation_existing_user
+    assert invitation_existing_user["users_written"] is False, invitation_existing_user
+
+    invitation_missing_audit = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="audit plan is required",
+        backup_evidence_planned=True,
+        audit_evidence_planned=False,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_missing_audit["skip_reason"] == "audit_evidence_plan_required", invitation_missing_audit
+    assert invitation_missing_audit["operation_audit_rows_written"] is False, invitation_missing_audit
+
+    invitation_full_email_blocked = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="operator@example.com",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="full login identifier should be blocked",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_full_email_blocked["skip_reason"] == "login_identifier_must_be_masked", invitation_full_email_blocked
+    assert invitation_full_email_blocked["login_identifier_masked"] is None, invitation_full_email_blocked
+
+    invitation_sensitive = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="authorization: bearer must-not-leak-invite",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_sensitive["skip_reason"] == "user_invitation_sensitive_material_blocked", invitation_sensitive
+
+    invitation_success = permission_service.evaluate_real_user_invitation_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="invite operator for store 8 readonly trial",
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_success["status"] == "user_invitation_mock_ready", invitation_success
+    assert invitation_success["invitation_would_create_user"] is True, invitation_success
+    assert invitation_success["invitation_would_send"] is True, invitation_success
+    assert invitation_success["users_written"] is False, invitation_success
+    assert invitation_success["membership_written"] is False, invitation_success
+    assert invitation_success["operation_audit_rows_planned"] is True, invitation_success
+    assert invitation_success["operation_audit_rows_written"] is False, invitation_success
+    assert invitation_success["real_auth_session_created"] is False, invitation_success
+    assert invitation_success["formal_sync_open"] is False, invitation_success
+
     runtime_user_hash = "user-hash-cccccccccccccccc"
     missing_user = None
     runtime_success = None
@@ -10520,6 +10654,13 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "runtime_success": runtime_success,
             "runtime_duplicate": runtime_duplicate,
             "missing_user": missing_user,
+            "invitation_no_approval": invitation_no_approval,
+            "invitation_operator_blocked": invitation_operator_blocked,
+            "invitation_existing_user": invitation_existing_user,
+            "invitation_missing_audit": invitation_missing_audit,
+            "invitation_full_email_blocked": invitation_full_email_blocked,
+            "invitation_sensitive": invitation_sensitive,
+            "invitation_success": invitation_success,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -10541,6 +10682,8 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "zipcode",
         "must-not-leak",
         "must-not-leak-route",
+        "must-not-leak-invite",
+        "operator@example.com",
     ]:
         assert forbidden not in serialized, serialized
 

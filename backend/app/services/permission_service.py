@@ -117,6 +117,8 @@ SENSITIVE_VALUE_MARKERS = (
 PHONE_PATTERN = re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b")
 SAFE_OPERATION_PATTERN = re.compile(r"^[a-z0-9_.:-]{1,120}$")
 SAFE_USER_HASH_PATTERN = re.compile(r"^user-hash-[a-f0-9]{8,64}$")
+SAFE_LOGIN_HASH_PATTERN = re.compile(r"^login-hash-[a-f0-9]{8,64}$")
+SAFE_MASKED_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9*@._+\-\s]{3,160}$")
 
 
 def _actor_hash(actor_id: object) -> str | None:
@@ -577,5 +579,181 @@ def evaluate_store_membership_assignment_runtime_mock_gate(
         "status": "membership_assignment_runtime_mock_ready",
         "membership_would_create": True,
         "business_message": "Store membership assignment passed runtime mock checks. No user or membership row was written.",
+    })
+    return result
+
+
+def evaluate_real_user_invitation_mock_gate(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    login_identifier_hash: str | None,
+    login_identifier_masked: str | None,
+    target_store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    invitation_reason: str | None = None,
+    backup_evidence_planned: bool = False,
+    audit_evidence_planned: bool = False,
+    membership_assignment_plan_ready: bool = False,
+    existing_user_hashes: list[str] | tuple[str, ...] | set[str] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private mock gate for future user invitation planning; never creates users or sends invites."""
+
+    normalized_role = _normalize_role(target_role)
+    safe_masked_identifier = (
+        login_identifier_masked
+        if (
+            isinstance(login_identifier_masked, str)
+            and SAFE_MASKED_IDENTIFIER_PATTERN.fullmatch(login_identifier_masked)
+            and ("@" not in login_identifier_masked or "*" in login_identifier_masked)
+            and not PHONE_PATTERN.search(login_identifier_masked)
+        )
+        else None
+    )
+    result = {
+        "phase": "ERP-Multistore-1M",
+        "real_user_invitation_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "target_user_key_hash": target_user_key_hash if isinstance(target_user_key_hash, str) else None,
+        "login_identifier_hash": login_identifier_hash if isinstance(login_identifier_hash, str) else None,
+        "login_identifier_masked": safe_masked_identifier,
+        "target_store_ids": [],
+        "target_role": normalized_role,
+        "manual_approval": bool(manual_approval),
+        "invitation_reason_present": bool(invitation_reason),
+        "backup_evidence_planned": bool(backup_evidence_planned),
+        "audit_evidence_planned": bool(audit_evidence_planned),
+        "membership_assignment_plan_ready": bool(membership_assignment_plan_ready),
+        "invitation_would_create_user": False,
+        "invitation_would_send": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != VERIFICATION_SCOPE:
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(target_user_key_hash, str) or not SAFE_USER_HASH_PATTERN.fullmatch(target_user_key_hash):
+        result["skip_reason"] = "target_user_hash_invalid"
+        return result
+    if not isinstance(login_identifier_hash, str) or not SAFE_LOGIN_HASH_PATTERN.fullmatch(login_identifier_hash):
+        result["skip_reason"] = "login_identifier_hash_invalid"
+        return result
+    if not isinstance(login_identifier_masked, str) or not SAFE_MASKED_IDENTIFIER_PATTERN.fullmatch(login_identifier_masked):
+        result["skip_reason"] = "login_identifier_masked_invalid"
+        return result
+    if "@" in login_identifier_masked and "*" not in login_identifier_masked:
+        result["skip_reason"] = "login_identifier_must_be_masked"
+        return result
+    if PHONE_PATTERN.search(login_identifier_masked):
+        result["skip_reason"] = "login_identifier_phone_not_allowed"
+        return result
+    if normalized_role is None:
+        result["skip_reason"] = "target_role_not_allowed"
+        return result
+    if not isinstance(invitation_reason, str) or not invitation_reason.strip():
+        result["skip_reason"] = "invitation_reason_required"
+        return result
+    if _contains_sensitive_material({
+        "actor_context": actor_context,
+        "target_user_key_hash": target_user_key_hash,
+        "login_identifier_hash": login_identifier_hash,
+        "login_identifier_masked": login_identifier_masked,
+        "invitation_reason": invitation_reason,
+        "existing_user_hashes": list(existing_user_hashes or []),
+    }):
+        result["skip_reason"] = "user_invitation_sensitive_material_blocked"
+        return result
+
+    if not isinstance(target_store_ids, (list, tuple, set)) or not target_store_ids:
+        result["skip_reason"] = "target_store_ids_required"
+        return result
+    safe_store_ids: list[int] = []
+    for store_id in target_store_ids:
+        try:
+            safe_store_id = int(store_id)
+        except (TypeError, ValueError):
+            result["skip_reason"] = "target_store_id_invalid"
+            return result
+        if safe_store_id <= 0:
+            result["skip_reason"] = "target_store_id_invalid"
+            return result
+        safe_store_ids.append(safe_store_id)
+    safe_store_ids = sorted(set(safe_store_ids))
+    result["target_store_ids"] = safe_store_ids
+    if len(safe_store_ids) > 5:
+        result["skip_reason"] = "target_store_limit_exceeded"
+        return result
+
+    if not backup_evidence_planned:
+        result["skip_reason"] = "backup_evidence_plan_required"
+        return result
+    if not audit_evidence_planned:
+        result["skip_reason"] = "audit_evidence_plan_required"
+        return result
+    if not membership_assignment_plan_ready:
+        result["skip_reason"] = "membership_assignment_plan_required"
+        return result
+
+    if existing_user_hashes is None:
+        existing_user_hashes = []
+    if not isinstance(existing_user_hashes, (list, tuple, set)):
+        result["skip_reason"] = "existing_user_hashes_invalid"
+        return result
+    for existing_hash in existing_user_hashes:
+        if not isinstance(existing_hash, str) or not SAFE_USER_HASH_PATTERN.fullmatch(existing_hash):
+            result["skip_reason"] = "existing_user_hash_invalid"
+            return result
+    if target_user_key_hash in set(existing_user_hashes):
+        result["skip_reason"] = "target_user_already_exists"
+        return result
+
+    approval_results: list[dict[str, Any]] = []
+    for store_id in safe_store_ids:
+        approval_gate = evaluate_sensitive_action_approval_mock_gate(
+            actor_context=actor_context,
+            requested_store_id=store_id,
+            action_key="store_membership.assign",
+            manual_approval=manual_approval,
+            verification_scope=verification_scope,
+        )
+        approval_results.append({
+            "store_id": store_id,
+            "status": approval_gate.get("status"),
+            "skip_reason": approval_gate.get("skip_reason"),
+            "actor_role": approval_gate.get("actor_role"),
+            "actor_id_hash": approval_gate.get("actor_id_hash"),
+            "store_scope_verified": approval_gate.get("store_scope_verified"),
+            "permission_verified": approval_gate.get("permission_verified"),
+            "approval_role_verified": approval_gate.get("approval_role_verified"),
+        })
+        if approval_gate.get("status") != "approval_allowed_mock":
+            result["approval_results"] = approval_results
+            result["skip_reason"] = approval_gate.get("skip_reason") or "user_invitation_approval_blocked"
+            return result
+
+    result.update({
+        "status": "user_invitation_mock_ready",
+        "approval_results": approval_results,
+        "invitation_would_create_user": True,
+        "invitation_would_send": True,
+        "business_message": "User invitation passed the private mock gate only; no user, session, role, or membership row was written.",
+        "next_action": "Plan a separate readonly API and later real invitation approval phase.",
     })
     return result
