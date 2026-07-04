@@ -1167,3 +1167,33 @@ Naver-Product-Batch-1A defines the path from the current 5-row product proof tow
 The multi-store production operation model plan is documented in `PHASE_ERP_MULTISTORE_1A_MULTI_STORE_PRODUCTION_OPERATION_MODEL_PLAN.md`.
 
 ERP-Multistore-1A defines the production model for large-scale multi-store operations: known actor identity, active store membership, role scope, per-store task state, failure isolation, audit evidence, backup/restore evidence, and business-safe dashboard summaries. Auth foundation tables exist, but real users and store memberships are still not active.
+
+## Phase ERP-Batch-1C - Formal Batch Sync Readonly Evidence API Plan
+
+The formal batch sync readonly evidence API plan is documented in `PHASE_ERP_BATCH_1C_FORMAL_BATCH_SYNC_READONLY_EVIDENCE_API_PLAN.md`.
+
+ERP-Batch-1C plans a future readonly evidence API for formal batch approval screens. It remains planning-only: no public execution endpoint, no formal sync opening, and no business writes.
+
+## Phase ERP-Batch-1D - Batch Sync Approval UI Plan
+
+The batch sync approval UI plan is documented in `PHASE_ERP_BATCH_1D_BATCH_SYNC_APPROVAL_UI_PLAN.md`.
+
+ERP-Batch-1D plans the future operator-facing approval UI. It should show candidate counts, changed fields, backup evidence, permission approval, audit readiness, and rollback readiness in business language while keeping technical diagnostics folded.
+
+## Phase Naver-Order-Batch-1B - Order Batch Readonly Candidate Window
+
+The Naver order batch readonly candidate window is documented in `PHASE_NAVER_ORDER_BATCH_1B_ORDER_BATCH_READONLY_CANDIDATE_WINDOW.md`.
+
+Naver-Order-Batch-1B ran a recent 3-day KST readonly window through the existing protected order preview endpoint. HTTP returned `200`, preview status was `success`, safe hash `id-hash-192b9c67e8` was observed, and the local sync status remained `not_requested`. No orders, products, SyncLog rows, tested-success rows, audit rows, or timeline events were written. Formal order batch sync remains closed.
+
+## Phase Naver-Product-Batch-1B - Product Batch Page Expansion Readonly Repeat
+
+The Naver product batch page expansion readonly repeat is documented in `PHASE_NAVER_PRODUCT_BATCH_1B_PRODUCT_BATCH_PAGE_EXPANSION_READONLY_REPEAT.md`.
+
+Naver-Product-Batch-1B ran protected readonly product previews for `page=1,size=5` and `page=2,size=5`. Page 1 returned `would_update=3`, `would_refresh_only=2`, and changed field name `stock_quantity`; page 2 returned `success_empty`. No product writes were performed. The new stock-change signal requires manual review before any later write phase.
+
+## Phase ERP-Multistore-1B - Store Membership Assignment Approval Plan
+
+The store membership assignment approval plan is documented in `PHASE_ERP_MULTISTORE_1B_STORE_MEMBERSHIP_ASSIGNMENT_APPROVAL_PLAN.md`.
+
+ERP-Multistore-1B plans the first production-safe store membership assignment flow. It does not create users, assign memberships, activate login, or enable large-scale multi-store production operation.

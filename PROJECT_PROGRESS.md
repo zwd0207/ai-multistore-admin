@@ -617,3 +617,32 @@ Next 5 recommended stages:
 3. `Phase Naver-Order-Batch-1B: Order batch readonly candidate window`
 4. `Phase Naver-Product-Batch-1B: Product batch page expansion readonly repeat`
 5. `Phase ERP-Multistore-1B: Store membership assignment approval plan`
+
+### Latest update after `Phase ERP-Batch-1C` to `Phase ERP-Multistore-1B`
+
+- Project overall planning progress: about `74% - 80%`
+- Naver basic ERP loop progress: about `82% - 87%`
+- ERP real-user landing progress: about `76% - 82%`
+- Production version for long-term non-technical use: about `70% - 76%`
+
+Implemented in this update:
+
+- Planned a future readonly evidence API for formal batch sync approval screens.
+- Planned the future batch sync approval UI with business-first wording and folded technical diagnostics.
+- Ran a protected Naver order readonly candidate window over a recent 3-day KST range. The existing endpoint still limits the window to one candidate at a time. HTTP returned `200`, preview status was `success`, safe hash `id-hash-192b9c67e8` was observed, and no local write was requested.
+- Ran protected Naver product readonly previews for `page=1,size=5` and `page=2,size=5`.
+- Product page 1 now reports `would_update=3`, `would_refresh_only=2`, and changed field `stock_quantity`; page 2 remains `success_empty`.
+- Planned the first store membership assignment approval flow for future multi-store production operation.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, mock-proven formal batch sync production gate design, and readonly evidence for future batch approval.
+- Not suitable now: actually opening formal product/order batch sync, automatic product stock update writes, active multi-user login production use, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-1C: Product stock-change approval plan`
+2. `Phase Naver-Product-Batch-1D: Product stock-change mock write gate`
+3. `Phase ERP-Batch-1E: Readonly evidence API mock gate`
+4. `Phase ERP-Multistore-1C: Store membership mock assignment gate`
+5. `Phase ERP-Auth-1O: Auth role assignment approval plan`
