@@ -15,6 +15,7 @@ READONLY_MOCK_SCOPE = VERIFICATION_SCOPE
 READONLY_LOCAL_SCOPE = "local_readonly_route"
 INTEGRATION_MOCK_SCOPE = VERIFICATION_SCOPE
 SELECTED_OPERATION_MOCK_SCOPE = VERIFICATION_SCOPE
+SELECTED_OPERATION_LOCAL_MOCK_SCOPE = VERIFICATION_SCOPE
 BACKUP_AUDIT_MOCK_SCOPE = VERIFICATION_SCOPE
 BACKUP_AUDIT_RUNTIME_MOCK_SCOPE = VERIFICATION_SCOPE
 
@@ -116,6 +117,7 @@ ACTION_LABELS_ZH = {
     "audit_logs_readonly_mock_blocked": "\u5ba1\u8ba1\u65e5\u5fd7\u963b\u65ad\u8bb0\u5f55",
     "audit_writer_local_approved": "\u672c\u5730\u5ba1\u8ba1\u5199\u5165\u9a8c\u8bc1",
     "audit_writer_local_blocked_evidence": "\u672c\u5730\u5ba1\u8ba1\u963b\u65ad\u8bc1\u636e",
+    "approval_verified": "\u4eba\u5de5\u6279\u51c6\u5df2\u9a8c\u8bc1",
     "backup_created": "\u5907\u4efd\u5df2\u521b\u5efa",
     "backup_hash_verified": "\u5907\u4efd\u54c8\u5e0c\u5df2\u9a8c\u8bc1",
     "backup_integrity_verified": "\u5907\u4efd\u5b8c\u6574\u6027\u5df2\u9a8c\u8bc1",
@@ -138,6 +140,9 @@ ACTION_LABELS_ZH = {
     "schema_migration_backup_verified": "\u7ed3\u6784\u8fc1\u79fb\u524d\u5907\u4efd\u5df2\u9a8c\u8bc1",
     "schema_migration_succeeded": "\u7ed3\u6784\u8fc1\u79fb\u6210\u529f",
     "schema_migration_verified": "\u7ed3\u6784\u8fc1\u79fb\u540e\u6821\u9a8c\u6210\u529f",
+    "selected_operation_finished": "\u9009\u5b9a\u64cd\u4f5c\u5df2\u5b8c\u6210",
+    "selected_operation_started": "\u9009\u5b9a\u64cd\u4f5c\u5df2\u5f00\u59cb",
+    "post_write_verification_finished": "\u5199\u5165\u540e\u6821\u9a8c\u5df2\u5b8c\u6210",
 }
 
 TARGET_TYPE_LABELS_ZH = {
@@ -158,6 +163,7 @@ REASON_LABELS_ZH = {
     "sensitive_scan_failed": "\u654f\u611f\u5b57\u6bb5\u626b\u63cf\u672a\u901a\u8fc7",
     "local_writer_verified": "\u672c\u5730\u5199\u5165\u95e8\u7981\u5df2\u9a8c\u8bc1",
     "manual_operation_blocked": "\u4eba\u5de5\u64cd\u4f5c\u5df2\u963b\u65ad",
+    "selected_operation_local_mock_gate": "\u9009\u5b9a\u64cd\u4f5c\u5ba1\u8ba1\u9a8c\u8bc1",
 }
 
 
@@ -1290,6 +1296,302 @@ def write_selected_operation_audit_runtime_wiring_mock_gate(
         "runtime_writer_enabled": False,
         "real_database_written": False,
         "operation_type": operation_type,
+    })
+    return result
+
+
+def write_selected_operation_audit_local_implementation_mock_gate(
+    db: Session,
+    *,
+    operation_type: str,
+    store_id: int,
+    platform: str,
+    target_order_hash: str | None,
+    manual_approval: bool,
+    backup_evidence: dict[str, Any] | None,
+    local_operation_result: dict[str, Any] | None,
+    post_write_verification: dict[str, Any] | None,
+    audit_write_enabled: bool,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private 2D mock gate for selected local operation audit evidence.
+
+    The helper validates the production-shaped audit chain defined in
+    ERP-Audit-2C, but writes only to the isolated verify_all database.
+    """
+
+    result = _base_result(phase="ERP-Audit-2D")
+    result.update({
+        "selected_operation_local_mock_gate": True,
+        "operation_type": operation_type,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+        "temp_database_only": True,
+    })
+    if not audit_write_enabled:
+        return result
+    if verification_scope != SELECTED_OPERATION_LOCAL_MOCK_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "selected_operation_local_mock_scope_required",
+        })
+        return result
+    if operation_type != "controlled_naver_order_local_refresh":
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_selected_operation",
+        })
+        return result
+    if store_id != 8:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_store_id",
+        })
+        return result
+    if platform != "naver":
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_platform",
+        })
+        return result
+
+    safe_target_hash = str(target_order_hash or "").strip()
+    if not safe_target_hash:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_target_order_hash",
+        })
+        return result
+    if not safe_target_hash.startswith("id-hash-") or not SAFE_ENUM_PATTERN.match(safe_target_hash):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsafe_target_order_hash",
+        })
+        return result
+    if manual_approval is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+    if not isinstance(backup_evidence, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_evidence_required",
+        })
+        return result
+
+    backup_sha256 = str(backup_evidence.get("backup_sha256") or "").strip()
+    if not _valid_sha256(backup_sha256):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_backup_sha256",
+        })
+        return result
+    required_backup_flags = {
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+    missing_backup_flags = sorted(
+        key
+        for key, expected in required_backup_flags.items()
+        if backup_evidence.get(key) is not expected
+    )
+    if backup_evidence.get("sqlite_integrity_check") != "ok" or missing_backup_flags:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_evidence_not_verified",
+            "missing_or_invalid_backup_flags": missing_backup_flags,
+        })
+        return result
+
+    if not isinstance(local_operation_result, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_local_operation_result",
+        })
+        return result
+    if local_operation_result.get("formal_sync_open") is not False:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "formal_sync_must_remain_closed",
+        })
+        return result
+    if local_operation_result.get("platform_writes_enabled") is not False:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "platform_writes_must_remain_disabled",
+        })
+        return result
+
+    operation_status = str(local_operation_result.get("status") or "").strip()
+    if operation_status not in {"succeeded", "blocked", "failed"}:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_local_operation_status",
+        })
+        return result
+
+    if not isinstance(post_write_verification, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_post_write_verification",
+        })
+        return result
+    verification_status = str(post_write_verification.get("status") or "").strip()
+    if verification_status not in {"succeeded", "failed"}:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_post_write_verification_status",
+        })
+        return result
+    if post_write_verification.get("raw_response_saved") is not False:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "post_write_raw_response_must_not_be_saved",
+        })
+        return result
+    if post_write_verification.get("privacy_fields_redacted") is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "post_write_privacy_must_be_redacted",
+        })
+        return result
+
+    forbidden_fields = _sensitive_fields({
+        "target_order_hash": safe_target_hash,
+        "backup_evidence": backup_evidence,
+        "local_operation_result": local_operation_result,
+        "post_write_verification": post_write_verification,
+    })
+    if forbidden_fields:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "audit_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    operation_row_status = {
+        "succeeded": "success",
+        "blocked": "blocked",
+        "failed": "failed",
+    }[operation_status]
+    verification_row_status = "success" if verification_status == "succeeded" else "failed"
+    actions: list[tuple[str, str]] = [
+        ("approval_verified", "success"),
+        ("pre_write_backup_verified", "success"),
+        ("selected_operation_started", "success"),
+        ("selected_operation_finished", operation_row_status),
+        ("post_write_verification_finished", verification_row_status),
+    ]
+
+    now = datetime.now()
+    correlation_id = f"audit-corr-2d-{safe_target_hash[:24]}"
+    backup_path = str(backup_evidence.get("backup_path") or "C:/safe-backups/codex1.db.backup-erp-audit-2d")
+    audit_rows: list[dict[str, Any]] = []
+    for index, (action, action_status) in enumerate(actions):
+        safety_flags = {
+            "selected_operation_local_mock_scope_only": True,
+            "real_api_called": False,
+            "runtime_writer_enabled": False,
+            "real_database_written": False,
+            "temp_database_only": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "sensitive_scan_passed": action_status != "blocked",
+        }
+        sensitive_scan_passed = action_status != "blocked"
+        if action_status == "blocked":
+            safety_flags["blocked_payload_written"] = False
+
+        audit_rows.append({
+            "created_at": now,
+            "updated_at": now,
+            "store_id": store_id,
+            "platform": platform,
+            "environment": "local",
+            "actor_type": "human",
+            "actor_id": "operator-safe-hash-2d",
+            "actor_label": "Local operator",
+            "actor_role": "owner",
+            "action": action,
+            "operation_phase": "ERP-Audit-2D",
+            "correlation_id": correlation_id,
+            "request_id": f"audit-request-2d-{index + 1:03d}",
+            "status": action_status,
+            "reason_code": "selected_operation_local_mock_gate",
+            "target_type": "order",
+            "target_id": None,
+            "target_hash": safe_target_hash,
+            "target_label": "Controlled Naver order local refresh audit mock",
+            "changed_field_names": ["order_status", "delivery_status", "last_synced_at"],
+            "before_summary": {
+                "operation_type": operation_type,
+                "manual_approval": True,
+                "backup_verified": True,
+                "formal_sync_open": False,
+            },
+            "after_summary": {
+                "audit_chain_action": action,
+                "local_operation_status": operation_status,
+                "post_write_verification_status": verification_status,
+            },
+            "counts_summary": {
+                "audit_rows_written": 1,
+                "orders_written": int(local_operation_result.get("orders_written") or 0),
+                "orders_updated": int(local_operation_result.get("orders_updated") or 0),
+                "products_written": 0,
+                "sync_logs_written": 0,
+                "capability_results_written": 0,
+                "order_status_events_written": int(local_operation_result.get("order_status_events_written") or 0),
+            },
+            "safety_flags": safety_flags,
+            "backup_path": backup_path,
+            "backup_sha256": backup_sha256,
+            "restore_source_path": backup_path,
+            "restore_source_sha256": backup_sha256,
+            "sensitive_scan_passed": sensitive_scan_passed,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Selected operation local implementation mock writes only to verify_all temporary database.",
+        })
+
+    inserted_ids: list[int] = []
+    for row_index, audit_row in enumerate(audit_rows):
+        skip_reason, extra = _validate_audit_row(audit_row)
+        if skip_reason:
+            result.update({
+                "status": "audit_write_blocked",
+                "skip_reason": skip_reason,
+                "invalid_row_index": row_index,
+                **extra,
+            })
+            return result
+        inserted_ids.append(_insert_audit_row(db, audit_row).id)
+
+    result.update({
+        "status": "selected_operation_local_mock_chain_written",
+        "audit_rows_written": True,
+        "rows_written": len(inserted_ids),
+        "audit_log_ids": inserted_ids,
+        "correlation_id": correlation_id,
+        "chain_actions": [action for action, _status in actions],
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+        "temp_database_only": True,
+        "real_api_called": False,
+        "sync_log_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "capability_tested_success_written": False,
     })
     return result
 

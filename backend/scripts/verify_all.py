@@ -8909,6 +8909,381 @@ def verify_selected_operation_audit_runtime_wiring_mock_gate() -> None:
     print("selected operation audit runtime wiring mock gate: ok")
 
 
+def verify_selected_operation_audit_local_implementation_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        SELECTED_OPERATION_LOCAL_MOCK_SCOPE,
+        write_selected_operation_audit_local_implementation_mock_gate,
+    )
+
+    base_kwargs = {
+        "operation_type": "controlled_naver_order_local_refresh",
+        "store_id": 8,
+        "platform": "naver",
+        "target_order_hash": "id-hash-audit2d-selected-order",
+        "manual_approval": True,
+        "backup_evidence": {
+            "backup_created": True,
+            "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-2d",
+            "backup_sha256": "5" * 64,
+            "sqlite_integrity_check": "ok",
+            "manifest_written": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        "local_operation_result": {
+            "status": "succeeded",
+            "orders_written": 0,
+            "orders_updated": 1,
+            "order_status_events_written": 0,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        },
+        "post_write_verification": {
+            "status": "succeeded",
+            "target_verified": True,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        "audit_write_enabled": True,
+        "verification_scope": SELECTED_OPERATION_LOCAL_MOCK_SCOPE,
+    }
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        disabled_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "audit_write_enabled": False},
+        )
+        assert disabled_gate["status"] == "audit_write_not_requested", disabled_gate
+        assert disabled_gate["rows_written"] == 0, disabled_gate
+        assert disabled_gate["runtime_writer_enabled"] is False, disabled_gate
+
+        missing_scope_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "verification_scope": None},
+        )
+        assert missing_scope_gate["skip_reason"] == "selected_operation_local_mock_scope_required", missing_scope_gate
+        assert missing_scope_gate["rows_written"] == 0, missing_scope_gate
+
+        unsupported_operation_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "operation_type": "naver_order_formal_batch_sync"},
+        )
+        assert unsupported_operation_gate["skip_reason"] == "unsupported_selected_operation", unsupported_operation_gate
+
+        unsupported_store_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "store_id": 7},
+        )
+        assert unsupported_store_gate["skip_reason"] == "unsupported_store_id", unsupported_store_gate
+
+        unsupported_platform_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "platform": "coupang"},
+        )
+        assert unsupported_platform_gate["skip_reason"] == "unsupported_platform", unsupported_platform_gate
+
+        missing_hash_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "target_order_hash": ""},
+        )
+        assert missing_hash_gate["skip_reason"] == "missing_target_order_hash", missing_hash_gate
+
+        unsafe_hash_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "target_order_hash": "ORDER-202607030001"},
+        )
+        assert unsafe_hash_gate["skip_reason"] == "unsafe_target_order_hash", unsafe_hash_gate
+
+        missing_approval_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "manual_approval": False},
+        )
+        assert missing_approval_gate["skip_reason"] == "manual_approval_required", missing_approval_gate
+
+        missing_backup_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "backup_evidence": None},
+        )
+        assert missing_backup_gate["skip_reason"] == "backup_evidence_required", missing_backup_gate
+
+        invalid_backup_sha_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "backup_evidence": {
+                    **base_kwargs["backup_evidence"],
+                    "backup_sha256": "not-a-valid-sha",
+                },
+            },
+        )
+        assert invalid_backup_sha_gate["skip_reason"] == "invalid_backup_sha256", invalid_backup_sha_gate
+
+        unsafe_backup_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "backup_evidence": {
+                    **base_kwargs["backup_evidence"],
+                    "manifest_written": False,
+                },
+            },
+        )
+        assert unsafe_backup_gate["skip_reason"] == "backup_evidence_not_verified", unsafe_backup_gate
+
+        missing_operation_result_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "local_operation_result": None},
+        )
+        assert missing_operation_result_gate["skip_reason"] == "missing_local_operation_result", missing_operation_result_gate
+
+        formal_sync_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "local_operation_result": {
+                    **base_kwargs["local_operation_result"],
+                    "formal_sync_open": True,
+                },
+            },
+        )
+        assert formal_sync_gate["skip_reason"] == "formal_sync_must_remain_closed", formal_sync_gate
+
+        platform_write_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "local_operation_result": {
+                    **base_kwargs["local_operation_result"],
+                    "platform_writes_enabled": True,
+                },
+            },
+        )
+        assert platform_write_gate["skip_reason"] == "platform_writes_must_remain_disabled", platform_write_gate
+
+        invalid_operation_status_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "local_operation_result": {
+                    **base_kwargs["local_operation_result"],
+                    "status": "synced_everything",
+                },
+            },
+        )
+        assert invalid_operation_status_gate["skip_reason"] == "invalid_local_operation_status", invalid_operation_status_gate
+
+        missing_post_write_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{**base_kwargs, "post_write_verification": None},
+        )
+        assert missing_post_write_gate["skip_reason"] == "missing_post_write_verification", missing_post_write_gate
+
+        invalid_post_status_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "post_write_verification": {
+                    **base_kwargs["post_write_verification"],
+                    "status": "maybe",
+                },
+            },
+        )
+        assert invalid_post_status_gate["skip_reason"] == "invalid_post_write_verification_status", invalid_post_status_gate
+
+        raw_response_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "post_write_verification": {
+                    **base_kwargs["post_write_verification"],
+                    "raw_response_saved": True,
+                },
+            },
+        )
+        assert raw_response_gate["skip_reason"] == "post_write_raw_response_must_not_be_saved", raw_response_gate
+
+        privacy_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "post_write_verification": {
+                    **base_kwargs["post_write_verification"],
+                    "privacy_fields_redacted": False,
+                },
+            },
+        )
+        assert privacy_gate["skip_reason"] == "post_write_privacy_must_be_redacted", privacy_gate
+
+        sensitive_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "post_write_verification": {
+                    **base_kwargs["post_write_verification"],
+                    "raw_response": "audit-raw-response-must-not-leak",
+                    "Authorization": "authorization: bearer audit-must-not-leak",
+                },
+            },
+        )
+        assert sensitive_gate["skip_reason"] == "audit_sensitive_field_blocked", sensitive_gate
+        sensitive_gate_text = json.dumps(sensitive_gate, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in sensitive_gate_text, sensitive_gate_text
+
+        success_gate = write_selected_operation_audit_local_implementation_mock_gate(db, **base_kwargs)
+        assert success_gate["status"] == "selected_operation_local_mock_chain_written", success_gate
+        assert success_gate["phase"] == "ERP-Audit-2D", success_gate
+        assert success_gate["rows_written"] == 5, success_gate
+        assert success_gate["selected_operation_local_mock_gate"] is True, success_gate
+        assert success_gate["runtime_writer_enabled"] is False, success_gate
+        assert success_gate["real_database_written"] is False, success_gate
+        assert success_gate["temp_database_only"] is True, success_gate
+        assert success_gate["real_api_called"] is False, success_gate
+        assert success_gate["sync_log_written"] is False, success_gate
+        assert success_gate["operation_type"] == "controlled_naver_order_local_refresh", success_gate
+        assert success_gate["chain_actions"] == [
+            "approval_verified",
+            "pre_write_backup_verified",
+            "selected_operation_started",
+            "selected_operation_finished",
+            "post_write_verification_finished",
+        ], success_gate
+
+        blocked_gate = write_selected_operation_audit_local_implementation_mock_gate(
+            db,
+            **{
+                **base_kwargs,
+                "target_order_hash": "id-hash-audit2d-blocked-order",
+                "local_operation_result": {
+                    "status": "blocked",
+                    "orders_written": 0,
+                    "orders_updated": 0,
+                    "order_status_events_written": 0,
+                    "formal_sync_open": False,
+                    "platform_writes_enabled": False,
+                    "blocked_reason": "manual_review_required",
+                },
+                "post_write_verification": {
+                    "status": "failed",
+                    "target_verified": False,
+                    "raw_response_saved": False,
+                    "privacy_fields_redacted": True,
+                },
+            },
+        )
+        assert blocked_gate["status"] == "selected_operation_local_mock_chain_written", blocked_gate
+        assert blocked_gate["rows_written"] == 5, blocked_gate
+
+        persisted_rows = db.execute(text("""
+            SELECT
+                action,
+                status,
+                reason_code,
+                operation_phase,
+                correlation_id,
+                request_id,
+                target_type,
+                target_hash,
+                changed_field_names,
+                before_summary,
+                after_summary,
+                counts_summary,
+                safety_flags,
+                backup_sha256,
+                sensitive_scan_passed,
+                raw_response_saved,
+                secrets_saved,
+                privacy_fields_redacted
+            FROM operation_audit_logs
+            WHERE operation_phase = 'ERP-Audit-2D'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(persisted_rows) == 10, persisted_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["secrets_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in persisted_rows), persisted_rows
+        assert {row["target_type"] for row in persisted_rows} == {"order"}, persisted_rows
+        assert {row["reason_code"] for row in persisted_rows} == {"selected_operation_local_mock_gate"}, persisted_rows
+        assert {row["operation_phase"] for row in persisted_rows} == {"ERP-Audit-2D"}, persisted_rows
+        assert {row["backup_sha256"] for row in persisted_rows} == {"5" * 64}, persisted_rows
+        assert sorted({row["action"] for row in persisted_rows}) == [
+            "approval_verified",
+            "post_write_verification_finished",
+            "pre_write_backup_verified",
+            "selected_operation_finished",
+            "selected_operation_started",
+        ], persisted_rows
+
+        blocked_rows = [row for row in persisted_rows if row["status"] == "blocked"]
+        assert len(blocked_rows) == 1, persisted_rows
+        blocked_flags = blocked_rows[0]["safety_flags"]
+        if isinstance(blocked_flags, str):
+            blocked_flags = json.loads(blocked_flags)
+        assert blocked_flags["blocked_payload_written"] is False, blocked_flags
+
+        persisted_text = json.dumps(
+            [dict(row) for row in persisted_rows],
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+        for forbidden in [
+            "client_secret",
+            "authorization",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw_request",
+            "rawresponse",
+            "channelno",
+            "productorderid",
+            "order-202607030001",
+            "buyername",
+            "receivername",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+        ]:
+            assert forbidden not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 10, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("selected operation audit local implementation mock gate: ok")
+
+
 def verify_backup_creation_audit_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -11271,6 +11646,7 @@ def main() -> None:
         verify_operation_audit_writer_local_implementation()
         verify_operation_audit_writer_integration_mock_gate()
         verify_selected_operation_audit_runtime_wiring_mock_gate()
+        verify_selected_operation_audit_local_implementation_mock_gate()
         verify_backup_creation_audit_mock_gate()
         verify_backup_creation_audit_runtime_wiring_mock_gate()
         verify_backup_creation_audit_local_implementation()
