@@ -713,6 +713,12 @@ The selected-operation runtime wiring mock gate is documented in `PHASE_ERP_AUDI
 
 ERP-Audit-1U adds a private Codex1 mock helper for `controlled_naver_order_local_refresh` and verifies it only in the temporary `verify_all.py` database. It requires store 8, platform Naver, a safe target order hash, manual approval, backup evidence, fake write result, fake post-write readback, audit write intent, and private verification scope. It writes a five-row audit chain only in the temporary verification database and confirms business counts remain unchanged. It does not connect real runtime order flows, write the real `operation_audit_logs` table, call platform APIs, modify schema, execute backup/restore, add public audit write routes, or open formal sync.
 
+## Phase ERP-Audit-1V - Selected Operation Runtime Wiring Implementation Approval Plan
+
+The selected-operation runtime wiring implementation approval plan is documented in `PHASE_ERP_AUDIT_1V_SELECTED_OPERATION_RUNTIME_WIRING_IMPLEMENTATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-1V is planning-only. It defines the approval boundary for a later local implementation that may connect audit writing to only `controlled_naver_order_local_refresh`. A later implementation must start from clean worktrees, create and verify a database backup, record baseline counts, require explicit user approval, remain limited to store 8 and Naver, write only safe append-only audit rows, and prove readback and sensitive scans. This phase does not add code, connect runtime order flows, write audit or business rows, modify schema, call platform APIs, execute backup/restore, add public audit write routes, or open formal sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
