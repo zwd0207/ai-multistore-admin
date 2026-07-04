@@ -33,7 +33,7 @@ function nextActionText(result) {
     return '目标用户已存在，不需要重复创建邀请；如需店铺权限，请走成员分配审批。';
   }
   if (result.skipReason === 'login_identifier_must_be_masked') {
-    return '请只展示脱敏后的登录标识，不要在页面、日志或测试快照中放完整邮箱或手机号。';
+    return '请只展示脱敏后的登录标识，不要在页面、日志或测试截图中放完整邮箱或手机号。';
   }
   return '请管理员查看折叠详情中的阻断原因；当前不进入真实邀请或写入阶段。';
 }
@@ -86,7 +86,7 @@ export default function UserInvitationReadonlyPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>用户邀请只读检查</h2>
-          <p>这里仅检查后续邀请新运营用户的准备条件，不会创建用户、发送邀请或分配店铺成员。</p>
+          <p>这里只检查后续邀请新运营用户的准备条件，不会创建用户、发送邀请或分配店铺成员。</p>
         </div>
         <span className="period-chip">{loading ? '检查中' : '只读检查'}</span>
       </div>
@@ -129,7 +129,7 @@ export default function UserInvitationReadonlyPanel() {
         title="查看用户邀请检查技术详情"
         description="这里保留只读门禁状态和安全标记；普通运营只需要看上方业务结论。"
         items={[
-          { label: 'phase', value: result?.phase || 'ERP-Multistore-1R' },
+          { label: 'phase', value: result?.phase || 'ERP-Multistore-1T' },
           { label: 'status', value: result?.status },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'target_store_ids', value: result?.targetStoreIds?.join(', ') || String(storeId) },

@@ -1533,3 +1533,33 @@ Codex1 now exposes `POST /api/v1/batch/naver/products/rollback-readonly-report` 
 The user invitation readonly UI walkthrough is documented in `PHASE_ERP_MULTISTORE_1S_USER_INVITATION_READONLY_UI_WALKTHROUGH.md`.
 
 The Accounts invitation readiness panel remains display-only in backend and mock modes. Real invitation, user creation, role assignment, and store membership writes remain closed.
+
+## Phase ERP-Batch-1T - Batch Approval Audit Evidence UI Route Integration Plan
+
+The UI route integration plan is documented in `PHASE_ERP_BATCH_1T_BATCH_APPROVAL_AUDIT_EVIDENCE_UI_ROUTE_INTEGRATION_PLAN.md`.
+
+The Orders panel may consume the local readonly audit-evidence route but must keep all write actions closed.
+
+## Phase ERP-Batch-1U - Batch Approval Audit Evidence UI Route Integration
+
+The UI route integration is documented in `PHASE_ERP_BATCH_1U_BATCH_APPROVAL_AUDIT_EVIDENCE_UI_ROUTE_INTEGRATION.md`.
+
+Codex2 Orders now calls the batch approval audit-evidence readonly route in backend mode and shows audit readiness as business wording.
+
+## Phase Naver-Product-Batch-1S - Product Rollback Readonly Report UI Route Integration Plan
+
+The UI route integration plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1S_PRODUCT_ROLLBACK_READONLY_REPORT_UI_ROUTE_INTEGRATION_PLAN.md`.
+
+The Products rollback report panel may consume the local readonly rollback-report route but must not execute restore or product writes.
+
+## Phase Naver-Product-Batch-1T - Product Rollback Readonly Report UI Route Integration
+
+The UI route integration is documented in `PHASE_NAVER_PRODUCT_BATCH_1T_PRODUCT_ROLLBACK_READONLY_REPORT_UI_ROUTE_INTEGRATION.md`.
+
+Codex2 Products now reads the local rollback readonly report route in backend mode and keeps restore/product writes closed.
+
+## Phase ERP-Multistore-1T - User Invitation Readonly UI Production Wording Cleanup
+
+The wording cleanup is documented in `PHASE_ERP_MULTISTORE_1T_USER_INVITATION_READONLY_UI_PRODUCTION_WORDING_CLEANUP.md`.
+
+The Accounts user invitation panel now uses clearer Chinese business wording while keeping real invitation, user creation, and membership writes closed.

@@ -990,3 +990,31 @@ Next 5 recommended stages:
 3. `Phase Naver-Product-Batch-1S: Product rollback readonly report UI route integration plan`
 4. `Phase Naver-Product-Batch-1T: Product rollback readonly report UI route integration`
 5. `Phase ERP-Multistore-1T: User invitation readonly UI production wording cleanup`
+
+### Latest update after `Phase ERP-Batch-1T` to `Phase ERP-Multistore-1T`
+
+- Project overall planning progress: about `87% - 92%`
+- Naver basic ERP loop progress: about `94% - 97%`
+- ERP real-user landing progress: about `89% - 94%`
+- Production version for long-term non-technical use: about `83% - 88%`
+
+Implemented in this update:
+
+- Planned and implemented the Orders UI integration for the batch approval audit-evidence readonly route.
+- Added frontend service support for `POST /api/v1/batch/approval-audit-evidence`.
+- Planned and implemented the Products UI integration for the Naver product rollback readonly report route.
+- Added frontend service support for `POST /api/v1/batch/naver/products/rollback-readonly-report`.
+- Cleaned the Accounts user invitation readonly panel into clearer production-facing Chinese wording.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, readonly batch evidence API normalization, approval evidence UI display, controlled stock-only local product update, readonly membership assignment readiness checks, readonly user-invitation readiness checks, Accounts/Orders readiness panels, local batch approval audit-evidence route review, local product rollback report route review, and frontend display of those route results.
+- Not suitable now: opening formal product/order batch sync, broad product writes, active multi-user login production use, sending real user invitations, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Batch-1V: Batch approval audit evidence UI runtime walkthrough`
+2. `Phase Naver-Product-Batch-1U: Product rollback readonly report UI runtime walkthrough`
+3. `Phase ERP-Multistore-1U: User invitation readonly UI runtime walkthrough`
+4. `Phase ERP-Batch-2A: Formal batch sync operator checklist consolidation`
+5. `Phase ERP-Multistore-2A: Real user invitation production gate plan`

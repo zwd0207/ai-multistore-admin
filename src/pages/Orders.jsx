@@ -1042,11 +1042,52 @@ function buildNaverBatchEvidencePayload({ storeId, localOrderCount }) {
   };
 }
 
+function buildBatchApprovalAuditPlan() {
+  return {
+    approval_record_planned: true,
+    backup_verification_record_planned: true,
+    permission_check_record_planned: true,
+    write_attempt_record_planned: true,
+    post_write_verification_record_planned: true,
+    sensitive_scan_record_planned: true,
+    rollback_reference_planned: true,
+    failure_record_planned: true,
+    formal_sync_remains_closed: true,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildBatchApprovalAuditPayload({ readonlyEvidence, storeId }) {
+  return {
+    readonlyEvidence,
+    approvalContext: {
+      actor_id: 'local-admin',
+      role: 'admin',
+      store_ids: [Number(storeId)],
+      manual_approval_planned: true,
+      approved_actions: ['products.batch_sync_write', 'orders.batch_sync_write'],
+    },
+    auditEvidencePlan: buildBatchApprovalAuditPlan(),
+  };
+}
+
+function batchAuditStatusMessage(auditResult) {
+  if (!auditResult) return '正在整理批量审批审计证据，只读检查不会写入审计记录。';
+  if (auditResult.status === 'batch_approval_audit_evidence_ready') {
+    return '批量审批审计证据已整理，可用于人工复核；当前不会写入审计记录或业务数据。';
+  }
+  if (auditResult.skipReason) return '批量审批审计证据暂未通过，请管理员查看折叠技术详情。';
+  return '批量审批审计证据已返回，写入动作保持关闭。';
+}
+
 function NaverBatchApprovalEvidencePanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({
     loading: false,
     result: null,
+    auditResult: null,
     error: '',
     localOrderCount: 0,
   });
@@ -1054,7 +1095,7 @@ function NaverBatchApprovalEvidencePanel() {
 
   useEffect(() => {
     if (!isNaverStore || !selectedStoreId) {
-      setState({ loading: false, result: null, error: '', localOrderCount: 0 });
+      setState({ loading: false, result: null, auditResult: null, error: '', localOrderCount: 0 });
       return undefined;
     }
     let cancelled = false;
@@ -1076,10 +1117,15 @@ function NaverBatchApprovalEvidencePanel() {
           storeId: selectedStoreId,
           localOrderCount: naverOrders.length,
         }));
+        const auditResult = await dataProvider.checkBatchApprovalAuditEvidence(buildBatchApprovalAuditPayload({
+          readonlyEvidence: result,
+          storeId: selectedStoreId,
+        }));
         if (!cancelled) {
           setState({
             loading: false,
             result,
+            auditResult,
             error: '',
             localOrderCount: naverOrders.length,
           });
@@ -1089,6 +1135,7 @@ function NaverBatchApprovalEvidencePanel() {
           setState({
             loading: false,
             result: null,
+            auditResult: null,
             error: error?.message || '批量同步审批证据暂时无法加载。',
             localOrderCount: 0,
           });
@@ -1101,9 +1148,12 @@ function NaverBatchApprovalEvidencePanel() {
 
   if (!isNaverStore) return null;
 
-  const { loading, result, error, localOrderCount } = state;
+  const {
+    loading, result, auditResult, error, localOrderCount,
+  } = state;
   const evidenceItems = result?.items || [];
   const hasEvidence = result?.status === 'readonly_evidence_api_ready';
+  const hasAuditEvidence = auditResult?.status === 'batch_approval_audit_evidence_ready';
 
   return (
     <section className="content-card">
@@ -1123,6 +1173,14 @@ function NaverBatchApprovalEvidencePanel() {
           </div>
           <p>{batchEvidenceStatusMessage(result)}</p>
           <small>商品和订单的正式批量同步都仍然需要单独审批。</small>
+        </article>
+        <article className={hasAuditEvidence ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审计证据</strong>
+            <span>{hasAuditEvidence ? '已整理' : '待确认'}</span>
+          </div>
+          <p>{batchAuditStatusMessage(auditResult)}</p>
+          <small>当前只做只读检查，不写入审计记录，也不开放正式批量同步。</small>
         </article>
         {evidenceItems.map((item) => (
           <article className="business-capability-card info" key={item.evidenceId}>
@@ -1157,6 +1215,19 @@ function NaverBatchApprovalEvidencePanel() {
         items={[
           { label: 'batch_evidence_phase', value: result?.phase || 'ERP-Batch-1J' },
           { label: 'batch_evidence_status', value: result?.status },
+          { label: 'batch_audit_phase', value: auditResult?.phase || 'ERP-Batch-1S' },
+          { label: 'batch_audit_status', value: auditResult?.status },
+          { label: 'batch_audit_skip_reason', value: auditResult?.skipReason },
+          { label: 'batch_audit_route_path', value: auditResult?.routePath },
+          { label: 'batch_audit_backend_route_implemented', value: auditResult?.backendRouteImplemented },
+          { label: 'batch_audit_evidence_count', value: auditResult?.evidenceCount },
+          { label: 'batch_audit_required_actions', value: auditResult?.requiredActions?.join(', ') || '-' },
+          { label: 'batch_audit_operation_audit_rows_planned', value: auditResult?.operationAuditRowsPlanned },
+          { label: 'batch_audit_operation_audit_rows_written', value: auditResult?.operationAuditRowsWritten },
+          { label: 'batch_audit_real_database_written', value: auditResult?.realDatabaseWritten },
+          { label: 'batch_audit_orders_written', value: auditResult?.ordersWritten },
+          { label: 'batch_audit_products_written', value: auditResult?.productsWritten },
+          { label: 'batch_audit_formal_sync_open', value: auditResult?.formalSyncOpen },
           { label: 'public_endpoint_enabled', value: result?.publicEndpointEnabled },
           { label: 'evidence_count', value: result?.evidenceCount },
           { label: 'real_api_called', value: result?.realApiCalled },

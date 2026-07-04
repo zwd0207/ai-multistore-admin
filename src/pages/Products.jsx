@@ -680,6 +680,124 @@ function ProductRollbackReadonlyReportMockPanel() {
   );
 }
 
+function ProductRollbackReadonlyReportRoutePanel() {
+  const { selectedStore } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  const [state, setState] = useState({ loading: false, report: null, error: '' });
+
+  useEffect(() => {
+    if (!isNaverStore) {
+      setState({ loading: false, report: null, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    const rollbackDrillGate = {
+      status: 'product_batch_rollback_drill_mock_ready',
+      rollback_executed: false,
+      real_restore_executed: false,
+      products_written: false,
+      backup_evidence_verified: true,
+      updated_count: 3,
+      created_count: 0,
+      stock_only_write_verified: true,
+    };
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getNaverProductRollbackReadonlyReport({ rollbackDrillGate })
+      .then((report) => {
+        if (!cancelled) setState({ loading: false, report, error: '' });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            report: null,
+            error: error?.message || '商品回滚只读报告暂时无法加载。',
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, report, error } = state;
+  const hasReport = report?.status === 'product_rollback_drill_readonly_report_ready';
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 商品回滚只读报告</h2>
+          <p>这里展示商品库存小批量写入后的回滚准备情况，仅用于人工审核，不会恢复数据库，也不会再次写入商品。</p>
+        </div>
+        <span className="period-chip">{loading ? '加载中' : '只读报告'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={hasReport ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>报告状态</strong>
+            <span>{hasReport ? '已整理' : '待确认'}</span>
+          </div>
+          <p>{report?.businessMessage || '商品回滚只读报告正在整理，当前不会执行恢复或写入商品。'}</p>
+          <small>这里读取本地只读 route；不会执行真实恢复，也不会开放正式商品批量同步。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>影响范围</strong>
+            <span>{report?.updatedCount ?? 0} 条</span>
+          </div>
+          <p>最近一次受控商品写入只涉及库存字段，未新增商品，也未修改名称、状态或价格。</p>
+          <small>正式商品批量同步仍未开放。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>恢复操作</strong>
+            <span>未执行</span>
+          </div>
+          <p>当前只展示恢复准备情况，不会把备份恢复到生产数据库。</p>
+          <small>真实恢复必须单独审批，并先做临时库演练。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>后续动作</strong>
+            <span>继续审核</span>
+          </div>
+          <p>{report?.nextAction || '继续人工审核备份、回读和敏感扫描证据。'}</p>
+          <small>页面不调用 Naver，也不执行 real_sync。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看商品回滚报告技术详情"
+        description="这些字段仅供管理员排查，主页面只展示业务结论。"
+        items={[
+          { label: 'phase', value: report?.phase || 'Naver-Product-Batch-1R' },
+          { label: 'status', value: report?.status },
+          { label: 'skip_reason', value: report?.skipReason },
+          { label: 'route_path', value: report?.routePath },
+          { label: 'backend_route_implemented', value: report?.backendRouteImplemented },
+          { label: 'public_endpoint_enabled', value: report?.publicEndpointEnabled },
+          { label: 'report_ready', value: report?.reportReady },
+          { label: 'backup_evidence_verified', value: report?.backupEvidenceVerified },
+          { label: 'updated_count', value: report?.updatedCount },
+          { label: 'created_count', value: report?.createdCount },
+          { label: 'stock_only_write_verified', value: report?.stockOnlyWriteVerified },
+          { label: 'rollback_executed', value: report?.rollbackExecuted },
+          { label: 'real_restore_executed', value: report?.realRestoreExecuted },
+          { label: 'production_db_touched', value: report?.productionDbTouched },
+          { label: 'products_written', value: report?.productsWritten },
+          { label: 'orders_written', value: report?.ordersWritten },
+          { label: 'sync_log_written', value: report?.syncLogWritten },
+          { label: 'tested_success_written', value: report?.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_written', value: report?.operationAuditRowsWritten },
+          { label: 'formal_product_sync_open', value: report?.formalProductSyncOpen },
+          { label: 'platform_writes_enabled', value: report?.platformWritesEnabled },
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -688,7 +806,7 @@ export default function Products() {
   return (
     <>
       <NaverProductPreviewStatusPanel />
-      <ProductRollbackReadonlyReportMockPanel />
+      <ProductRollbackReadonlyReportRoutePanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"

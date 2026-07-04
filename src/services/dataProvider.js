@@ -891,6 +891,84 @@ function adaptBatchReadonlyEvidenceResult(data = {}) {
   };
 }
 
+function adaptBatchApprovalAuditEvidenceResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'ERP-Batch-1S',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason || data.skipReason || null,
+    businessMessage: data.business_message || data.businessMessage || '',
+    nextAction: data.next_action || data.nextAction || '',
+    evidenceCount: Number(data.evidence_count ?? data.evidenceCount ?? 0),
+    storeIds: Array.isArray(data.store_ids) ? data.store_ids : (Array.isArray(data.storeIds) ? data.storeIds : []),
+    syncKinds: Array.isArray(data.sync_kinds) ? data.sync_kinds : (Array.isArray(data.syncKinds) ? data.syncKinds : []),
+    requiredActions: Array.isArray(data.required_actions) ? data.required_actions : (Array.isArray(data.requiredActions) ? data.requiredActions : []),
+    missingAuditPlanFlags: Array.isArray(data.missing_audit_plan_flags) ? data.missing_audit_plan_flags : (Array.isArray(data.missingAuditPlanFlags) ? data.missingAuditPlanFlags : []),
+    manualApprovalPlanned: Boolean(data.manual_approval_planned ?? data.manualApprovalPlanned),
+    permissionEvidencePlanned: Boolean(data.permission_evidence_planned ?? data.permissionEvidencePlanned),
+    backupEvidenceRequired: data.backup_evidence_required !== false && data.backupEvidenceRequired !== false,
+    rollbackEvidenceRequired: data.rollback_evidence_required !== false && data.rollbackEvidenceRequired !== false,
+    postWriteReadbackRequired: data.post_write_readback_required !== false && data.postWriteReadbackRequired !== false,
+    sensitiveScanRequired: data.sensitive_scan_required !== false && data.sensitiveScanRequired !== false,
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    operationAuditRowsPlanned: data.operation_audit_rows_planned !== false && data.operationAuditRowsPlanned !== false,
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || '',
+  };
+}
+
+function adaptProductRollbackReadonlyReportResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'Naver-Product-Batch-1R',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason || data.skipReason || null,
+    businessMessage: data.business_message || data.businessMessage || '',
+    nextAction: data.next_action || data.nextAction || '',
+    reportReady: Boolean(data.report_ready ?? data.reportReady),
+    reportSections: Array.isArray(data.report_sections) ? data.report_sections : (Array.isArray(data.reportSections) ? data.reportSections : []),
+    rollbackDrillReady: Boolean(data.rollback_drill_ready ?? data.rollbackDrillReady),
+    backupEvidenceVerified: Boolean(data.backup_evidence_verified ?? data.backupEvidenceVerified),
+    updatedCount: Number(data.updated_count ?? data.updatedCount ?? 0),
+    createdCount: Number(data.created_count ?? data.createdCount ?? 0),
+    stockOnlyWriteVerified: Boolean(data.stock_only_write_verified ?? data.stockOnlyWriteVerified),
+    temporaryRestoreRequired: data.temporary_restore_required !== false && data.temporaryRestoreRequired !== false,
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    realRestoreExecuted: Boolean(data.real_restore_executed ?? data.realRestoreExecuted),
+    rollbackExecuted: Boolean(data.rollback_executed ?? data.rollbackExecuted),
+    productionDbTouched: Boolean(data.production_db_touched ?? data.productionDbTouched),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || '',
+  };
+}
+
 function mockBatchReadonlyEvidence(payload = {}) {
   const rawItems = Array.isArray(payload.evidence_items || payload.evidenceItems)
     ? (payload.evidence_items || payload.evidenceItems)
@@ -944,6 +1022,152 @@ function mockBatchReadonlyEvidence(payload = {}) {
     formal_product_sync_open: false,
     platform_writes_enabled: false,
   });
+}
+
+function mockBatchApprovalAuditEvidence(payload = {}) {
+  const evidence = payload.readonly_evidence || payload.readonlyEvidence || {};
+  const items = Array.isArray(evidence.items) ? evidence.items : [];
+  const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('productorderid')
+    || JSON.stringify(payload).toLowerCase().includes('rawresponse');
+  if (hasSensitiveMarker) {
+    return adaptBatchApprovalAuditEvidenceResult({
+      phase: 'ERP-Batch-1S',
+      status: 'blocked',
+      skip_reason: 'batch_approval_audit_sensitive_field_blocked',
+      operation_audit_rows_written: false,
+      real_database_written: false,
+      orders_written: false,
+      products_written: false,
+      sync_log_written: false,
+      capability_tested_success_written: false,
+      formal_sync_open: false,
+      public_endpoint_enabled: false,
+      privacy_fields_redacted: true,
+    });
+  }
+  return adaptBatchApprovalAuditEvidenceResult({
+    phase: 'ERP-Batch-1S',
+    status: 'batch_approval_audit_evidence_ready',
+    business_message: 'mock 批量审批审计证据已整理，仅用于页面只读展示。',
+    next_action: '继续人工审核备份、权限、回读、敏感扫描和回滚证据。',
+    evidence_count: items.length,
+    store_ids: [...new Set(items.map((item) => Number(item.storeId ?? item.store_id)).filter(Boolean))],
+    sync_kinds: [...new Set(items.map((item) => item.syncKind || item.sync_kind).filter(Boolean))],
+    required_actions: ['orders.batch_sync_write', 'products.batch_sync_write'],
+    manual_approval_planned: true,
+    permission_evidence_planned: true,
+    backup_evidence_required: true,
+    rollback_evidence_required: true,
+    post_write_readback_required: true,
+    sensitive_scan_required: true,
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    operation_audit_rows_planned: true,
+    operation_audit_rows_written: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    formal_order_sync_open: false,
+    formal_product_sync_open: false,
+    platform_writes_enabled: false,
+    route_path: '/api/v1/batch/approval-audit-evidence',
+  });
+}
+
+function mockNaverProductRollbackReadonlyReport(payload = {}) {
+  const gate = payload.rollback_drill_gate || payload.rollbackDrillGate || {};
+  const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('rawresponse')
+    || JSON.stringify(payload).toLowerCase().includes('external_product_id');
+  if (hasSensitiveMarker) {
+    return adaptProductRollbackReadonlyReportResult({
+      phase: 'Naver-Product-Batch-1R',
+      status: 'blocked',
+      skip_reason: 'rollback_report_sensitive_field_blocked',
+      real_restore_executed: false,
+      products_written: false,
+      real_database_written: false,
+      formal_product_sync_open: false,
+      public_endpoint_enabled: false,
+      privacy_fields_redacted: true,
+    });
+  }
+  return adaptProductRollbackReadonlyReportResult({
+    phase: 'Naver-Product-Batch-1R',
+    status: gate.status === 'product_batch_rollback_drill_mock_ready'
+      ? 'product_rollback_drill_readonly_report_ready'
+      : 'product_rollback_drill_readonly_report_ready',
+    report_ready: true,
+    report_sections: ['backup_evidence', 'stock_change_summary', 'rollback_checklist', 'restore_drill_plan', 'readback_plan', 'sensitive_scan_plan'],
+    rollback_drill_ready: true,
+    backup_evidence_verified: true,
+    updated_count: Number(gate.updated_count ?? gate.updatedCount ?? 3),
+    created_count: Number(gate.created_count ?? gate.createdCount ?? 0),
+    stock_only_write_verified: true,
+    temporary_restore_required: true,
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    real_restore_executed: false,
+    rollback_executed: false,
+    production_db_touched: false,
+    real_api_called: false,
+    real_database_written: false,
+    products_written: false,
+    orders_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    operation_audit_rows_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_product_sync_open: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    route_path: '/api/v1/batch/naver/products/rollback-readonly-report',
+    business_message: 'mock 商品回滚只读报告已整理，不会执行恢复或写入商品。',
+    next_action: '继续人工审核备份、回读和敏感扫描证据。',
+  });
+}
+
+function toBatchApprovalReadonlyEvidencePayload(readonlyEvidence = {}) {
+  const rawItems = Array.isArray(readonlyEvidence.items) ? readonlyEvidence.items : [];
+  return {
+    status: readonlyEvidence.status || 'readonly_evidence_api_ready',
+    formal_sync_open: Boolean(readonlyEvidence.formalSyncOpen ?? readonlyEvidence.formal_sync_open),
+    real_database_written: Boolean(readonlyEvidence.realDatabaseWritten ?? readonlyEvidence.real_database_written),
+    orders_written: Boolean(readonlyEvidence.ordersWritten ?? readonlyEvidence.orders_written),
+    products_written: Boolean(readonlyEvidence.productsWritten ?? readonlyEvidence.products_written),
+    sync_log_written: Boolean(readonlyEvidence.syncLogWritten ?? readonlyEvidence.sync_log_written),
+    capability_tested_success_written: Boolean(readonlyEvidence.capabilityTestedSuccessWritten ?? readonlyEvidence.capability_tested_success_written),
+    operation_audit_rows_written: Boolean(readonlyEvidence.operationAuditRowsWritten ?? readonlyEvidence.operation_audit_rows_written),
+    operation_audit_rows_planned: readonlyEvidence.operationAuditRowsPlanned ?? readonlyEvidence.operation_audit_rows_planned ?? true,
+    privacy_fields_redacted: readonlyEvidence.privacyFieldsRedacted ?? readonlyEvidence.privacy_fields_redacted ?? true,
+    raw_response_saved: Boolean(readonlyEvidence.rawResponseSaved ?? readonlyEvidence.raw_response_saved),
+    items: rawItems.map((item = {}) => ({
+      store_id: Number(item.storeId ?? item.store_id ?? 0),
+      sync_kind: item.syncKind || item.sync_kind || '',
+      duplicate_check_passed: item.duplicateCheckPassed ?? item.duplicate_check_passed ?? true,
+      field_whitelist_verified: item.fieldWhitelistVerified ?? item.field_whitelist_verified ?? true,
+      audit_required: item.auditRequired ?? item.audit_required ?? true,
+      operation_audit_rows_planned: item.operationAuditRowsPlanned ?? item.operation_audit_rows_planned ?? true,
+      backup_required: item.backupRequired ?? item.backup_required ?? true,
+      permission_required: item.permissionRequired ?? item.permission_required ?? true,
+      candidate_count: Number(item.candidateCount ?? item.candidate_count ?? 0),
+      would_create: Number(item.wouldCreate ?? item.would_create ?? 0),
+      would_update: Number(item.wouldUpdate ?? item.would_update ?? 0),
+      would_refresh_only: Number(item.wouldRefreshOnly ?? item.would_refresh_only ?? 0),
+      would_skip: Number(item.wouldSkip ?? item.would_skip ?? 0),
+      changed_field_names: Array.isArray(item.changedFieldNames)
+        ? item.changedFieldNames
+        : (Array.isArray(item.changed_field_names) ? item.changed_field_names : []),
+    })),
+  };
 }
 
 const sourceMethods = {
@@ -1080,6 +1304,22 @@ const sourceMethods = {
     };
     if (!isBackendSource) return mockBatchReadonlyEvidence(request);
     return adaptBatchReadonlyEvidenceResult(await backendApi.normalizeBatchReadonlyEvidence(request));
+  },
+  checkBatchApprovalAuditEvidence: async (payload = {}) => {
+    const request = {
+      readonly_evidence: toBatchApprovalReadonlyEvidencePayload(payload.readonlyEvidence || payload.readonly_evidence || {}),
+      approval_context: payload.approvalContext || payload.approval_context || {},
+      audit_evidence_plan: payload.auditEvidencePlan || payload.audit_evidence_plan || {},
+    };
+    if (!isBackendSource) return mockBatchApprovalAuditEvidence(request);
+    return adaptBatchApprovalAuditEvidenceResult(await backendApi.checkBatchApprovalAuditEvidence(request));
+  },
+  getNaverProductRollbackReadonlyReport: async (payload = {}) => {
+    const request = {
+      rollback_drill_gate: payload.rollbackDrillGate || payload.rollback_drill_gate || {},
+    };
+    if (!isBackendSource) return mockNaverProductRollbackReadonlyReport(request);
+    return adaptProductRollbackReadonlyReportResult(await backendApi.getNaverProductRollbackReadonlyReport(request));
   },
   previewNaverOrderCompleteFields: async (payload = {}) => {
     if (!isBackendSource) return mockNaverOrderCompletePreview(payload);
