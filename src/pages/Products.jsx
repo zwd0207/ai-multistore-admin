@@ -585,6 +585,101 @@ function NaverProductPreviewStatusPanel() {
   );
 }
 
+function ProductRollbackReadonlyReportMockPanel() {
+  const { selectedStore } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+
+  const report = {
+    phase: 'Naver-Product-Batch-1N',
+    status: 'product_rollback_readonly_report_ui_mock_ready',
+    reportReady: true,
+    backupEvidenceVerified: true,
+    updatedCount: 3,
+    createdCount: 0,
+    stockOnlyWriteVerified: true,
+    rollbackExecuted: false,
+    realRestoreExecuted: false,
+    productionDbTouched: false,
+    productsWritten: false,
+    ordersWritten: false,
+    syncLogWritten: false,
+    capabilityTestedSuccessWritten: false,
+    operationAuditRowsWritten: false,
+    formalProductSyncOpen: false,
+    platformWritesEnabled: false,
+  };
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Naver 商品回滚只读报告</h2>
+          <p>这里展示商品库存小批量写入后的回滚准备情况，仅用于人工审核，不会恢复数据库，也不会再次写入商品。</p>
+        </div>
+        <span className="period-chip">只读报告</span>
+      </div>
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>报告状态</strong>
+            <span>已整理</span>
+          </div>
+          <p>商品回滚只读报告已准备好，可用于确认备份、回读校验和敏感字段扫描计划。</p>
+          <small>这是 mock 展示面板，不会执行真实恢复。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>影响范围</strong>
+            <span>{report.updatedCount} 条</span>
+          </div>
+          <p>最近一次受控商品写入只涉及库存字段，未新增商品，也未修改名称、状态或价格。</p>
+          <small>正式商品批量同步仍未开放。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>恢复操作</strong>
+            <span>未执行</span>
+          </div>
+          <p>当前只展示恢复准备情况，不会把备份恢复到生产数据库。</p>
+          <small>真实恢复必须单独审批，并先做临时库演练。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>后续动作</strong>
+            <span>继续审核</span>
+          </div>
+          <p>下一步应把备份、审计、回读和回滚证据接入批量审批页面。</p>
+          <small>页面不调用 Naver，也不执行 real_sync。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看商品回滚报告技术详情"
+        description="这些字段仅供管理员排查，主页面只展示业务结论。"
+        items={[
+          { label: 'phase', value: report.phase },
+          { label: 'status', value: report.status },
+          { label: 'report_ready', value: report.reportReady },
+          { label: 'backup_evidence_verified', value: report.backupEvidenceVerified },
+          { label: 'updated_count', value: report.updatedCount },
+          { label: 'created_count', value: report.createdCount },
+          { label: 'stock_only_write_verified', value: report.stockOnlyWriteVerified },
+          { label: 'rollback_executed', value: report.rollbackExecuted },
+          { label: 'real_restore_executed', value: report.realRestoreExecuted },
+          { label: 'production_db_touched', value: report.productionDbTouched },
+          { label: 'products_written', value: report.productsWritten },
+          { label: 'orders_written', value: report.ordersWritten },
+          { label: 'sync_log_written', value: report.syncLogWritten },
+          { label: 'tested_success_written', value: report.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_written', value: report.operationAuditRowsWritten },
+          { label: 'formal_product_sync_open', value: report.formalProductSyncOpen },
+          { label: 'platform_writes_enabled', value: report.platformWritesEnabled },
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -593,6 +688,7 @@ export default function Products() {
   return (
     <>
       <NaverProductPreviewStatusPanel />
+      <ProductRollbackReadonlyReportMockPanel />
       <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"

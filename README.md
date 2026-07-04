@@ -1413,3 +1413,33 @@ Codex1 now has a private mock gate for future batch approval audit readiness. It
 The order batch approval evidence audit readiness plan is documented in `PHASE_NAVER_ORDER_BATCH_1F_ORDER_BATCH_APPROVAL_EVIDENCE_AUDIT_READINESS_PLAN.md`.
 
 Naver order batch refresh remains closed. Future write approval still needs fresh readonly evidence, backup, permission, privacy gates, field whitelist, audit chain, readback, sensitive scan, and rollback reference.
+
+## Phase ERP-Multistore-1M - Real User Invitation Mock Gate
+
+The real user invitation mock gate is documented in `PHASE_ERP_MULTISTORE_1M_REAL_USER_INVITATION_MOCK_GATE.md`.
+
+Codex1 now has a private mock gate for future user invitation readiness. It verifies safe hashes, masked login identifier display, store scope, target role, approval, backup planning, audit planning, and membership assignment planning without creating users or memberships.
+
+## Phase ERP-Multistore-1N - User Invitation Readonly API Plan
+
+The user invitation readonly API plan is documented in `PHASE_ERP_MULTISTORE_1N_USER_INVITATION_READONLY_API_PLAN.md`.
+
+No public invitation API is added yet. Real user invitation and production login remain closed.
+
+## Phase Naver-Product-Batch-1N - Product Rollback Readonly Report UI Mock Display
+
+The product rollback readonly report UI mock display is documented in `PHASE_NAVER_PRODUCT_BATCH_1N_PRODUCT_ROLLBACK_READONLY_REPORT_UI_MOCK_DISPLAY.md`.
+
+Codex2 Products now shows a Naver product rollback readonly report mock panel. It is display-only and does not call Naver, restore a database, write products, or open formal product batch sync.
+
+## Phase ERP-Batch-1O - Batch Approval Audit Evidence Local Route Plan
+
+The batch approval audit evidence local route plan is documented in `PHASE_ERP_BATCH_1O_BATCH_APPROVAL_AUDIT_EVIDENCE_LOCAL_ROUTE_PLAN.md`.
+
+The audit evidence gate remains private. No public route is added and no audit rows are written.
+
+## Phase Naver-Order-Batch-1G - Order Batch Audit Readiness UI Wording Plan
+
+The order batch audit readiness UI wording plan is documented in `PHASE_NAVER_ORDER_BATCH_1G_ORDER_BATCH_AUDIT_READINESS_UI_WORDING_PLAN.md`.
+
+Future order batch audit readiness should be shown with business-first wording. Formal order batch sync remains closed.
