@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `70% - 76%`
-- Naver 基础 ERP 闭环进度：约 `79% - 84%`
-- ERP 给真实用户落地使用进度：约 `73% - 79%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `66% - 72%`
+- 项目总体规划进度：约 `72% - 78%`
+- Naver 基础 ERP 闭环进度：约 `80% - 85%`
+- ERP 给真实用户落地使用进度：约 `74% - 80%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `68% - 74%`
 
 ## 当前定位
 
@@ -557,3 +557,33 @@ Next 5 recommended stages:
 3. `Phase ERP-Auth-1N: Auth schema post-migration verification`
 4. `Phase ERP-Backup-2B: Restore runbook mock drill gate`
 5. `Phase Naver-ERP-21B: Existing-order no-change audit UI runtime walkthrough`
+
+### Latest update after `Phase ERP-Auth-1L` to `Phase Naver-ERP-21B`
+
+- Project overall planning progress: about `72% - 78%`
+- Naver basic ERP loop progress: about `80% - 85%`
+- ERP real-user landing progress: about `74% - 80%`
+- Production version for long-term non-technical use: about `68% - 74%`
+
+Implemented in this update:
+
+- Approved and implemented the local ERP auth foundation schema migration.
+- Created a pre-migration backup and manifest for `backend/codex1.db`.
+- Added auth models and `upgrade_auth_schema.py` in Codex1.
+- Migrated the real local database to include auth foundation tables and safe system role/permission metadata.
+- Verified `erp_roles=5`, `erp_permissions=10`, `erp_role_permissions=35`, `erp_users=0`, and `erp_store_memberships=0`.
+- Added a private restore runbook mock drill gate.
+- Recorded the no-change Naver order refresh UI/audit wording boundary.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, controlled no-change refresh audit evidence, and migrated auth foundation tables.
+- Not suitable now: formal product/order batch sync, active multi-user login production use, large-scale multi-store production, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Auth-1O: Auth role assignment approval plan`
+2. `Phase ERP-Auth-1P: Auth role assignment mock gate`
+3. `Phase ERP-Auth-1Q: Auth readonly users/roles API approval plan`
+4. `Phase ERP-Backup-2C: Restore runbook readonly UI plan`
+5. `Phase Naver-ERP-21C: No-change audit display implementation check`

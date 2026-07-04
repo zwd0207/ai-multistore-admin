@@ -12,10 +12,10 @@ PROJECT_PROGRESS.md
 
 当前固定进度口径：
 
-- 项目总体规划进度：约 `70% - 76%`
-- Naver 基础 ERP 闭环进度：约 `79% - 84%`
-- ERP 给真实用户落地使用进度：约 `73% - 79%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `66% - 72%`
+- 项目总体规划进度：约 `72% - 78%`
+- Naver 基础 ERP 闭环进度：约 `80% - 85%`
+- ERP 给真实用户落地使用进度：约 `74% - 80%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `68% - 74%`
 
 ## 环境要求
 
@@ -1105,3 +1105,33 @@ ERP-Backup-2A defines the checklist for a future real restore: source backup man
 The no-change refresh UI/audit display check is documented in `PHASE_NAVER_ERP_21A_EXISTING_ORDER_REFRESH_NO_CHANGE_UI_AUDIT_DISPLAY_CHECK.md`.
 
 Naver-ERP-21A records how to explain the 20E/20F no-change refresh: the selected order was checked, no business fields changed, no local update was forced, and audit evidence was recorded. It must not be displayed as formal order sync availability.
+
+## Phase ERP-Auth-1L - Auth Schema Migration Approval Plan
+
+The auth schema migration approval plan is documented in `PHASE_ERP_AUTH_1L_AUTH_SCHEMA_MIGRATION_APPROVAL_PLAN.md`.
+
+ERP-Auth-1L approves only the local auth foundation migration: auth tables plus safe role/permission metadata. It does not approve real users, store memberships, login sessions, public auth routes, business writes, platform APIs, restore execution, or formal sync opening.
+
+## Phase ERP-Auth-1M - Auth Schema Migration Implementation
+
+The auth schema migration implementation is documented in `PHASE_ERP_AUTH_1M_AUTH_SCHEMA_MIGRATION_IMPLEMENTATION.md`.
+
+ERP-Auth-1M adds Codex1 auth models and `backend/scripts/upgrade_auth_schema.py`, creates a pre-migration backup, and applies the local schema. The real local database now has 5 auth foundation tables plus safe system role/permission metadata. It keeps `erp_users=0` and `erp_store_memberships=0`, so production login remains closed.
+
+## Phase ERP-Auth-1N - Auth Schema Post-Migration Verification
+
+The auth schema post-migration verification is documented in `PHASE_ERP_AUTH_1N_AUTH_SCHEMA_POST_MIGRATION_VERIFICATION.md`.
+
+ERP-Auth-1N verifies `erp_roles=5`, `erp_permissions=10`, `erp_role_permissions=35`, `erp_users=0`, and `erp_store_memberships=0`. Business counts stay stable, admin can approve `orders.refresh_batch_write`, and operator cannot receive that permission.
+
+## Phase ERP-Backup-2B - Restore Runbook Mock Drill Gate
+
+The restore runbook mock drill gate is documented in `PHASE_ERP_BACKUP_2B_RESTORE_RUNBOOK_MOCK_DRILL_GATE.md`.
+
+ERP-Backup-2B adds a private restore checklist gate to Codex1. It verifies a future restore request has manifest, hash, dry-run, approval, audit, rollback, and post-restore evidence before any real restore can be considered. It does not execute restore or expose a public restore API.
+
+## Phase Naver-ERP-21B - Existing-Order No-Change Audit UI Runtime Walkthrough
+
+The existing-order no-change audit UI walkthrough is documented in `PHASE_NAVER_ERP_21B_EXISTING_ORDER_NO_CHANGE_AUDIT_UI_RUNTIME_WALKTHROUGH.md`.
+
+Naver-ERP-21B confirms the expected UI wording for the 20E/20F no-change refresh: checked again, no business fields changed, no forced local update, audit evidence recorded, formal order sync still closed.
