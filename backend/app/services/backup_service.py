@@ -9,6 +9,7 @@ from scripts.list_local_backups import list_local_backups
 
 
 BACKUP_REPORT_MOCK_SCOPE = "verify_all_temp_db"
+RESTORE_RUNBOOK_MOCK_SCOPE = "verify_all_temp_db"
 DEFAULT_BACKUP_REPORT_LIMIT = 20
 MAX_BACKUP_REPORT_LIMIT = 50
 ALLOWED_BACKUP_REPORT_FILTERS = {"limit"}
@@ -203,3 +204,86 @@ def summarize_backup_report_readonly_local(*, limit: int | None = None) -> dict[
         "sensitive_scan_passed": report.get("sensitive_scan_passed") is True,
     })
     return summary
+
+
+def evaluate_restore_runbook_mock_drill_gate(
+    *,
+    checklist: dict[str, Any] | None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private mock gate for proving a future restore runbook is complete."""
+
+    result = {
+        "phase": "ERP-Backup-2B",
+        "status": "restore_mock_drill_blocked",
+        "skip_reason": None,
+        "restore_runbook_mock_gate": True,
+        "public_endpoint_enabled": False,
+        "real_restore_executed": False,
+        "production_db_touched": False,
+        "backup_deleted": False,
+        "rows_written": 0,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != RESTORE_RUNBOOK_MOCK_SCOPE:
+        result["skip_reason"] = "restore_runbook_mock_scope_required"
+        return result
+    if not isinstance(checklist, dict):
+        result["skip_reason"] = "restore_checklist_missing"
+        return result
+    if not _sensitive_scan_passed(checklist):
+        result["skip_reason"] = "restore_checklist_sensitive_field_blocked"
+        return result
+
+    required_true_flags = {
+        "incident_reason_recorded",
+        "current_git_status_recorded",
+        "pre_restore_backup_planned",
+        "source_manifest_verified",
+        "source_sha256_verified",
+        "source_size_verified",
+        "temporary_restore_dry_run_passed",
+        "baseline_counts_reviewed",
+        "production_target_blocked_in_dry_run",
+        "human_approval_recorded",
+        "audit_evidence_plan_ready",
+        "rollback_plan_ready",
+        "post_restore_verification_plan_ready",
+    }
+    missing_flags = sorted(flag for flag in required_true_flags if checklist.get(flag) is not True)
+    if missing_flags:
+        result.update({
+            "skip_reason": "restore_checklist_incomplete",
+            "missing_flags": missing_flags,
+        })
+        return result
+    if checklist.get("real_restore_requested") is True:
+        result["skip_reason"] = "real_restore_request_not_allowed_in_mock_gate"
+        return result
+    if checklist.get("restore_target_is_production_db") is True:
+        result["skip_reason"] = "production_restore_target_not_allowed_in_mock_gate"
+        return result
+    if checklist.get("backup_delete_requested") is True:
+        result["skip_reason"] = "backup_delete_not_allowed_in_mock_gate"
+        return result
+
+    safe_summary = {
+        "incident_reason_recorded": True,
+        "source_manifest_verified": True,
+        "temporary_restore_dry_run_passed": True,
+        "human_approval_recorded": True,
+        "rollback_plan_ready": True,
+        "real_restore_executed": False,
+        "production_db_touched": False,
+    }
+    result.update({
+        "status": "restore_mock_drill_ready",
+        "skip_reason": None,
+        "checklist_summary": safe_summary,
+        "business_message": "Restore runbook mock drill passed. Real restore still requires a separate approval phase.",
+    })
+    return result

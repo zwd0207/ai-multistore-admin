@@ -10604,6 +10604,230 @@ def verify_auth_schema_mock_migration_gate() -> None:
     print("auth schema mock migration gate: ok")
 
 
+def verify_auth_schema_local_migration_script() -> None:
+    from scripts import upgrade_auth_schema
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with sqlite3.connect(VERIFY_DB_PATH) as conn:
+        auth_tables_before = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        before_user_count = (
+            conn.execute("SELECT COUNT(*) FROM erp_users").fetchone()[0]
+            if "erp_users" in auth_tables_before
+            else 0
+        )
+        before_membership_count = (
+            conn.execute("SELECT COUNT(*) FROM erp_store_memberships").fetchone()[0]
+            if "erp_store_memberships" in auth_tables_before
+            else 0
+        )
+        before_counts = {
+            "orders": conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
+            "products": conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],
+            "sync_logs": conn.execute("SELECT COUNT(*) FROM sync_logs").fetchone()[0],
+            "api_capability_test_results": conn.execute(
+                "SELECT COUNT(*) FROM api_capability_test_results"
+            ).fetchone()[0],
+            "operation_audit_logs": conn.execute("SELECT COUNT(*) FROM operation_audit_logs").fetchone()[0],
+            "order_status_events": conn.execute("SELECT COUNT(*) FROM order_status_events").fetchone()[0],
+        }
+
+    result = upgrade_auth_schema.upgrade(run_create_all=True)
+    repeat_result = upgrade_auth_schema.upgrade(run_create_all=True)
+    assert set(result["indexes"]) >= set(upgrade_auth_schema.AUTH_INDEXES), result
+    assert repeat_result["tables"] == [], repeat_result
+
+    with sqlite3.connect(VERIFY_DB_PATH) as conn:
+        upgrade_auth_schema.verify_auth_schema(conn)
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert upgrade_auth_schema.AUTH_TABLES <= tables, tables
+        role_count = conn.execute("SELECT COUNT(*) FROM erp_roles").fetchone()[0]
+        permission_count = conn.execute("SELECT COUNT(*) FROM erp_permissions").fetchone()[0]
+        role_permission_count = conn.execute("SELECT COUNT(*) FROM erp_role_permissions").fetchone()[0]
+        user_count = conn.execute("SELECT COUNT(*) FROM erp_users").fetchone()[0]
+        membership_count = conn.execute("SELECT COUNT(*) FROM erp_store_memberships").fetchone()[0]
+        assert role_count >= 5, role_count
+        assert permission_count >= 10, permission_count
+        assert role_permission_count >= 1, role_permission_count
+        assert user_count == before_user_count, {"before": before_user_count, "after": user_count}
+        assert membership_count == before_membership_count, {
+            "before": before_membership_count,
+            "after": membership_count,
+        }
+
+        after_counts = {
+            "orders": conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
+            "products": conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],
+            "sync_logs": conn.execute("SELECT COUNT(*) FROM sync_logs").fetchone()[0],
+            "api_capability_test_results": conn.execute(
+                "SELECT COUNT(*) FROM api_capability_test_results"
+            ).fetchone()[0],
+            "operation_audit_logs": conn.execute("SELECT COUNT(*) FROM operation_audit_logs").fetchone()[0],
+            "order_status_events": conn.execute("SELECT COUNT(*) FROM order_status_events").fetchone()[0],
+        }
+        assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+        for table_name in upgrade_auth_schema.AUTH_TABLES:
+            columns = {
+                row[1].lower()
+                for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            forbidden = sorted(columns & upgrade_auth_schema.FORBIDDEN_AUTH_COLUMNS)
+            assert not forbidden, {"table": table_name, "forbidden": forbidden}
+
+    safe_summary = {
+        "phase": "ERP-Auth-1M",
+        "status": "auth_schema_local_migration_verified",
+        "role_count": role_count,
+        "permission_count": permission_count,
+        "role_permission_count": role_permission_count,
+        "user_count": user_count,
+        "store_membership_count": membership_count,
+        "real_auth_session_created": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    serialized = json.dumps(safe_summary, ensure_ascii=False, default=str).lower()
+    for forbidden in [
+        "authorization",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "buyerphone",
+        "receiverphone",
+        "zipcode",
+        "token",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("auth schema local migration script: ok")
+
+
+def verify_restore_runbook_mock_drill_gate() -> None:
+    from app.services.backup_service import RESTORE_RUNBOOK_MOCK_SCOPE, evaluate_restore_runbook_mock_drill_gate
+
+    ready_checklist = {
+        "incident_reason_recorded": True,
+        "current_git_status_recorded": True,
+        "pre_restore_backup_planned": True,
+        "source_manifest_verified": True,
+        "source_sha256_verified": True,
+        "source_size_verified": True,
+        "temporary_restore_dry_run_passed": True,
+        "baseline_counts_reviewed": True,
+        "production_target_blocked_in_dry_run": True,
+        "human_approval_recorded": True,
+        "audit_evidence_plan_ready": True,
+        "rollback_plan_ready": True,
+        "post_restore_verification_plan_ready": True,
+        "real_restore_requested": False,
+        "restore_target_is_production_db": False,
+        "backup_delete_requested": False,
+    }
+
+    missing_scope = evaluate_restore_runbook_mock_drill_gate(
+        checklist=ready_checklist,
+        verification_scope=None,
+    )
+    assert missing_scope["skip_reason"] == "restore_runbook_mock_scope_required", missing_scope
+    assert missing_scope["real_restore_executed"] is False, missing_scope
+
+    incomplete = evaluate_restore_runbook_mock_drill_gate(
+        checklist={**ready_checklist, "rollback_plan_ready": False},
+        verification_scope=RESTORE_RUNBOOK_MOCK_SCOPE,
+    )
+    assert incomplete["skip_reason"] == "restore_checklist_incomplete", incomplete
+    assert "rollback_plan_ready" in incomplete["missing_flags"], incomplete
+
+    real_restore_blocked = evaluate_restore_runbook_mock_drill_gate(
+        checklist={**ready_checklist, "real_restore_requested": True},
+        verification_scope=RESTORE_RUNBOOK_MOCK_SCOPE,
+    )
+    assert real_restore_blocked["skip_reason"] == "real_restore_request_not_allowed_in_mock_gate", real_restore_blocked
+    assert real_restore_blocked["production_db_touched"] is False, real_restore_blocked
+
+    sensitive_blocked = evaluate_restore_runbook_mock_drill_gate(
+        checklist={**ready_checklist, "client_secret": "must-not-leak"},
+        verification_scope=RESTORE_RUNBOOK_MOCK_SCOPE,
+    )
+    assert sensitive_blocked["skip_reason"] == "restore_checklist_sensitive_field_blocked", sensitive_blocked
+
+    ready = evaluate_restore_runbook_mock_drill_gate(
+        checklist=ready_checklist,
+        verification_scope=RESTORE_RUNBOOK_MOCK_SCOPE,
+    )
+    assert ready["status"] == "restore_mock_drill_ready", ready
+    assert ready["real_restore_executed"] is False, ready
+    assert ready["production_db_touched"] is False, ready
+    assert ready["backup_deleted"] is False, ready
+    assert ready["rows_written"] == 0, ready
+    assert ready["raw_response_saved"] is False, ready
+    assert ready["secrets_saved"] is False, ready
+    assert ready["privacy_fields_redacted"] is True, ready
+    assert ready["formal_sync_open"] is False, ready
+    assert ready["platform_writes_enabled"] is False, ready
+
+    serialized = json.dumps(
+        {
+            "missing_scope": missing_scope,
+            "incomplete": incomplete,
+            "real_restore_blocked": real_restore_blocked,
+            "sensitive_blocked": sensitive_blocked,
+            "ready": ready,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "productorderid",
+        "buyerphone",
+        "receiverphone",
+        "zipcode",
+        "must-not-leak",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("restore runbook mock drill gate: ok")
+
+
 def verify_operation_audit_logs_readonly_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -12081,6 +12305,8 @@ def verify_git_tracking() -> None:
         "M  backend/app/database.py",
         " M backend/app/models/__init__.py",
         "M  backend/app/models/__init__.py",
+        " M backend/app/models/auth.py",
+        "A  backend/app/models/auth.py",
         " M backend/app/models/api_credential.py",
         " M backend/app/models/financial.py",
         " M backend/app/models/order.py",
@@ -12122,6 +12348,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_operation_audit_logs_schema.py",
         "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
+        " M backend/scripts/upgrade_auth_schema.py",
+        "A  backend/scripts/upgrade_auth_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
@@ -12130,6 +12358,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
         "?? backend/app/api/v1/endpoints/permissions.py",
         "?? backend/app/models/api_capability.py",
+        "?? backend/app/models/auth.py",
         "?? backend/app/models/financial.py",
         "?? backend/app/models/order_status_event.py",
         "?? backend/app/models/operation_audit_log.py",
@@ -12149,6 +12378,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/platform_login_service.py",
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
+        "?? backend/scripts/upgrade_auth_schema.py",
         "?? backend/scripts/upgrade_order_status_events_schema.py",
         "?? backend/scripts/upgrade_operation_audit_logs_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
@@ -12294,6 +12524,8 @@ def main() -> None:
         verify_naver_order_refresh_backup_evidence_gate()
         verify_role_permission_mock_gates()
         verify_auth_schema_mock_migration_gate()
+        verify_auth_schema_local_migration_script()
+        verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()

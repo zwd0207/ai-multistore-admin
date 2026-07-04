@@ -43,7 +43,9 @@ def init_db() -> None:
         from scripts.upgrade_sync_schema import upgrade as upgrade_sync_schema
         from scripts.upgrade_order_status_events_schema import upgrade as upgrade_order_status_events_schema
         from scripts.upgrade_operation_audit_logs_schema import upgrade as upgrade_operation_audit_logs_schema
+        from scripts.upgrade_auth_schema import upgrade as upgrade_auth_schema
 
         upgrade_sync_schema(run_create_all=False)
         upgrade_order_status_events_schema(run_create_all=False)
         upgrade_operation_audit_logs_schema(run_create_all=False)
+        upgrade_auth_schema(run_create_all=False)

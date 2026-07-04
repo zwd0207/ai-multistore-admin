@@ -70,6 +70,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    erp_store_memberships = relationship(
+        "ErpStoreMembership",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     platform_sales_details = relationship(
         "PlatformSalesDetail",
         back_populates="store",
