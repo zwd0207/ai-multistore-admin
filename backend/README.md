@@ -919,4 +919,8 @@ Naver-ERP-19B repeats the selected new-order candidate readonly preview. Token, 
 
 Naver-ERP-19C approves only a later one-order local write for safe hash `id-hash-192b9c67e8`. The future write requires clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy gate, one-candidate limit, post-write readback, and five-row operation audit evidence. This phase does not call Naver, execute `real_sync=true`, write local data, write audit rows, create backups, change schema, or open formal order sync.
 
+Naver-ERP-19D executes the approved one-order local write after a fresh database backup and a fresh Naver readonly preview. Token, feed, and detail returned HTTP 200, the safe hash matched `id-hash-192b9c67e8`, and the privacy gate passed. Exactly one local Naver order was created: `orders_store8=6 -> 7`. Products, SyncLog, tested-success records, and order status events did not change. Five append-only `operation_audit_logs` rows were written for approval, backup verification, operation start, operation finish, and post-write verification. Formal Naver order sync remains closed.
+
+Naver-ERP-19E verifies the 19D result by readback only. The selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and the 19D audit chain has exactly five safe rows under one correlation id. The verification does not call Naver, write data, change schema, or open formal order sync.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.

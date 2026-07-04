@@ -1435,6 +1435,10 @@ Phase Naver-ERP-19B is the selected new-order readonly repeat result. It uses th
 
 Phase Naver-ERP-19C is the selected new-order single local write approval contract for safe hash `id-hash-192b9c67e8`. It does not change the public API surface, call Naver, execute `real_sync=true`, write data, write audit rows, create backups, change schema, or open formal sync. A later 19D may write at most one local Naver order only after clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy and status gates, one-candidate limit, post-write readback, and five-row operation audit evidence. It must not write products, SyncLog, `ApiCapabilityTestResult tested_success`, or Naver platform data.
 
+Phase Naver-ERP-19D is the selected new-order single local write result. It uses the existing public preview endpoint only for a fresh readonly repeat with `real_sync=false`, then uses the private selected-new-order local write gate for exactly one local order after the backup, duplicate, privacy, and sensitive scans pass. The selected safe hash is `id-hash-192b9c67e8`; local counts changed as expected: `orders_store8=6 -> 7`, `products_store8=5 -> 5`, `sync_logs_store8=1 -> 1`, `tested_success_store8=8 -> 8`, and `order_status_events=0 -> 0`. Five append-only audit rows were written under one correlation id. This does not open formal order sync and does not enable any Naver platform write operation.
+
+Phase Naver-ERP-19E is post-write readback verification. It confirms the selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and five 19D audit actions exist: `approval_verified`, `pre_write_backup_verified`, `selected_operation_started`, `selected_operation_finished`, and `post_write_verification_finished`. 19E does not call Naver or write data.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`
