@@ -1425,6 +1425,8 @@ _evaluate_naver_order_refresh_batch_with_backup_evidence_gate(...)
 
 This private helper wraps the existing Naver order refresh batch mock gate. Write-enabled paths require safe backup evidence before manual approval can proceed. Readonly paths do not require backup evidence because they do not write local data.
 
+Phase Naver-ERP-18C is the controlled readonly repeat result. It uses the existing public `POST /api/v1/sync/orders/naver/preview` contract with `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. It returned HTTP 200 for token, feed, and detail. The safe observed hash was `id-hash-192b9c67e8`, with `DELIVERED / 配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. It did not write orders, products, SyncLog, `ApiCapabilityTestResult tested_success`, operation audit rows, or order status events, and it did not open formal order sync or execute any platform write operation.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`
