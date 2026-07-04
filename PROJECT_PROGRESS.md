@@ -178,6 +178,34 @@
 9. `Phase ERP-Auth-1C: Sensitive action approval roles`
 10. `Phase ERP-Auth-1D: Multi-store data isolation verification`
 
+### Latest update after `Phase ERP-Audit-2C`
+
+- Project overall planning progress: about `59% - 66%`
+- Naver basic ERP loop progress: about `72% - 77%`
+- ERP real-user landing progress: about `63% - 70%`
+- Production version for long-term non-technical use: about `56% - 61%`
+
+Implemented in this update:
+
+- Documented `Phase ERP-Audit-2C: Selected operation audit local implementation approval plan`.
+- Approved only the future audit boundary for `controlled_naver_order_local_refresh`.
+- Kept formal Naver order batch sync closed.
+- Kept public audit write/delete/export/raw detail APIs closed.
+- Confirmed this phase performs no real API call, no database write, no schema change, no backup/restore execution, and no Codex1 runtime code change.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, and audit trail review.
+- Not suitable now: formal product/order batch sync, multi-user permissioned production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Audit-2D: Selected operation audit local implementation mock gate`
+2. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
+3. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
+4. `Phase Naver-ERP-18E: Controlled order refresh small write with audit evidence`
+5. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
+
 ## 安全边界
 
 继续遵守：

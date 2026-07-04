@@ -931,3 +931,9 @@ ERP-Backup-1M defines how the Logs/Audit administrator page should show backup e
 The backup report frontend readonly implementation is documented in `PHASE_ERP_BACKUP_1N_BACKUP_REPORT_FRONTEND_READONLY_IMPLEMENTATION.md`.
 
 ERP-Backup-1N connects Codex2 to the existing readonly backup report APIs and adds a `本地备份报告` section to Logs/Audit. It shows backup counts, manifest safety, latest backup evidence, and folded diagnostics, without restore/delete/cleanup controls and without any platform API or business-data write.
+
+## Phase ERP-Audit-2C - Selected Operation Audit Local Implementation Approval Plan
+
+The selected operation audit local implementation approval plan is documented in `PHASE_ERP_AUDIT_2C_SELECTED_OPERATION_AUDIT_LOCAL_IMPLEMENTATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-2C is planning-only. It approves only the future audit coverage boundary for `controlled_naver_order_local_refresh`: manual approval, verified pre-write backup evidence, selected local Naver order target, append-only audit rows, post-write verification, and strict sensitive-data exclusion. It does not modify runtime code, write audit rows, write business rows, create or restore backups, call platform APIs, change schema, or open formal Naver order sync.
