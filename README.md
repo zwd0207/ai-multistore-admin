@@ -1623,3 +1623,33 @@ Codex2 Products now shows a readonly `Naver 商品批量审批证据联动` pane
 The real user invitation production gate plan is documented in `PHASE_ERP_MULTISTORE_2A_REAL_USER_INVITATION_PRODUCTION_GATE_PLAN.md`.
 
 Real user invitation remains closed. A future implementation must require explicit approval, admin/owner role, store-scoped permission, masked login identifiers, backup evidence, append-only audit evidence, invite expiry, one-time consumption design, post-create readback, and rollback or disable-user instructions.
+
+## Phase ERP-Batch-2C - Formal Batch Checklist Runtime Walkthrough
+
+The runtime walkthrough is documented in `PHASE_ERP_BATCH_2C_FORMAL_BATCH_CHECKLIST_RUNTIME_WALKTHROUGH.md`.
+
+The Orders checklist panel was verified in backend and mock modes. It shows the operator gates in Chinese business wording and keeps formal product/order batch sync closed.
+
+## Phase Naver-Product-Batch-2C - Product Evidence Linkage Runtime Walkthrough
+
+The runtime walkthrough is documented in `PHASE_NAVER_PRODUCT_BATCH_2C_PRODUCT_EVIDENCE_LINKAGE_RUNTIME_WALKTHROUGH.md`.
+
+The Products evidence-linkage panel was verified in backend and mock modes. It shows readonly candidates, backup/rollback, whitelist, and audit linkage without writing products or opening formal product batch sync.
+
+## Phase ERP-Batch-2D - Formal Batch Approval Decision Record Plan
+
+The decision record plan is documented in `PHASE_ERP_BATCH_2D_FORMAL_BATCH_APPROVAL_DECISION_RECORD_PLAN.md`.
+
+A future approval record should bind store, platform, sync kind, decision status, actor hash, readonly evidence, backup manifest, rollback report, permission gate, whitelist, duplicate check, sensitive scan, readback, and audit correlation. This phase adds no schema or route.
+
+## Phase ERP-Batch-2E - Formal Batch Approval Decision Readonly UI Plan
+
+The readonly UI plan is documented in `PHASE_ERP_BATCH_2E_FORMAL_BATCH_APPROVAL_DECISION_READONLY_UI_PLAN.md`.
+
+A future UI should show approval status, scope, evidence readiness, expiry, and readback requirement in business language while keeping technical ids folded.
+
+## Phase ERP-Multistore-2B - Real User Invitation Readonly Approval Checklist UI Plan
+
+The invitation approval checklist UI plan is documented in `PHASE_ERP_MULTISTORE_2B_REAL_USER_INVITATION_READONLY_APPROVAL_CHECKLIST_UI_PLAN.md`.
+
+Real user invitation remains closed. A future readonly checklist should show masked login, role/store scope, approval, backup, audit, expiry, one-time consumption, readback, and rollback or disable-user readiness.
