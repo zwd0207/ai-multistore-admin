@@ -1227,3 +1227,33 @@ ERP-Multistore-1C adds `evaluate_store_membership_assignment_mock_gate(...)`. It
 The auth role assignment approval plan is documented in `PHASE_ERP_AUTH_1O_AUTH_ROLE_ASSIGNMENT_APPROVAL_PLAN.md`.
 
 ERP-Auth-1O documents the future role assignment approval flow. Production login, user creation, role assignment UI, route-level authorization, and real store memberships remain closed.
+
+## Phase Naver-Product-Batch-1E - Product Stock-Change Real Write Approval
+
+The product stock-change real write approval is documented in `PHASE_NAVER_PRODUCT_BATCH_1E_PRODUCT_STOCK_CHANGE_REAL_WRITE_APPROVAL.md`.
+
+Naver-Product-Batch-1E approves only the latest stock-only Naver product evidence for controlled local write. It requires the fresh readonly preview, verified backup evidence, admin approval for `products.batch_sync_write`, and audit/rollback readiness. It does not write products by itself and does not open formal product batch sync.
+
+## Phase Naver-Product-Batch-1F - Product Stock-Change Small Local Write
+
+The product stock-change small local write is documented in `PHASE_NAVER_PRODUCT_BATCH_1F_PRODUCT_STOCK_CHANGE_SMALL_LOCAL_WRITE.md`.
+
+Naver-Product-Batch-1F executes the narrow local stock update path for existing Naver products only. The allowed written field is `stock_quantity`; product creates, name/status/price/currency changes, raw data writes, SyncLog writes, tested-success writes, order writes, timeline writes, and platform writes remain blocked.
+
+## Phase Naver-Product-Batch-1G - Product Stock-Change Post-Write Verification
+
+The product stock-change post-write verification is documented in `PHASE_NAVER_PRODUCT_BATCH_1G_PRODUCT_STOCK_CHANGE_POST_WRITE_VERIFICATION.md`.
+
+Naver-Product-Batch-1G verifies that `products_store8` remains 5, only the approved 3 stock values changed, page 2 remains empty readonly evidence, and formal product batch sync remains closed.
+
+## Phase ERP-Batch-1F - Readonly Evidence API Local Implementation Plan
+
+The readonly evidence API local implementation plan is documented in `PHASE_ERP_BATCH_1F_READONLY_EVIDENCE_API_LOCAL_IMPLEMENTATION_PLAN.md`.
+
+ERP-Batch-1F keeps the future readonly evidence API in plan status. No public evidence endpoint is open yet.
+
+## Phase ERP-Multistore-1D - Store Membership Real Assignment Approval
+
+The store membership real assignment approval is documented in `PHASE_ERP_MULTISTORE_1D_STORE_MEMBERSHIP_REAL_ASSIGNMENT_APPROVAL.md`.
+
+ERP-Multistore-1D defines the approval boundary for future real membership assignment. No users or store memberships are created in this phase, and large-scale multi-store production remains closed.

@@ -675,3 +675,33 @@ Next 5 recommended stages:
 3. `Phase Naver-Product-Batch-1G: Product stock-change post-write verification`
 4. `Phase ERP-Batch-1F: Readonly evidence API local implementation plan`
 5. `Phase ERP-Multistore-1D: Store membership real assignment approval`
+
+### Latest update after `Phase Naver-Product-Batch-1E` to `Phase ERP-Multistore-1D`
+
+- Project overall planning progress: about `76% - 82%`
+- Naver basic ERP loop progress: about `84% - 89%`
+- ERP real-user landing progress: about `78% - 84%`
+- Production version for long-term non-technical use: about `72% - 78%`
+
+Implemented in this update:
+
+- Approved the latest Naver product stock-only evidence for controlled local writing after backup, role approval, and rollback/audit readiness.
+- Added a private Codex1 real-write approval wrapper `_evaluate_naver_product_stock_change_real_write_approval(...)`.
+- Added a narrow private Codex1 local writer `_sync_naver_product_stock_change_local_write(...)` that may update only `products.stock_quantity` for existing Naver products.
+- Re-ran protected Naver product readonly evidence for `page=1,size=5` and `page=2,size=5`.
+- Executed the controlled stock-only local write for 3 existing store 8 Naver products after creating a verified backup.
+- Verified that product count stayed stable and that orders, SyncLog, tested-success, timeline events, users, and store memberships did not change.
+- Planned the future readonly evidence API local implementation and the real store membership assignment approval boundary.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, mock-proven formal batch sync production gate design, readonly evidence for future batch approval, and controlled stock-only local product update.
+- Not suitable now: opening formal product/order batch sync, broad product writes, active multi-user login production use, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Batch-1G: Readonly evidence API mock route gate`
+2. `Phase ERP-Batch-1H: Readonly evidence API local route implementation`
+3. `Phase ERP-Multistore-1E: Store membership schema runtime assignment mock gate`
+4. `Phase Naver-Product-Batch-1H: Product stock-change UI verification`
+5. `Phase Naver-Product-Batch-1I: Product batch sync rollback drill plan`
