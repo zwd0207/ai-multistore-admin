@@ -60,6 +60,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/mock-check",
     "/api/v1/permissions/sensitive-action/mock-check",
     "/api/v1/permissions/store-membership/readonly-check",
+    "/api/v1/permissions/user-invitation/readonly-check",
     "/api/v1/batch/readonly-evidence",
     "/api/v1/products",
     "/api/v1/orders",
@@ -1258,6 +1259,7 @@ def verify_openapi() -> None:
         "/api/v1/permissions/mock-check": {"post"},
         "/api/v1/permissions/sensitive-action/mock-check": {"post"},
         "/api/v1/permissions/store-membership/readonly-check": {"post"},
+        "/api/v1/permissions/user-invitation/readonly-check": {"post"},
     }
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
@@ -10489,6 +10491,77 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert invitation_success["real_auth_session_created"] is False, invitation_success
     assert invitation_success["formal_sync_open"] is False, invitation_success
 
+    with TestClient(app) as client:
+        route_invitation_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
+            "actor_context": admin_store8,
+            "target_user_key_hash": "user-hash-dddddddddddddddd",
+            "login_identifier_hash": "login-hash-dddddddddddddddd",
+            "login_identifier_masked": "op***-invite",
+            "target_store_ids": [8],
+            "target_role": "operator",
+            "manual_approval": True,
+            "invitation_reason": "invite operator for store 8 readonly trial",
+            "backup_evidence_planned": True,
+            "audit_evidence_planned": True,
+            "membership_assignment_plan_ready": True,
+            "existing_user_hashes": [],
+        })
+        assert route_invitation_response.status_code == 200, route_invitation_response.text
+        route_invitation = route_invitation_response.json()["data"]
+        assert route_invitation["phase"] == "ERP-Multistore-1P", route_invitation
+        assert route_invitation["status"] == "user_invitation_mock_ready", route_invitation
+        assert route_invitation["user_invitation_readonly_api_mock_gate"] is True, route_invitation
+        assert route_invitation["readonly_api_mock_gate"] is True, route_invitation
+        assert route_invitation["public_endpoint_enabled"] is True, route_invitation
+        assert route_invitation["invitation_sent"] is False, route_invitation
+        assert route_invitation["users_written"] is False, route_invitation
+        assert route_invitation["membership_written"] is False, route_invitation
+        assert route_invitation["role_assignment_written"] is False, route_invitation
+        assert route_invitation["real_auth_session_created"] is False, route_invitation
+        assert route_invitation["real_database_written"] is False, route_invitation
+        assert route_invitation["operation_audit_rows_written"] is False, route_invitation
+        assert route_invitation["formal_sync_open"] is False, route_invitation
+        assert route_invitation["privacy_fields_redacted"] is True, route_invitation
+
+        route_invitation_duplicate_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
+            "actor_context": admin_store8,
+            "target_user_key_hash": "user-hash-dddddddddddddddd",
+            "login_identifier_hash": "login-hash-dddddddddddddddd",
+            "login_identifier_masked": "op***-invite",
+            "target_store_ids": [8],
+            "target_role": "operator",
+            "manual_approval": True,
+            "invitation_reason": "duplicate user should be blocked",
+            "backup_evidence_planned": True,
+            "audit_evidence_planned": True,
+            "membership_assignment_plan_ready": True,
+            "existing_user_hashes": ["user-hash-dddddddddddddddd"],
+        })
+        assert route_invitation_duplicate_response.status_code == 200, route_invitation_duplicate_response.text
+        route_invitation_duplicate = route_invitation_duplicate_response.json()["data"]
+        assert route_invitation_duplicate["skip_reason"] == "target_user_already_exists", route_invitation_duplicate
+        assert route_invitation_duplicate["users_written"] is False, route_invitation_duplicate
+        assert route_invitation_duplicate["membership_written"] is False, route_invitation_duplicate
+
+        route_invitation_sensitive_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
+            "actor_context": admin_store8,
+            "target_user_key_hash": "user-hash-dddddddddddddddd",
+            "login_identifier_hash": "login-hash-dddddddddddddddd",
+            "login_identifier_masked": "op***-invite",
+            "target_store_ids": [8],
+            "target_role": "operator",
+            "manual_approval": True,
+            "invitation_reason": "authorization: bearer must-not-leak-route-invite",
+            "backup_evidence_planned": True,
+            "audit_evidence_planned": True,
+            "membership_assignment_plan_ready": True,
+            "existing_user_hashes": [],
+        })
+        assert route_invitation_sensitive_response.status_code == 200, route_invitation_sensitive_response.text
+        route_invitation_sensitive = route_invitation_sensitive_response.json()["data"]
+        assert route_invitation_sensitive["skip_reason"] == "user_invitation_sensitive_material_blocked", route_invitation_sensitive
+        assert route_invitation_sensitive["users_written"] is False, route_invitation_sensitive
+
     runtime_user_hash = "user-hash-cccccccccccccccc"
     missing_user = None
     runtime_success = None
@@ -10661,6 +10734,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "invitation_full_email_blocked": invitation_full_email_blocked,
             "invitation_sensitive": invitation_sensitive,
             "invitation_success": invitation_success,
+            "route_invitation": route_invitation,
+            "route_invitation_duplicate": route_invitation_duplicate,
+            "route_invitation_sensitive": route_invitation_sensitive,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -10682,6 +10758,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "zipcode",
         "must-not-leak",
         "must-not-leak-route",
+        "must-not-leak-route-invite",
         "must-not-leak-invite",
         "operator@example.com",
     ]:
@@ -11217,6 +11294,28 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_audit_ready["formal_sync_open"] is False, batch_audit_ready
     assert batch_audit_ready["required_actions"] == ["orders.batch_sync_write", "products.batch_sync_write"], batch_audit_ready
 
+    batch_audit_route_ready = sync_service.evaluate_batch_approval_audit_evidence_local_route_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan=batch_audit_plan,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_route_ready["phase"] == "ERP-Batch-1P", batch_audit_route_ready
+    assert batch_audit_route_ready["status"] == "batch_approval_audit_evidence_mock_ready", batch_audit_route_ready
+    assert batch_audit_route_ready["batch_approval_audit_evidence_local_route_mock_gate"] is True, batch_audit_route_ready
+    assert batch_audit_route_ready["public_endpoint_enabled"] is False, batch_audit_route_ready
+    assert batch_audit_route_ready["real_database_written"] is False, batch_audit_route_ready
+    assert batch_audit_route_ready["operation_audit_rows_written"] is False, batch_audit_route_ready
+    assert batch_audit_route_ready["orders_written"] is False, batch_audit_route_ready
+    assert batch_audit_route_ready["products_written"] is False, batch_audit_route_ready
+    assert batch_audit_route_ready["formal_sync_open"] is False, batch_audit_route_ready
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -11232,6 +11331,22 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_audit_missing_plan["skip_reason"] == "audit_evidence_plan_incomplete", batch_audit_missing_plan
     assert "write_attempt_record_planned" in batch_audit_missing_plan["missing_audit_plan_flags"], batch_audit_missing_plan
     assert batch_audit_missing_plan["operation_audit_rows_written"] is False, batch_audit_missing_plan
+
+    batch_audit_route_missing_plan = sync_service.evaluate_batch_approval_audit_evidence_local_route_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan={**batch_audit_plan, "write_attempt_record_planned": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_route_missing_plan["phase"] == "ERP-Batch-1P", batch_audit_route_missing_plan
+    assert batch_audit_route_missing_plan["skip_reason"] == "audit_evidence_plan_incomplete", batch_audit_route_missing_plan
+    assert batch_audit_route_missing_plan["operation_audit_rows_written"] is False, batch_audit_route_missing_plan
 
     batch_audit_missing_permission = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
@@ -11262,6 +11377,21 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     )
     assert batch_audit_sensitive["skip_reason"] == "batch_approval_audit_sensitive_field_blocked", batch_audit_sensitive
     assert batch_audit_sensitive["operation_audit_rows_written"] is False, batch_audit_sensitive
+
+    batch_audit_route_sensitive = sync_service.evaluate_batch_approval_audit_evidence_local_route_mock_gate(
+        readonly_evidence={**readonly_success, "productOrderId": "must-not-leak-route-audit"},
+        approval_context={
+            "actor_id": "batch-admin",
+            "role": "admin",
+            "store_ids": [8],
+            "manual_approval_planned": True,
+            "approved_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        },
+        audit_evidence_plan=batch_audit_plan,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_audit_route_sensitive["skip_reason"] == "batch_approval_audit_sensitive_field_blocked", batch_audit_route_sensitive
+    assert batch_audit_route_sensitive["operation_audit_rows_written"] is False, batch_audit_route_sensitive
 
     readonly_sensitive = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
         evidence_items=[{

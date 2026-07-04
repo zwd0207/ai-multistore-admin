@@ -5776,6 +5776,53 @@ def _evaluate_batch_approval_audit_evidence_mock_gate(
     return result
 
 
+def evaluate_batch_approval_audit_evidence_local_route_mock_gate(
+    *,
+    readonly_evidence: dict | None,
+    approval_context: dict | None,
+    audit_evidence_plan: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for the future local audit-evidence route; it does not expose a write endpoint."""
+
+    result = _evaluate_batch_approval_audit_evidence_mock_gate(
+        readonly_evidence=readonly_evidence,
+        approval_context=approval_context,
+        audit_evidence_plan=audit_evidence_plan,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "ERP-Batch-1P",
+        "batch_approval_audit_evidence_local_route_mock_gate": True,
+        "local_route_mock_gate": True,
+        "route_path_planned": "/api/v1/batch/approval-audit-evidence",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "batch_approval_audit_evidence_mock_ready":
+        result["business_message"] = (
+            "批量审批审计证据本地 route mock gate 已通过；当前不会开放接口、不会写入审计记录，也不会开启正式批量同步。"
+        )
+        result["next_action"] = "单独阶段再实现只读本地 route，并继续保持写入关闭。"
+    return result
+
+
 def evaluate_batch_readonly_evidence_api_local(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

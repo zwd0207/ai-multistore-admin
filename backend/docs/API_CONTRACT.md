@@ -2142,3 +2142,48 @@ Phase ERP-Batch-1O is route planning only. A future local route may wrap `_evalu
 ### Naver Order Batch Audit Readiness UI Wording
 
 Phase Naver-Order-Batch-1G is wording planning only. Future UI should show order batch approval evidence in seller-facing language and keep `phase`, `sync_kind`, `would_*`, changed fields, audit flags, and formal-sync flags folded. It does not call Naver or open formal order batch sync.
+
+### User Invitation Readonly API Mock Gate
+
+Phase ERP-Multistore-1O verifies the mock-gate contract for a future invitation readiness API. The gate accepts only safe hashes, masked login identifier display, target stores, target role, manual approval, backup evidence planning, audit evidence planning, and membership assignment planning. It blocks duplicate target users and unsafe login identifier display.
+
+It must keep:
+
+```text
+users_written=false
+membership_written=false
+role_assignment_written=false
+real_auth_session_created=false
+real_database_written=false
+operation_audit_rows_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+### User Invitation Readonly API Local Implementation
+
+Phase ERP-Multistore-1P adds:
+
+```text
+POST /api/v1/permissions/user-invitation/readonly-check
+```
+
+The endpoint returns business messages for ready, duplicate target user, unsafe login identifier display, missing manual approval, permission blocked, and generic blocked cases. It may expose masked login identifier and safe hashes only. It must not send invitations, create users, create sessions, assign roles, assign store memberships, write audit rows, write orders, write products, write SyncLog, write tested-success rows, or call platform APIs.
+
+### Product Rollback Readonly Report Backend Route Plan
+
+Phase Naver-Product-Batch-1O is a plan-only contract. A future backend route may expose a readonly rollback report over backup evidence, stock-only write summary, temporary restore planning, readback planning, and sensitive-scan planning. This phase does not add that route and does not execute restore or writes.
+
+### Batch Approval Audit Evidence Local Route Mock Gate
+
+Phase ERP-Batch-1P adds:
+
+```text
+evaluate_batch_approval_audit_evidence_local_route_mock_gate(...)
+```
+
+The helper wraps the private batch approval audit evidence gate for a future local route. It records the planned path `/api/v1/batch/approval-audit-evidence` but keeps `public_endpoint_enabled=false`. It does not expose a new route, write audit rows, write orders, write products, write SyncLog, write tested-success rows, call platforms, or open formal sync.
+
+### Naver Order Batch Audit Readiness UI Mock Display
+
+Phase Naver-Order-Batch-1H is a Codex2 UI display contract. The Orders page may show order-batch audit readiness in business wording, but technical fields and write flags must remain folded. The display must not call Naver, write orders, write products, write audit rows, or imply that formal order batch sync is open.
