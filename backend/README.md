@@ -1244,3 +1244,37 @@ ERP-Multistore-2E is a readonly API plan only for a future invitation approval c
 ERP-Multistore-2F adds Codex2 Accounts mock display for invitation approval checklist wording. It does not change backend write contracts.
 
 Naver-Order-Batch-2A documents the approval boundary for any future Naver order batch execution. Future execution requires fresh readonly candidates, store-scoped approval, permission checks, backup, privacy gate, whitelist, duplicate protection, audit chain, readback, and rollback planning. No Naver call or local order write is performed in this phase.
+
+ERP-Batch-2K adds a service-level local-route mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_readonly_api_local_route_mock_gate(...)
+```
+
+It keeps the planned approval-decision readonly route unexposed while verifying route shape, business wording, folded technical details, and closed execution boundaries.
+
+ERP-Batch-2L exposes a local readonly route:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+The route returns approval-decision readiness for local review. It writes no orders, products, SyncLog, tested-success rows, timeline events, or audit rows, and it does not approve batch execution.
+
+ERP-Multistore-2G adds a service-level mock gate:
+
+```text
+evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(...)
+```
+
+It verifies the future invitation checklist readonly API contract while keeping `public_endpoint_enabled=false`, `backend_route_implemented=false`, `invitation_sent=false`, `users_written=false`, `membership_written=false`, and `operation_audit_rows_written=false`.
+
+ERP-Multistore-2H is a local API implementation plan only. No invitation checklist route is exposed in this phase.
+
+Naver-Order-Batch-2B adds a service-level mock gate:
+
+```text
+evaluate_naver_order_batch_execution_approval_mock_gate(...)
+```
+
+It verifies Naver order batch execution approval readiness using fresh readonly candidates, backup, store-scoped approval, permission gate, privacy gate, whitelist, delivery/claim mapping review, duplicate protection, audit chain, readback, rollback, and sensitive scan. It does not call Naver, write orders, write timeline events, or enable shipment/cancel/return/exchange platform writes.

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.core.responses import success_response
 from app.schemas.batch import (
     BatchApprovalAuditEvidenceRequest,
+    BatchApprovalDecisionReadonlyCheckRequest,
     BatchReadonlyEvidenceRequest,
     NaverProductRollbackReadonlyReportRequest,
 )
@@ -34,6 +35,20 @@ def check_batch_approval_audit_evidence(payload: BatchApprovalAuditEvidenceReque
     return success_response(
         data=result,
         message="batch approval audit evidence checked",
+    )
+
+
+@router.post("/approval-decision/readonly-check")
+def check_batch_approval_decision_readonly(payload: BatchApprovalDecisionReadonlyCheckRequest) -> dict:
+    result = sync_service.evaluate_formal_batch_approval_decision_readonly_api_local(
+        readonly_evidence=payload.readonly_evidence,
+        approval_audit_evidence=payload.approval_audit_evidence,
+        decision_context=payload.decision_context,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="batch approval decision readonly check completed",
     )
 
 

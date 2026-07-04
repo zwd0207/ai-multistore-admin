@@ -920,3 +920,121 @@ def evaluate_real_user_invitation_approval_checklist_mock_gate(
         ),
     })
     return result
+
+
+def evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    login_identifier_hash: str | None,
+    login_identifier_masked: str | None,
+    target_store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    invitation_reason: str | None = None,
+    approval_checklist: dict[str, Any] | None = None,
+    readonly_api_context: dict[str, Any] | None = None,
+    existing_user_hashes: list[str] | tuple[str, ...] | set[str] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Mock gate for a future invitation checklist readonly API; no route is exposed."""
+
+    result = evaluate_real_user_invitation_approval_checklist_mock_gate(
+        actor_context=actor_context,
+        target_user_key_hash=target_user_key_hash,
+        login_identifier_hash=login_identifier_hash,
+        login_identifier_masked=login_identifier_masked,
+        target_store_ids=target_store_ids,
+        target_role=target_role,
+        manual_approval=manual_approval,
+        invitation_reason=invitation_reason,
+        approval_checklist=approval_checklist,
+        existing_user_hashes=existing_user_hashes,
+        verification_scope=verification_scope,
+    )
+    required_api_flags = [
+        "readonly_api_contract_planned",
+        "business_wording_required",
+        "technical_details_folded",
+        "send_invitation_button_excluded",
+        "write_endpoint_excluded",
+        "masked_identifier_required",
+        "route_requires_separate_implementation",
+        "real_invitation_remains_closed",
+    ]
+    result.update({
+        "phase": "ERP-Multistore-2G",
+        "user_invitation_approval_checklist_readonly_api_mock_gate": True,
+        "readonly_api_mock_gate": True,
+        "required_api_flags": required_api_flags,
+        "missing_api_flags": [],
+        "route_path_planned": "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "real_invitation_open": False,
+        "invitation_would_send": False,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") != "user_invitation_approval_checklist_mock_ready":
+        return result
+    if verification_scope != VERIFICATION_SCOPE:
+        result["status"] = "blocked"
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(readonly_api_context, dict):
+        result["status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_required"
+        return result
+    if _contains_sensitive_material(readonly_api_context):
+        result["status"] = "blocked"
+        result["skip_reason"] = "invitation_checklist_readonly_api_sensitive_material_blocked"
+        return result
+    missing_api_flags = [
+        flag for flag in required_api_flags
+        if readonly_api_context.get(flag) is not True
+    ]
+    result["missing_api_flags"] = missing_api_flags
+    if missing_api_flags:
+        result["status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_incomplete"
+        return result
+    if readonly_api_context.get("public_endpoint_enabled") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "public_endpoint_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("backend_route_implemented") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "backend_route_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("invitation_sent") is True or readonly_api_context.get("users_written") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "real_invitation_not_allowed_in_mock_gate"
+        return result
+
+    result.update({
+        "status": "user_invitation_approval_checklist_readonly_api_mock_ready",
+        "checklist_ready": True,
+        "business_message": (
+            "真实用户邀请审批清单只读 API mock gate 已通过；当前只规划只读审查接口，不会发送邀请或创建用户。"
+        ),
+        "next_action": (
+            "后续可单独规划本地只读 API 实现；真实邀请仍必须另开审批和写入阶段。"
+        ),
+    })
+    return result

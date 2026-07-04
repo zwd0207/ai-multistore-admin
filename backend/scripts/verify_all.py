@@ -63,6 +63,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/user-invitation/readonly-check",
     "/api/v1/batch/readonly-evidence",
     "/api/v1/batch/approval-audit-evidence",
+    "/api/v1/batch/approval-decision/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
@@ -1269,6 +1270,7 @@ def verify_openapi() -> None:
     batch_methods = {
         "/api/v1/batch/readonly-evidence": {"post"},
         "/api/v1/batch/approval-audit-evidence": {"post"},
+        "/api/v1/batch/approval-decision/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
     }
     for batch_path, expected_methods in batch_methods.items():
@@ -10587,6 +10589,78 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert invitation_checklist_sensitive["skip_reason"] == "user_invitation_checklist_sensitive_material_blocked", invitation_checklist_sensitive
     assert invitation_checklist_sensitive["real_database_written"] is False, invitation_checklist_sensitive
 
+    invitation_readonly_api_context = {
+        "readonly_api_contract_planned": True,
+        "business_wording_required": True,
+        "technical_details_folded": True,
+        "send_invitation_button_excluded": True,
+        "write_endpoint_excluded": True,
+        "masked_identifier_required": True,
+        "route_requires_separate_implementation": True,
+        "real_invitation_remains_closed": True,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "invitation_sent": False,
+        "users_written": False,
+    }
+    invitation_readonly_api_ready = permission_service.evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="invite operator for store 8 readonly api checklist",
+        approval_checklist=invitation_approval_checklist,
+        readonly_api_context=invitation_readonly_api_context,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_readonly_api_ready["phase"] == "ERP-Multistore-2G", invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["status"] == "user_invitation_approval_checklist_readonly_api_mock_ready", invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["public_endpoint_enabled"] is False, invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["backend_route_implemented"] is False, invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["invitation_sent"] is False, invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["users_written"] is False, invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["membership_written"] is False, invitation_readonly_api_ready
+    assert invitation_readonly_api_ready["operation_audit_rows_written"] is False, invitation_readonly_api_ready
+
+    invitation_readonly_api_missing_fold = permission_service.evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="missing folded details should block",
+        approval_checklist=invitation_approval_checklist,
+        readonly_api_context={**invitation_readonly_api_context, "technical_details_folded": False},
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_readonly_api_missing_fold["skip_reason"] == "readonly_api_context_incomplete", invitation_readonly_api_missing_fold
+    assert "technical_details_folded" in invitation_readonly_api_missing_fold["missing_api_flags"], invitation_readonly_api_missing_fold
+    assert invitation_readonly_api_missing_fold["users_written"] is False, invitation_readonly_api_missing_fold
+
+    invitation_readonly_api_public_endpoint = permission_service.evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="public endpoint should stay planned",
+        approval_checklist=invitation_approval_checklist,
+        readonly_api_context={**invitation_readonly_api_context, "public_endpoint_enabled": True},
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_readonly_api_public_endpoint["skip_reason"] == "public_endpoint_not_allowed_in_mock_gate", invitation_readonly_api_public_endpoint
+    assert invitation_readonly_api_public_endpoint["public_endpoint_enabled"] is False, invitation_readonly_api_public_endpoint
+
     with TestClient(app) as client:
         route_invitation_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
             "actor_context": admin_store8,
@@ -10837,6 +10911,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "invitation_checklist_missing_expiry": invitation_checklist_missing_expiry,
             "invitation_checklist_full_email": invitation_checklist_full_email,
             "invitation_checklist_sensitive": invitation_checklist_sensitive,
+            "invitation_readonly_api_ready": invitation_readonly_api_ready,
+            "invitation_readonly_api_missing_fold": invitation_readonly_api_missing_fold,
+            "invitation_readonly_api_public_endpoint": invitation_readonly_api_public_endpoint,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -11053,6 +11130,72 @@ def verify_formal_batch_sync_production_gate() -> None:
     assert order_gate["formal_order_sync_open"] is False, order_gate
     assert order_gate["platform_writes_enabled"] is False, order_gate
 
+    order_execution_context = {
+        "order_batch_candidates_fresh": True,
+        "order_privacy_gate_verified": True,
+        "order_field_whitelist_verified": True,
+        "delivery_claim_mapping_reviewed": True,
+        "duplicate_protection_ready": True,
+        "audit_chain_ready": True,
+        "post_write_readback_required": True,
+        "rollback_plan_ready": True,
+        "sensitive_scan_passed": True,
+        "platform_order_write_actions_excluded": True,
+        "formal_sync_remains_closed": True,
+        "execution_approved": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    order_execution_ready = sync_service.evaluate_naver_order_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=4,
+        batch_size=4,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context=order_execution_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert order_execution_ready["phase"] == "Naver-Order-Batch-2B", order_execution_ready
+    assert order_execution_ready["status"] == "naver_order_batch_execution_approval_mock_ready", order_execution_ready
+    assert order_execution_ready["order_batch_execution_approval_ready"] is True, order_execution_ready
+    assert order_execution_ready["execution_approved"] is False, order_execution_ready
+    assert order_execution_ready["orders_written"] is False, order_execution_ready
+    assert order_execution_ready["timeline_events_written"] is False, order_execution_ready
+    assert order_execution_ready["operation_audit_rows_written"] is False, order_execution_ready
+    assert order_execution_ready["formal_order_sync_open"] is False, order_execution_ready
+    assert order_execution_ready["platform_order_writes_enabled"] is False, order_execution_ready
+
+    order_execution_missing_privacy = sync_service.evaluate_naver_order_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=4,
+        batch_size=4,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context={**order_execution_context, "order_privacy_gate_verified": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert order_execution_missing_privacy["skip_reason"] == "order_batch_execution_context_incomplete", order_execution_missing_privacy
+    assert "order_privacy_gate_verified" in order_execution_missing_privacy["missing_execution_flags"], order_execution_missing_privacy
+    assert order_execution_missing_privacy["orders_written"] is False, order_execution_missing_privacy
+
+    order_execution_sensitive = sync_service.evaluate_naver_order_batch_execution_approval_mock_gate(
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=4,
+        batch_size=4,
+        readonly_evidence={**readonly_evidence, "productOrderId": "must-not-leak-order-execution"},
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        execution_context=order_execution_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert order_execution_sensitive["skip_reason"] == "naver_order_batch_execution_sensitive_field_blocked", order_execution_sensitive
+    assert order_execution_sensitive["orders_written"] is False, order_execution_sensitive
+
     oversized = sync_service._evaluate_formal_batch_sync_production_gate(
         sync_kind="naver_product_batch",
         actor_context=admin_multi_store,
@@ -11088,6 +11231,9 @@ def verify_formal_batch_sync_production_gate() -> None:
         {
             "product_gate": product_gate,
             "order_gate": order_gate,
+            "order_execution_ready": order_execution_ready,
+            "order_execution_missing_privacy": order_execution_missing_privacy,
+            "order_execution_sensitive": order_execution_sensitive,
             "no_approval": no_approval,
             "missing_backup": missing_backup,
             "operator_blocked": operator_blocked,
@@ -11554,6 +11700,22 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_decision_api_sensitive["skip_reason"] == "approval_decision_readonly_api_sensitive_field_blocked", batch_decision_api_sensitive
     assert batch_decision_api_sensitive["orders_written"] is False, batch_decision_api_sensitive
 
+    batch_decision_route_mock_ready = sync_service.evaluate_formal_batch_approval_decision_readonly_api_local_route_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        readonly_api_context=batch_decision_api_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_route_mock_ready["phase"] == "ERP-Batch-2K", batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["status"] == "formal_batch_approval_decision_readonly_api_mock_ready", batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["local_route_mock_gate"] is True, batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["public_endpoint_enabled"] is False, batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["backend_route_implemented"] is False, batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["execution_approved"] is False, batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["orders_written"] is False, batch_decision_route_mock_ready
+    assert batch_decision_route_mock_ready["products_written"] is False, batch_decision_route_mock_ready
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -11775,6 +11937,29 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_audit["capability_tested_success_written"] is False, local_audit
         assert local_audit["formal_sync_open"] is False, local_audit
 
+        local_decision_response = client.post("/api/v1/batch/approval-decision/readonly-check", json={
+            "readonly_evidence": local_evidence,
+            "approval_audit_evidence": local_audit,
+            "decision_context": batch_decision_context,
+            "readonly_api_context": batch_decision_api_context,
+        })
+        assert local_decision_response.status_code == 200, local_decision_response.text
+        local_decision = local_decision_response.json()["data"]
+        assert local_decision["phase"] == "ERP-Batch-2L", local_decision
+        assert local_decision["status"] == "formal_batch_approval_decision_readonly_api_ready", local_decision
+        assert local_decision["formal_batch_approval_decision_readonly_api_local"] is True, local_decision
+        assert local_decision["backend_route_implemented"] is True, local_decision
+        assert local_decision["public_endpoint_enabled"] is True, local_decision
+        assert local_decision["execution_approved"] is False, local_decision
+        assert local_decision["operation_audit_rows_written"] is False, local_decision
+        assert local_decision["real_database_written"] is False, local_decision
+        assert local_decision["orders_written"] is False, local_decision
+        assert local_decision["products_written"] is False, local_decision
+        assert local_decision["sync_log_written"] is False, local_decision
+        assert local_decision["capability_tested_success_written"] is False, local_decision
+        assert local_decision["formal_sync_open"] is False, local_decision
+        assert local_decision["platform_writes_enabled"] is False, local_decision
+
         local_audit_sensitive_response = client.post("/api/v1/batch/approval-audit-evidence", json={
             "readonly_evidence": {**local_evidence, "productOrderId": "must-not-leak-local-audit"},
             "approval_context": {
@@ -11792,6 +11977,19 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_audit_sensitive["skip_reason"] == "batch_approval_audit_sensitive_field_blocked", local_audit_sensitive
         assert local_audit_sensitive["operation_audit_rows_written"] is False, local_audit_sensitive
         assert local_audit_sensitive["real_database_written"] is False, local_audit_sensitive
+
+        local_decision_sensitive_response = client.post("/api/v1/batch/approval-decision/readonly-check", json={
+            "readonly_evidence": local_evidence,
+            "approval_audit_evidence": local_audit,
+            "decision_context": {**batch_decision_context, "productOrderId": "must-not-leak-local-decision"},
+            "readonly_api_context": batch_decision_api_context,
+        })
+        assert local_decision_sensitive_response.status_code == 200, local_decision_sensitive_response.text
+        local_decision_sensitive = local_decision_sensitive_response.json()["data"]
+        assert local_decision_sensitive["phase"] == "ERP-Batch-2L", local_decision_sensitive
+        assert local_decision_sensitive["skip_reason"] == "formal_batch_decision_sensitive_field_blocked", local_decision_sensitive
+        assert local_decision_sensitive["operation_audit_rows_written"] is False, local_decision_sensitive
+        assert local_decision_sensitive["real_database_written"] is False, local_decision_sensitive
 
     with SessionLocal() as db:
         after_counts = {
@@ -11824,9 +12022,12 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_decision_api_missing_fold": batch_decision_api_missing_fold,
             "batch_decision_api_public_endpoint": batch_decision_api_public_endpoint,
             "batch_decision_api_sensitive": batch_decision_api_sensitive,
+            "batch_decision_route_mock_ready": batch_decision_route_mock_ready,
             "local_evidence": local_evidence,
             "local_audit": local_audit,
             "local_audit_sensitive": local_audit_sensitive,
+            "local_decision": local_decision,
+            "local_decision_sensitive": local_decision_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,

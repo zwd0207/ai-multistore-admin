@@ -6311,6 +6311,236 @@ def evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
     return result
 
 
+def evaluate_formal_batch_approval_decision_readonly_api_local_route_mock_gate(
+    *,
+    readonly_evidence: dict | None,
+    approval_audit_evidence: dict | None,
+    decision_context: dict | None,
+    readonly_api_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for the future local readonly route; it still exposes no route."""
+
+    result = evaluate_formal_batch_approval_decision_readonly_api_mock_gate(
+        readonly_evidence=readonly_evidence,
+        approval_audit_evidence=approval_audit_evidence,
+        decision_context=decision_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "ERP-Batch-2K",
+        "formal_batch_approval_decision_readonly_api_local_route_mock_gate": True,
+        "local_route_mock_gate": True,
+        "route_path_planned": "/api/v1/batch/approval-decision/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "formal_batch_approval_decision_readonly_api_mock_ready":
+        result["business_message"] = (
+            "正式批量审批决策只读 API local route mock gate 已通过；当前仍不开放路由、不批准执行。"
+        )
+        result["next_action"] = "后续可单独实现本地只读 route，继续保持写入和平台调用关闭。"
+    return result
+
+
+def evaluate_formal_batch_approval_decision_readonly_api_local(
+    *,
+    readonly_evidence: dict | None,
+    approval_audit_evidence: dict | None,
+    decision_context: dict | None,
+    readonly_api_context: dict | None,
+) -> dict:
+    """Local readonly approval-decision route helper; never approves execution."""
+
+    result = evaluate_formal_batch_approval_decision_readonly_api_local_route_mock_gate(
+        readonly_evidence=readonly_evidence,
+        approval_audit_evidence=approval_audit_evidence,
+        decision_context=decision_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "ERP-Batch-2L",
+        "formal_batch_approval_decision_readonly_api_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/approval-decision/readonly-check",
+        "http_method": "POST",
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "formal_batch_approval_decision_readonly_api_mock_ready":
+        result["status"] = "formal_batch_approval_decision_readonly_api_ready"
+        result["decision_status"] = "ready_for_local_readonly_review"
+        result["business_message"] = (
+            "正式批量审批决策只读检查已完成；当前只提供人工复核材料，不批准执行或写入。"
+        )
+        result["next_action"] = "继续人工复核审批材料；执行商品或订单批量写入必须另开阶段。"
+    return result
+
+
+def evaluate_naver_order_batch_execution_approval_mock_gate(
+    *,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    execution_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock approval gate for a later Naver order batch execution phase; never writes."""
+
+    required_execution_flags = [
+        "order_batch_candidates_fresh",
+        "order_privacy_gate_verified",
+        "order_field_whitelist_verified",
+        "delivery_claim_mapping_reviewed",
+        "duplicate_protection_ready",
+        "audit_chain_ready",
+        "post_write_readback_required",
+        "rollback_plan_ready",
+        "sensitive_scan_passed",
+        "platform_order_write_actions_excluded",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "Naver-Order-Batch-2B",
+        "naver_order_batch_execution_approval_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "required_execution_flags": required_execution_flags,
+        "missing_execution_flags": [],
+        "order_batch_execution_approval_ready": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(execution_context, dict):
+        result["skip_reason"] = "execution_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "readonly_evidence": readonly_evidence,
+        "backup_evidence": backup_evidence,
+        "execution_context": execution_context,
+    }):
+        result["skip_reason"] = "naver_order_batch_execution_sensitive_field_blocked"
+        return result
+
+    missing_flags = [
+        flag for flag in required_execution_flags
+        if execution_context.get(flag) is not True
+    ]
+    result["missing_execution_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "order_batch_execution_context_incomplete"
+        return result
+    if execution_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if execution_context.get("formal_sync_open") is True or execution_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    production_gate = _evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_order_batch",
+        actor_context=actor_context,
+        store_ids=store_ids,
+        candidate_count=candidate_count,
+        batch_size=batch_size,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=manual_approval,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=verification_scope,
+        write_requested=True,
+    )
+    result["production_gate"] = production_gate
+    result.update({
+        "store_ids": production_gate.get("store_ids") or [],
+        "candidate_count": production_gate.get("candidate_count"),
+        "batch_size": production_gate.get("batch_size"),
+        "permission_verified": bool(production_gate.get("permission_verified")),
+        "approval_role_verified": bool(production_gate.get("approval_role_verified")),
+        "backup_evidence_verified": bool(production_gate.get("backup_evidence_verified")),
+        "readonly_evidence_verified": bool(production_gate.get("readonly_evidence_verified")),
+    })
+    if production_gate.get("status") != "formal_batch_gate_ready_for_later_execution":
+        result["skip_reason"] = production_gate.get("skip_reason") or "formal_batch_gate_not_ready"
+        return result
+
+    result.update({
+        "status": "naver_order_batch_execution_approval_mock_ready",
+        "order_batch_execution_approval_ready": True,
+        "business_message": (
+            "Naver 订单批量执行审批 mock gate 已通过；当前只表示后续执行审批材料齐备，不会写入订单或调用平台写接口。"
+        ),
+        "next_action": (
+            "如要真正执行订单批量写入，必须另开执行阶段并再次确认备份、审计、回读和敏感扫描。"
+        ),
+    })
+    return result
+
+
 def evaluate_batch_readonly_evidence_api_local(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

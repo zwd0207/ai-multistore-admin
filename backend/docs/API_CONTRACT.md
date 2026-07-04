@@ -2428,3 +2428,79 @@ The future route should wrap the invitation approval checklist mock gate and kee
 ### Naver Order Batch Execution Approval Boundary
 
 Phase Naver-Order-Batch-2A is a planning boundary for future order batch execution. Execution must require fresh readonly candidates, store-scoped approval, permission gate, verified backup, privacy gate, whitelist, duplicate protection, audit chain, readback, rollback plan, and sensitive scan. This phase performs no Naver call, no order write, no timeline write, and no platform order write.
+
+### Formal Batch Approval Decision Readonly Local Route
+
+Phase ERP-Batch-2K adds the local-route mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_readonly_api_local_route_mock_gate(...)
+```
+
+Phase ERP-Batch-2L exposes:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+Request shape:
+
+```text
+readonly_evidence: object
+approval_audit_evidence: object
+decision_context: object
+readonly_api_context: object
+```
+
+The route wraps the approval-decision readonly API gate and must keep:
+
+```text
+backend_route_implemented=true
+public_endpoint_enabled=true
+execution_approved=false
+operation_audit_rows_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+timeline_events_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+It returns manual review readiness only and does not approve execution.
+
+### Invitation Approval Checklist Readonly API Mock Gate
+
+Phase ERP-Multistore-2G adds:
+
+```text
+evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(...)
+```
+
+It verifies the future invitation checklist readonly API contract and keeps the route unimplemented in this phase. Phase ERP-Multistore-2H is a local implementation plan only. User creation, invitation sending, auth sessions, role assignment, membership writes, and audit-row writes remain closed.
+
+### Naver Order Batch Execution Approval Mock Gate
+
+Phase Naver-Order-Batch-2B adds:
+
+```text
+evaluate_naver_order_batch_execution_approval_mock_gate(...)
+```
+
+The gate requires order candidates, privacy gate, whitelist, delivery/claim mapping review, duplicate protection, audit chain, readback, rollback, sensitive scan, backup, permission, and manual approval. It must keep:
+
+```text
+execution_approved=false
+orders_written=false
+timeline_events_written=false
+operation_audit_rows_written=false
+formal_order_sync_open=false
+platform_order_writes_enabled=false
+shipment_write_enabled=false
+cancel_write_enabled=false
+return_write_enabled=false
+exchange_write_enabled=false
+```
+
+Actual Naver order batch execution remains a separate future phase.
