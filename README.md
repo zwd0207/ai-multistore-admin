@@ -961,3 +961,9 @@ Naver-ERP-18D does not approve a refresh write for the 18C candidate. Local read
 The selected new-order candidate approval plan is documented in `PHASE_NAVER_ERP_19A_SELECTED_NEW_ORDER_CANDIDATE_APPROVAL_PLAN.md`.
 
 Naver-ERP-19A is planning-only. It approves safe hash `id-hash-192b9c67e8` only for a fresh readonly repeat as a selected new-order candidate, not as an existing-order refresh candidate. Any later write requires exact hash repeat, duplicate count zero, privacy gate pass, fresh database backup, one-order limit, post-write readback, audit evidence, no SyncLog write, no tested-success write, no product write, no platform write, and no formal order sync opening.
+
+## Phase Naver-ERP-19B - Selected New-Order Readonly Repeat
+
+The selected new-order readonly repeat is documented in `PHASE_NAVER_ERP_19B_SELECTED_NEW_ORDER_READONLY_REPEAT.md`.
+
+Naver-ERP-19B calls the existing Naver order preview endpoint in readonly mode over a recent 3-day KST window. Token, feed, and detail returned HTTP 200. The observed safe hash matched `id-hash-192b9c67e8`, remained `candidate_new`, and had `配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Counts stayed unchanged: `orders_store8=6`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=5`, and `order_status_events=0`. Formal order sync remains closed.
