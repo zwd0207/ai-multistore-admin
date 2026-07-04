@@ -689,6 +689,12 @@ The audit writer integration approval plan is documented in `PHASE_ERP_AUDIT_1Q_
 
 ERP-Audit-1Q is planning-only. It defines how the existing controlled local audit writer may later be connected to selected runtime operations through a separate mock gate first. The first approved target direction is narrow local accountability for controlled Naver order writes/refreshes, backup creation, restore dry-run evidence, and schema migration evidence. Any future real audit write must require explicit approval, clean worktrees, database backup when applicable, safe correlation-chain rows, sensitive scans, and post-write verification. This phase does not write `operation_audit_logs`, change schema, modify Codex2 runtime behavior, call platform APIs, execute backups/restores, or open formal product/order sync.
 
+## Phase ERP-Audit-1R - Audit Writer Integration Mock Gate
+
+The audit writer integration mock gate is documented in `PHASE_ERP_AUDIT_1R_AUDIT_WRITER_INTEGRATION_MOCK_GATE.md`.
+
+ERP-Audit-1R adds a private Codex1 service mock gate for complete safe audit correlation chains, verified only in the temporary `verify_all.py` database. It covers controlled Naver order local write/refresh evidence, database backup evidence, restore dry-run evidence, and schema migration evidence. The gate requires explicit write intent, manual approval, the private verification scope, one shared correlation id, unique request ids, complete required action chains, safe flags, privacy redaction, valid SHA-256 evidence, and sensitive-field blocking. It does not write the real `operation_audit_logs` table, connect runtime business flows, add public audit write/delete/export/detail routes, call platform APIs, execute backup/restore, change schema, or open formal sync.
+
 ## Phase ERP-Backup-1A - Database Backup and Restore Drill Plan
 
 The database backup and restore drill plan is documented in `PHASE_ERP_BACKUP_1A_DATABASE_BACKUP_RESTORE_DRILL_PLAN.md`.
