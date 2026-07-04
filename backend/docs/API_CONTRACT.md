@@ -2187,3 +2187,46 @@ The helper wraps the private batch approval audit evidence gate for a future loc
 ### Naver Order Batch Audit Readiness UI Mock Display
 
 Phase Naver-Order-Batch-1H is a Codex2 UI display contract. The Orders page may show order-batch audit readiness in business wording, but technical fields and write flags must remain folded. The display must not call Naver, write orders, write products, write audit rows, or imply that formal order batch sync is open.
+
+### User Invitation Readonly UI
+
+Phase ERP-Multistore-1Q plans the Accounts-page invitation readiness UI. Phase ERP-Multistore-1R implements it in Codex2. The backend contract is unchanged: the UI may call `POST /api/v1/permissions/user-invitation/readonly-check`, but it must not create users, send invitations, create sessions, assign roles, write memberships, write audit rows, or expose full login identifiers.
+
+### Batch Approval Audit Evidence Local Route Plan
+
+Phase ERP-Batch-1Q remains plan-only for a future readonly route:
+
+```text
+POST /api/v1/batch/approval-audit-evidence
+```
+
+No endpoint is added in this phase. A future route must wrap the existing batch approval audit evidence gate, return business readiness wording, reject sensitive markers, and keep `operation_audit_rows_written=false`, `orders_written=false`, `products_written=false`, and `formal_sync_open=false`.
+
+### Product Rollback Readonly Report Backend Route Mock Gate
+
+Phase Naver-Product-Batch-1P adds:
+
+```text
+evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(...)
+```
+
+The helper wraps the existing product rollback readonly report gate and records the future path `/api/v1/batch/naver/products/rollback-readonly-report` as planned only. It must keep:
+
+```text
+public_endpoint_enabled=false
+real_restore_executed=false
+rollback_executed=false
+production_db_touched=false
+real_database_written=false
+products_written=false
+orders_written=false
+operation_audit_rows_written=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+It does not expose a route, restore a database, write products, or open formal product batch sync.
+
+### Order Batch Audit Readiness UI Walkthrough
+
+Phase Naver-Order-Batch-1I verifies the Codex2 Orders audit readiness display. It is a readonly walkthrough phase and does not change backend write contracts.

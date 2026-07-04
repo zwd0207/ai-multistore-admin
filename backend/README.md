@@ -1156,3 +1156,25 @@ evaluate_batch_approval_audit_evidence_local_route_mock_gate(...)
 It wraps the private batch approval audit evidence gate and records the future route path as planned evidence only. It keeps `public_endpoint_enabled=false`, `operation_audit_rows_written=false`, `orders_written=false`, `products_written=false`, and `formal_sync_open=false`.
 
 Naver-Order-Batch-1H adds Codex2 readonly UI display for order batch audit readiness. The backend contract remains unchanged: no Naver API call, no order write, no product write, no SyncLog, no tested-success row, no shipment/cancel/return/exchange write, and formal order batch sync remains closed.
+
+ERP-Multistore-1Q plans the Codex2 user invitation readonly UI. The UI must show invitation readiness in business language while keeping hashes, skip reasons, write flags, and audit flags folded.
+
+ERP-Multistore-1R implements the Codex2 user invitation readonly UI against the existing readonly API/data-provider method. It does not create users, send invitations, create sessions, assign roles, assign store memberships, or call platform APIs.
+
+ERP-Batch-1Q is a plan-only boundary for a future readonly local route:
+
+```text
+POST /api/v1/batch/approval-audit-evidence
+```
+
+No route is added in this phase. Future implementation must remain readonly and must not write audit rows, products, orders, SyncLog, tested-success rows, or open formal sync.
+
+Naver-Product-Batch-1P adds a service-level mock gate:
+
+```text
+evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(...)
+```
+
+It wraps the existing rollback readonly report gate and records a planned future route path while keeping `public_endpoint_enabled=false`, `real_restore_executed=false`, `production_db_touched=false`, `products_written=false`, and `formal_product_sync_open=false`.
+
+Naver-Order-Batch-1I is a Codex2 walkthrough phase for the Orders audit readiness panel. The panel remains readonly and must not imply formal order batch sync is open.

@@ -5430,6 +5430,50 @@ def _evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(
     return result
 
 
+def evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(
+    *,
+    rollback_drill_gate: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for a future readonly product rollback report route; no route or restore is exposed."""
+
+    result = _evaluate_naver_product_batch_rollback_drill_readonly_report_mock_gate(
+        rollback_drill_gate=rollback_drill_gate,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "Naver-Product-Batch-1P",
+        "product_rollback_readonly_report_backend_route_mock_gate": True,
+        "backend_route_mock_gate": True,
+        "route_path_planned": "/api/v1/batch/naver/products/rollback-readonly-report",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "real_restore_executed": False,
+        "rollback_executed": False,
+        "production_db_touched": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "timeline_events_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "product_rollback_drill_readonly_report_ready":
+        result["business_message"] = (
+            "Naver 商品回滚只读报告 backend route mock gate 已通过；当前不会开放接口、不会恢复数据库，也不会写入商品。"
+        )
+        result["next_action"] = "后续可单独规划只读 route，本阶段继续保持恢复和批量同步关闭。"
+    return result
+
+
 def _batch_readonly_default_business_message(sync_kind: str) -> str:
     if sync_kind == "naver_order_batch":
         return "Naver 订单批量只读证据已整理，等待人工审核。"

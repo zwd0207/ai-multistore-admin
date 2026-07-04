@@ -11853,6 +11853,128 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     print("product stock change and readonly evidence gates: ok")
 
 
+def verify_product_rollback_backend_route_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services import sync_service
+    from app.services.permission_service import VERIFICATION_SCOPE
+
+    product_write_summary = {
+        "phase": "Naver-Product-Batch-1F",
+        "stock_only_write": True,
+        "updated_count": 2,
+        "created_count": 0,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "raw_response_saved": False,
+        "products_written": False,
+    }
+    backup_evidence = {
+        "backup_sha256": "c" * 64,
+        "sqlite_integrity_check": "ok",
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-product-rollback-route.db",
+    }
+    rollback_checklist = {
+        "backup_manifest_available": True,
+        "pre_write_counts_captured": True,
+        "changed_product_hashes_available": True,
+        "rollback_sql_reviewed": True,
+        "temporary_restore_dry_run_planned": True,
+        "post_rollback_readback_planned": True,
+        "sensitive_scan_planned": True,
+        "formal_sync_remains_closed": True,
+        "real_restore_requested": False,
+        "restore_target_is_production_db": False,
+    }
+
+    with SessionLocal() as db:
+        before_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+
+    rollback_ready = sync_service._evaluate_naver_product_batch_rollback_drill_mock_gate(
+        product_write_summary=product_write_summary,
+        backup_evidence=backup_evidence,
+        rollback_checklist=rollback_checklist,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert rollback_ready["status"] == "product_batch_rollback_drill_mock_ready", rollback_ready
+
+    route_ready = sync_service.evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(
+        rollback_drill_gate=rollback_ready,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert route_ready["phase"] == "Naver-Product-Batch-1P", route_ready
+    assert route_ready["status"] == "product_rollback_drill_readonly_report_ready", route_ready
+    assert route_ready["product_rollback_readonly_report_backend_route_mock_gate"] is True, route_ready
+    assert route_ready["backend_route_mock_gate"] is True, route_ready
+    assert route_ready["public_endpoint_enabled"] is False, route_ready
+    assert route_ready["real_restore_executed"] is False, route_ready
+    assert route_ready["rollback_executed"] is False, route_ready
+    assert route_ready["production_db_touched"] is False, route_ready
+    assert route_ready["real_api_called"] is False, route_ready
+    assert route_ready["real_database_written"] is False, route_ready
+    assert route_ready["products_written"] is False, route_ready
+    assert route_ready["orders_written"] is False, route_ready
+    assert route_ready["operation_audit_rows_written"] is False, route_ready
+    assert route_ready["formal_product_sync_open"] is False, route_ready
+    assert route_ready["platform_writes_enabled"] is False, route_ready
+
+    route_blocked = sync_service.evaluate_naver_product_rollback_readonly_report_backend_route_mock_gate(
+        rollback_drill_gate={**rollback_ready, "rawResponse": "must-not-leak-route"},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert route_blocked["skip_reason"] == "rollback_report_sensitive_field_blocked", route_blocked
+    assert route_blocked["public_endpoint_enabled"] is False, route_blocked
+    assert route_blocked["real_restore_executed"] is False, route_blocked
+    assert route_blocked["products_written"] is False, route_blocked
+
+    with SessionLocal() as db:
+        after_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+    assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+    serialized = json.dumps(
+        {"route_ready": route_ready, "route_blocked": route_blocked},
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "channelno",
+        "external_product_id",
+        "must-not-leak-route",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("product rollback backend route mock gate: ok")
+
+
 def verify_auth_schema_mock_migration_gate() -> None:
     from sqlalchemy import text
 
@@ -14182,6 +14304,7 @@ def main() -> None:
         verify_store_membership_assignment_mock_gate()
         verify_formal_batch_sync_production_gate()
         verify_product_stock_change_and_readonly_evidence_gates()
+        verify_product_rollback_backend_route_mock_gate()
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
         verify_restore_runbook_mock_drill_gate()
