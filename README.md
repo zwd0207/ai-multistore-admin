@@ -1683,3 +1683,33 @@ Codex1 now verifies the future real-user invitation checklist: masked login disp
 The UI implementation plan is documented in `PHASE_ERP_MULTISTORE_2D_REAL_USER_INVITATION_APPROVAL_CHECKLIST_UI_IMPLEMENTATION_PLAN.md`.
 
 The current plan keeps real invitation closed and defines how a future Accounts UI should present the checklist in business wording.
+
+## Phase ERP-Batch-2I - Formal Batch Approval Decision Readonly API Mock Gate
+
+The readonly API mock gate is documented in `PHASE_ERP_BATCH_2I_FORMAL_BATCH_APPROVAL_DECISION_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now checks the future approval-decision readonly API safety shape without exposing a route. It requires business wording, folded technical fields, no execution button, no write endpoint, hidden sensitive fields on the main page, and a separate implementation phase.
+
+## Phase ERP-Batch-2J - Formal Batch Approval Decision Readonly API Local Implementation Plan
+
+The local implementation plan is documented in `PHASE_ERP_BATCH_2J_FORMAL_BATCH_APPROVAL_DECISION_READONLY_API_LOCAL_IMPLEMENTATION_PLAN.md`.
+
+The future route is planned only; no endpoint is added in this phase.
+
+## Phase ERP-Multistore-2E - Invitation Approval Checklist Readonly API Plan
+
+The invitation checklist readonly API plan is documented in `PHASE_ERP_MULTISTORE_2E_INVITATION_APPROVAL_CHECKLIST_READONLY_API_PLAN.md`.
+
+The route remains planned only. Real invitation, user creation, auth sessions, role assignment, and membership writes remain closed.
+
+## Phase ERP-Multistore-2F - Invitation Approval Checklist Readonly UI Mock Display
+
+The Accounts readonly UI mock display is documented in `PHASE_ERP_MULTISTORE_2F_INVITATION_APPROVAL_CHECKLIST_READONLY_UI_MOCK_DISPLAY.md`.
+
+Codex2 Accounts now shows a business-readable checklist for backup, audit evidence, expiry, one-time invite, readback, and rollback before any future real invitation.
+
+## Phase Naver-Order-Batch-2A - Formal Order Batch Execution Approval Boundary Plan
+
+The formal order batch execution boundary is documented in `PHASE_NAVER_ORDER_BATCH_2A_FORMAL_ORDER_BATCH_EXECUTION_APPROVAL_BOUNDARY_PLAN.md`.
+
+Future Naver order batch execution still requires fresh readonly candidates, backup, store-scoped approval, permission gates, privacy checks, audit chain, readback, and rollback planning.

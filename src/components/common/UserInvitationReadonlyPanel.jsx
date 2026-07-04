@@ -8,6 +8,45 @@ const TARGET_LOGIN_HASH = 'login-hash-22222222bbbbbbbb';
 const TARGET_LOGIN_MASKED = 'op***-invite';
 const TARGET_ROLE = 'operator';
 
+const invitationApprovalChecklist = [
+  {
+    key: 'backup_evidence',
+    title: '邀请前备份',
+    status: '需复核',
+    message: '真实创建用户前，需要先确认数据库备份可追溯，避免误建账号后无法恢复。',
+  },
+  {
+    key: 'audit_plan',
+    title: '审计证据',
+    status: '需复核',
+    message: '审批、创建用户、分配店铺、回读结果都需要形成审计证据，方便以后追查。',
+  },
+  {
+    key: 'expiry',
+    title: '邀请有效期',
+    status: '需复核',
+    message: '邀请链接必须有有效期，过期后不能继续使用。',
+  },
+  {
+    key: 'one_time',
+    title: '一次性使用',
+    status: '需复核',
+    message: '邀请链接只能被目标用户使用一次，不能被重复消费或转发滥用。',
+  },
+  {
+    key: 'readback',
+    title: '创建后回读',
+    status: '需复核',
+    message: '真实邀请完成后，需要回读用户、角色和店铺成员关系，确认范围正确。',
+  },
+  {
+    key: 'rollback',
+    title: '禁用/回滚方案',
+    status: '需复核',
+    message: '如果邀请对象或权限范围错误，必须有禁用账号或撤销成员关系的处理方案。',
+  },
+];
+
 function statusTone(result) {
   if (!result) return 'muted';
   if (result.status === 'user_invitation_mock_ready') return 'success';
@@ -159,14 +198,34 @@ export default function UserInvitationReadonlyPanel() {
           <p>页面只展示脱敏后的登录标识，不展示完整邮箱或手机号。</p>
           <small>完整登录标识、密码、token、签名和请求头不会展示。</small>
         </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>真实邀请审批清单</strong>
+            <span>mock 展示</span>
+          </div>
+          <p>下面清单只帮助管理员理解真实邀请前还要复核什么，不会发送邀请，也不会创建用户或成员关系。</p>
+          <small>后续如果进入真实邀请，仍必须另开审批和写入阶段。</small>
+        </article>
+        {invitationApprovalChecklist.map((item) => (
+          <article className="business-capability-card info" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>未完成复核前，真实邀请保持关闭。</small>
+          </article>
+        ))}
       </div>
       <TechnicalDetails
         title="查看用户邀请检查技术详情"
         description="这里保留只读门禁状态和安全标记；普通运营只需要看上方业务结论。"
         items={[
           { label: 'phase', value: result?.phase || 'ERP-Multistore-1T' },
+          { label: 'approval_checklist_display_phase', value: 'ERP-Multistore-2F' },
           { label: 'status', value: result?.status },
           { label: 'skip_reason', value: result?.skipReason },
+          { label: 'approval_checklist_item_count', value: invitationApprovalChecklist.length },
           { label: 'target_store_ids', value: result?.targetStoreIds?.join(', ') || String(storeId) },
           { label: 'target_role', value: result?.targetRole || TARGET_ROLE },
           { label: 'target_user_hash', value: result?.targetUserKeyHash || TARGET_USER_HASH },
@@ -195,6 +254,10 @@ export default function UserInvitationReadonlyPanel() {
           { label: 'raw_response_saved', value: result?.rawResponseSaved ?? false },
           { label: 'formal_sync_open', value: result?.formalSyncOpen ?? false },
           { label: 'platform_writes_enabled', value: result?.platformWritesEnabled ?? false },
+          ...invitationApprovalChecklist.map((item) => ({
+            label: `approval_checklist.${item.key}`,
+            value: item.status,
+          })),
         ]}
       />
     </section>

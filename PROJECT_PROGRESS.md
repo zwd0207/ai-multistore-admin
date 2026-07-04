@@ -1132,3 +1132,33 @@ Next 5 recommended stages:
 3. `Phase ERP-Multistore-2E: Invitation approval checklist readonly API plan`
 4. `Phase ERP-Multistore-2F: Invitation approval checklist readonly UI mock display`
 5. `Phase Naver-Order-Batch-2A: Formal order batch execution approval boundary plan`
+
+### Latest update after `Phase ERP-Batch-2I` to `Phase Naver-Order-Batch-2A`
+
+Progress snapshot:
+
+- Project overall planning progress: about `92% - 96%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `93% - 97%`
+- Production version for long-term non-technical use: about `88% - 92%`
+
+Implemented in this update:
+
+- Added Codex1 formal batch approval-decision readonly API mock gate.
+- Planned the local readonly approval-decision API route without implementing the route.
+- Planned the invitation approval checklist readonly API.
+- Added Codex2 Accounts invitation approval checklist mock display.
+- Planned the Naver order batch execution approval boundary.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, readonly batch evidence API normalization, approval evidence UI display, controlled stock-only local product update, readonly membership assignment readiness checks, readonly user-invitation readiness checks, Accounts/Orders readiness panels, local batch approval audit-evidence route review, local product rollback report route review, frontend display of those route results, operator-facing formal batch checklist review, planned formal approval decision records, mock-proven final approval-decision gates, and invitation checklist UI mock review.
+- Not suitable now: opening formal product/order batch execution, broad product writes, active multi-user login production use, sending real user invitations, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Batch-2K: Formal batch approval decision readonly API local route mock gate`
+2. `Phase ERP-Batch-2L: Formal batch approval decision readonly API local implementation`
+3. `Phase ERP-Multistore-2G: Invitation approval checklist readonly API mock gate`
+4. `Phase ERP-Multistore-2H: Invitation approval checklist readonly API local implementation plan`
+5. `Phase Naver-Order-Batch-2B: Order batch execution approval mock gate`
