@@ -1433,6 +1433,8 @@ Phase Naver-ERP-19A is the selected new-order candidate approval contract for sa
 
 Phase Naver-ERP-19B is the selected new-order readonly repeat result. It uses the existing public `POST /api/v1/sync/orders/naver/preview` contract with `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. Token, feed, and detail returned HTTP 200. The observed safe hash matched `id-hash-192b9c67e8`, remained `candidate_new`, and local duplicate real-order matches stayed zero. It did not write orders, products, SyncLog, `ApiCapabilityTestResult tested_success`, operation audit rows, or order status events, and it did not open formal order sync or execute any platform write operation.
 
+Phase Naver-ERP-19C is the selected new-order single local write approval contract for safe hash `id-hash-192b9c67e8`. It does not change the public API surface, call Naver, execute `real_sync=true`, write data, write audit rows, create backups, change schema, or open formal sync. A later 19D may write at most one local Naver order only after clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy and status gates, one-candidate limit, post-write readback, and five-row operation audit evidence. It must not write products, SyncLog, `ApiCapabilityTestResult tested_success`, or Naver platform data.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`

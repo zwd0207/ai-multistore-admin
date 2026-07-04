@@ -917,4 +917,6 @@ Naver-ERP-19A documents the selected new-order candidate approval plan for safe 
 
 Naver-ERP-19B repeats the selected new-order candidate readonly preview. Token, feed, and detail returned HTTP 200, and the observed safe hash matched `id-hash-192b9c67e8`. The candidate remains `candidate_new`, with `配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Counts stayed unchanged: `orders_store8=6`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=5`, and `order_status_events=0`. Formal order sync remains closed.
 
+Naver-ERP-19C approves only a later one-order local write for safe hash `id-hash-192b9c67e8`. The future write requires clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy gate, one-candidate limit, post-write readback, and five-row operation audit evidence. This phase does not call Naver, execute `real_sync=true`, write local data, write audit rows, create backups, change schema, or open formal order sync.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
