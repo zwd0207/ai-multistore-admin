@@ -7,10 +7,12 @@ from app.schemas.permission import (
     PermissionMockCheckRequest,
     SensitiveActionPermissionMockCheckRequest,
     StoreMembershipReadonlyCheckRequest,
+    UserInvitationApprovalChecklistReadonlyCheckRequest,
     UserInvitationReadonlyCheckRequest,
 )
 from app.services.permission_service import (
     VERIFICATION_SCOPE,
+    evaluate_real_user_invitation_approval_checklist_readonly_api_local,
     evaluate_real_user_invitation_mock_gate,
     evaluate_sensitive_action_approval_mock_gate,
     evaluate_store_membership_assignment_runtime_mock_gate,
@@ -193,3 +195,26 @@ def check_user_invitation_readonly_gate(payload: UserInvitationReadonlyCheckRequ
         "secrets_saved": False,
         "privacy_fields_redacted": True,
     })
+
+
+@router.post("/user-invitation/approval-checklist/readonly-check")
+def check_user_invitation_approval_checklist_readonly_gate(
+    payload: UserInvitationApprovalChecklistReadonlyCheckRequest,
+) -> dict:
+    result = evaluate_real_user_invitation_approval_checklist_readonly_api_local(
+        actor_context=payload.actor_context,
+        target_user_key_hash=payload.target_user_key_hash,
+        login_identifier_hash=payload.login_identifier_hash,
+        login_identifier_masked=payload.login_identifier_masked,
+        target_store_ids=payload.target_store_ids,
+        target_role=payload.target_role,
+        manual_approval=payload.manual_approval,
+        invitation_reason=payload.invitation_reason,
+        approval_checklist=payload.approval_checklist,
+        readonly_api_context=payload.readonly_api_context,
+        existing_user_hashes=payload.existing_user_hashes,
+    )
+    return success_response(
+        data=result,
+        message="user invitation approval checklist readonly checked",
+    )

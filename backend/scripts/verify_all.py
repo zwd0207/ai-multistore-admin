@@ -61,6 +61,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/sensitive-action/mock-check",
     "/api/v1/permissions/store-membership/readonly-check",
     "/api/v1/permissions/user-invitation/readonly-check",
+    "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
     "/api/v1/batch/readonly-evidence",
     "/api/v1/batch/approval-audit-evidence",
     "/api/v1/batch/approval-decision/readonly-check",
@@ -1263,6 +1264,7 @@ def verify_openapi() -> None:
         "/api/v1/permissions/sensitive-action/mock-check": {"post"},
         "/api/v1/permissions/store-membership/readonly-check": {"post"},
         "/api/v1/permissions/user-invitation/readonly-check": {"post"},
+        "/api/v1/permissions/user-invitation/approval-checklist/readonly-check": {"post"},
     }
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
@@ -10661,6 +10663,33 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert invitation_readonly_api_public_endpoint["skip_reason"] == "public_endpoint_not_allowed_in_mock_gate", invitation_readonly_api_public_endpoint
     assert invitation_readonly_api_public_endpoint["public_endpoint_enabled"] is False, invitation_readonly_api_public_endpoint
 
+    invitation_readonly_route_mock_ready = (
+        permission_service.evaluate_real_user_invitation_approval_checklist_readonly_api_local_route_mock_gate(
+            actor_context=admin_store8,
+            target_user_key_hash="user-hash-dddddddddddddddd",
+            login_identifier_hash="login-hash-dddddddddddddddd",
+            login_identifier_masked="op***-invite",
+            target_store_ids=[8],
+            target_role="operator",
+            manual_approval=True,
+            invitation_reason="invite operator for store 8 local route checklist",
+            approval_checklist=invitation_approval_checklist,
+            readonly_api_context=invitation_readonly_api_context,
+            existing_user_hashes=[],
+            verification_scope=permission_service.VERIFICATION_SCOPE,
+        )
+    )
+    assert invitation_readonly_route_mock_ready["phase"] == "ERP-Multistore-2I", invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["status"] == "user_invitation_approval_checklist_readonly_route_mock_ready", invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["public_endpoint_enabled"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["backend_route_implemented"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["invitation_sent"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["users_written"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["membership_written"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["role_assignment_written"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["operation_audit_rows_written"] is False, invitation_readonly_route_mock_ready
+    assert invitation_readonly_route_mock_ready["real_database_written"] is False, invitation_readonly_route_mock_ready
+
     with TestClient(app) as client:
         route_invitation_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
             "actor_context": admin_store8,
@@ -10731,6 +10760,64 @@ def verify_store_membership_assignment_mock_gate() -> None:
         route_invitation_sensitive = route_invitation_sensitive_response.json()["data"]
         assert route_invitation_sensitive["skip_reason"] == "user_invitation_sensitive_material_blocked", route_invitation_sensitive
         assert route_invitation_sensitive["users_written"] is False, route_invitation_sensitive
+
+        route_invitation_checklist_response = client.post(
+            "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+            json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": "user-hash-dddddddddddddddd",
+                "login_identifier_hash": "login-hash-dddddddddddddddd",
+                "login_identifier_masked": "op***-invite",
+                "target_store_ids": [8],
+                "target_role": "operator",
+                "manual_approval": True,
+                "invitation_reason": "invite operator for store 8 approval checklist readonly route",
+                "approval_checklist": invitation_approval_checklist,
+                "readonly_api_context": invitation_readonly_api_context,
+                "existing_user_hashes": [],
+            },
+        )
+        assert route_invitation_checklist_response.status_code == 200, route_invitation_checklist_response.text
+        route_invitation_checklist = route_invitation_checklist_response.json()["data"]
+        assert route_invitation_checklist["phase"] == "ERP-Multistore-2J", route_invitation_checklist
+        assert route_invitation_checklist["status"] == "user_invitation_approval_checklist_readonly_api_ready", route_invitation_checklist
+        assert route_invitation_checklist["user_invitation_approval_checklist_readonly_api_local"] is True, route_invitation_checklist
+        assert route_invitation_checklist["public_endpoint_enabled"] is True, route_invitation_checklist
+        assert route_invitation_checklist["backend_route_implemented"] is True, route_invitation_checklist
+        assert route_invitation_checklist["invitation_sent"] is False, route_invitation_checklist
+        assert route_invitation_checklist["users_written"] is False, route_invitation_checklist
+        assert route_invitation_checklist["membership_written"] is False, route_invitation_checklist
+        assert route_invitation_checklist["role_assignment_written"] is False, route_invitation_checklist
+        assert route_invitation_checklist["real_auth_session_created"] is False, route_invitation_checklist
+        assert route_invitation_checklist["real_database_written"] is False, route_invitation_checklist
+        assert route_invitation_checklist["operation_audit_rows_written"] is False, route_invitation_checklist
+        assert route_invitation_checklist["raw_response_saved"] is False, route_invitation_checklist
+        assert route_invitation_checklist["secrets_saved"] is False, route_invitation_checklist
+        assert route_invitation_checklist["privacy_fields_redacted"] is True, route_invitation_checklist
+
+        route_invitation_checklist_sensitive_response = client.post(
+            "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+            json={
+                "actor_context": admin_store8,
+                "target_user_key_hash": "user-hash-dddddddddddddddd",
+                "login_identifier_hash": "login-hash-dddddddddddddddd",
+                "login_identifier_masked": "op***-invite",
+                "target_store_ids": [8],
+                "target_role": "operator",
+                "manual_approval": True,
+                "invitation_reason": "authorization: bearer hidden invite checklist route",
+                "approval_checklist": invitation_approval_checklist,
+                "readonly_api_context": invitation_readonly_api_context,
+                "existing_user_hashes": [],
+            },
+        )
+        assert route_invitation_checklist_sensitive_response.status_code == 200, route_invitation_checklist_sensitive_response.text
+        route_invitation_checklist_sensitive = route_invitation_checklist_sensitive_response.json()["data"]
+        assert route_invitation_checklist_sensitive["phase"] == "ERP-Multistore-2J", route_invitation_checklist_sensitive
+        assert route_invitation_checklist_sensitive["skip_reason"] == "user_invitation_checklist_sensitive_material_blocked", route_invitation_checklist_sensitive
+        assert route_invitation_checklist_sensitive["users_written"] is False, route_invitation_checklist_sensitive
+        assert route_invitation_checklist_sensitive["membership_written"] is False, route_invitation_checklist_sensitive
+        assert route_invitation_checklist_sensitive["real_database_written"] is False, route_invitation_checklist_sensitive
 
     runtime_user_hash = "user-hash-cccccccccccccccc"
     missing_user = None
@@ -10914,6 +11001,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "invitation_readonly_api_ready": invitation_readonly_api_ready,
             "invitation_readonly_api_missing_fold": invitation_readonly_api_missing_fold,
             "invitation_readonly_api_public_endpoint": invitation_readonly_api_public_endpoint,
+            "invitation_readonly_route_mock_ready": invitation_readonly_route_mock_ready,
+            "route_invitation_checklist": route_invitation_checklist,
+            "route_invitation_checklist_sensitive": route_invitation_checklist_sensitive,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,

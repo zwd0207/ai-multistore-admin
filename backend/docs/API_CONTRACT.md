@@ -2504,3 +2504,83 @@ exchange_write_enabled=false
 ```
 
 Actual Naver order batch execution remains a separate future phase.
+
+### Approval Decision Readonly API Frontend Integration
+
+Phases ERP-Batch-2M and ERP-Batch-2N connect Codex2 Orders to:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+This is a readonly review integration only. It must keep execution approval closed, show business-facing wording on the main page, and keep route flags, phase names, write flags, and skipped reasons folded in technical details.
+
+The integration must keep:
+
+```text
+execution_approved=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+formal_sync_open=false
+formal_order_sync_open=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+### Invitation Approval Checklist Readonly Local Route
+
+Phase ERP-Multistore-2I adds a local-route mock gate:
+
+```text
+evaluate_real_user_invitation_approval_checklist_readonly_api_local_route_mock_gate(...)
+```
+
+Phase ERP-Multistore-2J exposes:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-checklist/readonly-check
+```
+
+Request shape:
+
+```text
+actor_context: object
+target_user_key_hash: string
+login_identifier_hash: string
+login_identifier_masked: string
+target_store_ids: number[]
+target_role: string
+manual_approval: boolean
+invitation_reason: string
+approval_checklist: object
+readonly_api_context: object
+existing_user_hashes: string[]
+```
+
+The route must keep:
+
+```text
+public_endpoint_enabled=true
+backend_route_implemented=true
+invitation_sent=false
+users_written=false
+membership_written=false
+role_assignment_written=false
+real_auth_session_created=false
+real_database_written=false
+operation_audit_rows_written=false
+raw_response_saved=false
+secrets_saved=false
+privacy_fields_redacted=true
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+It returns local review readiness only. Real invitation creation, auth session creation, role assignment, store membership write, and invitation sending remain separate future phases.
+
+### Order Batch Execution Approval Readonly UI Plan
+
+Phase Naver-Order-Batch-2C is a UI planning boundary only. Future UI must present Naver order batch execution readiness as a checklist and must not imply order batch execution approval. It performs no Naver call, local order write, shipment write, cancel write, return write, or exchange write.

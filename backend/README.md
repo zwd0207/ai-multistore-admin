@@ -1278,3 +1278,31 @@ evaluate_naver_order_batch_execution_approval_mock_gate(...)
 ```
 
 It verifies Naver order batch execution approval readiness using fresh readonly candidates, backup, store-scoped approval, permission gate, privacy gate, whitelist, delivery/claim mapping review, duplicate protection, audit chain, readback, rollback, and sensitive scan. It does not call Naver, write orders, write timeline events, or enable shipment/cancel/return/exchange platform writes.
+
+ERP-Batch-2M plans Codex2 frontend integration for the approval-decision readonly API. It adds no backend write contract and does not approve formal batch execution.
+
+ERP-Batch-2N integrates Codex2 Orders with:
+
+```text
+POST /api/v1/batch/approval-decision/readonly-check
+```
+
+The frontend displays review readiness in business wording while keeping execution flags and route metadata folded. The backend contract remains readonly: no Naver call, no order/product write, no SyncLog/tested-success write, no audit-row write, and no formal product/order batch execution.
+
+ERP-Multistore-2I adds a service-level local-route mock gate:
+
+```text
+evaluate_real_user_invitation_approval_checklist_readonly_api_local_route_mock_gate(...)
+```
+
+It verifies the invitation approval checklist route boundary while keeping `public_endpoint_enabled=false`, `backend_route_implemented=false`, `invitation_sent=false`, `users_written=false`, `membership_written=false`, and `operation_audit_rows_written=false`.
+
+ERP-Multistore-2J exposes a local readonly route:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-checklist/readonly-check
+```
+
+The route returns checklist readiness for local review only. It does not create users, send invitations, create auth sessions, assign roles, write store memberships, write audit rows, or open formal sync.
+
+Naver-Order-Batch-2C plans the future order batch execution approval readonly UI. No Naver call, local order write, or platform order write is performed.

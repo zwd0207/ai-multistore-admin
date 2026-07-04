@@ -1038,3 +1038,134 @@ def evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
         ),
     })
     return result
+
+
+def evaluate_real_user_invitation_approval_checklist_readonly_api_local_route_mock_gate(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    login_identifier_hash: str | None,
+    login_identifier_masked: str | None,
+    target_store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    invitation_reason: str | None = None,
+    approval_checklist: dict[str, Any] | None = None,
+    readonly_api_context: dict[str, Any] | None = None,
+    existing_user_hashes: list[str] | tuple[str, ...] | set[str] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Mock gate for exposing the invitation approval checklist as a local readonly route."""
+
+    result = evaluate_real_user_invitation_approval_checklist_readonly_api_mock_gate(
+        actor_context=actor_context,
+        target_user_key_hash=target_user_key_hash,
+        login_identifier_hash=login_identifier_hash,
+        login_identifier_masked=login_identifier_masked,
+        target_store_ids=target_store_ids,
+        target_role=target_role,
+        manual_approval=manual_approval,
+        invitation_reason=invitation_reason,
+        approval_checklist=approval_checklist,
+        readonly_api_context=readonly_api_context,
+        existing_user_hashes=existing_user_hashes,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "ERP-Multistore-2I",
+        "user_invitation_approval_checklist_readonly_api_local_route_mock_gate": True,
+        "route_path_planned": "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "user_invitation_approval_checklist_readonly_api_mock_ready":
+        result["status"] = "user_invitation_approval_checklist_readonly_route_mock_ready"
+        result["business_message"] = (
+            "用户邀请审批清单只读路由 mock gate 已通过。当前只允许展示审批材料，不会创建用户、发送邀请或分配店铺权限。"
+        )
+        result["next_action"] = (
+            "后续可进入本地只读 API 实现；真实邀请仍必须单独审批并经过审计、备份和回读校验。"
+        )
+    return result
+
+
+def evaluate_real_user_invitation_approval_checklist_readonly_api_local(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    login_identifier_hash: str | None,
+    login_identifier_masked: str | None,
+    target_store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    invitation_reason: str | None = None,
+    approval_checklist: dict[str, Any] | None = None,
+    readonly_api_context: dict[str, Any] | None = None,
+    existing_user_hashes: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> dict[str, Any]:
+    """Local readonly invitation approval checklist route helper; never sends invitations."""
+
+    result = evaluate_real_user_invitation_approval_checklist_readonly_api_local_route_mock_gate(
+        actor_context=actor_context,
+        target_user_key_hash=target_user_key_hash,
+        login_identifier_hash=login_identifier_hash,
+        login_identifier_masked=login_identifier_masked,
+        target_store_ids=target_store_ids,
+        target_role=target_role,
+        manual_approval=manual_approval,
+        invitation_reason=invitation_reason,
+        approval_checklist=approval_checklist,
+        readonly_api_context=readonly_api_context,
+        existing_user_hashes=existing_user_hashes,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    result.update({
+        "phase": "ERP-Multistore-2J",
+        "user_invitation_approval_checklist_readonly_api_local": True,
+        "route_path": "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+        "http_method": "POST",
+        "public_endpoint_enabled": True,
+        "backend_route_implemented": True,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "user_invitation_approval_checklist_readonly_route_mock_ready":
+        result["status"] = "user_invitation_approval_checklist_readonly_api_ready"
+        result["business_message"] = (
+            "用户邀请审批清单只读检查已可用于本地后台查看。当前不会创建用户、发送邀请或分配店铺权限。"
+        )
+        result["next_action"] = (
+            "如需真实邀请，必须另开审批阶段，并保留权限、审计、备份、回读和撤销证据。"
+        )
+    return result
