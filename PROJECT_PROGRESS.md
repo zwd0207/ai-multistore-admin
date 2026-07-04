@@ -346,6 +346,32 @@ Next 5 recommended stages:
 4. `Phase ERP-Auth-1A: Role and permission model plan`
 5. `Phase ERP-Auth-1B: Store-scoped access gate mock`
 
+### Latest update after `Phase Naver-ERP-19C`
+
+- Project overall planning progress: about `63% - 70%`
+- Naver basic ERP loop progress: about `74% - 79%`
+- ERP real-user landing progress: about `66% - 73%`
+- Production version for long-term non-technical use: about `59% - 64%`
+
+Implemented in this update:
+
+- Approved only a later one-order local write for safe hash `id-hash-192b9c67e8`.
+- Required fresh backup, fresh readonly preview, duplicate count zero, privacy gate, one-candidate limit, readback, and audit evidence.
+- Kept formal Naver order sync, product sync, batch order sync, SyncLog writes, tested-success writes, and platform order writes closed.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, and approved single selected new-order local write gate.
+- Not suitable now: formal product/order batch sync, multi-user permissioned production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-ERP-19D: Selected new-order single local write with audit evidence`
+2. `Phase Naver-ERP-19E: Selected new-order post-write audit verification`
+3. `Phase ERP-Auth-1A: Role and permission model plan`
+4. `Phase ERP-Auth-1B: Store-scoped access gate mock`
+5. `Phase ERP-Auth-1C: Sensitive action approval roles`
+
 ## 安全边界
 
 继续遵守：

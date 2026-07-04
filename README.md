@@ -967,3 +967,9 @@ Naver-ERP-19A is planning-only. It approves safe hash `id-hash-192b9c67e8` only 
 The selected new-order readonly repeat is documented in `PHASE_NAVER_ERP_19B_SELECTED_NEW_ORDER_READONLY_REPEAT.md`.
 
 Naver-ERP-19B calls the existing Naver order preview endpoint in readonly mode over a recent 3-day KST window. Token, feed, and detail returned HTTP 200. The observed safe hash matched `id-hash-192b9c67e8`, remained `candidate_new`, and had `配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Counts stayed unchanged: `orders_store8=6`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=5`, and `order_status_events=0`. Formal order sync remains closed.
+
+## Phase Naver-ERP-19C - Selected New-Order Single Local Write Approval
+
+The selected new-order single local write approval is documented in `PHASE_NAVER_ERP_19C_SELECTED_NEW_ORDER_SINGLE_LOCAL_WRITE_APPROVAL.md`.
+
+Naver-ERP-19C approves only a later one-order local write for safe hash `id-hash-192b9c67e8`, after clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy gate, one-candidate limit, post-write readback, and five-row operation audit evidence. This phase does not call Naver, execute `real_sync=true`, write local data, write audit rows, create backups, change schema, or open formal order sync.
