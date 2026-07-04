@@ -38,6 +38,25 @@ function nextActionText(result) {
   return '请管理员查看折叠详情中的阻断原因；当前不进入真实邀请或写入阶段。';
 }
 
+function approvalRoleMessage(result) {
+  if (!result) return '正在检查是否具备后续邀请审批条件。';
+  if (result.approvalRoleVerified) {
+    return '当前管理员角色已通过只读审批门禁；这只代表可以规划后续真实邀请审批，不代表已经发送邀请。';
+  }
+  if (result.skipReason === 'permission_denied' || result.skipReason === 'approval_role_required') {
+    return '当前角色不能批准真实用户邀请，请由管理员或负责人审批。';
+  }
+  return '真实邀请仍需重新确认店铺范围、角色权限和人工审批。';
+}
+
+function auditEvidenceMessage(result) {
+  if (!result) return '正在检查备份和审计证据计划。';
+  if (result.backupEvidencePlanned && result.auditEvidencePlanned && result.membershipAssignmentPlanReady) {
+    return '备份、审计证据和后续成员分配计划已在只读门禁中声明；当前不会写入审计记录。';
+  }
+  return '真实邀请前必须补齐备份计划、审计证据计划和后续成员分配计划。';
+}
+
 export default function UserInvitationReadonlyPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({ loading: false, result: null, error: '' });
@@ -108,6 +127,22 @@ export default function UserInvitationReadonlyPanel() {
           <p>当前不会发送邀请、不会创建登录会话，也不会写入真实成员关系。</p>
           <small>真实邀请必须另开阶段，并先确认备份、权限、审计和回读校验。</small>
         </article>
+        <article className={result?.approvalRoleVerified ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审批角色门禁</strong>
+            <span>{result?.approvalRoleVerified ? '已通过只读检查' : '待审批确认'}</span>
+          </div>
+          <p>{approvalRoleMessage(result)}</p>
+          <small>这里不创建用户、不发送邀请，也不授予店铺权限。</small>
+        </article>
+        <article className={result?.auditEvidencePlanned ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审计证据计划</strong>
+            <span>{result?.operationAuditRowsPlanned ? '已规划' : '待规划'}</span>
+          </div>
+          <p>{auditEvidenceMessage(result)}</p>
+          <small>审计记录只在后续真实邀请阶段批准后才允许写入。</small>
+        </article>
         <article className="business-capability-card info">
           <div className="business-capability-head">
             <strong>目标店铺</strong>
@@ -138,6 +173,8 @@ export default function UserInvitationReadonlyPanel() {
           { label: 'login_identifier_hash', value: result?.loginIdentifierHash || TARGET_LOGIN_HASH },
           { label: 'login_identifier_masked', value: result?.loginIdentifierMasked || TARGET_LOGIN_MASKED },
           { label: 'manual_approval', value: result?.manualApproval },
+          { label: 'approval_role_verified', value: result?.approvalRoleVerified },
+          { label: 'approval_results', value: result?.approvalResults?.map((item) => `${item.storeId}:${item.status}`).join(', ') || '-' },
           { label: 'backup_evidence_planned', value: result?.backupEvidencePlanned },
           { label: 'audit_evidence_planned', value: result?.auditEvidencePlanned },
           { label: 'membership_assignment_plan_ready', value: result?.membershipAssignmentPlanReady },
@@ -147,6 +184,7 @@ export default function UserInvitationReadonlyPanel() {
           { label: 'users_written', value: result?.usersWritten ?? false },
           { label: 'membership_written', value: result?.membershipWritten ?? false },
           { label: 'role_assignment_written', value: result?.roleAssignmentWritten ?? false },
+          { label: 'operation_audit_rows_planned', value: result?.operationAuditRowsPlanned ?? false },
           { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten ?? false },
           { label: 'real_auth_session_created', value: result?.realAuthSessionCreated ?? false },
           { label: 'real_database_written', value: result?.realDatabaseWritten ?? false },

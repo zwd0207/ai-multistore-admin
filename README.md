@@ -1563,3 +1563,33 @@ Codex2 Products now reads the local rollback readonly report route in backend mo
 The wording cleanup is documented in `PHASE_ERP_MULTISTORE_1T_USER_INVITATION_READONLY_UI_PRODUCTION_WORDING_CLEANUP.md`.
 
 The Accounts user invitation panel now uses clearer Chinese business wording while keeping real invitation, user creation, and membership writes closed.
+
+## Phase ERP-Batch-1V - Batch Approval Evidence UI Post-Implementation Verification
+
+The post-implementation verification is documented in `PHASE_ERP_BATCH_1V_BATCH_APPROVAL_EVIDENCE_UI_POST_IMPLEMENTATION_VERIFICATION.md`.
+
+The Orders batch approval evidence panel was verified as a readonly business review surface. It keeps formal product/order batch sync closed and does not write orders, products, SyncLog, tested-success records, audit rows, users, or memberships.
+
+## Phase Naver-Product-Batch-1U - Product Rollback Readonly Report UI Runtime Walkthrough
+
+The runtime walkthrough is documented in `PHASE_NAVER_PRODUCT_BATCH_1U_PRODUCT_ROLLBACK_READONLY_REPORT_UI_RUNTIME_WALKTHROUGH.md`.
+
+The Products rollback report panel was verified as a readonly report surface. It does not execute restore, write products, call Naver, or open formal product batch sync.
+
+## Phase Naver-Product-Batch-1V - Product Rollback Approval Evidence Linkage Plan
+
+The approval evidence linkage plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1V_PRODUCT_ROLLBACK_APPROVAL_EVIDENCE_LINKAGE_PLAN.md`.
+
+Future product batch approvals should link readonly candidates, backup evidence, rollback readiness, restore drill evidence, sensitive scans, post-write readback, and audit correlation. This phase is planning-only.
+
+## Phase ERP-Multistore-1U - Real User Invitation Approval Role Gate
+
+The approval role gate is documented in `PHASE_ERP_MULTISTORE_1U_REAL_USER_INVITATION_APPROVAL_ROLE_GATE.md`.
+
+Codex2 Accounts now shows the user invitation approval role gate in business wording. Passing this readonly gate does not send invitations, create users, assign roles, create memberships, or write audit rows.
+
+## Phase ERP-Multistore-1V - User Invitation Audit Evidence Plan
+
+The user invitation audit evidence plan is documented in `PHASE_ERP_MULTISTORE_1V_USER_INVITATION_AUDIT_EVIDENCE_PLAN.md`.
+
+Codex2 Accounts now shows the audit evidence plan for a future real invitation: backup evidence planned, audit evidence planned, membership assignment plan ready, and operation audit rows planned but not written.

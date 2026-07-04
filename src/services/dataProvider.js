@@ -717,6 +717,16 @@ function mockUserInvitationReadonlyGate(payload = {}) {
     target_store_ids: targetStoreIds,
     target_role: roleExists ? targetRole : null,
     manual_approval: Boolean(payload.manual_approval ?? payload.manualApproval),
+    approval_results: access.status === 'approval_allowed_mock' ? [{
+      store_id: firstStoreId,
+      status: access.status,
+      skip_reason: access.skipReason || null,
+      actor_role: access.actorRole || null,
+      actor_id_hash: access.actorIdHash || null,
+      store_scope_verified: access.storeScopeVerified,
+      permission_verified: access.permissionVerified,
+      approval_role_verified: access.approvalRoleVerified,
+    }] : [],
     invitation_reason_present: Boolean(payload.invitation_reason || payload.invitationReason),
     backup_evidence_planned: backupPlanned,
     audit_evidence_planned: auditPlanned,
@@ -799,6 +809,22 @@ function adaptStoreMembershipReadonlyResult(data = {}) {
 }
 
 function adaptUserInvitationReadonlyResult(data = {}) {
+  const rawApprovalResults = Array.isArray(data.approval_results)
+    ? data.approval_results
+    : (Array.isArray(data.approvalResults) ? data.approvalResults : []);
+  const approvalResults = rawApprovalResults.map((item) => ({
+    storeId: item.store_id ?? item.storeId ?? null,
+    status: item.status || 'blocked',
+    skipReason: item.skip_reason ?? item.skipReason ?? null,
+    actorRole: item.actor_role ?? item.actorRole ?? null,
+    actorIdHash: item.actor_id_hash ?? item.actorIdHash ?? null,
+    storeScopeVerified: Boolean(item.store_scope_verified ?? item.storeScopeVerified),
+    permissionVerified: Boolean(item.permission_verified ?? item.permissionVerified),
+    approvalRoleVerified: Boolean(item.approval_role_verified ?? item.approvalRoleVerified),
+  }));
+  const approvalRoleVerified = approvalResults.length
+    ? approvalResults.every((item) => item.approvalRoleVerified)
+    : Boolean(data.approval_role_verified ?? data.approvalRoleVerified);
   return {
     ...data,
     phase: data.phase || 'ERP-Multistore-1P',
@@ -810,6 +836,8 @@ function adaptUserInvitationReadonlyResult(data = {}) {
     targetStoreIds: Array.isArray(data.target_store_ids || data.targetStoreIds) ? (data.target_store_ids || data.targetStoreIds) : [],
     targetRole: data.target_role ?? data.targetRole ?? null,
     manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    approvalResults,
+    approvalRoleVerified,
     invitationReasonPresent: Boolean(data.invitation_reason_present ?? data.invitationReasonPresent),
     backupEvidencePlanned: Boolean(data.backup_evidence_planned ?? data.backupEvidencePlanned),
     auditEvidencePlanned: Boolean(data.audit_evidence_planned ?? data.auditEvidencePlanned),
@@ -820,6 +848,7 @@ function adaptUserInvitationReadonlyResult(data = {}) {
     usersWritten: Boolean(data.users_written ?? data.usersWritten),
     membershipWritten: Boolean(data.membership_written ?? data.membershipWritten),
     roleAssignmentWritten: Boolean(data.role_assignment_written ?? data.roleAssignmentWritten),
+    operationAuditRowsPlanned: data.operation_audit_rows_planned !== false && data.operationAuditRowsPlanned !== false,
     operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
     businessMessage: data.business_message ?? data.businessMessage ?? '',
     readonlyApiMockGate: Boolean(data.readonly_api_mock_gate ?? data.readonlyApiMockGate),
