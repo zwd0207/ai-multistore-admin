@@ -1473,3 +1473,33 @@ Codex1 now has a service-level mock gate for the future local route. It keeps th
 The order batch audit readiness UI mock display is documented in `PHASE_NAVER_ORDER_BATCH_1H_ORDER_BATCH_AUDIT_READINESS_UI_MOCK_DISPLAY.md`.
 
 Codex2 Orders now shows a Naver order batch audit readiness panel. The main panel uses business wording; write flags and audit readiness flags stay folded in `TechnicalDetails`.
+
+## Phase ERP-Multistore-1Q - User Invitation Readonly UI Plan
+
+The user invitation readonly UI plan is documented in `PHASE_ERP_MULTISTORE_1Q_USER_INVITATION_READONLY_UI_PLAN.md`.
+
+The planned UI keeps real invitation, real user creation, and real membership writes closed while showing readiness in business language.
+
+## Phase ERP-Multistore-1R - User Invitation Readonly UI Display
+
+The user invitation readonly UI display is documented in `PHASE_ERP_MULTISTORE_1R_USER_INVITATION_READONLY_UI_DISPLAY.md`.
+
+Codex2 Accounts now shows a user invitation readonly panel in backend and mock modes. It calls the readonly data-provider method and keeps hashes/write flags folded in technical details.
+
+## Phase ERP-Batch-1Q - Batch Approval Audit Evidence Local Route Plan
+
+The batch approval audit evidence local route plan is documented in `PHASE_ERP_BATCH_1Q_BATCH_APPROVAL_AUDIT_EVIDENCE_LOCAL_ROUTE_PLAN.md`.
+
+The future route remains plan-only in this phase. No endpoint is exposed and no audit rows are written.
+
+## Phase Naver-Product-Batch-1P - Product Rollback Readonly Report Backend Route Mock Gate
+
+The product rollback readonly report backend route mock gate is documented in `PHASE_NAVER_PRODUCT_BATCH_1P_PRODUCT_ROLLBACK_READONLY_REPORT_BACKEND_ROUTE_MOCK_GATE.md`.
+
+Codex1 now has a service-level mock gate for a future readonly rollback-report route. The route is still not public, and restore/product writes remain closed.
+
+## Phase Naver-Order-Batch-1I - Order Batch Audit Readiness UI Walkthrough
+
+The order batch audit readiness UI walkthrough is documented in `PHASE_NAVER_ORDER_BATCH_1I_ORDER_BATCH_AUDIT_READINESS_UI_WALKTHROUGH.md`.
+
+The Orders audit readiness panel remains a readonly business display and does not open formal order batch sync.

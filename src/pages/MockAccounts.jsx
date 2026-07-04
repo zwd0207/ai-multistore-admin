@@ -13,6 +13,7 @@ import RiskPanel from '../components/common/RiskPanel';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import StoreMembershipReadonlyPanel from '../components/common/StoreMembershipReadonlyPanel';
+import UserInvitationReadonlyPanel from '../components/common/UserInvitationReadonlyPanel';
 import mockApi from '../services/mockApi';
 import { formatKstDateTimeWithLabel, getKstNowText } from '../utils/time';
 
@@ -201,6 +202,7 @@ export default function Accounts() {
         actions={<button className="button primary" onClick={openCreateModal}>新增账号</button>}
       />
       <StoreMembershipReadonlyPanel />
+      <UserInvitationReadonlyPanel />
 
       <FilterPanel>
         <SearchBar
