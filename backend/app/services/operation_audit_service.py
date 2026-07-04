@@ -14,6 +14,7 @@ LOCAL_WRITER_SCOPE = "local_runtime_approved"
 READONLY_MOCK_SCOPE = VERIFICATION_SCOPE
 READONLY_LOCAL_SCOPE = "local_readonly_route"
 INTEGRATION_MOCK_SCOPE = VERIFICATION_SCOPE
+SELECTED_OPERATION_MOCK_SCOPE = VERIFICATION_SCOPE
 
 DEFAULT_AUDIT_READ_LIMIT = 20
 MAX_AUDIT_READ_LIMIT = 50
@@ -882,6 +883,7 @@ def write_operation_audit_log_mock_gate(
 LOCAL_WRITE_INTEGRATION_TYPES = {
     "naver_order_local_write",
     "naver_order_local_refresh",
+    "controlled_naver_order_local_refresh",
 }
 APPROVED_INTEGRATION_OPERATION_TYPES = LOCAL_WRITE_INTEGRATION_TYPES | {
     "database_backup",
@@ -1056,6 +1058,234 @@ def write_operation_audit_integration_mock_gate(
         "correlation_id": chain_extra["correlation_id"],
         "chain_actions": chain_extra["chain_actions"],
         "runtime_writer_enabled": False,
+    })
+    return result
+
+
+def write_selected_operation_audit_runtime_wiring_mock_gate(
+    db: Session,
+    *,
+    operation_type: str,
+    store_id: int,
+    platform: str,
+    target_order_hash: str | None,
+    manual_approval: bool,
+    backup_verified: bool,
+    fake_write_result: dict[str, Any] | None,
+    fake_post_write_readback: dict[str, Any] | None,
+    audit_write_enabled: bool,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private 1U mock gate for a selected-operation audit call site.
+
+    This models the future runtime wiring shape without connecting the writer
+    to real order flows or writing the real database.
+    """
+
+    result = _base_result(phase="ERP-Audit-1U")
+    result.update({
+        "selected_operation_mock_gate": True,
+        "operation_type": operation_type,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    if not audit_write_enabled:
+        return result
+    if verification_scope != SELECTED_OPERATION_MOCK_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "selected_operation_mock_scope_required",
+        })
+        return result
+    if operation_type != "controlled_naver_order_local_refresh":
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_selected_operation",
+        })
+        return result
+    if store_id != 8:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_store_id",
+        })
+        return result
+    if platform != "naver":
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "unsupported_platform",
+        })
+        return result
+    if not str(target_order_hash or "").strip():
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_target_order_hash",
+        })
+        return result
+    if manual_approval is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+    if backup_verified is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "pre_write_backup_required",
+        })
+        return result
+    if not isinstance(fake_write_result, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_fake_write_result",
+        })
+        return result
+    if not isinstance(fake_post_write_readback, dict):
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "missing_fake_post_write_readback",
+        })
+        return result
+
+    terminal_status = str(fake_write_result.get("status") or "").strip()
+    if terminal_status not in {"succeeded", "blocked", "failed"}:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_fake_write_status",
+        })
+        return result
+    verification_status = str(fake_post_write_readback.get("status") or "").strip()
+    if verification_status not in {"succeeded", "failed"}:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "invalid_fake_verification_status",
+        })
+        return result
+
+    forbidden_fields = _sensitive_fields({
+        "target_order_hash": target_order_hash,
+        "fake_write_result": fake_write_result,
+        "fake_post_write_readback": fake_post_write_readback,
+    })
+    if forbidden_fields:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "audit_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    terminal_action = {
+        "succeeded": "local_write_succeeded",
+        "blocked": "local_write_blocked",
+        "failed": "local_write_failed",
+    }[terminal_status]
+    verification_action = {
+        "succeeded": "post_write_verification_succeeded",
+        "failed": "post_write_verification_failed",
+    }[verification_status]
+    status_by_action = {
+        "approval_planned": "planned",
+        "pre_write_backup_verified": "success",
+        "local_write_attempted": "success",
+        terminal_action: "blocked" if terminal_status == "blocked" else ("failed" if terminal_status == "failed" else "success"),
+        verification_action: "failed" if verification_status == "failed" else "success",
+    }
+
+    now = datetime.now()
+    correlation_id = f"audit-corr-1u-{target_order_hash[:24]}"
+    actions = [
+        "approval_planned",
+        "pre_write_backup_verified",
+        "local_write_attempted",
+        terminal_action,
+        verification_action,
+    ]
+    audit_rows: list[dict[str, Any]] = []
+    for index, action in enumerate(actions):
+        action_status = status_by_action[action]
+        safety_flags = {
+            "selected_operation_mock_scope_only": True,
+            "real_api_called": False,
+            "runtime_writer_enabled": False,
+            "real_database_written": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+        }
+        sensitive_scan_passed = True
+        if action_status == "blocked":
+            safety_flags["blocked_payload_written"] = False
+            safety_flags["sensitive_scan_passed"] = False
+            sensitive_scan_passed = False
+
+        audit_rows.append({
+            "created_at": now,
+            "updated_at": now,
+            "store_id": store_id,
+            "platform": platform,
+            "environment": "local",
+            "actor_type": "human",
+            "actor_id": "operator-safe-hash-1u",
+            "actor_label": "Local operator",
+            "actor_role": "owner",
+            "action": action,
+            "operation_phase": "ERP-Audit-1U",
+            "correlation_id": correlation_id,
+            "request_id": f"audit-request-1u-{index + 1:03d}",
+            "status": action_status,
+            "reason_code": "selected_operation_mock_gate",
+            "target_type": "order",
+            "target_id": None,
+            "target_hash": target_order_hash,
+            "target_label": "Controlled Naver order local refresh audit mock",
+            "changed_field_names": ["order_status", "delivery_status", "last_synced_at"],
+            "before_summary": {
+                "operation_type": operation_type,
+                "selected_operation": "controlled_naver_order_local_refresh",
+                "formal_sync_open": False,
+            },
+            "after_summary": {
+                "audit_chain_action": action,
+                "fake_write_status": terminal_status,
+                "fake_verification_status": verification_status,
+            },
+            "counts_summary": {
+                "audit_rows_written": 1,
+                "orders_written": int(fake_write_result.get("orders_written") or 0),
+                "orders_updated": int(fake_write_result.get("orders_updated") or 0),
+                "products_written": 0,
+                "sync_logs_written": 0,
+                "capability_results_written": 0,
+                "order_status_events_written": 0,
+            },
+            "safety_flags": safety_flags,
+            "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1u",
+            "backup_sha256": "3" * 64,
+            "restore_source_path": "C:/safe-backups/codex1.db.backup-erp-audit-1u",
+            "restore_source_sha256": "4" * 64,
+            "sensitive_scan_passed": sensitive_scan_passed,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Selected operation audit wiring mock uses temporary verification database only.",
+        })
+
+    gate = write_operation_audit_integration_mock_gate(
+        db,
+        audit_rows,
+        operation_type=operation_type,
+        write_enabled=True,
+        manual_approval=True,
+        verification_scope=INTEGRATION_MOCK_SCOPE,
+    )
+    result.update(gate)
+    result.update({
+        "phase": "ERP-Audit-1U",
+        "selected_operation_mock_gate": True,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+        "operation_type": operation_type,
     })
     return result
 
