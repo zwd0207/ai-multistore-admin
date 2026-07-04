@@ -1392,6 +1392,29 @@ backup_integrity_verified
 backup_manifest_verified
 ```
 
+### Backup Creation Audit Runtime Wiring and Local Writer
+
+```text
+write_backup_creation_audit_runtime_wiring_mock_gate(...)
+write_backup_creation_audit_local(...)
+```
+
+`write_backup_creation_audit_runtime_wiring_mock_gate` is a private 1Z verification helper. It accepts only safe backup evidence, manual approval, and the private verification scope, then writes the five-row backup audit chain only to the temporary verification database.
+
+`write_backup_creation_audit_local` is the controlled 2A local writer for an approved real local backup. It is blocked unless the caller provides explicit write intent, manual approval, the private local writer scope, a successful backup helper result, a manifest path, valid SHA-256, `sqlite_integrity_check=ok`, `backup_created=true`, `manifest_written=true`, `raw_response_saved=false`, `secrets_saved=false`, and `privacy_fields_redacted=true`.
+
+Allowed audit actions are exactly:
+
+```text
+backup_planned
+backup_created
+backup_hash_verified
+backup_integrity_verified
+backup_manifest_verified
+```
+
+The local writer may write only append-only `operation_audit_logs` rows. It must not write orders, products, `SyncLog`, `ApiCapabilityTestResult tested_success`, order timeline events, platform data, raw responses, tokens, Authorization values, headers, signatures, bcrypt inputs, client secrets, complete platform identifiers, buyer/receiver privacy, phones, addresses, or zip codes. It must not restore or delete backup files.
+
 ### Naver Order Refresh Backup Evidence Gate
 
 ```text

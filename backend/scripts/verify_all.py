@@ -8341,6 +8341,7 @@ def verify_operation_audit_writer_integration_mock_gate() -> None:
                 "backup_created",
                 "backup_hash_verified",
                 "backup_integrity_verified",
+                "backup_manifest_verified",
             ],
             operation_type="database_backup",
             correlation_id="audit-corr-1r-backup",
@@ -8531,7 +8532,7 @@ def verify_operation_audit_writer_integration_mock_gate() -> None:
 
         success_chains = [
             (local_write_chain, "naver_order_local_write", 5),
-            (backup_chain, "database_backup", 4),
+            (backup_chain, "database_backup", 5),
             (restore_chain, "restore_dry_run", 4),
             (schema_chain, "schema_migration", 4),
         ]
@@ -9064,6 +9065,311 @@ def verify_backup_creation_audit_mock_gate() -> None:
         }
 
     print("backup creation audit mock gate: ok")
+
+
+def verify_backup_creation_audit_runtime_wiring_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import (
+        BACKUP_AUDIT_RUNTIME_MOCK_SCOPE,
+        write_backup_creation_audit_runtime_wiring_mock_gate,
+    )
+
+    backup_evidence = {
+        "backup_created": True,
+        "manifest_written": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-1z",
+        "manifest_path": "C:/safe-backups/codex1.db.backup-erp-audit-1z.manifest.json",
+        "backup_sha256": "6" * 64,
+        "sqlite_integrity_check": "ok",
+        "created_by_actor_type": "human",
+        "created_by_actor_label": "Local operator",
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        disabled_gate = write_backup_creation_audit_runtime_wiring_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=False,
+            manual_approval=False,
+        )
+        assert disabled_gate["status"] == "audit_write_not_requested", disabled_gate
+        assert disabled_gate["rows_written"] == 0, disabled_gate
+
+        missing_scope_gate = write_backup_creation_audit_runtime_wiring_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=None,
+        )
+        assert missing_scope_gate["skip_reason"] == "backup_audit_runtime_mock_scope_required", missing_scope_gate
+
+        success_gate = write_backup_creation_audit_runtime_wiring_mock_gate(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            verification_scope=BACKUP_AUDIT_RUNTIME_MOCK_SCOPE,
+        )
+        assert success_gate["status"] == "audit_integration_chain_written", success_gate
+        assert success_gate["phase"] == "ERP-Audit-1Z", success_gate
+        assert success_gate["rows_written"] == 5, success_gate
+        assert success_gate["backup_creation_audit_runtime_wiring_mock_gate"] is True, success_gate
+        assert success_gate["runtime_writer_enabled"] is False, success_gate
+        assert success_gate["real_database_written"] is False, success_gate
+        assert success_gate["real_api_called"] is False, success_gate
+        assert success_gate["chain_actions"] == [
+            "backup_planned",
+            "backup_created",
+            "backup_hash_verified",
+            "backup_integrity_verified",
+            "backup_manifest_verified",
+        ], success_gate
+
+        persisted_rows = db.execute(text("""
+            SELECT action, operation_phase, target_type, backup_sha256,
+                   raw_response_saved, secrets_saved, privacy_fields_redacted, safety_flags
+            FROM operation_audit_logs
+            WHERE operation_phase = 'ERP-Audit-1Z'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(persisted_rows) == 5, persisted_rows
+        assert {row["target_type"] for row in persisted_rows} == {"backup"}, persisted_rows
+        assert all(row["backup_sha256"] == "6" * 64 for row in persisted_rows), persisted_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["secrets_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in persisted_rows), persisted_rows
+        persisted_text = json.dumps([dict(row) for row in persisted_rows], ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 5, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("backup creation audit runtime wiring mock gate: ok")
+
+
+def verify_backup_creation_audit_local_implementation() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_backup_creation_audit_local
+
+    backup_evidence = {
+        "backup_created": True,
+        "manifest_written": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-erp-audit-2a",
+        "manifest_path": "C:/safe-backups/codex1.db.backup-erp-audit-2a.manifest.json",
+        "backup_sha256": "7" * 64,
+        "sqlite_integrity_check": "ok",
+        "created_by_actor_type": "human",
+        "created_by_actor_label": "Local operator",
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+
+        disabled_gate = write_backup_creation_audit_local(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=False,
+            manual_approval=False,
+        )
+        assert disabled_gate["status"] == "audit_write_not_requested", disabled_gate
+        assert disabled_gate["rows_written"] == 0, disabled_gate
+
+        missing_scope_gate = write_backup_creation_audit_local(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            local_write_scope=None,
+        )
+        assert missing_scope_gate["skip_reason"] == "local_writer_scope_required", missing_scope_gate
+
+        missing_manifest_gate = write_backup_creation_audit_local(
+            db,
+            backup_evidence={key: value for key, value in backup_evidence.items() if key != "manifest_path"},
+            audit_write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert missing_manifest_gate["skip_reason"] == "manifest_path_missing", missing_manifest_gate
+
+        success_gate = write_backup_creation_audit_local(
+            db,
+            backup_evidence=backup_evidence,
+            audit_write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        assert success_gate["status"] == "backup_audit_chain_written", success_gate
+        assert success_gate["phase"] == "ERP-Audit-2A", success_gate
+        assert success_gate["rows_written"] == 5, success_gate
+        assert success_gate["backup_creation_audit_local_implementation"] is True, success_gate
+        assert success_gate["runtime_writer_enabled"] is True, success_gate
+        assert success_gate["real_database_written"] is True, success_gate
+        assert success_gate["real_api_called"] is False, success_gate
+        assert success_gate["sync_log_written"] is False, success_gate
+        assert success_gate["products_written"] is False, success_gate
+        assert success_gate["orders_written"] is False, success_gate
+        assert success_gate["capability_tested_success_written"] is False, success_gate
+
+        persisted_rows = db.execute(text("""
+            SELECT action, status, reason_code, correlation_id, operation_phase,
+                   target_type, backup_sha256, raw_response_saved, secrets_saved,
+                   privacy_fields_redacted, safety_flags
+            FROM operation_audit_logs
+            WHERE operation_phase = 'ERP-Audit-2A'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(persisted_rows) == 5, persisted_rows
+        assert len({row["correlation_id"] for row in persisted_rows}) == 1, persisted_rows
+        assert [row["action"] for row in persisted_rows] == [
+            "backup_planned",
+            "backup_created",
+            "backup_hash_verified",
+            "backup_integrity_verified",
+            "backup_manifest_verified",
+        ], persisted_rows
+        assert all(row["backup_sha256"] == "7" * 64 for row in persisted_rows), persisted_rows
+        assert all(row["raw_response_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["secrets_saved"] in (0, False) for row in persisted_rows), persisted_rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in persisted_rows), persisted_rows
+        persisted_text = json.dumps([dict(row) for row in persisted_rows], ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in persisted_text, persisted_text
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before + 5, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("backup creation audit local implementation: ok")
+
+
+def verify_backup_audit_post_write_verification() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        business_counts_before = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_before = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        rows = db.execute(text("""
+            SELECT action, status, reason_code, correlation_id, target_type,
+                   backup_sha256, raw_response_saved, secrets_saved,
+                   privacy_fields_redacted, sensitive_scan_passed
+            FROM operation_audit_logs
+            WHERE operation_phase = 'ERP-Audit-2A'
+            ORDER BY id
+        """)).mappings().all()
+        assert len(rows) == 5, rows
+        assert len({row["correlation_id"] for row in rows}) == 1, rows
+        assert [row["action"] for row in rows] == [
+            "backup_planned",
+            "backup_created",
+            "backup_hash_verified",
+            "backup_integrity_verified",
+            "backup_manifest_verified",
+        ], rows
+        assert {row["target_type"] for row in rows} == {"backup"}, rows
+        assert all(row["status"] == "success" for row in rows), rows
+        assert all(row["backup_sha256"] == "7" * 64 for row in rows), rows
+        assert all(row["raw_response_saved"] in (0, False) for row in rows), rows
+        assert all(row["secrets_saved"] in (0, False) for row in rows), rows
+        assert all(row["privacy_fields_redacted"] in (1, True) for row in rows), rows
+        assert all(row["sensitive_scan_passed"] in (1, True) for row in rows), rows
+        serialized = json.dumps([dict(row) for row in rows], ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS:
+            assert marker not in serialized, serialized
+
+        business_counts_after = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "order_status_events": db.execute(text("SELECT COUNT(*) FROM order_status_events")).scalar_one(),
+        }
+        audit_count_after = db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one()
+        assert business_counts_after == business_counts_before, {
+            "before": business_counts_before,
+            "after": business_counts_after,
+        }
+        assert audit_count_after == audit_count_before, {
+            "before": audit_count_before,
+            "after": audit_count_after,
+        }
+
+    print("backup audit post-write verification: ok")
 
 
 def verify_naver_order_refresh_backup_evidence_gate() -> None:
@@ -10966,6 +11272,9 @@ def main() -> None:
         verify_operation_audit_writer_integration_mock_gate()
         verify_selected_operation_audit_runtime_wiring_mock_gate()
         verify_backup_creation_audit_mock_gate()
+        verify_backup_creation_audit_runtime_wiring_mock_gate()
+        verify_backup_creation_audit_local_implementation()
+        verify_backup_audit_post_write_verification()
         verify_operation_audit_logs_readonly_mock_gate()
         verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()

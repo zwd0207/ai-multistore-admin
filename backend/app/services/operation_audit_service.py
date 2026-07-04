@@ -16,6 +16,7 @@ READONLY_LOCAL_SCOPE = "local_readonly_route"
 INTEGRATION_MOCK_SCOPE = VERIFICATION_SCOPE
 SELECTED_OPERATION_MOCK_SCOPE = VERIFICATION_SCOPE
 BACKUP_AUDIT_MOCK_SCOPE = VERIFICATION_SCOPE
+BACKUP_AUDIT_RUNTIME_MOCK_SCOPE = VERIFICATION_SCOPE
 
 DEFAULT_AUDIT_READ_LIMIT = 20
 MAX_AUDIT_READ_LIMIT = 50
@@ -911,6 +912,7 @@ BACKUP_REQUIRED_ACTIONS = {
     "backup_created",
     "backup_hash_verified",
     "backup_integrity_verified",
+    "backup_manifest_verified",
 }
 RESTORE_DRY_RUN_REQUIRED_ACTIONS = {
     "restore_dry_run_planned",
@@ -1292,6 +1294,120 @@ def write_selected_operation_audit_runtime_wiring_mock_gate(
     return result
 
 
+def _validate_backup_creation_evidence(
+    backup_evidence: dict[str, Any] | None,
+) -> tuple[str | None, dict[str, Any], str | None]:
+    if not isinstance(backup_evidence, dict):
+        return "backup_evidence_missing", {}, None
+
+    backup_sha256 = str(backup_evidence.get("backup_sha256") or "")
+    if not _valid_sha256(backup_sha256):
+        return "invalid_backup_sha256", {}, None
+    if backup_evidence.get("sqlite_integrity_check") != "ok":
+        return "backup_integrity_not_verified", {}, None
+    required_flags = {
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
+    for key, expected in required_flags.items():
+        if backup_evidence.get(key) is not expected:
+            return "backup_evidence_safety_flags_failed", {"failed_flag": key}, None
+    forbidden_fields = _sensitive_fields(backup_evidence)
+    if forbidden_fields:
+        return "audit_sensitive_field_blocked", {"forbidden_field_names": forbidden_fields}, None
+    return None, {}, backup_sha256
+
+
+def _build_backup_creation_audit_rows(
+    backup_evidence: dict[str, Any],
+    *,
+    phase: str,
+    reason_code: str,
+    correlation_prefix: str,
+    request_prefix: str,
+    actor_id: str,
+    safety_scope_key: str,
+    runtime_writer_enabled: bool,
+    real_database_written: bool,
+    notes: str,
+) -> list[dict[str, Any]]:
+    backup_sha256 = str(backup_evidence["backup_sha256"])
+    now = datetime.now()
+    correlation_id = f"{correlation_prefix}-{backup_sha256[:16]}"
+    actions = [
+        "backup_planned",
+        "backup_created",
+        "backup_hash_verified",
+        "backup_integrity_verified",
+        "backup_manifest_verified",
+    ]
+    audit_rows: list[dict[str, Any]] = []
+    for index, action in enumerate(actions):
+        audit_rows.append({
+            "created_at": now,
+            "updated_at": now,
+            "store_id": None,
+            "platform": "local",
+            "environment": "local",
+            "actor_type": str(backup_evidence.get("created_by_actor_type") or "human")[:40],
+            "actor_id": actor_id,
+            "actor_label": str(backup_evidence.get("created_by_actor_label") or "Local operator")[:120],
+            "actor_role": "owner",
+            "action": action,
+            "operation_phase": phase,
+            "correlation_id": correlation_id,
+            "request_id": f"{request_prefix}-{index + 1:03d}",
+            "status": "success",
+            "reason_code": reason_code,
+            "target_type": "backup",
+            "target_id": None,
+            "target_hash": f"id-hash-{backup_sha256[:10]}",
+            "target_label": "Local database backup evidence",
+            "changed_field_names": ["backup_sha256", "sqlite_integrity_check", "manifest_written"],
+            "before_summary": {
+                "backup_audit": "not_recorded",
+                "formal_sync_open": False,
+            },
+            "after_summary": {
+                "audit_chain_action": action,
+                "backup_verified": True,
+                "manifest_verified": True,
+            },
+            "counts_summary": {
+                "audit_rows_written": 1,
+                "orders_written": 0,
+                "products_written": 0,
+                "sync_logs_written": 0,
+                "capability_results_written": 0,
+                "order_status_events_written": 0,
+            },
+            "safety_flags": {
+                safety_scope_key: True,
+                "real_api_called": False,
+                "runtime_writer_enabled": runtime_writer_enabled,
+                "real_database_written": real_database_written,
+                "business_tables_written": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+            },
+            "backup_path": backup_evidence.get("backup_path"),
+            "backup_sha256": backup_sha256,
+            "restore_source_path": backup_evidence.get("backup_path"),
+            "restore_source_sha256": backup_sha256,
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": notes,
+        })
+    return audit_rows
+
+
 def write_backup_creation_audit_mock_gate(
     db: Session,
     *,
@@ -1323,118 +1439,24 @@ def write_backup_creation_audit_mock_gate(
             "skip_reason": "manual_approval_required",
         })
         return result
-    if not isinstance(backup_evidence, dict):
-        result.update({
-            "status": "audit_write_blocked",
-            "skip_reason": "backup_evidence_missing",
-        })
+
+    skip_reason, extra, _backup_sha256 = _validate_backup_creation_evidence(backup_evidence)
+    if skip_reason:
+        result.update({"status": "audit_write_blocked", "skip_reason": skip_reason, **extra})
         return result
 
-    backup_sha256 = str(backup_evidence.get("backup_sha256") or "")
-    if not _valid_sha256(backup_sha256):
-        result.update({
-            "status": "audit_write_blocked",
-            "skip_reason": "invalid_backup_sha256",
-        })
-        return result
-    if backup_evidence.get("sqlite_integrity_check") != "ok":
-        result.update({
-            "status": "audit_write_blocked",
-            "skip_reason": "backup_integrity_not_verified",
-        })
-        return result
-    required_flags = {
-        "backup_created": True,
-        "manifest_written": True,
-        "raw_response_saved": False,
-        "secrets_saved": False,
-        "privacy_fields_redacted": True,
-    }
-    for key, expected in required_flags.items():
-        if backup_evidence.get(key) is not expected:
-            result.update({
-                "status": "audit_write_blocked",
-                "skip_reason": "backup_evidence_safety_flags_failed",
-                "failed_flag": key,
-            })
-            return result
-    if _sensitive_fields(backup_evidence):
-        result.update({
-            "status": "audit_write_blocked",
-            "skip_reason": "audit_sensitive_field_blocked",
-        })
-        return result
-
-    now = datetime.now()
-    correlation_id = f"audit-corr-1x-{backup_sha256[:16]}"
-    actions = [
-        "backup_planned",
-        "backup_created",
-        "backup_hash_verified",
-        "backup_integrity_verified",
-        "backup_manifest_verified",
-    ]
-    audit_rows: list[dict[str, Any]] = []
-    for index, action in enumerate(actions):
-        audit_rows.append({
-            "created_at": now,
-            "updated_at": now,
-            "store_id": None,
-            "platform": "local",
-            "environment": "local",
-            "actor_type": str(backup_evidence.get("created_by_actor_type") or "human")[:40],
-            "actor_id": "operator-safe-hash-1x",
-            "actor_label": str(backup_evidence.get("created_by_actor_label") or "Local operator")[:120],
-            "actor_role": "owner",
-            "action": action,
-            "operation_phase": "ERP-Audit-1X",
-            "correlation_id": correlation_id,
-            "request_id": f"audit-request-1x-{index + 1:03d}",
-            "status": "success",
-            "reason_code": "backup_creation_audit_mock_gate",
-            "target_type": "backup",
-            "target_id": None,
-            "target_hash": f"id-hash-{backup_sha256[:10]}",
-            "target_label": "Local database backup evidence",
-            "changed_field_names": ["backup_sha256", "sqlite_integrity_check", "manifest_written"],
-            "before_summary": {
-                "backup_audit": "not_recorded",
-                "formal_sync_open": False,
-            },
-            "after_summary": {
-                "audit_chain_action": action,
-                "backup_verified": True,
-                "manifest_verified": True,
-            },
-            "counts_summary": {
-                "audit_rows_written": 1,
-                "orders_written": 0,
-                "products_written": 0,
-                "sync_logs_written": 0,
-                "capability_results_written": 0,
-                "order_status_events_written": 0,
-            },
-            "safety_flags": {
-                "backup_audit_mock_scope_only": True,
-                "real_api_called": False,
-                "runtime_writer_enabled": False,
-                "real_database_written": False,
-                "raw_response_saved": False,
-                "secrets_saved": False,
-                "privacy_fields_redacted": True,
-                "formal_sync_open": False,
-            },
-            "backup_path": backup_evidence.get("backup_path"),
-            "backup_sha256": backup_sha256,
-            "restore_source_path": backup_evidence.get("backup_path"),
-            "restore_source_sha256": backup_sha256,
-            "sensitive_scan_passed": True,
-            "raw_response_saved": False,
-            "secrets_saved": False,
-            "privacy_fields_redacted": True,
-            "notes": "Backup creation audit mock writes only safe evidence in the temporary verification database.",
-        })
-
+    audit_rows = _build_backup_creation_audit_rows(
+        backup_evidence or {},
+        phase="ERP-Audit-1X",
+        reason_code="backup_creation_audit_mock_gate",
+        correlation_prefix="audit-corr-1x",
+        request_prefix="audit-request-1x",
+        actor_id="operator-safe-hash-1x",
+        safety_scope_key="backup_audit_mock_scope_only",
+        runtime_writer_enabled=False,
+        real_database_written=False,
+        notes="Backup creation audit mock writes only safe evidence in the temporary verification database.",
+    )
     gate = write_operation_audit_integration_mock_gate(
         db,
         audit_rows,
@@ -1449,6 +1471,164 @@ def write_backup_creation_audit_mock_gate(
         "backup_creation_audit_mock_gate": True,
         "runtime_writer_enabled": False,
         "real_database_written": False,
+    })
+    return result
+
+
+def write_backup_creation_audit_runtime_wiring_mock_gate(
+    db: Session,
+    *,
+    backup_evidence: dict[str, Any] | None,
+    audit_write_enabled: bool,
+    manual_approval: bool,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private 1Z mock gate for backup-helper-to-audit runtime wiring."""
+
+    result = _base_result(phase="ERP-Audit-1Z")
+    result.update({
+        "backup_creation_audit_runtime_wiring_mock_gate": True,
+        "operation_type": "database_backup",
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    if not audit_write_enabled:
+        return result
+    if verification_scope != BACKUP_AUDIT_RUNTIME_MOCK_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "backup_audit_runtime_mock_scope_required",
+        })
+        return result
+    if manual_approval is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+
+    skip_reason, extra, _backup_sha256 = _validate_backup_creation_evidence(backup_evidence)
+    if skip_reason:
+        result.update({"status": "audit_write_blocked", "skip_reason": skip_reason, **extra})
+        return result
+
+    audit_rows = _build_backup_creation_audit_rows(
+        backup_evidence or {},
+        phase="ERP-Audit-1Z",
+        reason_code="backup_creation_audit_runtime_wiring_mock_gate",
+        correlation_prefix="audit-corr-1z",
+        request_prefix="audit-request-1z",
+        actor_id="operator-safe-hash-1z",
+        safety_scope_key="backup_audit_runtime_mock_scope_only",
+        runtime_writer_enabled=False,
+        real_database_written=False,
+        notes="Backup creation audit runtime wiring mock uses the temporary verification database only.",
+    )
+    gate = write_operation_audit_integration_mock_gate(
+        db,
+        audit_rows,
+        operation_type="database_backup",
+        write_enabled=True,
+        manual_approval=True,
+        verification_scope=INTEGRATION_MOCK_SCOPE,
+    )
+    result.update(gate)
+    result.update({
+        "phase": "ERP-Audit-1Z",
+        "backup_creation_audit_runtime_wiring_mock_gate": True,
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    return result
+
+
+def write_backup_creation_audit_local(
+    db: Session,
+    *,
+    backup_evidence: dict[str, Any] | None,
+    audit_write_enabled: bool,
+    manual_approval: bool,
+    local_write_scope: str | None = None,
+) -> dict[str, Any]:
+    """Controlled 2A local audit chain for an approved real local backup."""
+
+    result = _base_result(phase="ERP-Audit-2A")
+    result.update({
+        "backup_creation_audit_local_implementation": True,
+        "operation_type": "database_backup",
+        "runtime_writer_enabled": False,
+        "real_database_written": False,
+    })
+    if not audit_write_enabled:
+        return result
+    if local_write_scope != LOCAL_WRITER_SCOPE:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "local_writer_scope_required",
+        })
+        return result
+    if manual_approval is not True:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manual_approval_required",
+        })
+        return result
+
+    skip_reason, extra, _backup_sha256 = _validate_backup_creation_evidence(backup_evidence)
+    if skip_reason:
+        result.update({"status": "audit_write_blocked", "skip_reason": skip_reason, **extra})
+        return result
+    if not str((backup_evidence or {}).get("manifest_path") or "").strip():
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": "manifest_path_missing",
+        })
+        return result
+
+    audit_rows = _build_backup_creation_audit_rows(
+        backup_evidence or {},
+        phase="ERP-Audit-2A",
+        reason_code="backup_creation_audit_local_implementation",
+        correlation_prefix="audit-corr-2a",
+        request_prefix="audit-request-2a",
+        actor_id="operator-safe-hash-2a",
+        safety_scope_key="backup_audit_local_runtime",
+        runtime_writer_enabled=True,
+        real_database_written=True,
+        notes="Approved local backup creation audit chain. Only operation_audit_logs rows are written.",
+    )
+    skip_reason, chain_extra = _validate_integration_chain(audit_rows, operation_type="database_backup")
+    if skip_reason:
+        result.update({
+            "status": "audit_write_blocked",
+            "skip_reason": skip_reason,
+            **chain_extra,
+        })
+        return result
+
+    inserted_ids: list[int] = []
+    for row in audit_rows:
+        inserted = _insert_audit_row(db, row)
+        inserted_ids.append(inserted.id)
+
+    result.update({
+        "status": "backup_audit_chain_written",
+        "audit_rows_written": True,
+        "rows_written": len(inserted_ids),
+        "audit_log_ids": inserted_ids,
+        "correlation_id": chain_extra["correlation_id"],
+        "chain_actions": chain_extra["chain_actions"],
+        "runtime_writer_enabled": True,
+        "real_database_written": True,
+        "real_api_called": False,
+        "sync_log_written": False,
+        "products_written": False,
+        "orders_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
     })
     return result
 
