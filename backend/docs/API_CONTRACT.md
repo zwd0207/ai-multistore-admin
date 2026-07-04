@@ -1439,6 +1439,26 @@ Phase Naver-ERP-19D is the selected new-order single local write result. It uses
 
 Phase Naver-ERP-19E is post-write readback verification. It confirms the selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and five 19D audit actions exist: `approval_verified`, `pre_write_backup_verified`, `selected_operation_started`, `selected_operation_finished`, and `post_write_verification_finished`. 19E does not call Naver or write data.
 
+### Role Permission Mock Gates
+
+```text
+evaluate_store_scoped_access_mock_gate(...)
+evaluate_sensitive_action_approval_mock_gate(...)
+role_permission_inventory()
+```
+
+ERP-Auth-1B and ERP-Auth-1C add private backend service helpers only. They are not public API routes, do not create sessions, do not add user tables, do not change schema, and are not connected to runtime route dependencies.
+
+`evaluate_store_scoped_access_mock_gate(...)` verifies private verification scope, safe actor context, known role, requested store scope, and operation permission. `evaluate_sensitive_action_approval_mock_gate(...)` additionally verifies that a sensitive action has manual approval and an approving role.
+
+The first roles are `owner`, `admin`, `operator`, `auditor`, and `viewer`. Sensitive actions include local order writes, order refresh batch writes, backup creation, database restore, credential updates, schema migrations, and formal sync opening.
+
+The mock gate response must keep `real_database_written=false`, `orders_written=false`, `products_written=false`, `sync_log_written=false`, `capability_tested_success_written=false`, `raw_response_saved=false`, `secrets_saved=false`, `privacy_fields_redacted=true`, `formal_sync_open=false`, and `platform_writes_enabled=false`.
+
+### Naver Order Refresh Batch Approval Plan
+
+Phase Naver-ERP-20A does not change the public API surface. A later controlled refresh batch write may be considered only after backup evidence, fresh readonly preview, existing-order identity match, store-scoped role permission, sensitive-action approval, audit chain preparation, post-write readback, and sensitive scan all pass. Formal order sync remains closed.
+
 The helper must keep:
 
 - `formal_order_sync_open=false`

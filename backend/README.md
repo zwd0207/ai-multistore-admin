@@ -923,4 +923,14 @@ Naver-ERP-19D executes the approved one-order local write after a fresh database
 
 Naver-ERP-19E verifies the 19D result by readback only. The selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and the 19D audit chain has exactly five safe rows under one correlation id. The verification does not call Naver, write data, change schema, or open formal order sync.
 
+ERP-Auth-1A defines the first local ERP role and permission model: `owner`, `admin`, `operator`, `auditor`, and `viewer`; store-scoped access; and sensitive action approval for local writes, refreshes, backups, restores, credential updates, schema migrations, and formal sync opening. It is planning-only.
+
+ERP-Auth-1B adds `app/services/permission_service.py` with a private `evaluate_store_scoped_access_mock_gate(...)`. The mock gate verifies private scope, safe actor context, role, requested store, operation permission, and store assignment. It is covered by `verify_all.py` and is not wired to public routes or runtime flows.
+
+ERP-Auth-1C adds `evaluate_sensitive_action_approval_mock_gate(...)`. The mock gate checks manual approval and role authority for sensitive actions. It writes no orders, products, SyncLog, tested-success records, audit rows, or platform data, and keeps formal sync closed.
+
+ERP-Auth-1D documents the future Codex2 role-aware action visibility plan. It does not change runtime frontend code.
+
+Naver-ERP-20A documents the next controlled order refresh batch approval plan. It requires future backup evidence, readonly candidate repeat, store-scoped role permission, sensitive-action approval, audit evidence, readback, and sensitive scan before any later write phase. It does not call Naver, write data, or open formal order sync.
+
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.

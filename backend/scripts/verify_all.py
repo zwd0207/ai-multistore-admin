@@ -9982,6 +9982,150 @@ def verify_naver_order_refresh_backup_evidence_gate() -> None:
     print("Naver order refresh backup evidence gate: ok")
 
 
+def verify_role_permission_mock_gates() -> None:
+    from app.services import permission_service
+
+    owner = {
+        "actor_id": "local-owner",
+        "role": "owner",
+        "store_ids": "all",
+    }
+    admin_store8 = {
+        "actor_id": "naver-admin",
+        "role": "admin",
+        "store_ids": [8],
+    }
+    operator_store8 = {
+        "actor_id": "naver-operator",
+        "role": "operator",
+        "store_ids": [8],
+    }
+    viewer_store8 = {
+        "actor_id": "naver-viewer",
+        "role": "viewer",
+        "store_ids": [8],
+    }
+
+    missing_scope = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context=owner,
+        requested_store_id=8,
+        operation_key="orders.read",
+        verification_scope=None,
+    )
+    assert missing_scope["skip_reason"] == "verification_scope_required", missing_scope
+    assert missing_scope["orders_written"] is False, missing_scope
+
+    owner_allowed = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context=owner,
+        requested_store_id=8,
+        operation_key="orders.refresh_batch_write",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert owner_allowed["phase"] == "ERP-Auth-1B", owner_allowed
+    assert owner_allowed["status"] == "access_allowed", owner_allowed
+    assert owner_allowed["store_scope_verified"] is True, owner_allowed
+    assert owner_allowed["permission_verified"] is True, owner_allowed
+
+    operator_allowed = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context=operator_store8,
+        requested_store_id=8,
+        operation_key="orders.preview",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert operator_allowed["status"] == "access_allowed", operator_allowed
+
+    store_mismatch = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context={**operator_store8, "store_ids": [7]},
+        requested_store_id=8,
+        operation_key="orders.preview",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert store_mismatch["skip_reason"] == "store_scope_mismatch", store_mismatch
+    assert store_mismatch["orders_written"] is False, store_mismatch
+
+    viewer_write_blocked = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context=viewer_store8,
+        requested_store_id=8,
+        operation_key="orders.local_write",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert viewer_write_blocked["skip_reason"] == "permission_denied", viewer_write_blocked
+    assert viewer_write_blocked["permission_verified"] is False, viewer_write_blocked
+
+    sensitive_actor_blocked = permission_service.evaluate_store_scoped_access_mock_gate(
+        actor_context={**owner, "client_secret": "must-not-leak"},
+        requested_store_id=8,
+        operation_key="orders.read",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert sensitive_actor_blocked["skip_reason"] == "actor_context_sensitive_material_blocked", sensitive_actor_blocked
+
+    no_manual_approval = permission_service.evaluate_sensitive_action_approval_mock_gate(
+        actor_context=admin_store8,
+        requested_store_id=8,
+        action_key="orders.refresh_batch_write",
+        manual_approval=False,
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert no_manual_approval["phase"] == "ERP-Auth-1C", no_manual_approval
+    assert no_manual_approval["skip_reason"] == "manual_approval_required", no_manual_approval
+    assert no_manual_approval["orders_written"] is False, no_manual_approval
+
+    operator_approval_blocked = permission_service.evaluate_sensitive_action_approval_mock_gate(
+        actor_context=operator_store8,
+        requested_store_id=8,
+        action_key="orders.refresh_batch_write",
+        manual_approval=True,
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert operator_approval_blocked["skip_reason"] == "permission_denied", operator_approval_blocked
+    assert operator_approval_blocked["approval_status"] == "blocked", operator_approval_blocked
+
+    admin_approval_allowed = permission_service.evaluate_sensitive_action_approval_mock_gate(
+        actor_context=admin_store8,
+        requested_store_id=8,
+        action_key="orders.refresh_batch_write",
+        manual_approval=True,
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert admin_approval_allowed["status"] == "approval_allowed_mock", admin_approval_allowed
+    assert admin_approval_allowed["approval_role_verified"] is True, admin_approval_allowed
+    assert admin_approval_allowed["formal_sync_open"] is False, admin_approval_allowed
+    assert admin_approval_allowed["platform_writes_enabled"] is False, admin_approval_allowed
+    assert admin_approval_allowed["orders_written"] is False, admin_approval_allowed
+    assert admin_approval_allowed["sync_log_written"] is False, admin_approval_allowed
+    assert admin_approval_allowed["capability_tested_success_written"] is False, admin_approval_allowed
+
+    inventory = permission_service.role_permission_inventory()
+    assert "owner" in inventory and "operator" in inventory and "viewer" in inventory, inventory
+    assert "orders.refresh_batch_write" in inventory["admin"]["sensitive_approval_actions"], inventory
+    assert inventory["operator"]["sensitive_approval_actions"] == [], inventory
+
+    serialized = json.dumps(
+        {
+            "owner_allowed": owner_allowed,
+            "admin_approval_allowed": admin_approval_allowed,
+            "inventory": inventory,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "buyerphone",
+        "receiverphone",
+        "zipcode",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("role permission mock gates: ok")
+
+
 def verify_operation_audit_logs_readonly_mock_gate() -> None:
     from sqlalchemy import text
 
@@ -11477,7 +11621,9 @@ def verify_git_tracking() -> None:
         " M backend/app/services/backup_service.py",
         " M backend/app/services/credential_service.py",
         " M backend/app/services/operation_audit_service.py",
+        " M backend/app/services/permission_service.py",
         "A  backend/app/services/operation_audit_service.py",
+        "A  backend/app/services/permission_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
@@ -11512,6 +11658,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/api_credential_readiness_service.py",
         "?? backend/app/services/backup_service.py",
         "?? backend/app/services/operation_audit_service.py",
+        "?? backend/app/services/permission_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
         "?? backend/app/schemas/platform_login.py",
@@ -11661,6 +11808,7 @@ def main() -> None:
         verify_backup_report_readonly_api_mock_gate()
         verify_backup_report_readonly_local_api()
         verify_naver_order_refresh_backup_evidence_gate()
+        verify_role_permission_mock_gates()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()
