@@ -1060,3 +1060,17 @@ It reads the real auth tables to verify target user existence, active role, appr
 Naver-Product-Batch-1H verifies that Products UI wording remains safe after the stock-only write: no pending product business update should be shown after post-write evidence, inventory reminders remain separate, and formal product batch sync stays closed.
 
 Naver-Product-Batch-1I plans the rollback drill required before any future product batch sync opening. The drill must restore only to a temporary copy and compare safe product summaries; real restore remains closed.
+
+ERP-Batch-1I documents the Codex2 approval UI integration plan for readonly batch evidence. ERP-Batch-1J implements the read-only UI display against `POST /api/v1/batch/readonly-evidence`; the UI shows business wording for product/order evidence and keeps `phase`, `sync_kind`, `would_*`, and safety flags folded in technical details. The display route does not call Naver, does not write rows, and does not open formal product or order batch sync.
+
+ERP-Multistore-1F documents the future store-membership assignment readonly API plan. The current runtime gate can read auth tables, but no public membership assignment API is opened yet, and no `erp_users` or `erp_store_memberships` rows are created.
+
+Naver-Product-Batch-1J adds a private rollback drill mock gate:
+
+```text
+_evaluate_naver_product_batch_rollback_drill_mock_gate(...)
+```
+
+It verifies a prior stock-only write summary, backup evidence, rollback checklist, temporary-restore planning, readback planning, and sensitive-scan planning. It blocks real restore requests and production database restore targets. It does not restore a database, write products, write orders, write SyncLog, write tested-success, write audit rows, or open formal product batch sync.
+
+Naver-Order-Batch-1C aligns Naver order batch readonly evidence with the shared batch evidence API shape. Order batch evidence may describe candidate counts, safe changed-field names, duplicate checks, and whitelist checks for manual review only. It does not call Naver, write orders, write timeline events, or open formal order batch sync.

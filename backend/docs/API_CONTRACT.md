@@ -1847,3 +1847,87 @@ evaluate_store_membership_assignment_runtime_mock_gate(...)
 ```
 
 It reads existing auth tables to check target user existence, active role, approval, and duplicate memberships. It does not create users, memberships, sessions, or role assignments.
+
+### Batch Approval UI Evidence Contract
+
+Phase ERP-Batch-1J connects the frontend approval evidence display to:
+
+```text
+POST /api/v1/batch/readonly-evidence
+```
+
+The endpoint remains a normalizer only. UI callers may submit safe product/order evidence items, but the backend response must keep all execution flags closed:
+
+```text
+real_api_called=false
+real_database_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+timeline_events_written=false
+formal_product_sync_open=false
+formal_order_sync_open=false
+platform_writes_enabled=false
+```
+
+Main UI should show business wording such as "approval evidence is ready" and "formal batch sync remains closed". Technical fields such as `sync_kind`, `would_create`, `would_update`, `would_refresh_only`, `phase`, and safety booleans should stay in folded technical details.
+
+### Store Membership Assignment Readonly API Plan
+
+Phase ERP-Multistore-1F is planning-only. A later readonly API may expose safe membership-assignment readiness for administrators, but it must not create users, assign roles, create store memberships, open login, or enable large-scale multi-store production operation.
+
+The future API should return only safe fields:
+
+```text
+target_user_exists
+target_role_exists
+duplicate_active_membership
+membership_would_create
+membership_written=false
+real_database_written=false
+raw_response_saved=false
+secrets_saved=false
+formal_sync_open=false
+```
+
+### Product Rollback Drill Mock Gate Contract
+
+Phase Naver-Product-Batch-1J adds a private mock gate:
+
+```text
+_evaluate_naver_product_batch_rollback_drill_mock_gate(...)
+```
+
+It requires verified backup evidence, a prior `Naver-Product-Batch-1F` stock-only write summary, and a rollback checklist covering manifest availability, pre-write counts, changed product hashes, reviewed rollback SQL, temporary restore dry-run planning, post-rollback readback planning, sensitive scanning, and formal-sync closure.
+
+It must block:
+
+- missing rollback checklist flags
+- real restore requests
+- production database restore targets
+- non-stock write summaries
+- product creates
+- unsafe backup evidence
+- sensitive material in any rollback evidence
+
+It must keep:
+
+```text
+rollback_executed=false
+real_restore_executed=false
+production_db_touched=false
+products_written=false
+orders_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+formal_product_sync_open=false
+```
+
+### Order Batch Readonly Evidence Alignment
+
+Phase Naver-Order-Batch-1C uses the shared batch readonly evidence API shape for order-batch review evidence. Order evidence may include safe changed-field names such as `order_status`, `delivery_status`, `claim_status`, and `payment_status`.
+
+This alignment is not an order sync endpoint. It must not call Naver, write orders, write timeline events, save raw responses, expose buyer privacy, or open formal order batch sync.

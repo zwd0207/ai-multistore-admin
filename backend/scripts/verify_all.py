@@ -10965,6 +10965,26 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
                     "formal_sync_open": False,
                     "business_message": "No product business field changes remain after stock-only local write.",
                     "next_action": "continue_readonly_monitoring",
+                },
+                {
+                    "evidence_id": "naver-order-batch-readonly-alignment",
+                    "store_id": 8,
+                    "sync_kind": "naver_order_batch",
+                    "window_label": "recent controlled order refresh candidates",
+                    "candidate_count": 2,
+                    "would_create": 0,
+                    "would_update": 1,
+                    "would_refresh_only": 1,
+                    "would_skip": 0,
+                    "changed_field_names": ["order_status", "delivery_status"],
+                    "duplicate_check_passed": True,
+                    "field_whitelist_verified": True,
+                    "real_sync": False,
+                    "raw_response_saved": False,
+                    "privacy_fields_redacted": True,
+                    "formal_sync_open": False,
+                    "business_message": "Order batch readonly evidence is normalized for manual review only.",
+                    "next_action": "order_batch_refresh_approval_required",
                 }
             ],
         })
@@ -10977,8 +10997,14 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_evidence["real_database_written"] is False, local_evidence
         assert local_evidence["products_written"] is False, local_evidence
         assert local_evidence["formal_product_sync_open"] is False, local_evidence
+        assert local_evidence["orders_written"] is False, local_evidence
+        assert local_evidence["formal_order_sync_open"] is False, local_evidence
+        assert local_evidence["evidence_count"] == 2, local_evidence
         assert local_evidence["items"][0]["would_update"] == 0, local_evidence
         assert local_evidence["items"][0]["would_refresh_only"] == 5, local_evidence
+        assert local_evidence["items"][1]["target"] == "orders", local_evidence
+        assert local_evidence["items"][1]["would_update"] == 1, local_evidence
+        assert local_evidence["items"][1]["changed_field_names"] == ["delivery_status", "order_status"], local_evidence
 
         local_sensitive_response = client.post("/api/v1/batch/readonly-evidence", json={
             "evidence_items": [{
@@ -11158,6 +11184,63 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "after": fixture_counts_after,
         }
 
+        rollback_checklist = {
+            "backup_manifest_available": True,
+            "pre_write_counts_captured": True,
+            "changed_product_hashes_available": True,
+            "rollback_sql_reviewed": True,
+            "temporary_restore_dry_run_planned": True,
+            "post_rollback_readback_planned": True,
+            "sensitive_scan_planned": True,
+            "formal_sync_remains_closed": True,
+            "real_restore_requested": False,
+            "restore_target_is_production_db": False,
+        }
+        missing_rollback_flag = sync_service._evaluate_naver_product_batch_rollback_drill_mock_gate(
+            product_write_summary=write_result,
+            backup_evidence=backup_evidence,
+            rollback_checklist={**rollback_checklist, "rollback_sql_reviewed": False},
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert missing_rollback_flag["skip_reason"] == "rollback_checklist_incomplete", missing_rollback_flag
+        assert missing_rollback_flag["rollback_executed"] is False, missing_rollback_flag
+        assert "rollback_sql_reviewed" in missing_rollback_flag["missing_checklist_flags"], missing_rollback_flag
+
+        restore_blocked = sync_service._evaluate_naver_product_batch_rollback_drill_mock_gate(
+            product_write_summary=write_result,
+            backup_evidence=backup_evidence,
+            rollback_checklist={**rollback_checklist, "real_restore_requested": True},
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert restore_blocked["skip_reason"] == "real_restore_request_not_allowed_in_mock_gate", restore_blocked
+        assert restore_blocked["real_restore_executed"] is False, restore_blocked
+        assert restore_blocked["production_db_touched"] is False, restore_blocked
+
+        sensitive_rollback = sync_service._evaluate_naver_product_batch_rollback_drill_mock_gate(
+            product_write_summary={**write_result, "rawResponse": "must-not-leak"},
+            backup_evidence=backup_evidence,
+            rollback_checklist=rollback_checklist,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert sensitive_rollback["skip_reason"] == "rollback_drill_sensitive_field_blocked", sensitive_rollback
+
+        rollback_ready = sync_service._evaluate_naver_product_batch_rollback_drill_mock_gate(
+            product_write_summary=write_result,
+            backup_evidence=backup_evidence,
+            rollback_checklist=rollback_checklist,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert rollback_ready["status"] == "product_batch_rollback_drill_mock_ready", rollback_ready
+        assert rollback_ready["rollback_drill_ready"] is True, rollback_ready
+        assert rollback_ready["backup_evidence_verified"] is True, rollback_ready
+        assert rollback_ready["updated_count"] == 3, rollback_ready
+        assert rollback_ready["created_count"] == 0, rollback_ready
+        assert rollback_ready["stock_only_write_verified"] is True, rollback_ready
+        assert rollback_ready["rollback_executed"] is False, rollback_ready
+        assert rollback_ready["real_restore_executed"] is False, rollback_ready
+        assert rollback_ready["products_written"] is False, rollback_ready
+        assert rollback_ready["formal_product_sync_open"] is False, rollback_ready
+
         create_blocked = sync_service._sync_naver_product_stock_change_local_write(
             db,
             store_id=8,
@@ -11224,6 +11307,31 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "stock-safe-003",
     ]:
         assert forbidden not in write_serialized, write_serialized
+
+    rollback_serialized = json.dumps(
+        {
+            "rollback_ready": rollback_ready,
+            "restore_blocked": restore_blocked,
+            "sensitive_rollback": sensitive_rollback,
+            "missing_rollback_flag": missing_rollback_flag,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "channelno",
+        "external_product_id",
+        "stock-safe-001",
+        "must-not-leak",
+    ]:
+        assert forbidden not in rollback_serialized, rollback_serialized
 
     print("product stock change and readonly evidence gates: ok")
 

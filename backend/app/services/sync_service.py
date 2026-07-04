@@ -5226,6 +5226,129 @@ def _sync_naver_product_stock_change_local_write(
     return result
 
 
+def _evaluate_naver_product_batch_rollback_drill_mock_gate(
+    *,
+    product_write_summary: dict | None,
+    backup_evidence: dict | None,
+    rollback_checklist: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Private rollback drill gate for Naver product batch planning; never restores or writes rows."""
+
+    result = {
+        "phase": "Naver-Product-Batch-1J",
+        "product_batch_rollback_drill_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "rollback_drill_ready": False,
+        "backup_evidence_verified": False,
+        "required_checklist_flags": [
+            "backup_manifest_available",
+            "pre_write_counts_captured",
+            "changed_product_hashes_available",
+            "rollback_sql_reviewed",
+            "temporary_restore_dry_run_planned",
+            "post_rollback_readback_planned",
+            "sensitive_scan_planned",
+            "formal_sync_remains_closed",
+        ],
+        "missing_checklist_flags": [],
+        "updated_count": 0,
+        "created_count": 0,
+        "stock_only_write_verified": False,
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "real_database_written": False,
+        "real_api_called": False,
+        "rollback_executed": False,
+        "real_restore_executed": False,
+        "production_db_touched": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(product_write_summary, dict):
+        result["skip_reason"] = "product_write_summary_required"
+        return result
+    if not isinstance(rollback_checklist, dict):
+        result["skip_reason"] = "rollback_checklist_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "product_write_summary": product_write_summary,
+        "backup_evidence": backup_evidence,
+        "rollback_checklist": rollback_checklist,
+    }):
+        result["skip_reason"] = "rollback_drill_sensitive_field_blocked"
+        return result
+
+    backup_gate = _validate_naver_order_refresh_backup_evidence(backup_evidence, require_backup=True)
+    result["backup_gate"] = backup_gate
+    result["backup_evidence_verified"] = bool(backup_gate["backup_evidence_verified"])
+    if not result["backup_evidence_verified"]:
+        result["skip_reason"] = backup_gate["skip_reason"]
+        return result
+
+    required_flags = result["required_checklist_flags"]
+    missing_flags = [flag for flag in required_flags if rollback_checklist.get(flag) is not True]
+    result["missing_checklist_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "rollback_checklist_incomplete"
+        return result
+    if rollback_checklist.get("real_restore_requested") is True:
+        result["skip_reason"] = "real_restore_request_not_allowed_in_mock_gate"
+        return result
+    if rollback_checklist.get("restore_target_is_production_db") is True:
+        result["skip_reason"] = "production_restore_target_not_allowed_in_mock_gate"
+        return result
+    if product_write_summary.get("phase") != "Naver-Product-Batch-1F":
+        result["skip_reason"] = "product_write_phase_mismatch"
+        return result
+    if product_write_summary.get("stock_only_write") is not True:
+        result["skip_reason"] = "stock_only_write_required"
+        return result
+    if product_write_summary.get("formal_product_sync_open") is True or product_write_summary.get("formal_sync_open") is True:
+        result["skip_reason"] = "formal_product_sync_open_not_allowed"
+        return result
+    if product_write_summary.get("raw_response_saved") is not False:
+        result["skip_reason"] = "raw_response_saved_not_allowed"
+        return result
+    try:
+        updated_count = int(product_write_summary.get("updated_count") or 0)
+        created_count = int(product_write_summary.get("created_count") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "product_write_counts_invalid"
+        return result
+    result["updated_count"] = updated_count
+    result["created_count"] = created_count
+    if updated_count <= 0:
+        result["skip_reason"] = "updated_product_count_required"
+        return result
+    if updated_count > 3:
+        result["skip_reason"] = "rollback_drill_product_limit_exceeded"
+        return result
+    if created_count != 0:
+        result["skip_reason"] = "product_create_not_allowed_in_rollback_drill"
+        return result
+
+    result.update({
+        "status": "product_batch_rollback_drill_mock_ready",
+        "rollback_drill_ready": True,
+        "stock_only_write_verified": True,
+        "business_message": "Naver product rollback drill gate passed in mock mode. No restore or product write was executed.",
+    })
+    return result
+
+
 def _evaluate_batch_readonly_evidence_api_mock_gate(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,
