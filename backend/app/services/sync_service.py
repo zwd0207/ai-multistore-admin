@@ -6411,6 +6411,172 @@ def evaluate_formal_batch_approval_decision_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(
+    *,
+    approval_decision: dict | None,
+    audit_linkage_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for linking a future batch approval decision to audit evidence."""
+
+    required_linkage_flags = [
+        "approval_decision_id_planned",
+        "readonly_evidence_hash_planned",
+        "backup_manifest_reference_planned",
+        "permission_evidence_reference_planned",
+        "sensitive_scan_reference_planned",
+        "readback_result_reference_planned",
+        "rollback_report_reference_planned",
+        "operator_identity_hash_planned",
+        "store_scope_planned",
+        "audit_correlation_id_planned",
+        "append_only_audit_rows_planned",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-2P",
+        "approval_decision_audit_linkage_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "audit_linkage_ready": False,
+        "required_linkage_flags": required_linkage_flags,
+        "missing_linkage_flags": [],
+        "store_ids": [],
+        "sync_kinds": [],
+        "required_actions": [],
+        "approval_decision_id_planned": False,
+        "readonly_evidence_hash_planned": False,
+        "backup_manifest_reference_planned": False,
+        "permission_evidence_reference_planned": False,
+        "sensitive_scan_reference_planned": False,
+        "readback_result_reference_planned": False,
+        "rollback_report_reference_planned": False,
+        "operator_identity_hash_planned": False,
+        "store_scope_planned": False,
+        "audit_correlation_id_planned": False,
+        "append_only_audit_rows_planned": False,
+        "execution_approved": False,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(approval_decision, dict):
+        result["skip_reason"] = "approval_decision_required"
+        return result
+    if not isinstance(audit_linkage_context, dict):
+        result["skip_reason"] = "audit_linkage_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "approval_decision": approval_decision,
+        "audit_linkage_context": audit_linkage_context,
+    }):
+        result["skip_reason"] = "approval_decision_audit_linkage_sensitive_field_blocked"
+        return result
+
+    if approval_decision.get("status") not in {
+        "formal_batch_approval_decision_mock_ready",
+        "formal_batch_approval_decision_readonly_api_mock_ready",
+        "formal_batch_approval_decision_readonly_api_ready",
+    }:
+        result["skip_reason"] = "approval_decision_not_ready"
+        return result
+    if approval_decision.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_linkage_mock_gate"
+        return result
+    if approval_decision.get("formal_sync_open") is True or approval_decision.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if approval_decision.get("real_database_written") is True:
+        result["skip_reason"] = "approval_decision_wrote_database"
+        return result
+    if approval_decision.get("orders_written") is True or approval_decision.get("products_written") is True:
+        result["skip_reason"] = "approval_decision_business_write_not_allowed"
+        return result
+    if approval_decision.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "approval_decision_audit_write_not_allowed"
+        return result
+    if approval_decision.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+
+    missing_flags = [
+        flag for flag in required_linkage_flags
+        if audit_linkage_context.get(flag) is not True
+    ]
+    result["missing_linkage_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "approval_decision_audit_linkage_incomplete"
+        return result
+    if audit_linkage_context.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "audit_write_not_allowed_in_linkage_mock_gate"
+        return result
+    if audit_linkage_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_linkage_mock_gate"
+        return result
+    if audit_linkage_context.get("formal_sync_open") is True or audit_linkage_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    decision_store_ids = set(_normalize_formal_batch_store_ids(approval_decision.get("store_ids")) or [])
+    linkage_store_ids = set(_normalize_formal_batch_store_ids(audit_linkage_context.get("store_ids")) or [])
+    if not decision_store_ids or not linkage_store_ids or not decision_store_ids.issubset(linkage_store_ids):
+        result["skip_reason"] = "audit_linkage_store_scope_mismatch"
+        return result
+
+    decision_actions = set(str(action) for action in (approval_decision.get("required_actions") or []))
+    linkage_actions = set(str(action) for action in (audit_linkage_context.get("required_actions") or []))
+    if decision_actions and not decision_actions.issubset(linkage_actions):
+        result["skip_reason"] = "audit_linkage_action_scope_mismatch"
+        return result
+
+    sync_kinds = sorted(str(kind) for kind in (approval_decision.get("sync_kinds") or []))
+    result.update({
+        "status": "approval_decision_audit_linkage_mock_ready",
+        "audit_linkage_ready": True,
+        "store_ids": sorted(decision_store_ids),
+        "sync_kinds": sync_kinds,
+        "required_actions": sorted(decision_actions),
+        "approval_decision_id_planned": True,
+        "readonly_evidence_hash_planned": True,
+        "backup_manifest_reference_planned": True,
+        "permission_evidence_reference_planned": True,
+        "sensitive_scan_reference_planned": True,
+        "readback_result_reference_planned": True,
+        "rollback_report_reference_planned": True,
+        "operator_identity_hash_planned": True,
+        "store_scope_planned": True,
+        "audit_correlation_id_planned": True,
+        "append_only_audit_rows_planned": True,
+        "business_message": (
+            "Formal batch approval decision audit linkage mock gate passed. "
+            "It plans append-only audit evidence only; no audit row or business data is written."
+        ),
+        "next_action": (
+            "Plan a readonly API for this linkage before any execution phase. "
+            "Product and order batch writes remain separately approved future work."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

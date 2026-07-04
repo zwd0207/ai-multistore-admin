@@ -11875,6 +11875,79 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_decision_route_mock_ready["orders_written"] is False, batch_decision_route_mock_ready
     assert batch_decision_route_mock_ready["products_written"] is False, batch_decision_route_mock_ready
 
+    batch_decision_audit_linkage_context = {
+        "store_ids": [8],
+        "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+        "approval_decision_id_planned": True,
+        "readonly_evidence_hash_planned": True,
+        "backup_manifest_reference_planned": True,
+        "permission_evidence_reference_planned": True,
+        "sensitive_scan_reference_planned": True,
+        "readback_result_reference_planned": True,
+        "rollback_report_reference_planned": True,
+        "operator_identity_hash_planned": True,
+        "store_scope_planned": True,
+        "audit_correlation_id_planned": True,
+        "append_only_audit_rows_planned": True,
+        "formal_sync_remains_closed": True,
+        "execution_approved": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+        "operation_audit_rows_written": False,
+    }
+    batch_decision_audit_linkage_ready = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(
+            approval_decision=batch_decision_ready,
+            audit_linkage_context=batch_decision_audit_linkage_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_ready["phase"] == "ERP-Batch-2P", batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["status"] == "approval_decision_audit_linkage_mock_ready", batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["audit_linkage_ready"] is True, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["operation_audit_rows_planned"] is True, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["operation_audit_rows_written"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["execution_approved"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["backend_route_implemented"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["public_endpoint_enabled"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["orders_written"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["products_written"] is False, batch_decision_audit_linkage_ready
+    assert batch_decision_audit_linkage_ready["formal_sync_open"] is False, batch_decision_audit_linkage_ready
+
+    batch_decision_audit_linkage_missing_hash = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(
+            approval_decision=batch_decision_ready,
+            audit_linkage_context={
+                **batch_decision_audit_linkage_context,
+                "readonly_evidence_hash_planned": False,
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_missing_hash["skip_reason"] == (
+        "approval_decision_audit_linkage_incomplete"
+    ), batch_decision_audit_linkage_missing_hash
+    assert "readonly_evidence_hash_planned" in batch_decision_audit_linkage_missing_hash["missing_linkage_flags"], (
+        batch_decision_audit_linkage_missing_hash
+    )
+    assert batch_decision_audit_linkage_missing_hash["operation_audit_rows_written"] is False, (
+        batch_decision_audit_linkage_missing_hash
+    )
+
+    batch_decision_audit_linkage_sensitive = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(
+            approval_decision={**batch_decision_ready, "productOrderId": "must-not-leak-linkage"},
+            audit_linkage_context=batch_decision_audit_linkage_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_sensitive["skip_reason"] == (
+        "approval_decision_audit_linkage_sensitive_field_blocked"
+    ), batch_decision_audit_linkage_sensitive
+    assert batch_decision_audit_linkage_sensitive["real_database_written"] is False, (
+        batch_decision_audit_linkage_sensitive
+    )
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -12182,6 +12255,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_decision_api_public_endpoint": batch_decision_api_public_endpoint,
             "batch_decision_api_sensitive": batch_decision_api_sensitive,
             "batch_decision_route_mock_ready": batch_decision_route_mock_ready,
+            "batch_decision_audit_linkage_ready": batch_decision_audit_linkage_ready,
+            "batch_decision_audit_linkage_missing_hash": batch_decision_audit_linkage_missing_hash,
+            "batch_decision_audit_linkage_sensitive": batch_decision_audit_linkage_sensitive,
             "local_evidence": local_evidence,
             "local_audit": local_audit,
             "local_audit_sensitive": local_audit_sensitive,
@@ -12212,6 +12288,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-route",
         "must-not-leak-audit",
         "must-not-leak-local-audit",
+        "must-not-leak-linkage",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

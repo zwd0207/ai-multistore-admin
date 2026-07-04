@@ -2655,3 +2655,53 @@ platform_writes_enabled=false
 ```
 
 Passing this mock gate does not approve product batch execution. It only proves future review materials are ready.
+
+### Approval Decision Audit Linkage Mock Gate
+
+Phase ERP-Batch-2P adds:
+
+```text
+evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(...)
+```
+
+The gate requires a ready formal batch approval decision plus planned references for approval decision id, readonly evidence hash, backup manifest, permission evidence, sensitive scan, readback result, rollback report, operator identity hash, store scope, audit correlation id, append-only audit rows, and closed formal sync.
+
+It must keep:
+
+```text
+execution_approved=false
+backend_route_implemented=false
+public_endpoint_enabled=false
+real_api_called=false
+real_database_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+timeline_events_written=false
+operation_audit_rows_written=false
+formal_sync_open=false
+formal_order_sync_open=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+Passing this mock gate does not write audit rows and does not approve execution.
+
+### Approval Decision Audit Linkage Readonly API Plan
+
+Phase ERP-Batch-2Q plans a future readonly route only:
+
+```text
+POST /api/v1/batch/approval-decision/audit-linkage/readonly-check
+```
+
+No route is added in this phase. A later implementation must remain readonly, use business wording, fold technical details, hide sensitive fields from the main page, and avoid product/order writes, audit-row writes, real platform calls, and execution approval.
+
+### Naver Product Batch Execution Approval Readonly UI
+
+Phases Naver-Product-Batch-2E and 2F plan and implement Codex2 UI only. Products may display checklist readiness for latest readonly candidates, field whitelist, backup/rollback, permission approval, audit chain, and platform-write boundary. The UI must not call Naver, write products, write audit rows, expose an execution button, or open formal product batch sync.
+
+### Invitation Approval Audit Linkage Plan
+
+Phase ERP-Multistore-2M is plan-only. Future real user invitation approval must link invitation decision id, target user safe hash, masked login identifier, store scope, target role, approver hash, permission evidence, backup evidence, invitation expiry policy, readback plan, rollback plan, and audit correlation id before user creation, invitation sending, role assignment, membership write, or audit-row write is allowed.

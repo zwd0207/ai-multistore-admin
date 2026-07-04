@@ -1328,3 +1328,17 @@ evaluate_naver_product_batch_execution_approval_mock_gate(...)
 ```
 
 It verifies future Naver product batch execution approval readiness using fresh readonly candidates, backup, store-scoped approval, product field whitelist, price/stock/status mapping review, duplicate protection, audit chain, readback, rollback, and sensitive scan. It does not call Naver, write products, write orders, write SyncLog, write tested-success rows, or write audit rows.
+
+ERP-Batch-2P adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_audit_linkage_mock_gate(...)
+```
+
+It verifies that a future formal batch approval decision can be linked to sanitized audit evidence references: approval decision id, readonly evidence hash, backup manifest, permission evidence, sensitive scan, readback result, rollback report, operator hash, store scope, and audit correlation id. It writes no audit rows, products, orders, SyncLog, tested-success rows, or timeline events, and it does not approve execution.
+
+ERP-Batch-2Q is a readonly API plan only. A future route may review approval-decision audit linkage, but no route is added in this phase and formal product/order batch execution remains closed.
+
+Naver-Product-Batch-2E and 2F plan and implement Codex2 readonly UI for future product batch execution approval. The UI may show local product context and review checklist items only; it must not call Naver, write products, expose an execution button, or imply formal product batch sync is open.
+
+ERP-Multistore-2M plans invitation approval audit linkage. Future real invitation approval must link target user hash, masked login, store scope, target role, approver hash, permission evidence, backup evidence, expiry policy, readback plan, rollback plan, and audit correlation id before any user, role, or membership write.
