@@ -4835,6 +4835,279 @@ def _evaluate_formal_batch_sync_production_gate(
     return result
 
 
+def _normalize_safe_changed_fields(changed_fields: object) -> list[str] | None:
+    if not isinstance(changed_fields, (list, tuple, set)):
+        return None
+    normalized: list[str] = []
+    for field in changed_fields:
+        if not isinstance(field, str):
+            return None
+        safe_field = field.strip().lower()
+        if not re.fullmatch(r"[a-z0-9_]{1,80}", safe_field):
+            return None
+        normalized.append(safe_field)
+    return sorted(set(normalized))
+
+
+def _evaluate_naver_product_stock_change_mock_write_gate(
+    *,
+    dry_run_diff: dict | None,
+    actor_context: dict | None,
+    store_id: int,
+    approved_changed_fields: list[str] | tuple[str, ...] | set[str] | None,
+    manual_approval: bool,
+    backup_evidence: dict | None,
+    audit_plan_ready: bool,
+    rollback_plan_ready: bool,
+    verification_scope: str | None,
+    write_requested: bool = False,
+) -> dict:
+    """Private mock gate for later stock-only local product updates; never writes products."""
+
+    from app.services.permission_service import (
+        evaluate_sensitive_action_approval_mock_gate,
+    )
+
+    result = {
+        "phase": "Naver-Product-Batch-1D",
+        "product_stock_change_mock_write_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "store_id": store_id,
+        "write_requested": bool(write_requested),
+        "manual_approval": bool(manual_approval),
+        "approved_changed_fields": [],
+        "observed_changed_fields": [],
+        "would_update": 0,
+        "would_create": 0,
+        "would_refresh_only": 0,
+        "would_skip": 0,
+        "stock_only_change": False,
+        "backup_evidence_verified": False,
+        "permission_verified": False,
+        "approval_role_verified": False,
+        "audit_plan_ready": bool(audit_plan_ready),
+        "rollback_plan_ready": bool(rollback_plan_ready),
+        "products_written": False,
+        "orders_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "real_database_written": False,
+        "real_api_called": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_product_sync_open": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if store_id != 8:
+        result["skip_reason"] = "store_scope_not_approved_for_stock_gate"
+        return result
+    if not isinstance(dry_run_diff, dict):
+        result["skip_reason"] = "dry_run_diff_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(dry_run_diff):
+        result["skip_reason"] = "dry_run_diff_sensitive_field_blocked"
+        return result
+
+    observed_changed_fields = _normalize_safe_changed_fields(dry_run_diff.get("changed_fields"))
+    approved_fields = _normalize_safe_changed_fields(approved_changed_fields)
+    if observed_changed_fields is None or approved_fields is None:
+        result["skip_reason"] = "changed_fields_invalid"
+        return result
+    result["observed_changed_fields"] = observed_changed_fields
+    result["approved_changed_fields"] = approved_fields
+    if observed_changed_fields != ["stock_quantity"]:
+        result["skip_reason"] = "non_stock_field_change_requires_separate_plan"
+        return result
+    if approved_fields != observed_changed_fields:
+        result["skip_reason"] = "approved_changed_fields_mismatch"
+        return result
+
+    try:
+        would_update = int(dry_run_diff.get("would_update") or 0)
+        would_create = int(dry_run_diff.get("would_create") or 0)
+        would_refresh_only = int(dry_run_diff.get("would_refresh_only") or 0)
+        would_skip = int(dry_run_diff.get("would_skip") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "dry_run_counts_invalid"
+        return result
+    result.update({
+        "would_update": would_update,
+        "would_create": would_create,
+        "would_refresh_only": would_refresh_only,
+        "would_skip": would_skip,
+    })
+    if would_update <= 0:
+        result["skip_reason"] = "stock_change_candidates_missing"
+        return result
+    if would_create != 0:
+        result["skip_reason"] = "product_create_not_allowed_in_stock_gate"
+        return result
+    if would_skip != 0:
+        result["skip_reason"] = "skipped_candidates_require_review"
+        return result
+    if dry_run_diff.get("write_safety_summary", {}).get("products_written") is not False:
+        result["skip_reason"] = "dry_run_write_safety_invalid"
+        return result
+
+    backup_gate = _validate_naver_order_refresh_backup_evidence(backup_evidence, require_backup=True)
+    result["backup_gate"] = backup_gate
+    result["backup_evidence_verified"] = bool(backup_gate["backup_evidence_verified"])
+    if not result["backup_evidence_verified"]:
+        result["skip_reason"] = backup_gate["skip_reason"]
+        return result
+    if not audit_plan_ready:
+        result["skip_reason"] = "audit_plan_required"
+        return result
+    if not rollback_plan_ready:
+        result["skip_reason"] = "rollback_plan_required"
+        return result
+
+    approval_gate = evaluate_sensitive_action_approval_mock_gate(
+        actor_context=actor_context,
+        requested_store_id=store_id,
+        action_key="products.batch_sync_write",
+        manual_approval=manual_approval,
+        verification_scope=verification_scope,
+    )
+    result["approval_gate"] = {
+        "status": approval_gate.get("status"),
+        "skip_reason": approval_gate.get("skip_reason"),
+        "actor_role": approval_gate.get("actor_role"),
+        "actor_id_hash": approval_gate.get("actor_id_hash"),
+        "store_scope_verified": approval_gate.get("store_scope_verified"),
+        "permission_verified": approval_gate.get("permission_verified"),
+        "approval_role_verified": approval_gate.get("approval_role_verified"),
+    }
+    if approval_gate.get("status") != "approval_allowed_mock":
+        result["skip_reason"] = approval_gate.get("skip_reason") or "stock_change_approval_blocked"
+        return result
+
+    result.update({
+        "status": "stock_change_mock_gate_ready_for_later_write_phase",
+        "stock_only_change": True,
+        "permission_verified": True,
+        "approval_role_verified": True,
+        "business_message": "Stock-only Naver product changes passed the private mock gate. No product rows were written.",
+    })
+    return result
+
+
+def _evaluate_batch_readonly_evidence_api_mock_gate(
+    *,
+    evidence_items: list[dict] | tuple[dict, ...] | None,
+    verification_scope: str | None,
+    max_items: int = 10,
+) -> dict:
+    """Private mock gate for a future readonly evidence API; never exposes a public route."""
+
+    result = {
+        "phase": "ERP-Batch-1E",
+        "readonly_evidence_api_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "max_items": max_items,
+        "evidence_count": 0,
+        "items": [],
+        "public_endpoint_enabled": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(evidence_items, (list, tuple)):
+        result["skip_reason"] = "evidence_items_required"
+        return result
+    if len(evidence_items) > max_items:
+        result["skip_reason"] = "evidence_item_limit_exceeded"
+        return result
+
+    allowed_sync_kinds = set(FORMAL_BATCH_SYNC_GATE_KINDS)
+    normalized_items: list[dict] = []
+    for index, item in enumerate(evidence_items):
+        if not isinstance(item, dict):
+            result["skip_reason"] = "evidence_item_shape_invalid"
+            return result
+        if _formal_batch_sync_sensitive_marker_found(item):
+            result["skip_reason"] = "evidence_item_sensitive_field_blocked"
+            result["blocked_index"] = index
+            return result
+        sync_kind = str(item.get("sync_kind") or "")
+        if sync_kind not in allowed_sync_kinds:
+            result["skip_reason"] = "sync_kind_not_allowed"
+            return result
+        try:
+            store_id = int(item.get("store_id"))
+            candidate_count = int(item.get("candidate_count") or 0)
+            would_create = int(item.get("would_create") or 0)
+            would_update = int(item.get("would_update") or 0)
+            would_refresh_only = int(item.get("would_refresh_only") or 0)
+            would_skip = int(item.get("would_skip") or 0)
+        except (TypeError, ValueError):
+            result["skip_reason"] = "evidence_counts_invalid"
+            return result
+        if store_id <= 0 or candidate_count < 0:
+            result["skip_reason"] = "evidence_counts_invalid"
+            return result
+        changed_fields = _normalize_safe_changed_fields(item.get("changed_field_names", []))
+        if changed_fields is None:
+            result["skip_reason"] = "changed_field_names_invalid"
+            return result
+        if item.get("real_sync") is True or item.get("raw_response_saved") is not False:
+            result["skip_reason"] = "readonly_evidence_safety_flags_invalid"
+            return result
+        if item.get("privacy_fields_redacted") is not True:
+            result["skip_reason"] = "privacy_redaction_required"
+            return result
+        if item.get("formal_sync_open") is True:
+            result["skip_reason"] = "formal_sync_already_open_not_allowed"
+            return result
+        normalized_items.append({
+            "evidence_id": str(item.get("evidence_id") or f"evidence-{index + 1}")[:120],
+            "store_id": store_id,
+            "platform": FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["platform"],
+            "sync_kind": sync_kind,
+            "target": FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["target"],
+            "window_label": str(item.get("window_label") or "readonly window")[:120],
+            "candidate_count": candidate_count,
+            "would_create": would_create,
+            "would_update": would_update,
+            "would_refresh_only": would_refresh_only,
+            "would_skip": would_skip,
+            "changed_field_names": changed_fields,
+            "duplicate_check_passed": bool(item.get("duplicate_check_passed")),
+            "field_whitelist_verified": bool(item.get("field_whitelist_verified")),
+            "backup_required": True,
+            "permission_required": True,
+            "audit_required": True,
+            "business_message": str(item.get("business_message") or "Readonly batch evidence is ready for review.")[:240],
+            "next_action": str(item.get("next_action") or "manual_review_required")[:160],
+        })
+
+    result.update({
+        "status": "readonly_evidence_api_mock_ready",
+        "evidence_count": len(normalized_items),
+        "items": normalized_items,
+    })
+    return result
+
+
 def _evaluate_naver_order_refresh_batch_mock_gate(
     db: Session,
     *,

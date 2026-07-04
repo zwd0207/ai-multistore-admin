@@ -1686,3 +1686,59 @@ Naver-Order-Batch-1B used the order preview route with `real_preview=true`, `inc
 Naver-Product-Batch-1B used the product preview route with `real_preview=true` and `real_sync=false`. `page=1,size=5` observed stock-quantity changes on 3 existing products; `page=2,size=5` returned empty. This evidence requires manual review before any later write phase.
 
 No evidence route may include token, Authorization, headers, signature, bcrypt input, client secret, raw response, full channel id, full product/order id, full buyer or receiver privacy, phone, address, or zip code.
+
+### Product Stock-Change Mock Gate Contract
+
+Phase Naver-Product-Batch-1D adds a private helper only:
+
+```text
+_evaluate_naver_product_stock_change_mock_write_gate(...)
+```
+
+The helper may return `stock_change_mock_gate_ready_for_later_write_phase` only when:
+
+- `store_id=8`
+- dry-run evidence is present and safe
+- changed fields are exactly `stock_quantity`
+- approved changed fields match observed changed fields
+- `would_update > 0`
+- `would_create = 0`
+- `would_skip = 0`
+- backup evidence is verified
+- audit plan is ready
+- rollback plan is ready
+- `products.batch_sync_write` approval passes
+
+The helper must keep:
+
+```text
+products_written=false
+orders_written=false
+sync_log_written=false
+capability_tested_success_written=false
+operation_audit_rows_written=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+```
+
+### Store Membership Assignment Mock Gate Contract
+
+Phase ERP-Multistore-1C adds a private helper only:
+
+```text
+evaluate_store_membership_assignment_mock_gate(...)
+```
+
+The helper checks target user safe hash, target store id, target role, assignment reason, `store_membership.assign` approval, and duplicate active membership.
+
+It must keep:
+
+```text
+membership_written=false
+real_database_written=false
+real_auth_session_created=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+No public user, role, login, or membership assignment endpoint is open yet.

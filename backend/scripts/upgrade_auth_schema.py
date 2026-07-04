@@ -184,6 +184,7 @@ PERMISSION_LABELS = {
     "audit.read": "查看审计记录",
     "backup.read": "查看备份报告",
     "backup.create": "创建本地备份",
+    "store_membership.assign": "受控分配店铺成员",
 }
 
 
@@ -439,6 +440,16 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
     if not admin_order_batch_approval or int(admin_order_batch_approval[0]) != 1:
         raise RuntimeError("Admin order batch approval permission was not seeded")
 
+    admin_membership_assign_approval = connection.execute("""
+        SELECT rp.can_approve_sensitive
+        FROM erp_role_permissions rp
+        JOIN erp_roles r ON r.id = rp.role_id
+        JOIN erp_permissions p ON p.id = rp.permission_id
+        WHERE r.role_key='admin' AND p.permission_key='store_membership.assign'
+    """).fetchone()
+    if not admin_membership_assign_approval or int(admin_membership_assign_approval[0]) != 1:
+        raise RuntimeError("Admin store membership assignment approval permission was not seeded")
+
     admin_refresh_approval = connection.execute("""
         SELECT rp.can_approve_sensitive
         FROM erp_role_permissions rp
@@ -458,6 +469,16 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
     """).fetchone()[0]
     if operator_product_batch_permission != 0:
         raise RuntimeError("Operator should not receive products.batch_sync_write permission")
+
+    operator_membership_assign_permission = connection.execute("""
+        SELECT COUNT(*)
+        FROM erp_role_permissions rp
+        JOIN erp_roles r ON r.id = rp.role_id
+        JOIN erp_permissions p ON p.id = rp.permission_id
+        WHERE r.role_key='operator' AND p.permission_key='store_membership.assign'
+    """).fetchone()[0]
+    if operator_membership_assign_permission != 0:
+        raise RuntimeError("Operator should not receive store_membership.assign permission")
 
     operator_refresh_permission = connection.execute("""
         SELECT COUNT(*)

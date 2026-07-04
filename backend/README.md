@@ -987,7 +987,7 @@ orders.refresh_batch_write
 
 These permissions are metadata for gate planning. They do not create users, sessions, or active store memberships.
 
-The local seed was applied after a fresh database backup. Current auth metadata counts are `erp_roles=5`, `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
+The local seed was applied after a fresh database backup. Current auth metadata counts are `erp_roles=5`, `erp_permissions=13`, `erp_role_permissions=41`, `erp_users=0`, and `erp_store_memberships=0`.
 
 Naver-Order-Batch-1A documents the future order batch refresh path. Naver-Product-Batch-1A documents the future product batch sync path. ERP-Multistore-1A documents the large-scale multi-store production model. All three remain planning/gate phases; platform shipment, cancel, return, exchange, refund, settlement, customer service, mail, appeal, and AI automation writes remain closed.
 
@@ -998,3 +998,29 @@ Naver-Order-Batch-1B uses the existing protected Naver order preview route in re
 Naver-Product-Batch-1B uses the existing protected Naver product preview route in readonly mode only. `page=1,size=5` returned `would_create=0`, `would_update=3`, `would_refresh_only=2`, `would_skip=0`, and changed field `stock_quantity`. `page=2,size=5` returned `success_empty`. No product write occurred. The observed stock changes are manual-review evidence, not write approval.
 
 ERP-Multistore-1B plans store membership assignment approval only. It does not create users, create memberships, activate login, or enable multi-store production operation.
+
+Naver-Product-Batch-1C documents the approval boundary for the observed stock-only product changes. Naver-Product-Batch-1D adds a private mock gate:
+
+```text
+_evaluate_naver_product_stock_change_mock_write_gate(...)
+```
+
+The helper accepts only stock-only evidence (`changed_fields=["stock_quantity"]`), requires backup evidence, audit/rollback readiness, and admin approval for `products.batch_sync_write`, and keeps `products_written=false`.
+
+ERP-Batch-1E adds a private mock gate for future readonly evidence APIs:
+
+```text
+_evaluate_batch_readonly_evidence_api_mock_gate(...)
+```
+
+It normalizes safe batch evidence for future approval screens but does not expose a public endpoint.
+
+ERP-Multistore-1C adds a private store-membership assignment mock gate:
+
+```text
+evaluate_store_membership_assignment_mock_gate(...)
+```
+
+It checks safe target user hash, target store, target role, assignment reason, admin approval for `store_membership.assign`, and duplicate active membership. It does not create users or memberships.
+
+ERP-Auth-1O remains planning-only for future role assignment approval. Production login, user creation, route-level authorization, and real store memberships remain closed.

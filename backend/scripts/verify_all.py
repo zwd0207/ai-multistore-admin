@@ -10115,6 +10115,7 @@ def verify_role_permission_mock_gates() -> None:
     assert "products.batch_sync_write" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert "orders.batch_sync_write" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert "orders.refresh_batch_write" in inventory["admin"]["sensitive_approval_actions"], inventory
+    assert "store_membership.assign" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert inventory["operator"]["sensitive_approval_actions"] == [], inventory
 
     with TestClient(app) as client:
@@ -10244,6 +10245,143 @@ def verify_role_permission_mock_gates() -> None:
         assert forbidden not in serialized, serialized
 
     print("role permission mock gates: ok")
+
+
+def verify_store_membership_assignment_mock_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services import permission_service
+
+    admin_store8 = {
+        "actor_id": "membership-admin",
+        "role": "admin",
+        "store_ids": [8],
+    }
+    operator_store8 = {
+        "actor_id": "membership-operator",
+        "role": "operator",
+        "store_ids": [8],
+    }
+    existing = [{
+        "user_key_hash": "user-hash-aaaaaaaaaaaaaaaa",
+        "store_id": 8,
+        "role": "operator",
+        "membership_status": "active",
+    }]
+
+    with SessionLocal() as db:
+        before_counts = {
+            "erp_users": db.execute(text("SELECT COUNT(*) FROM erp_users")).scalar_one(),
+            "erp_store_memberships": db.execute(text("SELECT COUNT(*) FROM erp_store_memberships")).scalar_one(),
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+        }
+
+    no_approval = permission_service.evaluate_store_membership_assignment_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-bbbbbbbbbbbbbbbb",
+        target_store_id=8,
+        target_role="operator",
+        existing_memberships=existing,
+        manual_approval=False,
+        assignment_reason="assign operator for store 8 trial",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert no_approval["skip_reason"] == "manual_approval_required", no_approval
+    assert no_approval["membership_written"] is False, no_approval
+
+    operator_blocked = permission_service.evaluate_store_membership_assignment_mock_gate(
+        actor_context=operator_store8,
+        target_user_key_hash="user-hash-bbbbbbbbbbbbbbbb",
+        target_store_id=8,
+        target_role="operator",
+        existing_memberships=existing,
+        manual_approval=True,
+        assignment_reason="operator cannot assign memberships",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert operator_blocked["skip_reason"] == "permission_denied", operator_blocked
+    assert operator_blocked["real_database_written"] is False, operator_blocked
+
+    duplicate = permission_service.evaluate_store_membership_assignment_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-aaaaaaaaaaaaaaaa",
+        target_store_id=8,
+        target_role="operator",
+        existing_memberships=existing,
+        manual_approval=True,
+        assignment_reason="duplicate should be blocked",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert duplicate["skip_reason"] == "duplicate_active_membership", duplicate
+    assert duplicate["duplicate_active_membership"] is True, duplicate
+
+    sensitive = permission_service.evaluate_store_membership_assignment_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-bbbbbbbbbbbbbbbb",
+        target_store_id=8,
+        target_role="operator",
+        existing_memberships=existing,
+        manual_approval=True,
+        assignment_reason="authorization: bearer must-not-leak",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert sensitive["skip_reason"] == "membership_assignment_sensitive_material_blocked", sensitive
+
+    success = permission_service.evaluate_store_membership_assignment_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-bbbbbbbbbbbbbbbb",
+        target_store_id=8,
+        target_role="operator",
+        existing_memberships=existing,
+        manual_approval=True,
+        assignment_reason="assign operator for store 8 trial",
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert success["status"] == "membership_assignment_mock_ready", success
+    assert success["membership_would_create"] is True, success
+    assert success["membership_written"] is False, success
+    assert success["real_database_written"] is False, success
+    assert success["formal_sync_open"] is False, success
+
+    with SessionLocal() as db:
+        after_counts = {
+            "erp_users": db.execute(text("SELECT COUNT(*) FROM erp_users")).scalar_one(),
+            "erp_store_memberships": db.execute(text("SELECT COUNT(*) FROM erp_store_memberships")).scalar_one(),
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+        }
+    assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+    serialized = json.dumps(
+        {
+            "no_approval": no_approval,
+            "operator_blocked": operator_blocked,
+            "duplicate": duplicate,
+            "success": success,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "buyerphone",
+        "receiverphone",
+        "zipcode",
+        "must-not-leak",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("store membership assignment mock gate: ok")
 
 
 def verify_formal_batch_sync_production_gate() -> None:
@@ -10491,6 +10629,255 @@ def verify_formal_batch_sync_production_gate() -> None:
         assert forbidden not in serialized, serialized
 
     print("formal batch sync production gate: ok")
+
+
+def verify_product_stock_change_and_readonly_evidence_gates() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services import sync_service
+    from app.services.permission_service import VERIFICATION_SCOPE
+
+    admin_store8 = {
+        "actor_id": "stock-admin",
+        "role": "admin",
+        "store_ids": [8],
+    }
+    operator_store8 = {
+        "actor_id": "stock-operator",
+        "role": "operator",
+        "store_ids": [8],
+    }
+    stock_diff = {
+        "would_create": 0,
+        "would_update": 3,
+        "would_refresh_only": 2,
+        "would_skip": 0,
+        "changed_fields": ["stock_quantity"],
+        "matched_existing_count": 5,
+        "write_safety_summary": {
+            "products_written": False,
+            "missing_optional_fields_block_write_approval": True,
+        },
+    }
+    backup_evidence = {
+        "backup_sha256": "b" * 64,
+        "sqlite_integrity_check": "ok",
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-product-stock-gate.db",
+    }
+
+    with SessionLocal() as db:
+        before_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+
+    no_approval = sync_service._evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff=stock_diff,
+        actor_context=admin_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity"],
+        manual_approval=False,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert no_approval["skip_reason"] == "manual_approval_required", no_approval
+    assert no_approval["products_written"] is False, no_approval
+
+    non_stock_change = sync_service._evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff={**stock_diff, "changed_fields": ["stock_quantity", "price"]},
+        actor_context=admin_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity", "price"],
+        manual_approval=True,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert non_stock_change["skip_reason"] == "non_stock_field_change_requires_separate_plan", non_stock_change
+
+    missing_backup = sync_service._evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff=stock_diff,
+        actor_context=admin_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity"],
+        manual_approval=True,
+        backup_evidence=None,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert missing_backup["skip_reason"] == "backup_evidence_missing", missing_backup
+
+    operator_blocked = sync_service._evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff=stock_diff,
+        actor_context=operator_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity"],
+        manual_approval=True,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert operator_blocked["skip_reason"] == "permission_denied", operator_blocked
+
+    success = sync_service._evaluate_naver_product_stock_change_mock_write_gate(
+        dry_run_diff=stock_diff,
+        actor_context=admin_store8,
+        store_id=8,
+        approved_changed_fields=["stock_quantity"],
+        manual_approval=True,
+        backup_evidence=backup_evidence,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert success["status"] == "stock_change_mock_gate_ready_for_later_write_phase", success
+    assert success["stock_only_change"] is True, success
+    assert success["would_update"] == 3, success
+    assert success["would_refresh_only"] == 2, success
+    assert success["products_written"] is False, success
+    assert success["formal_product_sync_open"] is False, success
+
+    readonly_success = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=[
+            {
+                "evidence_id": "naver-product-stock-evidence",
+                "store_id": 8,
+                "sync_kind": "naver_product_batch",
+                "window_label": "page=1,size=5",
+                "candidate_count": 5,
+                "would_create": 0,
+                "would_update": 3,
+                "would_refresh_only": 2,
+                "would_skip": 0,
+                "changed_field_names": ["stock_quantity"],
+                "duplicate_check_passed": True,
+                "field_whitelist_verified": True,
+                "real_sync": False,
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+                "business_message": "Detected stock changes that need manual review.",
+                "next_action": "stock_change_approval_required",
+            },
+            {
+                "evidence_id": "naver-order-existing-evidence",
+                "store_id": 8,
+                "sync_kind": "naver_order_batch",
+                "window_label": "recent 3 days KST",
+                "candidate_count": 1,
+                "would_create": 0,
+                "would_update": 0,
+                "would_refresh_only": 0,
+                "would_skip": 0,
+                "changed_field_names": [],
+                "duplicate_check_passed": True,
+                "field_whitelist_verified": True,
+                "real_sync": False,
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "formal_sync_open": False,
+                "business_message": "Order was checked and no write is needed.",
+                "next_action": "no_write_needed",
+            },
+        ],
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert readonly_success["status"] == "readonly_evidence_api_mock_ready", readonly_success
+    assert readonly_success["evidence_count"] == 2, readonly_success
+    assert readonly_success["public_endpoint_enabled"] is False, readonly_success
+    assert readonly_success["items"][0]["changed_field_names"] == ["stock_quantity"], readonly_success
+
+    readonly_sensitive = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=[{
+            "store_id": 8,
+            "sync_kind": "naver_product_batch",
+            "candidate_count": 1,
+            "productOrderId": "must-not-leak",
+            "real_sync": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+        }],
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert readonly_sensitive["skip_reason"] == "evidence_item_sensitive_field_blocked", readonly_sensitive
+
+    readonly_invalid_kind = sync_service._evaluate_batch_readonly_evidence_api_mock_gate(
+        evidence_items=[{
+            "store_id": 8,
+            "sync_kind": "coupang_unsafe_batch",
+            "candidate_count": 1,
+            "real_sync": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_sync_open": False,
+        }],
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert readonly_invalid_kind["skip_reason"] == "sync_kind_not_allowed", readonly_invalid_kind
+
+    with SessionLocal() as db:
+        after_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+    assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+    serialized = json.dumps(
+        {
+            "success": success,
+            "readonly_success": readonly_success,
+            "no_approval": no_approval,
+            "operator_blocked": operator_blocked,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "productorderid",
+        "buyername",
+        "buyerphone",
+        "receivername",
+        "receiverphone",
+        "zipcode",
+        "must-not-leak",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("product stock change and readonly evidence gates: ok")
 
 
 def verify_auth_schema_mock_migration_gate() -> None:
@@ -10762,8 +11149,16 @@ def verify_auth_schema_mock_migration_gate() -> None:
         assert "products.batch_sync_write" in permission_ids, permission_ids
         assert "orders.batch_sync_write" in permission_ids, permission_ids
         assert "orders.refresh_batch_write" in permission_ids, permission_ids
+        assert "store_membership.assign" in permission_ids, permission_ids
         assert "backup.create" in permission_ids, permission_ids
 
+        admin_membership_assign_approval = db.execute(text("""
+            SELECT rp.can_approve_sensitive
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='admin' AND p.permission_key='store_membership.assign'
+        """)).scalar_one()
         admin_product_batch_approval = db.execute(text("""
             SELECT rp.can_approve_sensitive
             FROM erp_role_permissions rp
@@ -10792,6 +11187,13 @@ def verify_auth_schema_mock_migration_gate() -> None:
             JOIN erp_permissions p ON p.id = rp.permission_id
             WHERE r.role_key='operator' AND p.permission_key='products.batch_sync_write'
         """)).scalar_one()
+        operator_membership_assign_permission = db.execute(text("""
+            SELECT COUNT(*)
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='operator' AND p.permission_key='store_membership.assign'
+        """)).scalar_one()
         operator_refresh_permission = db.execute(text("""
             SELECT COUNT(*)
             FROM erp_role_permissions rp
@@ -10818,7 +11220,9 @@ def verify_auth_schema_mock_migration_gate() -> None:
         assert admin_refresh_approval == 1, admin_refresh_approval
         assert admin_product_batch_approval == 1, admin_product_batch_approval
         assert admin_order_batch_approval == 1, admin_order_batch_approval
+        assert admin_membership_assign_approval == 1, admin_membership_assign_approval
         assert operator_product_batch_permission == 0, operator_product_batch_permission
+        assert operator_membership_assign_permission == 0, operator_membership_assign_permission
         assert operator_refresh_permission == 0, operator_refresh_permission
         assert store8_membership == 1, store8_membership
         assert store9_membership == 0, store9_membership
@@ -12798,7 +13202,9 @@ def main() -> None:
         verify_backup_report_readonly_local_api()
         verify_naver_order_refresh_backup_evidence_gate()
         verify_role_permission_mock_gates()
+        verify_store_membership_assignment_mock_gate()
         verify_formal_batch_sync_production_gate()
+        verify_product_stock_change_and_readonly_evidence_gates()
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
         verify_restore_runbook_mock_drill_gate()

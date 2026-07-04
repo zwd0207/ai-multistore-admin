@@ -31,6 +31,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "audit.read",
             "backup.read",
             "backup.create",
+            "store_membership.assign",
         },
         "sensitive_approval_actions": {
             "products.batch_sync_write",
@@ -38,6 +39,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "orders.local_write",
             "orders.refresh_batch_write",
             "backup.create",
+            "store_membership.assign",
         },
     },
     "operator": {
@@ -84,6 +86,7 @@ SENSITIVE_ACTIONS = {
     "orders.local_write",
     "orders.refresh_batch_write",
     "backup.create",
+    "store_membership.assign",
     "database.restore",
     "credentials.update",
     "schema.migrate",
@@ -113,6 +116,7 @@ SENSITIVE_VALUE_MARKERS = (
 
 PHONE_PATTERN = re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b")
 SAFE_OPERATION_PATTERN = re.compile(r"^[a-z0-9_.:-]{1,120}$")
+SAFE_USER_HASH_PATTERN = re.compile(r"^user-hash-[a-f0-9]{8,64}$")
 
 
 def _actor_hash(actor_id: object) -> str | None:
@@ -337,3 +341,116 @@ def role_permission_inventory() -> dict[str, Any]:
         }
         for role, definition in ROLE_DEFINITIONS.items()
     }
+
+
+def evaluate_store_membership_assignment_mock_gate(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    target_store_id: int | None,
+    target_role: str | None,
+    existing_memberships: list[dict[str, Any]] | None = None,
+    manual_approval: bool = False,
+    assignment_reason: str | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Private mock gate for future store membership assignment; never writes rows."""
+
+    normalized_role = _normalize_role(target_role)
+    result = {
+        "phase": "ERP-Multistore-1C",
+        "store_membership_assignment_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "target_user_key_hash": target_user_key_hash if isinstance(target_user_key_hash, str) else None,
+        "target_store_id": target_store_id,
+        "target_role": normalized_role,
+        "manual_approval": bool(manual_approval),
+        "assignment_reason_present": bool(assignment_reason),
+        "duplicate_active_membership": False,
+        "membership_would_create": False,
+        "membership_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != VERIFICATION_SCOPE:
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(target_user_key_hash, str) or not SAFE_USER_HASH_PATTERN.fullmatch(target_user_key_hash):
+        result["skip_reason"] = "target_user_hash_invalid"
+        return result
+    if not isinstance(target_store_id, int) or target_store_id <= 0:
+        result["skip_reason"] = "target_store_invalid"
+        return result
+    if normalized_role is None:
+        result["skip_reason"] = "target_role_not_allowed"
+        return result
+    if not isinstance(assignment_reason, str) or not assignment_reason.strip():
+        result["skip_reason"] = "assignment_reason_required"
+        return result
+    if _contains_sensitive_material({
+        "actor_context": actor_context,
+        "target_user_key_hash": target_user_key_hash,
+        "assignment_reason": assignment_reason,
+        "existing_memberships": existing_memberships or [],
+    }):
+        result["skip_reason"] = "membership_assignment_sensitive_material_blocked"
+        return result
+
+    approval_gate = evaluate_sensitive_action_approval_mock_gate(
+        actor_context=actor_context,
+        requested_store_id=target_store_id,
+        action_key="store_membership.assign",
+        manual_approval=manual_approval,
+        verification_scope=verification_scope,
+    )
+    result["approval_gate"] = {
+        "status": approval_gate.get("status"),
+        "skip_reason": approval_gate.get("skip_reason"),
+        "actor_role": approval_gate.get("actor_role"),
+        "actor_id_hash": approval_gate.get("actor_id_hash"),
+        "store_scope_verified": approval_gate.get("store_scope_verified"),
+        "permission_verified": approval_gate.get("permission_verified"),
+        "approval_role_verified": approval_gate.get("approval_role_verified"),
+    }
+    if approval_gate.get("status") != "approval_allowed_mock":
+        result["skip_reason"] = approval_gate.get("skip_reason") or "membership_assignment_approval_blocked"
+        return result
+
+    if not isinstance(existing_memberships, list):
+        existing_memberships = []
+    for membership in existing_memberships:
+        if not isinstance(membership, dict):
+            result["skip_reason"] = "existing_membership_shape_invalid"
+            return result
+        if _contains_sensitive_material(membership):
+            result["skip_reason"] = "existing_membership_sensitive_material_blocked"
+            return result
+        is_duplicate = (
+            membership.get("user_key_hash") == target_user_key_hash
+            and int(membership.get("store_id") or 0) == target_store_id
+            and str(membership.get("role") or "").strip().lower() == normalized_role
+            and str(membership.get("membership_status") or "active").strip().lower() == "active"
+        )
+        if is_duplicate:
+            result.update({
+                "duplicate_active_membership": True,
+                "skip_reason": "duplicate_active_membership",
+            })
+            return result
+
+    result.update({
+        "status": "membership_assignment_mock_ready",
+        "membership_would_create": True,
+        "business_message": "Store membership assignment passed the private mock gate only; no user or membership row was written.",
+    })
+    return result
