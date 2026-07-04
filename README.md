@@ -1383,3 +1383,33 @@ Naver order batch evidence defaults now use Chinese business wording and an expl
 The batch approval evidence audit linkage plan is documented in `PHASE_ERP_BATCH_1M_BATCH_APPROVAL_EVIDENCE_AUDIT_LINKAGE_PLAN.md`.
 
 Batch evidence now marks audit linkage as planned. No audit rows are written in this phase; future batch writes must still create append-only audit chains under separate approval.
+
+## Phase ERP-Multistore-1K - Store Membership Readonly UI Walkthrough
+
+The store membership readonly UI walkthrough is documented in `PHASE_ERP_MULTISTORE_1K_STORE_MEMBERSHIP_READONLY_UI_WALKTHROUGH.md`.
+
+The Accounts page membership panel remains a readonly business check. It does not create users, sessions, roles, or memberships.
+
+## Phase ERP-Multistore-1L - Real User Invitation Approval Plan
+
+The real user invitation approval plan is documented in `PHASE_ERP_MULTISTORE_1L_REAL_USER_INVITATION_APPROVAL_PLAN.md`.
+
+Real user invitation remains closed until a later phase approves invitation link or code handling, backup evidence, store-scoped permission, audit evidence, post-create readback, and rollback or disable-user instructions.
+
+## Phase Naver-Product-Batch-1M - Product Rollback Readonly Report UI Plan
+
+The product rollback readonly report UI plan is documented in `PHASE_NAVER_PRODUCT_BATCH_1M_PRODUCT_ROLLBACK_READONLY_REPORT_UI_PLAN.md`.
+
+A future UI should show rollback evidence in business wording while keeping technical details folded. Real restore and formal product batch sync remain closed.
+
+## Phase ERP-Batch-1N - Batch Approval Audit Evidence Mock Gate
+
+The batch approval audit evidence mock gate is documented in `PHASE_ERP_BATCH_1N_BATCH_APPROVAL_AUDIT_EVIDENCE_MOCK_GATE.md`.
+
+Codex1 now has a private mock gate for future batch approval audit readiness. It checks audit-chain planning, store scope, approval actions, duplicate checks, and field whitelist evidence without writing audit rows or opening formal sync.
+
+## Phase Naver-Order-Batch-1F - Order Batch Approval Evidence Audit Readiness Plan
+
+The order batch approval evidence audit readiness plan is documented in `PHASE_NAVER_ORDER_BATCH_1F_ORDER_BATCH_APPROVAL_EVIDENCE_AUDIT_READINESS_PLAN.md`.
+
+Naver order batch refresh remains closed. Future write approval still needs fresh readonly evidence, backup, permission, privacy gates, field whitelist, audit chain, readback, sensitive scan, and rollback reference.
