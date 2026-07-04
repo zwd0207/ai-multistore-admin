@@ -973,3 +973,15 @@ Naver-ERP-19B calls the existing Naver order preview endpoint in readonly mode o
 The selected new-order single local write approval is documented in `PHASE_NAVER_ERP_19C_SELECTED_NEW_ORDER_SINGLE_LOCAL_WRITE_APPROVAL.md`.
 
 Naver-ERP-19C approves only a later one-order local write for safe hash `id-hash-192b9c67e8`, after clean worktrees, fresh database backup, fresh readonly preview, duplicate count zero, privacy gate, one-candidate limit, post-write readback, and five-row operation audit evidence. This phase does not call Naver, execute `real_sync=true`, write local data, write audit rows, create backups, change schema, or open formal order sync.
+
+## Phase Naver-ERP-19D - Selected New-Order Single Local Write With Audit Evidence
+
+The selected new-order single local write with audit evidence is documented in `PHASE_NAVER_ERP_19D_SELECTED_NEW_ORDER_SINGLE_LOCAL_WRITE_WITH_AUDIT_EVIDENCE.md`.
+
+Naver-ERP-19D creates a fresh database backup, repeats the selected Naver order readonly preview, confirms safe hash `id-hash-192b9c67e8`, passes the privacy gate, and writes exactly one local Naver order. Counts changed as expected: `orders_store8=6 -> 7`, `products_store8=5 -> 5`, `sync_logs_store8=1 -> 1`, `tested_success_store8=8 -> 8`, and `order_status_events=0 -> 0`. Five append-only audit rows were written for approval, backup, operation start, operation finish, and post-write verification. Formal order sync and all Naver platform write operations remain closed.
+
+## Phase Naver-ERP-19E - Selected New-Order Post-Write Audit Verification
+
+The selected new-order post-write audit verification is documented in `PHASE_NAVER_ERP_19E_SELECTED_NEW_ORDER_POST_WRITE_AUDIT_VERIFICATION.md`.
+
+Naver-ERP-19E is readback-only. It confirms the selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and the 19D audit chain has exactly five safe rows with one correlation id. It does not call Naver, write local data, change schema, modify Codex2 runtime code, or open formal order sync.
