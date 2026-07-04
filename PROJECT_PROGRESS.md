@@ -427,6 +427,35 @@ Next 5 recommended stages:
 4. `Phase ERP-Auth-1D: Frontend role-aware action visibility plan`
 5. `Phase Naver-ERP-20A: Controlled order refresh batch with audit approval plan`
 
+### Latest update after `Phase ERP-Auth-1A` to `Phase Naver-ERP-20A`
+
+- Project overall planning progress: about `66% - 72%`
+- Naver basic ERP loop progress: about `76% - 81%`
+- ERP real-user landing progress: about `69% - 75%`
+- Production version for long-term non-technical use: about `62% - 67%`
+
+Implemented in this update:
+
+- Planned the first local ERP role model: owner, admin, operator, auditor, and viewer.
+- Added a private backend store-scoped permission mock gate.
+- Added a private backend sensitive-action approval mock gate.
+- Verified role/store/permission/approval blocks in `verify_all.py`.
+- Planned Codex2 role-aware action visibility without changing runtime UI.
+- Planned the next Naver controlled order refresh batch approval path with backup, audit, permission, and sensitive-action gates.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, verified selected Naver order write evidence, and mock-proven role/store approval checks.
+- Not suitable now: formal product/order batch sync, fully authenticated multi-user production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-ERP-20B: Controlled order refresh batch readonly repeat`
+2. `Phase Naver-ERP-20C: Controlled order refresh batch write approval`
+3. `Phase ERP-Auth-1E: Runtime permission API approval plan`
+4. `Phase ERP-Auth-1F: Runtime permission API mock gate`
+5. `Phase ERP-UX-2A: Role-aware action visibility implementation`
+
 ## 安全边界
 
 继续遵守：

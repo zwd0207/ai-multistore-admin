@@ -985,3 +985,33 @@ Naver-ERP-19D creates a fresh database backup, repeats the selected Naver order 
 The selected new-order post-write audit verification is documented in `PHASE_NAVER_ERP_19E_SELECTED_NEW_ORDER_POST_WRITE_AUDIT_VERIFICATION.md`.
 
 Naver-ERP-19E is readback-only. It confirms the selected safe hash exists exactly once, `orders_store8=7`, `operation_audit_logs=10`, and the 19D audit chain has exactly five safe rows with one correlation id. It does not call Naver, write local data, change schema, modify Codex2 runtime code, or open formal order sync.
+
+## Phase ERP-Auth-1A - Role and Permission Model Plan
+
+The role and permission model plan is documented in `PHASE_ERP_AUTH_1A_ROLE_PERMISSION_MODEL_PLAN.md`.
+
+ERP-Auth-1A is planning-only. It defines the first local ERP roles (`owner`, `admin`, `operator`, `auditor`, `viewer`), store-scoped permission groups, and sensitive actions that need explicit approval. It does not add user tables, public auth routes, schema changes, local writes, platform calls, or Codex2 runtime behavior.
+
+## Phase ERP-Auth-1B - Store-Scoped Access Gate Mock
+
+The store-scoped access gate mock is documented in `PHASE_ERP_AUTH_1B_STORE_SCOPED_ACCESS_GATE_MOCK.md`.
+
+ERP-Auth-1B adds a private Codex1 permission mock gate that verifies role, store scope, operation permission, and sensitive actor-context blocking. It is covered by `verify_all.py` only and is not connected to runtime routes or frontend behavior.
+
+## Phase ERP-Auth-1C - Sensitive Action Approval Roles
+
+The sensitive action approval roles phase is documented in `PHASE_ERP_AUTH_1C_SENSITIVE_ACTION_APPROVAL_ROLES.md`.
+
+ERP-Auth-1C extends the private mock gate for sensitive actions such as `orders.local_write`, `orders.refresh_batch_write`, backup creation, restore, credential updates, schema migrations, and formal sync opening. It verifies manual approval and role approval in mock only, with no business writes and no public API surface.
+
+## Phase ERP-Auth-1D - Frontend Role-Aware Action Visibility Plan
+
+The frontend role-aware action visibility plan is documented in `PHASE_ERP_AUTH_1D_FRONTEND_ROLE_AWARE_ACTION_VISIBILITY_PLAN.md`.
+
+ERP-Auth-1D is planning-only. It defines how Codex2 should eventually hide, disable, or explain sensitive actions using business wording while keeping permission keys and gate diagnostics inside folded technical details.
+
+## Phase Naver-ERP-20A - Controlled Order Refresh Batch With Audit Approval Plan
+
+The controlled order refresh batch with audit approval plan is documented in `PHASE_NAVER_ERP_20A_CONTROLLED_ORDER_REFRESH_BATCH_WITH_AUDIT_APPROVAL_PLAN.md`.
+
+Naver-ERP-20A is planning-only. It defines the next controlled order refresh batch path after the selected new-order write: backup, readonly candidate repeat, store-scoped role gate, sensitive action approval, audit chain, post-write readback, and sensitive scan. It does not call Naver, execute `real_sync=true`, write data, write audit rows, change schema, or open formal order sync.
