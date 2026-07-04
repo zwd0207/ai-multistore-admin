@@ -871,3 +871,33 @@ ERP-Audit-1X adds a private `write_backup_creation_audit_mock_gate(...)` helper 
 The controlled order refresh backup evidence gate is documented in `PHASE_NAVER_ERP_18A_ORDER_REFRESH_BACKUP_EVIDENCE_GATE.md`.
 
 Naver-ERP-18A adds a private backup-evidence wrapper around the existing Naver order refresh batch mock gate. Write-enabled paths are blocked unless safe backup evidence verifies SHA-256, SQLite integrity, manifest presence, and safety flags; readonly paths remain allowed without backup evidence because they do not write data. Verification runs only in the temporary database and proves no `products`, `SyncLog`, `ApiCapabilityTestResult`, or timeline event writes occur. It does not call Naver, write the real database, wire a public endpoint, or open formal Naver order sync.
+
+## Phase ERP-Backup-1J - Backup Report Readonly API Approval Plan
+
+The backup report readonly API approval plan is documented in `PHASE_ERP_BACKUP_1J_BACKUP_REPORT_READONLY_API_APPROVAL_PLAN.md`.
+
+ERP-Backup-1J is planning-only. It approves only `GET /api/v1/backups/local-report` and `GET /api/v1/backups/local-report/summary` as future readonly endpoints. The future route must not accept filesystem paths, restore targets, delete flags, or cleanup controls. This phase does not add code, write data, restore or delete backups, call platform APIs, change schema, modify Codex2 runtime UI, or open formal sync.
+
+## Phase ERP-Backup-1K - Backup Report Readonly API Mock Gate
+
+The backup report readonly API mock gate is documented in `PHASE_ERP_BACKUP_1K_BACKUP_REPORT_READONLY_API_MOCK_GATE.md`.
+
+ERP-Backup-1K adds `backend/app/services/backup_service.py` with a private mock gate for backup report API behavior. It reads only temporary fixture backup manifests under private verification scope, returns safe business metadata, blocks unsupported or sensitive cases, and confirms no restore, delete, production database touch, audit write, business write, platform API call, or formal sync occurs.
+
+## Phase ERP-Backup-1L - Backup Report Readonly Local API Implementation
+
+The backup report readonly local API implementation is documented in `PHASE_ERP_BACKUP_1L_BACKUP_REPORT_READONLY_LOCAL_API_IMPLEMENTATION.md`.
+
+ERP-Backup-1L implements `GET /api/v1/backups/local-report` and `GET /api/v1/backups/local-report/summary`. The endpoints read only the approved local backup root, accept only `limit`, reject unsupported query parameters without echoing raw values, return safe backup evidence and business messages, and keep `backup_deleted=false`, `real_restore_executed=false`, `production_db_touched=false`, and `rows_written=0`. They do not create/restore/delete backups, write audit or business rows, call platform APIs, change schema, modify Codex2 runtime UI, or open formal sync.
+
+## Phase ERP-Audit-1Y - Backup Creation Audit Runtime Wiring Approval Plan
+
+The backup creation audit runtime wiring approval plan is documented in `PHASE_ERP_AUDIT_1Y_BACKUP_CREATION_AUDIT_RUNTIME_WIRING_APPROVAL_PLAN.md`.
+
+ERP-Audit-1Y is planning-only. It defines the future narrow runtime connection from successful manual backup creation to append-only audit rows: `backup_planned`, `backup_created`, `backup_hash_verified`, `backup_integrity_verified`, and `backup_manifest_verified`. It does not write audit rows, create backups, restore/delete backups, call platform APIs, change schema, or open formal sync.
+
+## Phase Naver-ERP-18B - Controlled Order Refresh With Real Backup Evidence Approval Plan
+
+The controlled order refresh with real backup evidence approval plan is documented in `PHASE_NAVER_ERP_18B_CONTROLLED_ORDER_REFRESH_WITH_REAL_BACKUP_EVIDENCE_APPROVAL_PLAN.md`.
+
+Naver-ERP-18B is planning-only. It defines the approval gate for a later controlled Naver order refresh write that must use fresh real backup evidence before any local update. The future write remains capped, manually approved, privacy-gated, and limited to existing local real Naver orders. This phase does not call Naver, execute `real_sync=true`, write local data, create timeline events, write SyncLog or tested-success records, change schema, modify Codex2 runtime UI, or open formal Naver order sync.

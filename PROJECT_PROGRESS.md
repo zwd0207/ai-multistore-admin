@@ -6,10 +6,10 @@
 
 ## 当前进度
 
-- 项目总体规划进度：约 `54% - 61%`
-- Naver 基础 ERP 闭环进度：约 `70% - 75%`
-- ERP 给真实用户落地使用进度：约 `58% - 65%`
-- 可交给非技术人员长期稳定使用的生产版进度：约 `49% - 54%`
+- 项目总体规划进度：约 `55% - 62%`
+- Naver 基础 ERP 闭环进度：约 `71% - 76%`
+- ERP 给真实用户落地使用进度：约 `59% - 66%`
+- 可交给非技术人员长期稳定使用的生产版进度：约 `51% - 56%`
 
 ## 当前定位
 
@@ -74,8 +74,11 @@
 - 真实本地备份 helper 已完成，并已产生 1G 本地备份和 manifest。
 - Restore verification dry-run 已完成。
 - Backup manifest mock gate、real local backup helper、restore dry-run helper、backup list/report readonly helper 已完成。
+- Backup report readonly API approval plan、mock gate、本地只读 API 已完成。
 - Backup creation audit mock gate 已完成。
+- Backup creation audit runtime wiring approval plan 已完成。
 - Naver order refresh backup evidence gate 已完成。
+- Naver order refresh with real backup evidence approval plan 已完成。
 
 ## 未完成阶段
 
@@ -95,7 +98,6 @@
 
 ### 备份和恢复
 
-- Backup report 目前是本地脚本，还未提供只读 API。
 - Backup report 还未接入前端。
 - 真实 restore 仍未开放，只允许 dry-run。
 - 备份保留策略目前未执行自动清理，后续必须先做 report-only，再由人工审批。
@@ -126,53 +128,53 @@
 
 ### 接下来 5 个阶段
 
-1. `Phase ERP-Backup-1J: Backup report readonly API approval plan`
-   - 目的：把 1I 本地脚本报告规划成后端只读 API，但不立即开放写入、恢复或删除能力。
+1. `Phase ERP-Audit-1Z: Backup creation audit runtime wiring mock gate`
+   - 目的：先用临时库验证真实 backup helper 未来写 audit chain 的调用边界。
+   - 风险：中。
+   - 真实 API：否。
+   - 写库：只写临时验证库。
+   - Codex2：否。
+
+2. `Phase ERP-Audit-2A: Backup creation audit local implementation`
+   - 目的：把真实手动备份成功事件接入 append-only audit rows。
+   - 风险：中高。
+   - 真实 API：否。
+   - 写库：写 `operation_audit_logs`。
+   - Codex2：否。
+
+3. `Phase ERP-Audit-2B: Backup audit post-write verification`
+   - 目的：回读验证备份审计链、业务表不变、敏感字段不泄露。
    - 风险：低。
    - 真实 API：否。
    - 写库：否。
    - Codex2：否。
 
-2. `Phase ERP-Backup-1K: Backup report readonly API mock gate`
-   - 目的：用 mock/临时数据验证备份报告 API 输出只包含安全字段。
+4. `Phase ERP-Backup-1M: Backup report frontend readonly display plan`
+   - 目的：规划前端如何给非技术用户展示备份证据和恢复状态。
    - 风险：低。
    - 真实 API：否。
    - 写库：否。
-   - Codex2：否。
+   - Codex2：计划阶段。
 
-3. `Phase ERP-Backup-1L: Backup report readonly local API implementation`
-   - 目的：实现只读本地备份报告 API，前端未来可展示备份证据。
+5. `Phase ERP-Backup-1N: Backup report frontend readonly implementation`
+   - 目的：在前端只读展示备份报告，不提供恢复/删除按钮。
    - 风险：中。
    - 真实 API：否。
    - 写库：否。
-   - Codex2：后续需要。
-
-4. `Phase ERP-Audit-1Y: Backup creation audit runtime wiring approval plan`
-   - 目的：规划真实 backup helper 创建备份时如何写入 append-only 审计链。
-   - 风险：中。
-   - 真实 API：否。
-   - 写库：计划阶段否，后续实现会写 audit rows。
-   - Codex2：否。
-
-5. `Phase Naver-ERP-18B: Controlled order refresh with real backup evidence approval plan`
-   - 目的：把 18A backup evidence gate 转成下一次真实受控订单 refresh 写入前的审批计划。
-   - 风险：中。
-   - 真实 API：否。
-   - 写库：计划阶段否，后续实现可能写 1 到 2 条 refresh。
-   - Codex2：否。
+   - Codex2：是。
 
 ### 后续 10 个阶段候选
 
-1. `Phase ERP-Audit-1Z: Backup creation audit runtime wiring mock gate`
-2. `Phase ERP-Audit-2A: Backup creation audit local implementation`
-3. `Phase ERP-Audit-2B: Backup audit post-write verification`
-4. `Phase ERP-Backup-1M: Backup report frontend readonly display plan`
-5. `Phase ERP-Backup-1N: Backup report frontend readonly implementation`
-6. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
-7. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
-8. `Phase Naver-ERP-18E: Controlled order refresh small write`
-9. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
-10. `Phase ERP-Auth-1A: Role and permission model plan`
+1. `Phase Naver-ERP-18C: Controlled order refresh readonly repeat with backup evidence`
+2. `Phase Naver-ERP-18D: Controlled order refresh small write approval`
+3. `Phase Naver-ERP-18E: Controlled order refresh small write`
+4. `Phase Naver-ERP-18F: Controlled order refresh post-write audit verification`
+5. `Phase ERP-Auth-1A: Role and permission model plan`
+6. `Phase ERP-Auth-1B: Store-scoped access gate mock`
+7. `Phase ERP-Auth-1C: Sensitive action approval roles`
+8. `Phase ERP-Auth-1D: Multi-store data isolation verification`
+9. `Phase Prod-Ready-1A: Production readiness checklist`
+10. `Phase Prod-Ready-1B: End-to-end rehearsal with backup`
 
 ## 安全边界
 
@@ -188,4 +190,3 @@
 - 所有业务数据必须绑定 store。
 - preview 优先、dry-run 优先、小窗口优先、单条写库优先。
 - 正式批量同步必须单独批准。
-
