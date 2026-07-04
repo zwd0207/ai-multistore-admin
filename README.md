@@ -743,6 +743,12 @@ The real backup manifest implementation plan is documented in `PHASE_ERP_BACKUP_
 
 ERP-Backup-1D is planning-only. It defines the future manifest writer contract for real `backend/codex1.db` backups: required fields, computed hash/size/integrity data, path safety, atomic UTF-8 JSON writes, baseline counts, retention defaults, sensitive-field boundaries, and future audit correlation. It does not create backup files, write manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
 
+## Phase ERP-Backup-1E - Backup Manifest Mock Implementation Gate
+
+The backup manifest mock implementation gate is documented in `PHASE_ERP_BACKUP_1E_BACKUP_MANIFEST_MOCK_IMPLEMENTATION_GATE.md`.
+
+ERP-Backup-1E adds temporary-file `verify_all.py` coverage for a future backup manifest writer. The mock gate writes only temporary fixture manifests, computes SHA-256/size/integrity/counts from fixture backup files, validates retention and path safety, blocks sensitive fields, blocks manifest overwrite, and proves the real `backend/codex1.db` hash and size remain unchanged. It does not create production backups, write production manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
+
 ## Phase ERP-UX-1A - Frontend Production Usability Plan
 
 The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
