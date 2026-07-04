@@ -9740,6 +9740,198 @@ def verify_backup_manifest_mock_implementation_gate() -> None:
     print("backup manifest mock implementation gate: ok")
 
 
+def verify_real_local_backup_helper_implementation() -> None:
+    from scripts.create_local_backup import create_local_backup
+
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1g-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_root = temp_dir / "approved-backups"
+        backup_root.mkdir()
+
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE operation_audit_logs (id INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver safe fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Safe fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-backup1g001', 'PAYED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'payed')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.execute("INSERT INTO operation_audit_logs (id, action) VALUES (1, 'fixture_audit')")
+            conn.commit()
+        source_before = {
+            "size": source_db.stat().st_size,
+            "sha256": _sha256_file(source_db),
+        }
+
+        base_kwargs = {
+            "phase": "ERP-Backup-1G",
+            "operation_type": "real_local_backup_helper_implementation",
+            "created_by_actor_type": "test",
+            "created_by_actor_label": "verify_all",
+            "retention_class": "manual_checkpoint",
+            "retention_reason": "fixture local backup helper verification",
+            "source_db_path": source_db,
+            "backup_root": backup_root,
+            "related_store_ids": [8],
+            "related_platforms": ["naver"],
+            "related_safe_hashes": ["id-hash-backup1g001"],
+            "operation_audit_correlation_id": "backup-1g-correlation-safe-fixture",
+            "git_commit_codex1": "0" * 40,
+            "git_commit_codex2": "1" * 40,
+            "created_at": datetime(2026, 7, 4, 12, 30, 0, tzinfo=timezone.utc),
+        }
+
+        source_block = create_local_backup(**{**base_kwargs, "allow_custom_backup_root": True})
+        assert source_block["skip_reason"] == "source_db_path_mismatch", source_block
+        assert source_block["backup_created"] is False, source_block
+
+        root_block = create_local_backup(**{**base_kwargs, "allow_non_default_source": True})
+        assert root_block["skip_reason"] == "backup_root_not_approved", root_block
+        assert root_block["backup_created"] is False, root_block
+
+        invalid_retention = create_local_backup(**{
+            **base_kwargs,
+            "retention_class": "delete_now",
+            "allow_non_default_source": True,
+            "allow_custom_backup_root": True,
+        })
+        assert invalid_retention["skip_reason"] == "invalid_retention_class", invalid_retention
+
+        sensitive_input = create_local_backup(**{
+            **base_kwargs,
+            "retention_reason": "backup-token-must-not-leak",
+            "allow_non_default_source": True,
+            "allow_custom_backup_root": True,
+        })
+        assert sensitive_input["skip_reason"] == "sensitive_input_blocked", sensitive_input
+
+        missing_source = create_local_backup(**{
+            **base_kwargs,
+            "source_db_path": temp_dir / "missing-codex1.db",
+            "allow_non_default_source": True,
+            "allow_custom_backup_root": True,
+        })
+        assert missing_source["skip_reason"] == "source_db_missing", missing_source
+
+        success = create_local_backup(**{
+            **base_kwargs,
+            "allow_non_default_source": True,
+            "allow_custom_backup_root": True,
+        })
+        assert success["status"] == "backup_created", success
+        assert success["backup_created"] is True, success
+        assert success["manifest_written"] is True, success
+        assert success["real_restore_executed"] is False, success
+        assert success["backup_deleted"] is False, success
+        assert success["raw_response_saved"] is False, success
+        assert success["secrets_saved"] is False, success
+        assert success["privacy_fields_redacted"] is True, success
+        assert success["sqlite_integrity_check"] == "ok", success
+        assert success["baseline_counts"]["stores"] == 1, success
+        assert success["baseline_counts"]["products"] == 1, success
+        assert success["baseline_counts"]["orders"] == 1, success
+        assert success["baseline_counts"]["sync_logs"] == 1, success
+        assert success["baseline_counts"]["api_capability_test_results"] == 1, success
+        assert success["baseline_counts"]["order_status_events"] == 1, success
+        assert success["baseline_counts"]["operation_audit_logs"] == 1, success
+        assert success["baseline_counts"]["tested_success_store8"] == 1, success
+        assert success["protected_from_auto_delete"] is True, success
+
+        backup_path = Path(success["backup_path"])
+        manifest_path = Path(success["manifest_path"])
+        assert backup_path.exists(), backup_path
+        assert manifest_path.exists(), manifest_path
+        assert backup_path.parent.resolve() == backup_root.resolve(), backup_path
+        assert not Path(str(backup_path) + ".tmp").exists(), backup_path
+        assert not Path(str(manifest_path) + ".tmp").exists(), manifest_path
+        assert success["backup_sha256"] == _sha256_file(backup_path), success
+        assert success["backup_size_bytes"] == backup_path.stat().st_size, success
+
+        loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        missing_fields = sorted(REQUIRED_BACKUP_MANIFEST_FIELDS - set(loaded_manifest))
+        assert not missing_fields, missing_fields
+        assert loaded_manifest["backup_sha256"] == success["backup_sha256"], loaded_manifest
+        assert loaded_manifest["backup_size_bytes"] == success["backup_size_bytes"], loaded_manifest
+        assert loaded_manifest["backup_method"] == "sqlite_online_backup", loaded_manifest
+        assert loaded_manifest["retention_class"] == "manual_checkpoint", loaded_manifest
+        assert loaded_manifest["retention_until"], loaded_manifest
+        assert loaded_manifest["protected_from_auto_delete"] is True, loaded_manifest
+        assert loaded_manifest["restore_drill_status"] == "pending", loaded_manifest
+        assert loaded_manifest["raw_response_saved"] is False, loaded_manifest
+        assert loaded_manifest["secrets_saved"] is False, loaded_manifest
+        assert loaded_manifest["privacy_fields_redacted"] is True, loaded_manifest
+        assert loaded_manifest["sensitive_scan_passed"] is True, loaded_manifest
+        assert loaded_manifest["operation_audit_correlation_id"] == "backup-1g-correlation-safe-fixture", loaded_manifest
+
+        restore_manifest_gate = _validate_backup_manifest_for_restore_dry_run(loaded_manifest, backup_path)
+        assert restore_manifest_gate["status"] == "restore_dry_run_manifest_valid", restore_manifest_gate
+
+        duplicate = create_local_backup(**{
+            **base_kwargs,
+            "allow_non_default_source": True,
+            "allow_custom_backup_root": True,
+        })
+        assert duplicate["skip_reason"] == "backup_or_manifest_already_exists", duplicate
+        assert duplicate["backup_created"] is False, duplicate
+        assert duplicate["manifest_written"] is False, duplicate
+
+        manifest_text = json.dumps(loaded_manifest, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert marker not in manifest_text, manifest_text
+        for forbidden in [
+            "authorization",
+            "headers",
+            "signature",
+            "bcrypt",
+            "clientsecret",
+            "rawresponse",
+            "channelno",
+            "productorderid",
+            "buyername",
+            "receivername",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+        ]:
+            assert forbidden not in manifest_text, manifest_text
+
+        source_after = {
+            "size": source_db.stat().st_size,
+            "sha256": _sha256_file(source_db),
+        }
+        assert source_after == source_before, {
+            "before": source_before,
+            "after": source_after,
+        }
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("real local backup helper implementation: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -9793,6 +9985,7 @@ def verify_git_tracking() -> None:
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
         "M  backend/scripts/verify_all.py",
+        "?? backend/scripts/create_local_backup.py",
         " M backend/scripts/verify_stage_1c.py",
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
@@ -9953,6 +10146,7 @@ def main() -> None:
         verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()
         verify_backup_manifest_mock_implementation_gate()
+        verify_real_local_backup_helper_implementation()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()
