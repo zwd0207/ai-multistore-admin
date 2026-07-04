@@ -1743,3 +1743,33 @@ The future invitation checklist readonly route remains plan-only.
 The order batch execution approval mock gate is documented in `PHASE_NAVER_ORDER_BATCH_2B_ORDER_BATCH_EXECUTION_APPROVAL_MOCK_GATE.md`.
 
 Codex1 now verifies future Naver order batch execution approval readiness while keeping actual execution closed.
+
+## Phase ERP-Batch-2M - Approval Decision Readonly API Frontend Integration Plan
+
+The frontend integration plan is documented in `PHASE_ERP_BATCH_2M_APPROVAL_DECISION_READONLY_API_FRONTEND_INTEGRATION_PLAN.md`.
+
+Orders should consume the approval-decision readonly API as review evidence only. It must not add an execution button or imply that formal product/order batch sync is open.
+
+## Phase ERP-Batch-2N - Approval Decision Readonly API Frontend Integration
+
+The frontend integration is documented in `PHASE_ERP_BATCH_2N_APPROVAL_DECISION_READONLY_API_FRONTEND_INTEGRATION.md`.
+
+Codex2 Orders now calls the route-backed approval-decision readonly check through `dataProvider`, with a mock fallback for mock data mode. The panel shows business review readiness while keeping execution closed and technical flags folded.
+
+## Phase ERP-Multistore-2I - Invitation Approval Checklist Readonly API Local Route Mock Gate
+
+The local route mock gate is documented in `PHASE_ERP_MULTISTORE_2I_INVITATION_APPROVAL_CHECKLIST_READONLY_API_LOCAL_ROUTE_MOCK_GATE.md`.
+
+Codex1 now verifies the invitation approval checklist readonly route boundary before exposing it.
+
+## Phase ERP-Multistore-2J - Invitation Approval Checklist Readonly API Local Implementation
+
+The local implementation is documented in `PHASE_ERP_MULTISTORE_2J_INVITATION_APPROVAL_CHECKLIST_READONLY_API_LOCAL_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/permissions/user-invitation/approval-checklist/readonly-check` as a readonly review route. It does not create users, send invitations, create sessions, assign roles, write memberships, or write audit rows.
+
+## Phase Naver-Order-Batch-2C - Order Batch Execution Approval Readonly UI Plan
+
+The readonly UI plan is documented in `PHASE_NAVER_ORDER_BATCH_2C_ORDER_BATCH_EXECUTION_APPROVAL_READONLY_UI_PLAN.md`.
+
+Future order batch execution approval UI must show checklist readiness without implying execution approval. Naver order batch execution remains closed.

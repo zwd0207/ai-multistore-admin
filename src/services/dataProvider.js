@@ -960,6 +960,63 @@ function adaptBatchApprovalAuditEvidenceResult(data = {}) {
   };
 }
 
+function adaptBatchApprovalDecisionReadonlyResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'ERP-Batch-2L',
+    status: data.status || 'blocked',
+    decisionStatus: data.decision_status || data.decisionStatus || 'blocked',
+    skipReason: data.skip_reason || data.skipReason || null,
+    businessMessage: data.business_message || data.businessMessage || '',
+    nextAction: data.next_action || data.nextAction || '',
+    evidenceCount: Number(data.evidence_count ?? data.evidenceCount ?? 0),
+    storeIds: Array.isArray(data.store_ids) ? data.store_ids : (Array.isArray(data.storeIds) ? data.storeIds : []),
+    syncKinds: Array.isArray(data.sync_kinds) ? data.sync_kinds : (Array.isArray(data.syncKinds) ? data.syncKinds : []),
+    requiredActions: Array.isArray(data.required_actions) ? data.required_actions : (Array.isArray(data.requiredActions) ? data.requiredActions : []),
+    requiredDecisionFlags: Array.isArray(data.required_decision_flags)
+      ? data.required_decision_flags
+      : (Array.isArray(data.requiredDecisionFlags) ? data.requiredDecisionFlags : []),
+    missingDecisionFlags: Array.isArray(data.missing_decision_flags)
+      ? data.missing_decision_flags
+      : (Array.isArray(data.missingDecisionFlags) ? data.missingDecisionFlags : []),
+    requiredApiFlags: Array.isArray(data.required_api_flags)
+      ? data.required_api_flags
+      : (Array.isArray(data.requiredApiFlags) ? data.requiredApiFlags : []),
+    missingApiFlags: Array.isArray(data.missing_api_flags)
+      ? data.missing_api_flags
+      : (Array.isArray(data.missingApiFlags) ? data.missingApiFlags : []),
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    executionApproved: Boolean(data.execution_approved ?? data.executionApproved),
+    decisionRecordPlanned: Boolean(data.decision_record_planned ?? data.decisionRecordPlanned),
+    backupManifestVerified: Boolean(data.backup_manifest_verified ?? data.backupManifestVerified),
+    rollbackReportReady: Boolean(data.rollback_report_ready ?? data.rollbackReportReady),
+    permissionGateVerified: Boolean(data.permission_gate_verified ?? data.permissionGateVerified),
+    readonlyEvidenceFresh: Boolean(data.readonly_evidence_fresh ?? data.readonlyEvidenceFresh),
+    fieldWhitelistVerified: Boolean(data.field_whitelist_verified ?? data.fieldWhitelistVerified),
+    duplicateCheckPassed: Boolean(data.duplicate_check_passed ?? data.duplicateCheckPassed),
+    sensitiveScanPassed: Boolean(data.sensitive_scan_passed ?? data.sensitiveScanPassed),
+    auditCorrelationPlanned: Boolean(data.audit_correlation_planned ?? data.auditCorrelationPlanned),
+    operationAuditRowsPlanned: data.operation_audit_rows_planned !== false && data.operationAuditRowsPlanned !== false,
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    timelineEventsWritten: Boolean(data.timeline_events_written ?? data.timelineEventsWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || '',
+  };
+}
+
 function adaptProductRollbackReadonlyReportResult(data = {}) {
   return {
     ...data,
@@ -1110,6 +1167,104 @@ function mockBatchApprovalAuditEvidence(payload = {}) {
   });
 }
 
+function mockBatchApprovalDecisionReadonly(payload = {}) {
+  const readonlyEvidence = payload.readonly_evidence || payload.readonlyEvidence || {};
+  const approvalAuditEvidence = payload.approval_audit_evidence || payload.approvalAuditEvidence || {};
+  const decisionContext = payload.decision_context || payload.decisionContext || {};
+  const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('productorderid')
+    || JSON.stringify(payload).toLowerCase().includes('rawresponse');
+  if (hasSensitiveMarker) {
+    return adaptBatchApprovalDecisionReadonlyResult({
+      phase: 'ERP-Batch-2N',
+      status: 'blocked',
+      decision_status: 'blocked',
+      skip_reason: 'formal_batch_decision_sensitive_field_blocked',
+      execution_approved: false,
+      operation_audit_rows_written: false,
+      real_database_written: false,
+      orders_written: false,
+      products_written: false,
+      sync_log_written: false,
+      capability_tested_success_written: false,
+      formal_sync_open: false,
+      public_endpoint_enabled: false,
+      privacy_fields_redacted: true,
+    });
+  }
+  const items = Array.isArray(readonlyEvidence.items) ? readonlyEvidence.items : [];
+  const storeIds = [...new Set(items.map((item) => Number(item.store_id ?? item.storeId)).filter(Boolean))];
+  const syncKinds = [...new Set(items.map((item) => item.sync_kind || item.syncKind).filter(Boolean))];
+  const requiredActions = Array.isArray(approvalAuditEvidence.required_actions)
+    ? approvalAuditEvidence.required_actions
+    : (Array.isArray(approvalAuditEvidence.requiredActions) ? approvalAuditEvidence.requiredActions : []);
+  return adaptBatchApprovalDecisionReadonlyResult({
+    phase: 'ERP-Batch-2N',
+    status: 'formal_batch_approval_decision_readonly_api_ready',
+    decision_status: 'ready_for_local_readonly_review',
+    business_message: '批量同步审批决策只读检查已完成。当前只展示人工复核材料，不批准执行，也不写入商品或订单。',
+    next_action: '继续由管理员复核备份、权限、回读、审计和敏感扫描证据；执行写入必须另开阶段。',
+    evidence_count: Number(readonlyEvidence.evidence_count ?? readonlyEvidence.evidenceCount ?? items.length),
+    store_ids: storeIds.length ? storeIds : (Array.isArray(decisionContext.store_ids) ? decisionContext.store_ids : []),
+    sync_kinds: syncKinds,
+    required_actions: requiredActions,
+    required_decision_flags: [
+      'decision_record_planned',
+      'human_approval_required',
+      'backup_manifest_verified',
+      'rollback_report_ready',
+      'permission_gate_verified',
+      'readonly_evidence_fresh',
+      'field_whitelist_verified',
+      'duplicate_check_passed',
+      'sensitive_scan_passed',
+      'post_write_readback_required',
+      'audit_correlation_planned',
+      'formal_sync_remains_closed',
+    ],
+    missing_decision_flags: [],
+    required_api_flags: [
+      'readonly_api_contract_planned',
+      'business_wording_required',
+      'technical_details_folded',
+      'execution_button_excluded',
+      'write_endpoint_excluded',
+      'sensitive_fields_hidden_from_main_page',
+      'route_requires_separate_implementation',
+      'formal_sync_remains_closed',
+    ],
+    missing_api_flags: [],
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    execution_approved: false,
+    decision_record_planned: true,
+    backup_manifest_verified: true,
+    rollback_report_ready: true,
+    permission_gate_verified: true,
+    readonly_evidence_fresh: true,
+    field_whitelist_verified: true,
+    duplicate_check_passed: true,
+    sensitive_scan_passed: true,
+    audit_correlation_planned: true,
+    operation_audit_rows_planned: true,
+    operation_audit_rows_written: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    timeline_events_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    formal_order_sync_open: false,
+    formal_product_sync_open: false,
+    platform_writes_enabled: false,
+    route_path: '/api/v1/batch/approval-decision/readonly-check',
+  });
+}
+
 function mockNaverProductRollbackReadonlyReport(payload = {}) {
   const gate = payload.rollback_drill_gate || payload.rollbackDrillGate || {};
   const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('rawresponse')
@@ -1196,6 +1351,39 @@ function toBatchApprovalReadonlyEvidencePayload(readonlyEvidence = {}) {
         ? item.changedFieldNames
         : (Array.isArray(item.changed_field_names) ? item.changed_field_names : []),
     })),
+  };
+}
+
+function toBatchApprovalAuditEvidencePayload(approvalAuditEvidence = {}) {
+  return {
+    status: approvalAuditEvidence.status || 'batch_approval_audit_evidence_ready',
+    formal_sync_open: Boolean(approvalAuditEvidence.formalSyncOpen ?? approvalAuditEvidence.formal_sync_open),
+    real_database_written: Boolean(approvalAuditEvidence.realDatabaseWritten ?? approvalAuditEvidence.real_database_written),
+    orders_written: Boolean(approvalAuditEvidence.ordersWritten ?? approvalAuditEvidence.orders_written),
+    products_written: Boolean(approvalAuditEvidence.productsWritten ?? approvalAuditEvidence.products_written),
+    sync_log_written: Boolean(approvalAuditEvidence.syncLogWritten ?? approvalAuditEvidence.sync_log_written),
+    capability_tested_success_written: Boolean(
+      approvalAuditEvidence.capabilityTestedSuccessWritten ?? approvalAuditEvidence.capability_tested_success_written,
+    ),
+    operation_audit_rows_written: Boolean(
+      approvalAuditEvidence.operationAuditRowsWritten ?? approvalAuditEvidence.operation_audit_rows_written,
+    ),
+    operation_audit_rows_planned: approvalAuditEvidence.operationAuditRowsPlanned
+      ?? approvalAuditEvidence.operation_audit_rows_planned
+      ?? true,
+    privacy_fields_redacted: approvalAuditEvidence.privacyFieldsRedacted
+      ?? approvalAuditEvidence.privacy_fields_redacted
+      ?? true,
+    raw_response_saved: Boolean(approvalAuditEvidence.rawResponseSaved ?? approvalAuditEvidence.raw_response_saved),
+    store_ids: Array.isArray(approvalAuditEvidence.storeIds)
+      ? approvalAuditEvidence.storeIds
+      : (Array.isArray(approvalAuditEvidence.store_ids) ? approvalAuditEvidence.store_ids : []),
+    sync_kinds: Array.isArray(approvalAuditEvidence.syncKinds)
+      ? approvalAuditEvidence.syncKinds
+      : (Array.isArray(approvalAuditEvidence.sync_kinds) ? approvalAuditEvidence.sync_kinds : []),
+    required_actions: Array.isArray(approvalAuditEvidence.requiredActions)
+      ? approvalAuditEvidence.requiredActions
+      : (Array.isArray(approvalAuditEvidence.required_actions) ? approvalAuditEvidence.required_actions : []),
   };
 }
 
@@ -1342,6 +1530,18 @@ const sourceMethods = {
     };
     if (!isBackendSource) return mockBatchApprovalAuditEvidence(request);
     return adaptBatchApprovalAuditEvidenceResult(await backendApi.checkBatchApprovalAuditEvidence(request));
+  },
+  checkBatchApprovalDecisionReadonly: async (payload = {}) => {
+    const request = {
+      readonly_evidence: toBatchApprovalReadonlyEvidencePayload(payload.readonlyEvidence || payload.readonly_evidence || {}),
+      approval_audit_evidence: toBatchApprovalAuditEvidencePayload(
+        payload.approvalAuditEvidence || payload.approval_audit_evidence || {},
+      ),
+      decision_context: payload.decisionContext || payload.decision_context || {},
+      readonly_api_context: payload.readonlyApiContext || payload.readonly_api_context || {},
+    };
+    if (!isBackendSource) return mockBatchApprovalDecisionReadonly(request);
+    return adaptBatchApprovalDecisionReadonlyResult(await backendApi.checkBatchApprovalDecisionReadonly(request));
   },
   getNaverProductRollbackReadonlyReport: async (payload = {}) => {
     const request = {

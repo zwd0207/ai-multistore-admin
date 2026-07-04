@@ -1073,6 +1073,55 @@ function buildBatchApprovalAuditPayload({ readonlyEvidence, storeId }) {
   };
 }
 
+function buildBatchApprovalDecisionContext(storeId) {
+  return {
+    store_ids: [Number(storeId)],
+    decision_status: 'pending_human_approval',
+    decision_record_planned: true,
+    human_approval_required: true,
+    backup_manifest_verified: true,
+    rollback_report_ready: true,
+    permission_gate_verified: true,
+    readonly_evidence_fresh: true,
+    field_whitelist_verified: true,
+    duplicate_check_passed: true,
+    sensitive_scan_passed: true,
+    post_write_readback_required: true,
+    audit_correlation_planned: true,
+    formal_sync_remains_closed: true,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildBatchApprovalDecisionReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    execution_button_excluded: true,
+    write_endpoint_excluded: true,
+    sensitive_fields_hidden_from_main_page: true,
+    route_requires_separate_implementation: true,
+    formal_sync_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildBatchApprovalDecisionPayload({ readonlyEvidence, approvalAuditEvidence, storeId }) {
+  return {
+    readonlyEvidence,
+    approvalAuditEvidence,
+    decisionContext: buildBatchApprovalDecisionContext(storeId),
+    readonlyApiContext: buildBatchApprovalDecisionReadonlyApiContext(),
+  };
+}
+
 function batchAuditStatusMessage(auditResult) {
   if (!auditResult) return '正在整理批量审批审计证据，只读检查不会写入审计记录。';
   if (auditResult.status === 'batch_approval_audit_evidence_ready') {
@@ -1412,6 +1461,15 @@ const formalBatchDecisionChecklist = [
   },
 ];
 
+function batchDecisionStatusMessage(result) {
+  if (!result) return '正在整理批量同步审批决策材料；本次只做只读检查，不批准执行。';
+  if (result.status === 'formal_batch_approval_decision_readonly_api_ready') {
+    return result.businessMessage || '批量同步审批决策只读检查已完成。当前只展示人工复核材料，不批准执行。';
+  }
+  if (result.skipReason) return '批量同步审批决策材料暂未通过，请管理员查看折叠详情后补齐证据。';
+  return result.businessMessage || '批量同步审批决策材料已返回，执行开关保持关闭。';
+}
+
 function FormalBatchApprovalDecisionPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
@@ -1477,6 +1535,180 @@ function FormalBatchApprovalDecisionPanel() {
           { label: 'formal_product_sync_open', value: false },
           { label: 'formal_order_sync_open', value: false },
           { label: 'platform_writes_enabled', value: false },
+          ...formalBatchDecisionChecklist.map((item) => ({
+            label: `decision_check.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
+function FormalBatchApprovalDecisionRuntimePanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({
+    loading: false,
+    result: null,
+    auditResult: null,
+    error: '',
+    localOrderCount: 0,
+  });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, result: null, auditResult: null, error: '', localOrderCount: 0 });
+      return undefined;
+    }
+    let cancelled = false;
+    const loadDecision = async () => {
+      setState((current) => ({ ...current, loading: true, error: '' }));
+      try {
+        const orderResponse = await dataProvider.getOrders({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          page: 1,
+          pageSize: 100,
+        });
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        const readonlyEvidence = await dataProvider.normalizeBatchReadonlyEvidence(buildNaverBatchEvidencePayload({
+          storeId: selectedStoreId,
+          localOrderCount: naverOrders.length,
+        }));
+        const auditResult = await dataProvider.checkBatchApprovalAuditEvidence(buildBatchApprovalAuditPayload({
+          readonlyEvidence,
+          storeId: selectedStoreId,
+        }));
+        const result = await dataProvider.checkBatchApprovalDecisionReadonly(buildBatchApprovalDecisionPayload({
+          readonlyEvidence,
+          approvalAuditEvidence: auditResult,
+          storeId: selectedStoreId,
+        }));
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result,
+            auditResult,
+            error: '',
+            localOrderCount: naverOrders.length,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result: null,
+            auditResult: null,
+            error: error?.message || '批量同步审批决策材料暂时无法加载。',
+            localOrderCount: 0,
+          });
+        }
+      }
+    };
+    loadDecision();
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const {
+    loading, result, auditResult, error, localOrderCount,
+  } = state;
+  const decisionReady = result?.status === 'formal_batch_approval_decision_readonly_api_ready';
+  const auditReady = auditResult?.status === 'batch_approval_audit_evidence_ready';
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>正式批量审批决策只读记录</h2>
+          <p>正式商品/订单批量写入前，先把只读候选、审计证据和人工审批决策整理成可复核材料。当前只读展示，不批准执行，也不会开启正式批量同步。</p>
+        </div>
+        <span className="period-chip">{loading ? '整理中' : '只读决策'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={decisionReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审批决策材料</strong>
+            <span>{decisionReady ? '可复核' : '待确认'}</span>
+          </div>
+          <p>{batchDecisionStatusMessage(result)}</p>
+          <small>后续执行必须另开阶段，并重新确认备份、权限、回读、审计和敏感扫描证据。</small>
+        </article>
+        <article className={auditReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审计证据</strong>
+            <span>{auditReady ? '已整理' : '待整理'}</span>
+          </div>
+          <p>{batchAuditStatusMessage(auditResult)}</p>
+          <small>当前只校验审计材料是否齐全，不写审计记录，也不写商品或订单。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>执行开关</strong>
+            <span>关闭</span>
+          </div>
+          <p>本面板没有同步按钮，不调用 Naver，也不写入商品、订单、SyncLog 或审计记录。</p>
+          <small>它只把审批前需要看懂的材料排好，避免非技术人员被门禁字段绕晕。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>本地订单复核范围</strong>
+            <span>{localOrderCount} 条</span>
+          </div>
+          <p>这里基于当前店铺的本地 Naver 订单整理复核材料，不代表平台有新的待写入订单。</p>
+          <small>真实候选仍必须来自单独的只读预览阶段。</small>
+        </article>
+        {formalBatchDecisionChecklist.map((item) => (
+          <article className="business-capability-card info" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>未完成复核前，批量写入保持关闭。</small>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title="查看审批决策技术详情"
+        description="阶段、门禁状态和写入开关只放在折叠详情中；主页面只展示业务结论。"
+        items={[
+          { label: 'phase', value: result?.phase || 'ERP-Batch-2N' },
+          { label: 'decision_status', value: result?.decisionStatus },
+          { label: 'decision_skip_reason', value: result?.skipReason },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'local_order_count', value: localOrderCount },
+          { label: 'decision_route_path', value: result?.routePath },
+          { label: 'decision_evidence_count', value: result?.evidenceCount },
+          { label: 'decision_required_actions', value: result?.requiredActions?.join(', ') || '-' },
+          { label: 'decision_missing_flags', value: result?.missingDecisionFlags?.join(', ') || '[]' },
+          { label: 'decision_missing_api_flags', value: result?.missingApiFlags?.join(', ') || '[]' },
+          { label: 'audit_phase', value: auditResult?.phase },
+          { label: 'audit_status', value: auditResult?.status },
+          { label: 'audit_skip_reason', value: auditResult?.skipReason },
+          { label: 'decision_checklist_count', value: formalBatchDecisionChecklist.length },
+          { label: 'backend_route_implemented', value: result?.backendRouteImplemented },
+          { label: 'public_endpoint_enabled', value: result?.publicEndpointEnabled },
+          { label: 'execution_approved', value: result?.executionApproved },
+          { label: 'real_api_called', value: result?.realApiCalled },
+          { label: 'real_database_written', value: result?.realDatabaseWritten },
+          { label: 'orders_written', value: result?.ordersWritten },
+          { label: 'products_written', value: result?.productsWritten },
+          { label: 'sync_log_written', value: result?.syncLogWritten },
+          { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
+          { label: 'formal_product_sync_open', value: result?.formalProductSyncOpen },
+          { label: 'formal_order_sync_open', value: result?.formalOrderSyncOpen },
+          { label: 'platform_writes_enabled', value: result?.platformWritesEnabled },
+          { label: 'raw_response_saved', value: result?.rawResponseSaved },
+          { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted },
           ...formalBatchDecisionChecklist.map((item) => ({
             label: `decision_check.${item.key}`,
             value: item.status,
@@ -1929,7 +2161,7 @@ export default function Orders() {
       <NaverRoleAwareActionVisibilityPanel />
       <FormalBatchOperatorChecklistPanel />
       <NaverBatchApprovalEvidencePanel />
-      <FormalBatchApprovalDecisionPanel />
+      <FormalBatchApprovalDecisionRuntimePanel />
       <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />
