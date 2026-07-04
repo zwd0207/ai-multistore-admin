@@ -1646,3 +1646,43 @@ public_endpoint_enabled=false
 The role/permission model includes planning keys `products.batch_sync_write`, `orders.batch_sync_write`, and `orders.refresh_batch_write`. These keys are not production login, not active user assignment, and not a formal sync opening.
 
 The contract continues to prohibit storing or returning tokens, Authorization values, headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver privacy, phones, addresses, or zip codes.
+
+### Readonly Evidence Planning Contract
+
+ERP-Batch-1C plans a future readonly evidence API for formal batch approval screens. This route is not implemented yet and must not be treated as a write path.
+
+Future evidence responses may include safe fields only:
+
+```text
+safe evidence id
+store id
+platform
+sync kind
+readonly window label
+candidate count
+would_create
+would_update
+would_refresh_only
+would_skip
+changed_field_names
+duplicate_check_passed
+field_whitelist_verified
+backup_required
+permission_required
+audit_required
+business_message
+next_action
+```
+
+The current readonly evidence is still produced by existing protected preview routes:
+
+```text
+POST /api/v1/sync/orders/naver/preview
+POST /api/v1/sync/products/naver/preview
+```
+
+Naver-Order-Batch-1B used the order preview route with `real_preview=true`, `include_detail=true`, and `real_sync=false`. The protected endpoint remains limited to `page=1,size=1`, so the current batch-candidate window is one candidate at a time.
+
+Naver-Product-Batch-1B used the product preview route with `real_preview=true` and `real_sync=false`. `page=1,size=5` observed stock-quantity changes on 3 existing products; `page=2,size=5` returned empty. This evidence requires manual review before any later write phase.
+
+No evidence route may include token, Authorization, headers, signature, bcrypt input, client secret, raw response, full channel id, full product/order id, full buyer or receiver privacy, phone, address, or zip code.

@@ -990,3 +990,11 @@ These permissions are metadata for gate planning. They do not create users, sess
 The local seed was applied after a fresh database backup. Current auth metadata counts are `erp_roles=5`, `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
 
 Naver-Order-Batch-1A documents the future order batch refresh path. Naver-Product-Batch-1A documents the future product batch sync path. ERP-Multistore-1A documents the large-scale multi-store production model. All three remain planning/gate phases; platform shipment, cancel, return, exchange, refund, settlement, customer service, mail, appeal, and AI automation writes remain closed.
+
+ERP-Batch-1C and ERP-Batch-1D plan the future readonly evidence API and approval UI for formal batch sync. No new execution endpoint is open yet.
+
+Naver-Order-Batch-1B uses the existing protected Naver order preview route in readonly mode only. A recent 3-day KST window returned HTTP `200`, `preview_status=success`, safe hash `id-hash-192b9c67e8`, and `local_sync_status=not_requested`. No local order write, product write, SyncLog write, tested-success write, audit write, or timeline event write occurred.
+
+Naver-Product-Batch-1B uses the existing protected Naver product preview route in readonly mode only. `page=1,size=5` returned `would_create=0`, `would_update=3`, `would_refresh_only=2`, `would_skip=0`, and changed field `stock_quantity`. `page=2,size=5` returned `success_empty`. No product write occurred. The observed stock changes are manual-review evidence, not write approval.
+
+ERP-Multistore-1B plans store membership assignment approval only. It does not create users, create memberships, activate login, or enable multi-store production operation.
