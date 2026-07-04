@@ -737,6 +737,12 @@ The restore verification dry-run is documented in `PHASE_ERP_BACKUP_1C_RESTORE_V
 
 ERP-Backup-1C adds private `verify_all.py` coverage for a future restore verification workflow. It creates a temporary SQLite fixture, temporary backup copy, safe manifest, and temporary restore target, then verifies SHA-256, file size, retention class, safety flags, sensitive-field rejection, `PRAGMA integrity_check`, expected tables, and restored row counts. It blocks the production database path as a restore target and confirms the real `backend/codex1.db` is unchanged. It does not create production backups, restore the real database, delete backups, modify schema, write business data, call platform APIs, modify runtime UI, or open any formal sync.
 
+## Phase ERP-Backup-1D - Real Backup Manifest Implementation Plan
+
+The real backup manifest implementation plan is documented in `PHASE_ERP_BACKUP_1D_REAL_BACKUP_MANIFEST_IMPLEMENTATION_PLAN.md`.
+
+ERP-Backup-1D is planning-only. It defines the future manifest writer contract for real `backend/codex1.db` backups: required fields, computed hash/size/integrity data, path safety, atomic UTF-8 JSON writes, baseline counts, retention defaults, sensitive-field boundaries, and future audit correlation. It does not create backup files, write manifest files, restore a database, delete backups, modify schema, write local data, call platform APIs, modify runtime UI, or open formal sync.
+
 ## Phase ERP-UX-1A - Frontend Production Usability Plan
 
 The frontend production usability plan is documented in `PHASE_ERP_UX_1A_FRONTEND_PRODUCTION_USABILITY_PLAN.md`.
