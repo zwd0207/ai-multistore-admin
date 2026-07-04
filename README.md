@@ -1713,3 +1713,33 @@ Codex2 Accounts now shows a business-readable checklist for backup, audit eviden
 The formal order batch execution boundary is documented in `PHASE_NAVER_ORDER_BATCH_2A_FORMAL_ORDER_BATCH_EXECUTION_APPROVAL_BOUNDARY_PLAN.md`.
 
 Future Naver order batch execution still requires fresh readonly candidates, backup, store-scoped approval, permission gates, privacy checks, audit chain, readback, and rollback planning.
+
+## Phase ERP-Batch-2K - Formal Batch Approval Decision Readonly API Local Route Mock Gate
+
+The local route mock gate is documented in `PHASE_ERP_BATCH_2K_FORMAL_BATCH_APPROVAL_DECISION_READONLY_API_LOCAL_ROUTE_MOCK_GATE.md`.
+
+Codex1 now verifies the planned approval-decision readonly route boundary before exposing it.
+
+## Phase ERP-Batch-2L - Formal Batch Approval Decision Readonly API Local Implementation
+
+The local implementation is documented in `PHASE_ERP_BATCH_2L_FORMAL_BATCH_APPROVAL_DECISION_READONLY_API_LOCAL_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/batch/approval-decision/readonly-check` as a local readonly review route. It does not approve execution or write data.
+
+## Phase ERP-Multistore-2G - Invitation Approval Checklist Readonly API Mock Gate
+
+The invitation checklist readonly API mock gate is documented in `PHASE_ERP_MULTISTORE_2G_INVITATION_APPROVAL_CHECKLIST_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now verifies the planned invitation checklist readonly API contract without exposing a route.
+
+## Phase ERP-Multistore-2H - Invitation Approval Checklist Readonly API Local Implementation Plan
+
+The local implementation plan is documented in `PHASE_ERP_MULTISTORE_2H_INVITATION_APPROVAL_CHECKLIST_READONLY_API_LOCAL_IMPLEMENTATION_PLAN.md`.
+
+The future invitation checklist readonly route remains plan-only.
+
+## Phase Naver-Order-Batch-2B - Order Batch Execution Approval Mock Gate
+
+The order batch execution approval mock gate is documented in `PHASE_NAVER_ORDER_BATCH_2B_ORDER_BATCH_EXECUTION_APPROVAL_MOCK_GATE.md`.
+
+Codex1 now verifies future Naver order batch execution approval readiness while keeping actual execution closed.
