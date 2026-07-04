@@ -263,6 +263,34 @@ Next 5 recommended stages:
 4. `Phase ERP-Auth-1A: Role and permission model plan`
 5. `Phase ERP-Auth-1B: Store-scoped access gate mock`
 
+### Latest update after `Phase Naver-ERP-18D`
+
+- Project overall planning progress: about `61% - 68%`
+- Naver basic ERP loop progress: about `73% - 78%`
+- ERP real-user landing progress: about `65% - 72%`
+- Production version for long-term non-technical use: about `58% - 63%`
+
+Implemented in this update:
+
+- Reviewed whether 18C safe hash `id-hash-192b9c67e8` can enter the existing-order refresh write path.
+- Confirmed local store 8 has 3 real local Naver orders and 3 mock/test Naver rows.
+- Confirmed the 18C safe hash does not match an existing real local Naver order.
+- Blocked controlled order refresh write approval for this candidate.
+- Kept formal Naver order batch sync closed.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, mock-proven audit evidence, and readonly Naver order candidate classification.
+- Not suitable now: formal product/order batch sync, multi-user permissioned production use, large-scale multi-store production, automated shipment/cancel/return/exchange, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-ERP-19A: Selected new-order candidate approval plan`
+2. `Phase Naver-ERP-19B: Selected new-order readonly repeat`
+3. `Phase Naver-ERP-19C: Selected new-order single local write approval`
+4. `Phase Naver-ERP-19D: Selected new-order single local write with audit evidence`
+5. `Phase Naver-ERP-19E: Selected new-order post-write audit verification`
+
 ## 安全边界
 
 继续遵守：

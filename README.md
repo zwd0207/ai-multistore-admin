@@ -949,3 +949,9 @@ ERP-Audit-2D adds a private Codex1 mock gate for the production-shaped selected-
 The controlled order refresh readonly repeat is documented in `PHASE_NAVER_ERP_18C_ORDER_REFRESH_READONLY_REPEAT_WITH_BACKUP_EVIDENCE.md`.
 
 Naver-ERP-18C reruns the real Naver order preview in readonly mode after the current outbound IP was allowlisted. The request used `store_id=8`, `credential_id=7`, a recent 3-day KST window, `page=1`, `size=1`, `real_preview=true`, `include_detail=true`, `complete_field_preview=false`, and `real_sync=false`. Token, feed, and detail all returned HTTP 200, with safe hash `id-hash-192b9c67e8`, status `DELIVERED / 配送完成`, amount `499000 KRW`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and `address_saved=false`. Counts stayed unchanged: `orders_store8=6`, `products_store8=5`, `sync_logs_store8=1`, `tested_success_store8=8`, `operation_audit_logs=5`, and `order_status_events=0`. Formal order sync remains closed.
+
+## Phase Naver-ERP-18D - Controlled Order Refresh Small Write Approval
+
+The controlled order refresh small write approval review is documented in `PHASE_NAVER_ERP_18D_CONTROLLED_ORDER_REFRESH_SMALL_WRITE_APPROVAL.md`.
+
+Naver-ERP-18D does not approve a refresh write for the 18C candidate. Local readback showed that safe hash `id-hash-192b9c67e8` does not match an existing real local Naver order, while refresh writes are only for existing local orders. This phase did not call Naver, execute `real_sync=true`, write local data, write audit rows, change schema, or open formal order sync. The safe next direction is a separate selected new-order candidate approval plan if the operator wants to consider writing this candidate.
