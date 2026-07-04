@@ -1317,3 +1317,9 @@ Codex1 now has a private rollback drill mock gate for the controlled stock-only 
 The order batch readonly evidence API alignment is documented in `PHASE_NAVER_ORDER_BATCH_1C_ORDER_BATCH_READONLY_EVIDENCE_API_ALIGNMENT.md`.
 
 Order batch evidence now uses the same readonly evidence API shape as product batch evidence. It is only approval material; formal order batch sync remains closed.
+
+## Phase ERP-Batch-1K - Batch Approval UI Runtime Walkthrough
+
+The batch approval UI runtime walkthrough is documented in `PHASE_ERP_BATCH_1K_BATCH_APPROVAL_UI_RUNTIME_WALKTHROUGH.md`.
+
+ERP-Batch-1K verifies the Orders batch approval evidence panel in mock and backend data-source modes. The local backend on port `8012` was refreshed to the current Codex1 code so the evidence route is available. A small UI wording fix maps the backend evidence status to Chinese seller-facing copy on the main page; technical fields remain folded.

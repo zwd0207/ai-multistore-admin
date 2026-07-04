@@ -763,3 +763,30 @@ Next 5 recommended stages:
 3. `Phase ERP-Multistore-1H: Store membership readonly API local implementation plan`
 4. `Phase Naver-Product-Batch-1K: Product rollback drill readonly report plan`
 5. `Phase Naver-Order-Batch-1D: Order batch approval evidence UI walkthrough`
+
+### Latest update after `Phase ERP-Batch-1K`
+
+- Project overall planning progress: about `79% - 84%`
+- Naver basic ERP loop progress: about `86% - 91%`
+- ERP real-user landing progress: about `81% - 86%`
+- Production version for long-term non-technical use: about `75% - 80%`
+
+Implemented in this update:
+
+- Runtime-walked the Orders batch approval evidence panel in mock data-source mode.
+- Runtime-walked the same panel in backend data-source mode after refreshing local backend port `8012`.
+- Confirmed the evidence panel renders without white screen and does not show formal-sync-open wording.
+- Fixed the main evidence status copy so backend mode shows Chinese seller-facing wording instead of the backend English status message.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, mock-proven formal batch sync gate design, readonly evidence API normalization, approval evidence UI display, controlled stock-only local product update, and runtime mock checks for future store membership assignment.
+- Not suitable now: opening formal product/order batch sync, broad product writes, active multi-user login production use, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase ERP-Multistore-1G: Store membership readonly API mock gate`
+2. `Phase ERP-Multistore-1H: Store membership readonly API local implementation plan`
+3. `Phase Naver-Product-Batch-1K: Product rollback drill readonly report plan`
+4. `Phase Naver-Order-Batch-1D: Order batch approval evidence UI walkthrough`
+5. `Phase ERP-Batch-1L: Batch approval evidence backend wording cleanup`

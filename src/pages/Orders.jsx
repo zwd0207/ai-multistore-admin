@@ -982,6 +982,15 @@ function batchEvidenceChangeLabel(item = {}) {
   return fields.map((field) => batchEvidenceFieldLabels[field] || field).join('、');
 }
 
+function batchEvidenceStatusMessage(result) {
+  if (!result) return '正在整理只读证据，写入动作保持关闭。';
+  if (result.status === 'readonly_evidence_api_ready') {
+    return '批量同步只读证据已整理，本次不会同步或写入商品、订单。';
+  }
+  if (result.skipReason) return '只读证据暂未通过整理，请管理员在技术详情中查看原因。';
+  return '只读证据已返回，写入动作保持关闭。';
+}
+
 function buildNaverBatchEvidencePayload({ storeId, localOrderCount }) {
   const orderCount = Math.max(Number(localOrderCount || 0), 0);
   return {
@@ -1112,7 +1121,7 @@ function NaverBatchApprovalEvidencePanel() {
             <strong>审批材料状态</strong>
             <span>{hasEvidence ? '已整理' : '待确认'}</span>
           </div>
-          <p>{result?.businessMessage || '正在整理只读证据，写入动作保持关闭。'}</p>
+          <p>{batchEvidenceStatusMessage(result)}</p>
           <small>商品和订单的正式批量同步都仍然需要单独审批。</small>
         </article>
         {evidenceItems.map((item) => (
