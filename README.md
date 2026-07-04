@@ -826,3 +826,33 @@ ERP-UX-1J is planning-only. It defines a frontend last-line-of-defense redaction
 The TechnicalDetails safety hardening implementation is documented in `PHASE_ERP_UX_1K_TECHNICALDETAILS_SAFETY_HARDENING_IMPLEMENTATION.md`.
 
 ERP-UX-1K updates Codex2 runtime `TechnicalDetails` with strict default redaction. Folded administrator details now hide token, Authorization, headers, signatures, bcrypt/sign values, client secrets, raw response/body fields, full channel/product/order identifiers, buyer/receiver names and phones, and address-like fields. Safe diagnostics such as error codes, HTTP status, business hints, safe keyword flags, hashes, mapping versions, counts, booleans, source phases, and backup metadata can still appear in folded details. Logs before/after JSON is passed through the same redaction helper before rendering. This phase does not modify Codex1, call platform APIs, write local data, change database schema, or open formal product/order sync.
+
+## Phase ERP-Backup-1H - Backup Restore Drill Using 1G Manifest
+
+The backup restore drill using the 1G manifest is documented in `PHASE_ERP_BACKUP_1H_BACKUP_RESTORE_DRILL_USING_1G_MANIFEST.md`.
+
+ERP-Backup-1H adds `backend/scripts/restore_backup_dry_run.py` and verifies the existing 1G backup by copying it only to a temporary restore file, checking SHA-256, SQLite integrity, and baseline counts, then deleting the temporary copy. The real drill completed with `status=restore_dry_run_verified`, `real_restore_executed=false`, `production_db_touched=false`, and `backup_deleted=false`. This phase does not restore the real database, delete backups, write business data, call platform APIs, change schema, or open formal sync.
+
+## Phase ERP-Backup-1I - Backup List/Report Readonly Helper
+
+The backup list/report readonly helper is documented in `PHASE_ERP_BACKUP_1I_BACKUP_LIST_REPORT_READONLY_HELPER.md`.
+
+ERP-Backup-1I adds `backend/scripts/list_local_backups.py` for safe readonly backup manifest reporting. It lists approved-root manifests, validates required fields, reports existence and size match, abbreviates SHA-256, and returns safe counts, retention metadata, and safety booleans. The real report returned one valid manifest from ERP-Backup-1G with sensitive scan passed. It does not delete backups, restore databases, write audit rows, write business data, call platform APIs, change schema, or open formal sync.
+
+## Phase ERP-Audit-1W - Backup Creation Audit Integration Approval Plan
+
+The backup creation audit integration approval plan is documented in `PHASE_ERP_AUDIT_1W_BACKUP_CREATION_AUDIT_INTEGRATION_APPROVAL_PLAN.md`.
+
+ERP-Audit-1W is planning-only. It defines the future safe audit chain for real backup creation: `backup_planned`, `backup_created`, `backup_hash_verified`, `backup_integrity_verified`, and `backup_manifest_verified`. It does not write audit rows, create backups, restore databases, modify schema, write business data, call platform APIs, or open formal sync.
+
+## Phase ERP-Audit-1X - Backup Creation Audit Mock Gate
+
+The backup creation audit mock gate is documented in `PHASE_ERP_AUDIT_1X_BACKUP_CREATION_AUDIT_MOCK_GATE.md`.
+
+ERP-Audit-1X adds a private `write_backup_creation_audit_mock_gate(...)` helper in Codex1. It writes a five-row backup audit chain only inside the temporary `verify_all.py` database after private scope, manual approval, verified SHA-256, integrity, manifest, and safety flags pass. It does not write the real `operation_audit_logs` table, create backups, restore databases, write business data, call platform APIs, change schema, or open formal sync.
+
+## Phase Naver-ERP-18A - Controlled Order Refresh Backup Evidence Gate
+
+The controlled order refresh backup evidence gate is documented in `PHASE_NAVER_ERP_18A_ORDER_REFRESH_BACKUP_EVIDENCE_GATE.md`.
+
+Naver-ERP-18A adds a private backup-evidence wrapper around the existing Naver order refresh batch mock gate. Write-enabled paths are blocked unless safe backup evidence verifies SHA-256, SQLite integrity, manifest presence, and safety flags; readonly paths remain allowed without backup evidence because they do not write data. Verification runs only in the temporary database and proves no `products`, `SyncLog`, `ApiCapabilityTestResult`, or timeline event writes occur. It does not call Naver, write the real database, wire a public endpoint, or open formal Naver order sync.
