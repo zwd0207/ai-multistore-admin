@@ -22,15 +22,19 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "dashboard.read",
             "products.read",
             "products.preview",
+            "products.batch_sync_write",
             "orders.read",
             "orders.preview",
             "orders.local_write",
+            "orders.batch_sync_write",
             "orders.refresh_batch_write",
             "audit.read",
             "backup.read",
             "backup.create",
         },
         "sensitive_approval_actions": {
+            "products.batch_sync_write",
+            "orders.batch_sync_write",
             "orders.local_write",
             "orders.refresh_batch_write",
             "backup.create",
@@ -75,6 +79,8 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
 }
 
 SENSITIVE_ACTIONS = {
+    "products.batch_sync_write",
+    "orders.batch_sync_write",
     "orders.local_write",
     "orders.refresh_batch_write",
     "backup.create",

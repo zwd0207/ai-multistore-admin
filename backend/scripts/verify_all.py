@@ -10112,6 +10112,8 @@ def verify_role_permission_mock_gates() -> None:
 
     inventory = permission_service.role_permission_inventory()
     assert "owner" in inventory and "operator" in inventory and "viewer" in inventory, inventory
+    assert "products.batch_sync_write" in inventory["admin"]["sensitive_approval_actions"], inventory
+    assert "orders.batch_sync_write" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert "orders.refresh_batch_write" in inventory["admin"]["sensitive_approval_actions"], inventory
     assert inventory["operator"]["sensitive_approval_actions"] == [], inventory
 
@@ -10242,6 +10244,253 @@ def verify_role_permission_mock_gates() -> None:
         assert forbidden not in serialized, serialized
 
     print("role permission mock gates: ok")
+
+
+def verify_formal_batch_sync_production_gate() -> None:
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    from app.services import sync_service
+    from app.services.permission_service import VERIFICATION_SCOPE
+
+    admin_multi_store = {
+        "actor_id": "batch-admin",
+        "role": "admin",
+        "store_ids": [8, 9],
+    }
+    operator_store8 = {
+        "actor_id": "batch-operator",
+        "role": "operator",
+        "store_ids": [8],
+    }
+    readonly_evidence = {
+        "fresh_readonly_preview": True,
+        "real_sync": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "duplicate_check_passed": True,
+        "field_whitelist_verified": True,
+        "formal_sync_open": False,
+        "candidate_hash_count": 6,
+        "source_window_label": "mock readonly batch preview",
+    }
+    backup_evidence = {
+        "backup_sha256": "a" * 64,
+        "sqlite_integrity_check": "ok",
+        "backup_created": True,
+        "manifest_written": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "backup_path": "C:/safe-backups/codex1.db.backup-erp-batch-1b.db",
+    }
+
+    with SessionLocal() as db:
+        before_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+
+    no_approval = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_order_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=3,
+        batch_size=3,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=False,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert no_approval["skip_reason"] == "manual_approval_required", no_approval
+    assert no_approval["formal_sync_open"] is False, no_approval
+    assert no_approval["orders_written"] is False, no_approval
+
+    missing_backup = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_order_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=3,
+        batch_size=3,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=None,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert missing_backup["skip_reason"] == "backup_evidence_missing", missing_backup
+    assert missing_backup["backup_evidence_verified"] is False, missing_backup
+
+    sensitive_readonly = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_order_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=1,
+        batch_size=1,
+        readonly_evidence={**readonly_evidence, "productOrderId": "must-not-leak"},
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert sensitive_readonly["skip_reason"] == "readonly_evidence_sensitive_field_blocked", sensitive_readonly
+    assert sensitive_readonly["formal_sync_open"] is False, sensitive_readonly
+
+    operator_blocked = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_product_batch",
+        actor_context=operator_store8,
+        store_ids=[8],
+        candidate_count=2,
+        batch_size=2,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert operator_blocked["skip_reason"] == "permission_denied", operator_blocked
+    assert operator_blocked["permission_verified"] is False, operator_blocked
+
+    product_gate = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_product_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8, 9],
+        candidate_count=6,
+        batch_size=5,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert product_gate["status"] == "formal_batch_gate_ready_for_later_execution", product_gate
+    assert product_gate["target"] == "products", product_gate
+    assert product_gate["required_action"] == "products.batch_sync_write", product_gate
+    assert product_gate["target_store_count"] == 2, product_gate
+    assert product_gate["all_store_scopes_verified"] is True, product_gate
+    assert product_gate["permission_verified"] is True, product_gate
+    assert product_gate["approval_role_verified"] is True, product_gate
+    assert product_gate["readonly_evidence_verified"] is True, product_gate
+    assert product_gate["backup_evidence_verified"] is True, product_gate
+    assert product_gate["products_written"] is False, product_gate
+    assert product_gate["formal_product_sync_open"] is False, product_gate
+    assert product_gate["formal_sync_open"] is False, product_gate
+
+    order_gate = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_order_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=4,
+        batch_size=4,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert order_gate["status"] == "formal_batch_gate_ready_for_later_execution", order_gate
+    assert order_gate["target"] == "orders", order_gate
+    assert order_gate["required_action"] == "orders.batch_sync_write", order_gate
+    assert order_gate["orders_written"] is False, order_gate
+    assert order_gate["formal_order_sync_open"] is False, order_gate
+    assert order_gate["platform_writes_enabled"] is False, order_gate
+
+    oversized = sync_service._evaluate_formal_batch_sync_production_gate(
+        sync_kind="naver_product_batch",
+        actor_context=admin_multi_store,
+        store_ids=[8],
+        candidate_count=99,
+        batch_size=11,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=True,
+        audit_plan_ready=True,
+        rollback_plan_ready=True,
+        duplicate_protection_ready=True,
+        failure_isolation_ready=True,
+        multi_store_isolation_ready=True,
+        verification_scope=VERIFICATION_SCOPE,
+        write_requested=True,
+    )
+    assert oversized["skip_reason"] == "batch_size_limit_exceeded", oversized
+
+    with SessionLocal() as db:
+        after_counts = {
+            "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
+            "products": db.execute(text("SELECT COUNT(*) FROM products")).scalar_one(),
+            "sync_logs": db.execute(text("SELECT COUNT(*) FROM sync_logs")).scalar_one(),
+            "tested_success": db.execute(text(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE test_status = 'tested_success'"
+            )).scalar_one(),
+            "operation_audit_logs": db.execute(text("SELECT COUNT(*) FROM operation_audit_logs")).scalar_one(),
+        }
+    assert after_counts == before_counts, {"before": before_counts, "after": after_counts}
+
+    serialized = json.dumps(
+        {
+            "product_gate": product_gate,
+            "order_gate": order_gate,
+            "no_approval": no_approval,
+            "missing_backup": missing_backup,
+            "operator_blocked": operator_blocked,
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    for forbidden in [
+        "authorization:",
+        "client_secret",
+        "headers",
+        "signature",
+        "bcrypt",
+        "raw response",
+        "bearer ",
+        "productorderid",
+        "buyername",
+        "buyerphone",
+        "receivername",
+        "receiverphone",
+        "zipcode",
+    ]:
+        assert forbidden not in serialized, serialized
+
+    print("formal batch sync production gate: ok")
 
 
 def verify_auth_schema_mock_migration_gate() -> None:
@@ -10510,15 +10759,38 @@ def verify_auth_schema_mock_migration_gate() -> None:
                 }
 
         assert {"owner", "admin", "operator", "auditor", "viewer"} <= set(role_ids), role_ids
+        assert "products.batch_sync_write" in permission_ids, permission_ids
+        assert "orders.batch_sync_write" in permission_ids, permission_ids
         assert "orders.refresh_batch_write" in permission_ids, permission_ids
         assert "backup.create" in permission_ids, permission_ids
 
+        admin_product_batch_approval = db.execute(text("""
+            SELECT rp.can_approve_sensitive
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='admin' AND p.permission_key='products.batch_sync_write'
+        """)).scalar_one()
+        admin_order_batch_approval = db.execute(text("""
+            SELECT rp.can_approve_sensitive
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='admin' AND p.permission_key='orders.batch_sync_write'
+        """)).scalar_one()
         admin_refresh_approval = db.execute(text("""
             SELECT rp.can_approve_sensitive
             FROM erp_role_permissions rp
             JOIN erp_roles r ON r.id = rp.role_id
             JOIN erp_permissions p ON p.id = rp.permission_id
             WHERE r.role_key='admin' AND p.permission_key='orders.refresh_batch_write'
+        """)).scalar_one()
+        operator_product_batch_permission = db.execute(text("""
+            SELECT COUNT(*)
+            FROM erp_role_permissions rp
+            JOIN erp_roles r ON r.id = rp.role_id
+            JOIN erp_permissions p ON p.id = rp.permission_id
+            WHERE r.role_key='operator' AND p.permission_key='products.batch_sync_write'
         """)).scalar_one()
         operator_refresh_permission = db.execute(text("""
             SELECT COUNT(*)
@@ -10544,6 +10816,9 @@ def verify_auth_schema_mock_migration_gate() -> None:
               AND m.membership_status='active'
         """)).scalar_one()
         assert admin_refresh_approval == 1, admin_refresh_approval
+        assert admin_product_batch_approval == 1, admin_product_batch_approval
+        assert admin_order_batch_approval == 1, admin_order_batch_approval
+        assert operator_product_batch_permission == 0, operator_product_batch_permission
         assert operator_refresh_permission == 0, operator_refresh_permission
         assert store8_membership == 1, store8_membership
         assert store9_membership == 0, store9_membership
@@ -12523,6 +12798,7 @@ def main() -> None:
         verify_backup_report_readonly_local_api()
         verify_naver_order_refresh_backup_evidence_gate()
         verify_role_permission_mock_gates()
+        verify_formal_batch_sync_production_gate()
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
         verify_restore_runbook_mock_drill_gate()

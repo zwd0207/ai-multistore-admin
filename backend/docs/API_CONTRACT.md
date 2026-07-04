@@ -1583,3 +1583,66 @@ The helper must keep:
 ### Sensitive Boundary
 
 Local backup, restore, audit, and order-refresh gate responses must not include tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
+
+### Formal Batch Sync Gate Contract
+
+No public formal product/order batch sync endpoint is open yet.
+
+Phase ERP-Batch-1B adds only a private backend helper:
+
+```text
+_evaluate_formal_batch_sync_production_gate(...)
+```
+
+Allowed `sync_kind` values:
+
+```text
+naver_order_batch
+naver_order_refresh_batch
+naver_product_batch
+```
+
+The helper must require:
+
+- private verification scope
+- valid target store ids
+- positive candidate and batch counts
+- conservative batch-size limits
+- fresh readonly preview evidence
+- `real_sync=false`
+- `raw_response_saved=false`
+- `privacy_fields_redacted=true`
+- duplicate check passed
+- field whitelist verified
+- verified backup evidence
+- audit plan ready
+- rollback plan ready
+- duplicate protection ready
+- failure isolation ready
+- multi-store isolation ready
+- store-scoped permission and sensitive-action approval for every target store
+
+A passing helper result may return:
+
+```text
+status=formal_batch_gate_ready_for_later_execution
+```
+
+but must still keep:
+
+```text
+formal_sync_open=false
+formal_order_sync_open=false
+formal_product_sync_open=false
+platform_writes_enabled=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+real_api_called=false
+public_endpoint_enabled=false
+```
+
+The role/permission model includes planning keys `products.batch_sync_write`, `orders.batch_sync_write`, and `orders.refresh_batch_write`. These keys are not production login, not active user assignment, and not a formal sync opening.
+
+The contract continues to prohibit storing or returning tokens, Authorization values, headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver privacy, phones, addresses, or zip codes.

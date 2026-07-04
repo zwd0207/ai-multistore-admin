@@ -4572,6 +4572,269 @@ def _evaluate_naver_order_refresh_batch_with_backup_evidence_gate(
     return result
 
 
+FORMAL_BATCH_SYNC_GATE_KINDS = {
+    "naver_order_refresh_batch": {
+        "platform": "naver",
+        "target": "orders",
+        "required_action": "orders.refresh_batch_write",
+        "max_batch_size": 20,
+    },
+    "naver_order_batch": {
+        "platform": "naver",
+        "target": "orders",
+        "required_action": "orders.batch_sync_write",
+        "max_batch_size": 20,
+    },
+    "naver_product_batch": {
+        "platform": "naver",
+        "target": "products",
+        "required_action": "products.batch_sync_write",
+        "max_batch_size": 10,
+    },
+}
+
+
+def _formal_batch_sync_sensitive_marker_found(payload: object) -> bool:
+    serialized = json.dumps(payload, ensure_ascii=False, default=str).lower()
+    return any(
+        marker in serialized
+        for marker in (
+            "authorization:",
+            "bearer ",
+            "client_secret",
+            "access_token",
+            "refresh_token",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "rawresponse",
+            "buyername",
+            "buyerphone",
+            "receivername",
+            "receiverphone",
+            "detailedaddress",
+            "zipcode",
+            "channelno",
+            "productorderid",
+            "external_product_id_full",
+        )
+    )
+
+
+def _normalize_formal_batch_store_ids(store_ids: object) -> list[int] | None:
+    if not isinstance(store_ids, (list, tuple, set)) or not store_ids:
+        return None
+    normalized: list[int] = []
+    for store_id in store_ids:
+        try:
+            safe_store_id = int(store_id)
+        except (TypeError, ValueError):
+            return None
+        if safe_store_id <= 0:
+            return None
+        normalized.append(safe_store_id)
+    return sorted(set(normalized))
+
+
+def _validate_formal_batch_readonly_evidence(readonly_evidence: dict | None) -> dict:
+    result = {
+        "readonly_evidence_verified": False,
+        "skip_reason": None,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "real_sync": False,
+        "formal_sync_open": False,
+    }
+    if not isinstance(readonly_evidence, dict):
+        result["skip_reason"] = "readonly_evidence_missing"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(readonly_evidence):
+        result["skip_reason"] = "readonly_evidence_sensitive_field_blocked"
+        return result
+    if readonly_evidence.get("fresh_readonly_preview") is not True:
+        result["skip_reason"] = "fresh_readonly_preview_required"
+        return result
+    if readonly_evidence.get("real_sync") is True:
+        result["skip_reason"] = "real_sync_not_allowed_in_gate"
+        return result
+    if readonly_evidence.get("raw_response_saved") is not False:
+        result["skip_reason"] = "raw_response_saved_not_allowed"
+        return result
+    if readonly_evidence.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+    if readonly_evidence.get("duplicate_check_passed") is not True:
+        result["skip_reason"] = "duplicate_check_required"
+        return result
+    if readonly_evidence.get("field_whitelist_verified") is not True:
+        result["skip_reason"] = "field_whitelist_required"
+        return result
+    if readonly_evidence.get("formal_sync_open") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    result.update({
+        "readonly_evidence_verified": True,
+        "candidate_hash_count": int(readonly_evidence.get("candidate_hash_count") or 0),
+        "source_window_label": str(readonly_evidence.get("source_window_label") or "readonly preview").strip()[:120],
+    })
+    return result
+
+
+def _evaluate_formal_batch_sync_production_gate(
+    *,
+    sync_kind: str,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    audit_plan_ready: bool,
+    rollback_plan_ready: bool,
+    duplicate_protection_ready: bool,
+    failure_isolation_ready: bool,
+    multi_store_isolation_ready: bool,
+    verification_scope: str | None,
+    write_requested: bool = False,
+) -> dict:
+    """Private production gate model for formal batch sync planning; not wired to real sync."""
+
+    from app.services.permission_service import (
+        VERIFICATION_SCOPE,
+        evaluate_sensitive_action_approval_mock_gate,
+    )
+
+    config = FORMAL_BATCH_SYNC_GATE_KINDS.get(str(sync_kind or "").strip())
+    normalized_store_ids = _normalize_formal_batch_store_ids(store_ids)
+    result = {
+        "phase": "ERP-Batch-1B",
+        "formal_batch_sync_production_gate": True,
+        "sync_kind": sync_kind,
+        "platform": config["platform"] if config else None,
+        "target": config["target"] if config else None,
+        "required_action": config["required_action"] if config else None,
+        "status": "blocked",
+        "skip_reason": None,
+        "write_requested": bool(write_requested),
+        "manual_approval": bool(manual_approval),
+        "store_ids": normalized_store_ids or [],
+        "target_store_count": len(normalized_store_ids or []),
+        "candidate_count": candidate_count,
+        "batch_size": batch_size,
+        "max_batch_size": config["max_batch_size"] if config else None,
+        "readonly_evidence_verified": False,
+        "backup_evidence_verified": False,
+        "permission_verified": False,
+        "approval_role_verified": False,
+        "all_store_scopes_verified": False,
+        "audit_plan_ready": bool(audit_plan_ready),
+        "rollback_plan_ready": bool(rollback_plan_ready),
+        "duplicate_protection_ready": bool(duplicate_protection_ready),
+        "failure_isolation_ready": bool(failure_isolation_ready),
+        "multi_store_isolation_ready": bool(multi_store_isolation_ready),
+        "approval_gate_by_store": [],
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "real_database_written": False,
+        "real_api_called": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+        "public_endpoint_enabled": False,
+    }
+    if config is None:
+        result["skip_reason"] = "sync_kind_not_allowed"
+        return result
+    if verification_scope != VERIFICATION_SCOPE:
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if normalized_store_ids is None:
+        result["skip_reason"] = "store_ids_required"
+        return result
+    if len(normalized_store_ids) > 20:
+        result["skip_reason"] = "store_count_limit_exceeded"
+        return result
+    if not isinstance(candidate_count, int) or candidate_count <= 0:
+        result["skip_reason"] = "candidate_count_required"
+        return result
+    if not isinstance(batch_size, int) or batch_size <= 0:
+        result["skip_reason"] = "batch_size_required"
+        return result
+    if batch_size > int(config["max_batch_size"]):
+        result["skip_reason"] = "batch_size_limit_exceeded"
+        return result
+    if candidate_count < batch_size:
+        result["skip_reason"] = "candidate_count_less_than_batch_size"
+        return result
+
+    readonly_gate = _validate_formal_batch_readonly_evidence(readonly_evidence)
+    result["readonly_gate"] = readonly_gate
+    result["readonly_evidence_verified"] = bool(readonly_gate["readonly_evidence_verified"])
+    if not result["readonly_evidence_verified"]:
+        result["skip_reason"] = readonly_gate["skip_reason"]
+        return result
+
+    backup_gate = _validate_naver_order_refresh_backup_evidence(backup_evidence, require_backup=True)
+    result["backup_gate"] = backup_gate
+    result["backup_evidence_verified"] = bool(backup_gate["backup_evidence_verified"])
+    if not result["backup_evidence_verified"]:
+        result["skip_reason"] = backup_gate["skip_reason"]
+        return result
+
+    if not all([
+        audit_plan_ready,
+        rollback_plan_ready,
+        duplicate_protection_ready,
+        failure_isolation_ready,
+        multi_store_isolation_ready,
+    ]):
+        result["skip_reason"] = "production_safety_plan_incomplete"
+        return result
+
+    for store_id in normalized_store_ids:
+        approval_gate = evaluate_sensitive_action_approval_mock_gate(
+            actor_context=actor_context,
+            requested_store_id=store_id,
+            action_key=str(config["required_action"]),
+            manual_approval=manual_approval,
+            verification_scope=verification_scope,
+        )
+        result["approval_gate_by_store"].append({
+            "store_id": store_id,
+            "status": approval_gate.get("status"),
+            "skip_reason": approval_gate.get("skip_reason"),
+            "store_scope_verified": approval_gate.get("store_scope_verified"),
+            "permission_verified": approval_gate.get("permission_verified"),
+            "approval_role_verified": approval_gate.get("approval_role_verified"),
+            "actor_id_hash": approval_gate.get("actor_id_hash"),
+        })
+        if approval_gate.get("status") != "approval_allowed_mock":
+            result["skip_reason"] = approval_gate.get("skip_reason") or "permission_approval_gate_failed"
+            return result
+
+    result.update({
+        "status": "formal_batch_gate_ready_for_later_execution" if write_requested else "formal_batch_gate_plan_ready",
+        "permission_verified": True,
+        "approval_role_verified": True,
+        "all_store_scopes_verified": True,
+        "business_message": (
+            "正式批量同步生产门禁已在 mock gate 中通过；仍需单独执行阶段，当前没有开放正式同步。"
+        ),
+    })
+    return result
+
+
 def _evaluate_naver_order_refresh_batch_mock_gate(
     db: Session,
     *,

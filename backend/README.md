@@ -964,3 +964,29 @@ ERP-Backup-2B adds a private restore runbook mock drill gate in `app/services/ba
 Naver-ERP-21B records the expected UI/audit display for a no-change Naver order refresh. The result should be treated as "checked, no business fields changed, no forced update, audit evidence recorded", not as an error and not as formal sync availability.
 
 These phases continue to forbid storing tokens, Authorization values, request or response headers, signatures, bcrypt inputs, client secrets, raw external responses, complete channel ids, complete order/product-order ids, complete buyer or receiver names, phones, addresses, or zip codes.
+
+### Formal Batch Sync Production Gate Boundary
+
+ERP-Batch-1A prioritizes formal product/order batch sync readiness, but it does not open formal sync. The required production gate includes human approval, store-scoped role permission, sensitive-action approval, fresh readonly preview evidence, verified database backup evidence, duplicate protection, field whitelist verification, rollback and recovery planning, store-level failure isolation, append-only audit evidence, post-write readback, and sensitive-field scanning.
+
+ERP-Batch-1B adds a private mock helper in `app/services/sync_service.py`:
+
+```text
+_evaluate_formal_batch_sync_production_gate(...)
+```
+
+The helper supports `naver_order_batch`, `naver_order_refresh_batch`, and `naver_product_batch`. It checks the formal-batch gate without wiring a public endpoint, calling Naver, writing orders or products, writing SyncLog, adding tested-success rows, or opening formal sync. Passing output means the gate is ready for a later controlled execution phase only.
+
+The auth role model now includes safe sensitive permission keys for:
+
+```text
+products.batch_sync_write
+orders.batch_sync_write
+orders.refresh_batch_write
+```
+
+These permissions are metadata for gate planning. They do not create users, sessions, or active store memberships.
+
+The local seed was applied after a fresh database backup. Current auth metadata counts are `erp_roles=5`, `erp_permissions=12`, `erp_role_permissions=39`, `erp_users=0`, and `erp_store_memberships=0`.
+
+Naver-Order-Batch-1A documents the future order batch refresh path. Naver-Product-Batch-1A documents the future product batch sync path. ERP-Multistore-1A documents the large-scale multi-store production model. All three remain planning/gate phases; platform shipment, cancel, return, exchange, refund, settlement, customer service, mail, appeal, and AI automation writes remain closed.

@@ -175,9 +175,11 @@ PERMISSION_LABELS = {
     "dashboard.read": "查看工作台",
     "products.read": "查看商品",
     "products.preview": "预览商品接口",
+    "products.batch_sync_write": "受控批量写入本地商品",
     "orders.read": "查看订单",
     "orders.preview": "预览订单接口",
     "orders.local_write": "受控写入本地订单",
+    "orders.batch_sync_write": "受控批量写入本地订单",
     "orders.refresh_batch_write": "受控刷新本地订单",
     "audit.read": "查看审计记录",
     "backup.read": "查看备份报告",
@@ -417,6 +419,26 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
     if missing_permissions:
         raise RuntimeError(f"Missing permissions: {missing_permissions}")
 
+    admin_product_batch_approval = connection.execute("""
+        SELECT rp.can_approve_sensitive
+        FROM erp_role_permissions rp
+        JOIN erp_roles r ON r.id = rp.role_id
+        JOIN erp_permissions p ON p.id = rp.permission_id
+        WHERE r.role_key='admin' AND p.permission_key='products.batch_sync_write'
+    """).fetchone()
+    if not admin_product_batch_approval or int(admin_product_batch_approval[0]) != 1:
+        raise RuntimeError("Admin product batch approval permission was not seeded")
+
+    admin_order_batch_approval = connection.execute("""
+        SELECT rp.can_approve_sensitive
+        FROM erp_role_permissions rp
+        JOIN erp_roles r ON r.id = rp.role_id
+        JOIN erp_permissions p ON p.id = rp.permission_id
+        WHERE r.role_key='admin' AND p.permission_key='orders.batch_sync_write'
+    """).fetchone()
+    if not admin_order_batch_approval or int(admin_order_batch_approval[0]) != 1:
+        raise RuntimeError("Admin order batch approval permission was not seeded")
+
     admin_refresh_approval = connection.execute("""
         SELECT rp.can_approve_sensitive
         FROM erp_role_permissions rp
@@ -426,6 +448,16 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
     """).fetchone()
     if not admin_refresh_approval or int(admin_refresh_approval[0]) != 1:
         raise RuntimeError("Admin refresh approval permission was not seeded")
+
+    operator_product_batch_permission = connection.execute("""
+        SELECT COUNT(*)
+        FROM erp_role_permissions rp
+        JOIN erp_roles r ON r.id = rp.role_id
+        JOIN erp_permissions p ON p.id = rp.permission_id
+        WHERE r.role_key='operator' AND p.permission_key='products.batch_sync_write'
+    """).fetchone()[0]
+    if operator_product_batch_permission != 0:
+        raise RuntimeError("Operator should not receive products.batch_sync_write permission")
 
     operator_refresh_permission = connection.execute("""
         SELECT COUNT(*)
