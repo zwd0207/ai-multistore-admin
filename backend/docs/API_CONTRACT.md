@@ -2297,3 +2297,79 @@ It executes no restore, writes no products, and does not open formal product bat
 ### User Invitation Readonly UI Walkthrough
 
 Phase ERP-Multistore-1S verifies the Codex2 Accounts user invitation readiness panel in backend and mock modes. It does not change backend write contracts. Real user invitation and store membership writes remain closed.
+
+### Formal Batch Approval Decision Mock Gate
+
+Phase ERP-Batch-2F adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_mock_gate(...)
+```
+
+Input shape:
+
+```text
+readonly_evidence: object
+approval_audit_evidence: object
+decision_context: object
+verification_scope: "verify_all_temp_db"
+```
+
+The gate may return `formal_batch_approval_decision_mock_ready` only when readonly evidence, approval-audit evidence, backup manifest, rollback report, permission gate, whitelist, duplicate check, sensitive scan, readback, and audit correlation evidence are all present. It must keep:
+
+```text
+decision_status=ready_for_human_approval
+execution_approved=false
+public_endpoint_enabled=false
+backend_route_implemented=false
+operation_audit_rows_written=false
+orders_written=false
+products_written=false
+sync_log_written=false
+capability_tested_success_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+Phase ERP-Batch-2G is a readonly API plan only and adds no route. Phase ERP-Batch-2H adds Codex2 readonly UI display only.
+
+### Real User Invitation Approval Checklist Mock Gate
+
+Phase ERP-Multistore-2C adds a service-level mock gate:
+
+```text
+evaluate_real_user_invitation_approval_checklist_mock_gate(...)
+```
+
+Input shape:
+
+```text
+actor_context: object
+target_user_key_hash: string
+login_identifier_hash: string
+login_identifier_masked: string
+target_store_ids: list[int]
+target_role: string
+manual_approval: bool
+invitation_reason: string
+approval_checklist: object
+existing_user_hashes: list[string]
+verification_scope: "verify_all_temp_db"
+```
+
+The checklist must include backup evidence, audit evidence plan, membership assignment plan, invite expiry, one-time invite configuration, post-create readback, rollback or disable-user readiness, privacy display verification, and login boundary acknowledgement. It must keep:
+
+```text
+real_invitation_open=false
+invitation_would_send=false
+invitation_sent=false
+users_written=false
+membership_written=false
+role_assignment_written=false
+real_auth_session_created=false
+operation_audit_rows_written=false
+formal_sync_open=false
+platform_writes_enabled=false
+```
+
+Phase ERP-Multistore-2D is a UI implementation plan only. It does not send invitations or change auth/session behavior.

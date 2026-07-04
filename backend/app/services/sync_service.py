@@ -5963,6 +5963,239 @@ def evaluate_batch_approval_audit_evidence_readonly_route_local(
     return result
 
 
+def evaluate_formal_batch_approval_decision_mock_gate(
+    *,
+    readonly_evidence: dict | None,
+    approval_audit_evidence: dict | None,
+    decision_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Final mock gate before a human batch-approval decision; never approves execution."""
+
+    required_decision_flags = [
+        "decision_record_planned",
+        "human_approval_required",
+        "backup_manifest_verified",
+        "rollback_report_ready",
+        "permission_gate_verified",
+        "readonly_evidence_fresh",
+        "field_whitelist_verified",
+        "duplicate_check_passed",
+        "sensitive_scan_passed",
+        "post_write_readback_required",
+        "audit_correlation_planned",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-2F",
+        "formal_batch_approval_decision_mock_gate": True,
+        "status": "blocked",
+        "decision_status": "blocked",
+        "skip_reason": None,
+        "required_decision_flags": required_decision_flags,
+        "missing_decision_flags": [],
+        "evidence_count": 0,
+        "store_ids": [],
+        "sync_kinds": [],
+        "required_actions": [],
+        "decision_record_planned": False,
+        "human_approval_required": True,
+        "backup_manifest_verified": False,
+        "rollback_report_ready": False,
+        "permission_gate_verified": False,
+        "readonly_evidence_fresh": False,
+        "field_whitelist_verified": False,
+        "duplicate_check_passed": False,
+        "sensitive_scan_passed": False,
+        "post_write_readback_required": True,
+        "audit_correlation_planned": False,
+        "execution_approved": False,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(readonly_evidence, dict):
+        result["skip_reason"] = "readonly_evidence_required"
+        return result
+    if not isinstance(approval_audit_evidence, dict):
+        result["skip_reason"] = "approval_audit_evidence_required"
+        return result
+    if not isinstance(decision_context, dict):
+        result["skip_reason"] = "decision_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "readonly_evidence": readonly_evidence,
+        "approval_audit_evidence": approval_audit_evidence,
+        "decision_context": decision_context,
+    }):
+        result["skip_reason"] = "formal_batch_decision_sensitive_field_blocked"
+        return result
+
+    if readonly_evidence.get("status") not in {"readonly_evidence_api_mock_ready", "readonly_evidence_api_ready"}:
+        result["skip_reason"] = "readonly_evidence_not_ready"
+        return result
+    if readonly_evidence.get("formal_sync_open") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if readonly_evidence.get("real_database_written") is True:
+        result["skip_reason"] = "readonly_evidence_already_wrote_database"
+        return result
+    if readonly_evidence.get("orders_written") is True or readonly_evidence.get("products_written") is True:
+        result["skip_reason"] = "readonly_evidence_business_write_not_allowed"
+        return result
+    if readonly_evidence.get("sync_log_written") is True or readonly_evidence.get("capability_tested_success_written") is True:
+        result["skip_reason"] = "readonly_evidence_side_effect_not_allowed"
+        return result
+    if readonly_evidence.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "readonly_evidence_audit_write_not_allowed"
+        return result
+    if readonly_evidence.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+    if readonly_evidence.get("raw_response_saved") is not False:
+        result["skip_reason"] = "raw_response_saved_not_allowed"
+        return result
+
+    if approval_audit_evidence.get("status") not in {
+        "batch_approval_audit_evidence_mock_ready",
+        "batch_approval_audit_evidence_ready",
+    }:
+        result["skip_reason"] = "approval_audit_evidence_not_ready"
+        return result
+    if approval_audit_evidence.get("formal_sync_open") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if approval_audit_evidence.get("real_database_written") is True:
+        result["skip_reason"] = "approval_audit_evidence_wrote_database"
+        return result
+    if approval_audit_evidence.get("orders_written") is True or approval_audit_evidence.get("products_written") is True:
+        result["skip_reason"] = "approval_audit_business_write_not_allowed"
+        return result
+    if approval_audit_evidence.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "approval_audit_write_not_allowed"
+        return result
+    if approval_audit_evidence.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+
+    items = readonly_evidence.get("items")
+    if not isinstance(items, list) or not items:
+        result["skip_reason"] = "readonly_evidence_items_required"
+        return result
+
+    store_ids: set[int] = set()
+    sync_kinds: set[str] = set()
+    required_actions: set[str] = set()
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            result["skip_reason"] = "readonly_evidence_item_shape_invalid"
+            result["blocked_index"] = index
+            return result
+        sync_kind = str(item.get("sync_kind") or "")
+        config = FORMAL_BATCH_SYNC_GATE_KINDS.get(sync_kind)
+        if config is None:
+            result["skip_reason"] = "sync_kind_not_allowed"
+            result["blocked_index"] = index
+            return result
+        try:
+            store_id = int(item.get("store_id"))
+        except (TypeError, ValueError):
+            result["skip_reason"] = "readonly_evidence_store_id_invalid"
+            result["blocked_index"] = index
+            return result
+        if store_id <= 0:
+            result["skip_reason"] = "readonly_evidence_store_id_invalid"
+            result["blocked_index"] = index
+            return result
+        if item.get("duplicate_check_passed") is not True:
+            result["skip_reason"] = "duplicate_check_required"
+            result["blocked_index"] = index
+            return result
+        if item.get("field_whitelist_verified") is not True:
+            result["skip_reason"] = "field_whitelist_required"
+            result["blocked_index"] = index
+            return result
+        store_ids.add(store_id)
+        sync_kinds.add(sync_kind)
+        required_actions.add(str(config["required_action"]))
+
+    audit_store_ids = set(_normalize_formal_batch_store_ids(approval_audit_evidence.get("store_ids")) or [])
+    audit_actions = set(str(action) for action in (approval_audit_evidence.get("required_actions") or []))
+    if not store_ids.issubset(audit_store_ids):
+        result["skip_reason"] = "approval_audit_store_scope_mismatch"
+        return result
+    if not required_actions.issubset(audit_actions):
+        result["skip_reason"] = "approval_audit_action_scope_mismatch"
+        return result
+
+    decision_store_ids = set(_normalize_formal_batch_store_ids(decision_context.get("store_ids")) or [])
+    if not store_ids.issubset(decision_store_ids):
+        result["skip_reason"] = "decision_store_scope_mismatch"
+        return result
+    requested_status = str(decision_context.get("decision_status") or "pending_human_approval")
+    if requested_status not in {"pending_human_approval", "ready_for_human_review", "not_approved"}:
+        result["skip_reason"] = "decision_status_not_allowed"
+        return result
+    if decision_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if decision_context.get("formal_sync_open") is True or decision_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    missing_flags = [
+        flag for flag in required_decision_flags
+        if decision_context.get(flag) is not True
+    ]
+    result["missing_decision_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "approval_decision_context_incomplete"
+        return result
+
+    result.update({
+        "status": "formal_batch_approval_decision_mock_ready",
+        "decision_status": "ready_for_human_approval",
+        "evidence_count": len(items),
+        "store_ids": sorted(store_ids),
+        "sync_kinds": sorted(sync_kinds),
+        "required_actions": sorted(required_actions),
+        "decision_record_planned": True,
+        "backup_manifest_verified": True,
+        "rollback_report_ready": True,
+        "permission_gate_verified": True,
+        "readonly_evidence_fresh": True,
+        "field_whitelist_verified": True,
+        "duplicate_check_passed": True,
+        "sensitive_scan_passed": True,
+        "audit_correlation_planned": True,
+        "business_message": (
+            "正式批量审批决策的 mock 门禁已通过；当前只表示材料可进入人工审批，不批准执行，也不开启商品或订单批量同步。"
+        ),
+        "next_action": (
+            "继续由管理员人工复核审批范围、备份、权限、回滚、回读和敏感扫描证据；执行写入必须另开阶段。"
+        ),
+    })
+    return result
+
+
 def evaluate_batch_readonly_evidence_api_local(
     *,
     evidence_items: list[dict] | tuple[dict, ...] | None,

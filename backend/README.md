@@ -1200,3 +1200,25 @@ POST /api/v1/batch/naver/products/rollback-readonly-report
 The route wraps the rollback readonly report gate. It executes no restore, touches no production database, writes no products or audit rows, and keeps formal product batch sync closed.
 
 ERP-Multistore-1S verifies the Codex2 Accounts user invitation readiness panel in backend and mock modes. Real invitation, user creation, role assignment, and store membership writes remain closed.
+
+ERP-Batch-2F adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_mock_gate(...)
+```
+
+The gate requires fresh readonly evidence, approval-audit evidence, backup manifest verification, rollback readiness, permission gate evidence, field whitelist, duplicate check, sensitive scan, post-write readback planning, and audit correlation planning. It only returns `formal_batch_approval_decision_mock_ready` for manual review readiness. It keeps execution unapproved, does not expose a route, writes no audit rows or business rows, and keeps formal product/order batch execution closed.
+
+ERP-Batch-2G is a readonly API plan only. No new route is exposed in this phase.
+
+ERP-Batch-2H adds a Codex2 Orders readonly approval-decision panel. The backend contract remains no platform call, no product write, no order write, no SyncLog write, no tested-success write, no audit-row write, and no formal batch execution.
+
+ERP-Multistore-2C adds a service-level mock gate:
+
+```text
+evaluate_real_user_invitation_approval_checklist_mock_gate(...)
+```
+
+The gate verifies masked login display, target user/login hashes, target stores, target role, admin approval, backup evidence, audit plan, membership assignment plan, invite expiry, one-time invite planning, post-create readback, rollback/disable-user readiness, privacy display, and login boundary acknowledgement. It creates no user, sends no invitation, creates no auth session, assigns no role, writes no membership, and writes no audit row.
+
+ERP-Multistore-2D is a Codex2 UI implementation plan only. Real user invitation remains closed.

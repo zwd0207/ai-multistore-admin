@@ -757,3 +757,166 @@ def evaluate_real_user_invitation_mock_gate(
         "next_action": "Plan a separate readonly API and later real invitation approval phase.",
     })
     return result
+
+
+def evaluate_real_user_invitation_approval_checklist_mock_gate(
+    *,
+    actor_context: dict[str, Any] | None,
+    target_user_key_hash: str | None,
+    login_identifier_hash: str | None,
+    login_identifier_masked: str | None,
+    target_store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    target_role: str | None,
+    manual_approval: bool = False,
+    invitation_reason: str | None = None,
+    approval_checklist: dict[str, Any] | None = None,
+    existing_user_hashes: list[str] | tuple[str, ...] | set[str] | None = None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Mock gate for a real-user invitation approval checklist; never sends invites."""
+
+    safe_masked_identifier = (
+        login_identifier_masked
+        if (
+            isinstance(login_identifier_masked, str)
+            and SAFE_MASKED_IDENTIFIER_PATTERN.fullmatch(login_identifier_masked)
+            and ("@" not in login_identifier_masked or "*" in login_identifier_masked)
+            and not PHONE_PATTERN.search(login_identifier_masked)
+        )
+        else None
+    )
+    required_checklist_flags = [
+        "backup_evidence_ready",
+        "audit_evidence_plan_ready",
+        "membership_assignment_plan_ready",
+        "invite_expiry_configured",
+        "one_time_invite_configured",
+        "post_create_readback_required",
+        "disable_user_rollback_ready",
+        "privacy_display_verified",
+        "formal_login_boundary_acknowledged",
+    ]
+    result: dict[str, Any] = {
+        "phase": "ERP-Multistore-2C",
+        "real_user_invitation_approval_checklist_mock_gate": True,
+        "status": "blocked",
+        "skip_reason": None,
+        "required_checklist_flags": required_checklist_flags,
+        "missing_checklist_flags": [],
+        "checklist_ready": False,
+        "approval_role_verified": False,
+        "target_user_key_hash": target_user_key_hash if isinstance(target_user_key_hash, str) else None,
+        "login_identifier_hash": login_identifier_hash if isinstance(login_identifier_hash, str) else None,
+        "login_identifier_masked": safe_masked_identifier,
+        "target_store_ids": [],
+        "target_role": _normalize_role(target_role),
+        "manual_approval": bool(manual_approval),
+        "real_invitation_open": False,
+        "invitation_would_create_user": False,
+        "invitation_would_send": False,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_planned": True,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    if verification_scope != VERIFICATION_SCOPE:
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(approval_checklist, dict):
+        result["skip_reason"] = "approval_checklist_required"
+        return result
+    if _contains_sensitive_material({
+        "actor_context": actor_context,
+        "target_user_key_hash": target_user_key_hash,
+        "login_identifier_hash": login_identifier_hash,
+        "login_identifier_masked": login_identifier_masked,
+        "invitation_reason": invitation_reason,
+        "approval_checklist": approval_checklist,
+        "existing_user_hashes": list(existing_user_hashes or []),
+    }):
+        result["skip_reason"] = "user_invitation_checklist_sensitive_material_blocked"
+        return result
+
+    missing_flags = [
+        flag for flag in required_checklist_flags
+        if approval_checklist.get(flag) is not True
+    ]
+    result["missing_checklist_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "approval_checklist_incomplete"
+        return result
+    if approval_checklist.get("invitation_sent") is True:
+        result["skip_reason"] = "real_invitation_not_allowed_in_mock_gate"
+        return result
+    if approval_checklist.get("users_written") is True or approval_checklist.get("membership_written") is True:
+        result["skip_reason"] = "user_or_membership_write_not_allowed_in_mock_gate"
+        return result
+    if approval_checklist.get("real_auth_session_created") is True:
+        result["skip_reason"] = "auth_session_not_allowed_in_mock_gate"
+        return result
+
+    base_gate = evaluate_real_user_invitation_mock_gate(
+        actor_context=actor_context,
+        target_user_key_hash=target_user_key_hash,
+        login_identifier_hash=login_identifier_hash,
+        login_identifier_masked=login_identifier_masked,
+        target_store_ids=target_store_ids,
+        target_role=target_role,
+        manual_approval=manual_approval,
+        invitation_reason=invitation_reason,
+        backup_evidence_planned=True,
+        audit_evidence_planned=True,
+        membership_assignment_plan_ready=True,
+        existing_user_hashes=existing_user_hashes,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "target_user_key_hash": base_gate.get("target_user_key_hash"),
+        "login_identifier_hash": base_gate.get("login_identifier_hash"),
+        "login_identifier_masked": base_gate.get("login_identifier_masked"),
+        "target_store_ids": base_gate.get("target_store_ids") or [],
+        "target_role": base_gate.get("target_role"),
+        "approval_results": base_gate.get("approval_results") or [],
+        "backup_evidence_ready": True,
+        "audit_evidence_plan_ready": True,
+        "membership_assignment_plan_ready": True,
+        "invite_expiry_configured": True,
+        "one_time_invite_configured": True,
+        "post_create_readback_required": True,
+        "disable_user_rollback_ready": True,
+        "privacy_display_verified": True,
+        "formal_login_boundary_acknowledged": True,
+    })
+    if base_gate.get("status") != "user_invitation_mock_ready":
+        result["skip_reason"] = base_gate.get("skip_reason") or "user_invitation_base_gate_blocked"
+        return result
+
+    result.update({
+        "status": "user_invitation_approval_checklist_mock_ready",
+        "checklist_ready": True,
+        "approval_role_verified": all(
+            item.get("approval_role_verified") is True
+            for item in result.get("approval_results", [])
+        ),
+        "future_invitation_allowed_after_separate_approval": True,
+        "business_message": (
+            "真实用户邀请审批清单 mock 门禁已通过；当前只表示材料可进入人工审批，不会创建用户、发送邀请或分配店铺权限。"
+        ),
+        "next_action": (
+            "继续规划只读页面展示和后续真实邀请审批；真实邀请必须另开阶段并再次备份、审计和回读。"
+        ),
+    })
+    return result

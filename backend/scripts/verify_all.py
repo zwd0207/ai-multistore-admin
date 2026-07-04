@@ -10499,6 +10499,94 @@ def verify_store_membership_assignment_mock_gate() -> None:
     assert invitation_success["real_auth_session_created"] is False, invitation_success
     assert invitation_success["formal_sync_open"] is False, invitation_success
 
+    invitation_approval_checklist = {
+        "backup_evidence_ready": True,
+        "audit_evidence_plan_ready": True,
+        "membership_assignment_plan_ready": True,
+        "invite_expiry_configured": True,
+        "one_time_invite_configured": True,
+        "post_create_readback_required": True,
+        "disable_user_rollback_ready": True,
+        "privacy_display_verified": True,
+        "formal_login_boundary_acknowledged": True,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "real_auth_session_created": False,
+    }
+    invitation_checklist_success = permission_service.evaluate_real_user_invitation_approval_checklist_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="invite operator for store 8 approval checklist",
+        approval_checklist=invitation_approval_checklist,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_checklist_success["phase"] == "ERP-Multistore-2C", invitation_checklist_success
+    assert invitation_checklist_success["status"] == "user_invitation_approval_checklist_mock_ready", invitation_checklist_success
+    assert invitation_checklist_success["checklist_ready"] is True, invitation_checklist_success
+    assert invitation_checklist_success["approval_role_verified"] is True, invitation_checklist_success
+    assert invitation_checklist_success["invitation_would_send"] is False, invitation_checklist_success
+    assert invitation_checklist_success["users_written"] is False, invitation_checklist_success
+    assert invitation_checklist_success["membership_written"] is False, invitation_checklist_success
+    assert invitation_checklist_success["real_auth_session_created"] is False, invitation_checklist_success
+    assert invitation_checklist_success["operation_audit_rows_written"] is False, invitation_checklist_success
+
+    invitation_checklist_missing_expiry = permission_service.evaluate_real_user_invitation_approval_checklist_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="missing invite expiry should block",
+        approval_checklist={**invitation_approval_checklist, "invite_expiry_configured": False},
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_checklist_missing_expiry["skip_reason"] == "approval_checklist_incomplete", invitation_checklist_missing_expiry
+    assert "invite_expiry_configured" in invitation_checklist_missing_expiry["missing_checklist_flags"], invitation_checklist_missing_expiry
+    assert invitation_checklist_missing_expiry["users_written"] is False, invitation_checklist_missing_expiry
+
+    invitation_checklist_full_email = permission_service.evaluate_real_user_invitation_approval_checklist_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="operator@example.com",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="full login identifier should be blocked",
+        approval_checklist=invitation_approval_checklist,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_checklist_full_email["skip_reason"] == "login_identifier_must_be_masked", invitation_checklist_full_email
+    assert invitation_checklist_full_email["login_identifier_masked"] is None, invitation_checklist_full_email
+    assert invitation_checklist_full_email["users_written"] is False, invitation_checklist_full_email
+
+    invitation_checklist_sensitive = permission_service.evaluate_real_user_invitation_approval_checklist_mock_gate(
+        actor_context=admin_store8,
+        target_user_key_hash="user-hash-dddddddddddddddd",
+        login_identifier_hash="login-hash-dddddddddddddddd",
+        login_identifier_masked="op***-invite",
+        target_store_ids=[8],
+        target_role="operator",
+        manual_approval=True,
+        invitation_reason="authorization: bearer must-not-leak-checklist",
+        approval_checklist=invitation_approval_checklist,
+        existing_user_hashes=[],
+        verification_scope=permission_service.VERIFICATION_SCOPE,
+    )
+    assert invitation_checklist_sensitive["skip_reason"] == "user_invitation_checklist_sensitive_material_blocked", invitation_checklist_sensitive
+    assert invitation_checklist_sensitive["real_database_written"] is False, invitation_checklist_sensitive
+
     with TestClient(app) as client:
         route_invitation_response = client.post("/api/v1/permissions/user-invitation/readonly-check", json={
             "actor_context": admin_store8,
@@ -10745,6 +10833,10 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "route_invitation": route_invitation,
             "route_invitation_duplicate": route_invitation_duplicate,
             "route_invitation_sensitive": route_invitation_sensitive,
+            "invitation_checklist_success": invitation_checklist_success,
+            "invitation_checklist_missing_expiry": invitation_checklist_missing_expiry,
+            "invitation_checklist_full_email": invitation_checklist_full_email,
+            "invitation_checklist_sensitive": invitation_checklist_sensitive,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -10768,6 +10860,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "must-not-leak-route",
         "must-not-leak-route-invite",
         "must-not-leak-invite",
+        "must-not-leak-checklist",
         "operator@example.com",
     ]:
         assert forbidden not in serialized, serialized
@@ -11324,6 +11417,79 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
     assert batch_audit_route_ready["products_written"] is False, batch_audit_route_ready
     assert batch_audit_route_ready["formal_sync_open"] is False, batch_audit_route_ready
 
+    batch_decision_context = {
+        "store_ids": [8],
+        "decision_status": "pending_human_approval",
+        "decision_record_planned": True,
+        "human_approval_required": True,
+        "backup_manifest_verified": True,
+        "rollback_report_ready": True,
+        "permission_gate_verified": True,
+        "readonly_evidence_fresh": True,
+        "field_whitelist_verified": True,
+        "duplicate_check_passed": True,
+        "sensitive_scan_passed": True,
+        "post_write_readback_required": True,
+        "audit_correlation_planned": True,
+        "formal_sync_remains_closed": True,
+        "execution_approved": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    batch_decision_ready = sync_service.evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_ready["phase"] == "ERP-Batch-2F", batch_decision_ready
+    assert batch_decision_ready["status"] == "formal_batch_approval_decision_mock_ready", batch_decision_ready
+    assert batch_decision_ready["decision_status"] == "ready_for_human_approval", batch_decision_ready
+    assert batch_decision_ready["execution_approved"] is False, batch_decision_ready
+    assert batch_decision_ready["backend_route_implemented"] is False, batch_decision_ready
+    assert batch_decision_ready["public_endpoint_enabled"] is False, batch_decision_ready
+    assert batch_decision_ready["operation_audit_rows_written"] is False, batch_decision_ready
+    assert batch_decision_ready["orders_written"] is False, batch_decision_ready
+    assert batch_decision_ready["products_written"] is False, batch_decision_ready
+    assert batch_decision_ready["formal_sync_open"] is False, batch_decision_ready
+
+    batch_decision_missing_backup = sync_service.evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context={**batch_decision_context, "backup_manifest_verified": False},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_missing_backup["skip_reason"] == "approval_decision_context_incomplete", batch_decision_missing_backup
+    assert "backup_manifest_verified" in batch_decision_missing_backup["missing_decision_flags"], batch_decision_missing_backup
+    assert batch_decision_missing_backup["orders_written"] is False, batch_decision_missing_backup
+
+    batch_decision_stale_readonly = sync_service.evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence={**readonly_success, "status": "blocked"},
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context=batch_decision_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_stale_readonly["skip_reason"] == "readonly_evidence_not_ready", batch_decision_stale_readonly
+    assert batch_decision_stale_readonly["products_written"] is False, batch_decision_stale_readonly
+
+    batch_decision_missing_audit = sync_service.evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence={**batch_audit_route_ready, "status": "blocked"},
+        decision_context=batch_decision_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_missing_audit["skip_reason"] == "approval_audit_evidence_not_ready", batch_decision_missing_audit
+    assert batch_decision_missing_audit["operation_audit_rows_written"] is False, batch_decision_missing_audit
+
+    batch_decision_sensitive = sync_service.evaluate_formal_batch_approval_decision_mock_gate(
+        readonly_evidence=readonly_success,
+        approval_audit_evidence=batch_audit_route_ready,
+        decision_context={**batch_decision_context, "productOrderId": "must-not-leak-decision"},
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    assert batch_decision_sensitive["skip_reason"] == "formal_batch_decision_sensitive_field_blocked", batch_decision_sensitive
+    assert batch_decision_sensitive["real_database_written"] is False, batch_decision_sensitive
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -11585,6 +11751,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_audit_missing_plan": batch_audit_missing_plan,
             "batch_audit_missing_permission": batch_audit_missing_permission,
             "batch_audit_sensitive": batch_audit_sensitive,
+            "batch_decision_ready": batch_decision_ready,
+            "batch_decision_missing_backup": batch_decision_missing_backup,
+            "batch_decision_stale_readonly": batch_decision_stale_readonly,
+            "batch_decision_missing_audit": batch_decision_missing_audit,
+            "batch_decision_sensitive": batch_decision_sensitive,
             "local_evidence": local_evidence,
             "local_audit": local_audit,
             "local_audit_sensitive": local_audit_sensitive,
