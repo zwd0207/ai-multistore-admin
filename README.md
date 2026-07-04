@@ -937,3 +937,9 @@ ERP-Backup-1N connects Codex2 to the existing readonly backup report APIs and ad
 The selected operation audit local implementation approval plan is documented in `PHASE_ERP_AUDIT_2C_SELECTED_OPERATION_AUDIT_LOCAL_IMPLEMENTATION_APPROVAL_PLAN.md`.
 
 ERP-Audit-2C is planning-only. It approves only the future audit coverage boundary for `controlled_naver_order_local_refresh`: manual approval, verified pre-write backup evidence, selected local Naver order target, append-only audit rows, post-write verification, and strict sensitive-data exclusion. It does not modify runtime code, write audit rows, write business rows, create or restore backups, call platform APIs, change schema, or open formal Naver order sync.
+
+## Phase ERP-Audit-2D - Selected Operation Audit Local Implementation Mock Gate
+
+The selected operation audit local implementation mock gate is documented in `PHASE_ERP_AUDIT_2D_SELECTED_OPERATION_AUDIT_LOCAL_IMPLEMENTATION_MOCK_GATE.md`.
+
+ERP-Audit-2D adds a private Codex1 mock gate for the production-shaped selected-operation audit chain: `approval_verified`, `pre_write_backup_verified`, `selected_operation_started`, `selected_operation_finished`, and `post_write_verification_finished`. It writes only to the temporary `verify_all.py` database, requires manual approval, verified backup evidence, formal sync closed, platform writes disabled, privacy redaction, and safe target hashes. It does not write the real database, call platform APIs, change schema, or open formal Naver order sync.
