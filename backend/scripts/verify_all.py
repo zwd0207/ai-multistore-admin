@@ -437,6 +437,16 @@ ALLOWED_BACKUP_RETENTION_CLASSES = {
     "incident_response",
 }
 
+RETENTION_DAYS_BY_CLASS = {
+    "pre_write": 90,
+    "pre_migration": 180,
+    "pre_restore": 180,
+    "manual_checkpoint": 90,
+    "release_checkpoint": 180,
+    "scheduled_daily": 14,
+    "scheduled_weekly": 56,
+}
+
 FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS = [
     "backup-token-must-not-leak",
     "backup-client-secret-must-not-leak",
@@ -563,6 +573,257 @@ def _backup_manifest_sensitive_fields(manifest: dict) -> list[str]:
         if marker in manifest_text:
             forbidden.add("sensitive_value")
     return sorted(forbidden)
+
+
+def _validate_backup_manifest_safe_inputs(inputs: dict) -> dict:
+    result = {
+        "phase": "ERP-Backup-1E",
+        "status": "backup_manifest_inputs_valid",
+        "manifest_written": False,
+        "real_database_touched": False,
+        "real_backup_created": False,
+        "real_restore_executed": False,
+        "backup_deleted": False,
+    }
+    required = {
+        "phase",
+        "operation_type",
+        "source_db_path",
+        "backup_path",
+        "backup_root",
+        "created_by_actor_type",
+        "created_by_actor_label",
+        "retention_class",
+        "retention_reason",
+    }
+    missing = sorted(required - set(inputs))
+    if missing:
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "missing_manifest_inputs",
+            "missing_manifest_inputs": missing,
+        })
+        return result
+    if inputs.get("retention_class") not in ALLOWED_BACKUP_RETENTION_CLASSES:
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "invalid_retention_class",
+        })
+        return result
+    if _backup_manifest_sensitive_fields(inputs):
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "manifest_sensitive_field_blocked",
+        })
+        return result
+
+    source_path = Path(inputs["source_db_path"]).resolve()
+    backup_path = Path(inputs["backup_path"]).resolve()
+    backup_root = Path(inputs["backup_root"]).resolve()
+    production_db_path = (BACKEND_DIR / "codex1.db").resolve()
+    if source_path == production_db_path:
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "production_source_not_allowed_in_mock_gate",
+        })
+        return result
+    if not source_path.exists():
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "source_db_missing",
+        })
+        return result
+    if not backup_path.exists():
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "backup_file_missing",
+        })
+        return result
+    try:
+        backup_path.relative_to(backup_root)
+    except ValueError:
+        result.update({
+            "status": "backup_manifest_blocked",
+            "skip_reason": "backup_path_outside_approved_root",
+        })
+        return result
+    return result
+
+
+def _retention_until_for_class(created_at: datetime, retention_class: str) -> str | None:
+    days = RETENTION_DAYS_BY_CLASS.get(retention_class)
+    if days is None:
+        return None
+    return (created_at + timedelta(days=days)).isoformat()
+
+
+def _collect_sqlite_counts_and_metadata(db_path: Path) -> tuple[dict[str, int], dict[str, int | str]]:
+    with sqlite3.connect(db_path) as conn:
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+        page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+        table_names = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        count_tables = [
+            "stores",
+            "products",
+            "orders",
+            "sync_logs",
+            "api_capability_test_results",
+            "order_status_events",
+            "operation_audit_logs",
+        ]
+        counts = {}
+        for table_name in count_tables:
+            if table_name in table_names:
+                counts[table_name] = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            else:
+                counts[table_name] = 0
+        if "api_capability_test_results" in table_names:
+            counts["tested_success_store8"] = conn.execute(
+                "SELECT COUNT(*) FROM api_capability_test_results WHERE store_id=8 AND test_status='tested_success'"
+            ).fetchone()[0]
+        else:
+            counts["tested_success_store8"] = 0
+    return counts, {
+        "sqlite_integrity_check": integrity,
+        "sqlite_page_count": page_count,
+        "sqlite_page_size": page_size,
+    }
+
+
+def _write_backup_manifest_mock_gate(inputs: dict) -> dict:
+    validation = _validate_backup_manifest_safe_inputs(inputs)
+    if validation["status"] != "backup_manifest_inputs_valid":
+        return validation
+
+    source_path = Path(inputs["source_db_path"]).resolve()
+    backup_path = Path(inputs["backup_path"]).resolve()
+    manifest_path = backup_path.with_suffix(backup_path.suffix + ".manifest.json")
+    temp_manifest_path = backup_path.with_suffix(backup_path.suffix + ".manifest.json.tmp")
+    if manifest_path.exists():
+        return {
+            "phase": "ERP-Backup-1E",
+            "status": "backup_manifest_blocked",
+            "skip_reason": "manifest_already_exists",
+            "manifest_written": False,
+            "real_database_touched": False,
+            "real_backup_created": False,
+            "real_restore_executed": False,
+            "backup_deleted": False,
+        }
+
+    created_at = datetime.now(timezone.utc)
+    retention_class = inputs["retention_class"]
+    counts, sqlite_meta = _collect_sqlite_counts_and_metadata(backup_path)
+    manifest = {
+        "manifest_version": "backup-manifest-v1",
+        "backup_id": inputs.get("backup_id") or f"backup-{backup_path.stem}",
+        "phase": inputs["phase"],
+        "operation_type": inputs["operation_type"],
+        "created_at": created_at.isoformat(),
+        "created_by_actor_type": inputs["created_by_actor_type"],
+        "created_by_actor_label": inputs["created_by_actor_label"],
+        "source_db_path": source_path.as_posix(),
+        "backup_path": backup_path.as_posix(),
+        "backup_sha256": _sha256_file(backup_path),
+        "backup_size_bytes": backup_path.stat().st_size,
+        "backup_method": inputs.get("backup_method", "mock_fixture_copy"),
+        "sqlite_page_count": sqlite_meta["sqlite_page_count"],
+        "sqlite_page_size": sqlite_meta["sqlite_page_size"],
+        "sqlite_integrity_check": sqlite_meta["sqlite_integrity_check"],
+        "git_commit_codex1": inputs.get("git_commit_codex1", "0" * 40),
+        "git_commit_codex2": inputs.get("git_commit_codex2", "1" * 40),
+        "baseline_counts": counts,
+        "related_store_ids": inputs.get("related_store_ids", []),
+        "related_platforms": inputs.get("related_platforms", []),
+        "related_safe_hashes": inputs.get("related_safe_hashes", []),
+        "retention_class": retention_class,
+        "retention_reason": inputs["retention_reason"],
+        "retention_until": _retention_until_for_class(created_at, retention_class),
+        "legal_hold": bool(inputs.get("legal_hold", False)),
+        "protected_from_auto_delete": retention_class in {
+            "pre_write",
+            "pre_migration",
+            "pre_restore",
+            "incident_response",
+        } or bool(inputs.get("operation_audit_correlation_id")),
+        "restore_drill_status": "pending",
+        "last_restore_drill_at": None,
+        "sensitive_scan_passed": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "operation_audit_correlation_id": inputs.get("operation_audit_correlation_id"),
+        "notes": inputs.get("notes", "Temporary backup manifest mock gate only."),
+    }
+    forbidden_fields = _backup_manifest_sensitive_fields(manifest)
+    if forbidden_fields:
+        return {
+            "phase": "ERP-Backup-1E",
+            "status": "backup_manifest_blocked",
+            "skip_reason": "manifest_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+            "manifest_written": False,
+            "real_database_touched": False,
+            "real_backup_created": False,
+            "real_restore_executed": False,
+            "backup_deleted": False,
+        }
+    if sqlite_meta["sqlite_integrity_check"] != "ok":
+        return {
+            "phase": "ERP-Backup-1E",
+            "status": "backup_manifest_blocked",
+            "skip_reason": "sqlite_integrity_check_failed",
+            "manifest_written": False,
+            "real_database_touched": False,
+            "real_backup_created": False,
+            "real_restore_executed": False,
+            "backup_deleted": False,
+        }
+
+    temp_manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    loaded = json.loads(temp_manifest_path.read_text(encoding="utf-8"))
+    missing = sorted(REQUIRED_BACKUP_MANIFEST_FIELDS - set(loaded))
+    if missing:
+        temp_manifest_path.unlink(missing_ok=True)
+        return {
+            "phase": "ERP-Backup-1E",
+            "status": "backup_manifest_blocked",
+            "skip_reason": "missing_manifest_fields",
+            "missing_manifest_fields": missing,
+            "manifest_written": False,
+            "real_database_touched": False,
+            "real_backup_created": False,
+            "real_restore_executed": False,
+            "backup_deleted": False,
+        }
+    temp_manifest_path.replace(manifest_path)
+    return {
+        "phase": "ERP-Backup-1E",
+        "status": "backup_manifest_written",
+        "manifest_written": True,
+        "manifest_path": manifest_path.as_posix(),
+        "backup_path": backup_path.as_posix(),
+        "backup_sha256": manifest["backup_sha256"],
+        "backup_size_bytes": manifest["backup_size_bytes"],
+        "baseline_counts": manifest["baseline_counts"],
+        "sqlite_integrity_check": manifest["sqlite_integrity_check"],
+        "protected_from_auto_delete": manifest["protected_from_auto_delete"],
+        "retention_class": manifest["retention_class"],
+        "real_database_touched": False,
+        "real_backup_created": False,
+        "real_restore_executed": False,
+        "backup_deleted": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    }
 
 
 def _validate_backup_manifest_for_restore_dry_run(manifest: dict, backup_path: Path) -> dict:
@@ -9313,6 +9574,172 @@ def verify_backup_restore_verification_dry_run() -> None:
     print("backup restore verification dry-run: ok")
 
 
+def verify_backup_manifest_mock_implementation_gate() -> None:
+    production_db_path = BACKEND_DIR / "codex1.db"
+    production_before = None
+    if production_db_path.exists():
+        production_before = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="erp-backup-1e-", ignore_cleanup_errors=True) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_db = temp_dir / "fixture-source-codex1.db"
+        backup_root = temp_dir / "approved-backups"
+        backup_root.mkdir()
+
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("CREATE TABLE stores (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL)")
+            conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, product_name TEXT NOT NULL)")
+            conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, external_order_id TEXT NOT NULL, order_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE order_status_events (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, event_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE sync_logs (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, sync_type TEXT NOT NULL)")
+            conn.execute("CREATE TABLE api_capability_test_results (id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, test_status TEXT NOT NULL)")
+            conn.execute("CREATE TABLE operation_audit_logs (id INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            conn.execute("INSERT INTO stores (id, name, platform) VALUES (8, 'Naver safe fixture store', 'naver')")
+            conn.execute("INSERT INTO products (id, store_id, product_name) VALUES (1, 8, 'Safe fixture product')")
+            conn.execute("INSERT INTO orders (id, store_id, external_order_id, order_status) VALUES (1, 8, 'id-hash-backup001', 'DELIVERED')")
+            conn.execute("INSERT INTO order_status_events (id, order_id, event_type) VALUES (1, 1, 'delivered')")
+            conn.execute("INSERT INTO sync_logs (id, store_id, sync_type) VALUES (1, 8, 'fixture_safe_sync')")
+            conn.execute("INSERT INTO api_capability_test_results (id, store_id, test_status) VALUES (1, 8, 'tested_success')")
+            conn.execute("INSERT INTO operation_audit_logs (id, action) VALUES (1, 'fixture_audit')")
+            conn.commit()
+
+        backup_path = backup_root / "codex1.db.backup-erp-backup-1e-20260704-120000.db"
+        shutil.copy2(source_db, backup_path)
+        base_inputs = {
+            "phase": "ERP-Backup-1E",
+            "operation_type": "backup_manifest_mock_gate",
+            "source_db_path": source_db.as_posix(),
+            "backup_path": backup_path.as_posix(),
+            "backup_root": backup_root.as_posix(),
+            "created_by_actor_type": "test",
+            "created_by_actor_label": "verify_all",
+            "retention_class": "pre_write",
+            "retention_reason": "mock manifest verification",
+            "related_store_ids": [8],
+            "related_platforms": ["naver"],
+            "related_safe_hashes": ["id-hash-backup001"],
+            "operation_audit_correlation_id": "backup-1e-correlation-safe-fixture",
+        }
+
+        missing_inputs = dict(base_inputs)
+        missing_inputs.pop("phase")
+        missing_gate = _write_backup_manifest_mock_gate(missing_inputs)
+        assert missing_gate["skip_reason"] == "missing_manifest_inputs", missing_gate
+
+        invalid_retention_gate = _write_backup_manifest_mock_gate({
+            **base_inputs,
+            "retention_class": "delete_now",
+        })
+        assert invalid_retention_gate["skip_reason"] == "invalid_retention_class", invalid_retention_gate
+
+        sensitive_inputs_gate = _write_backup_manifest_mock_gate({
+            **base_inputs,
+            "notes": "backup-token-must-not-leak",
+        })
+        assert sensitive_inputs_gate["skip_reason"] == "manifest_sensitive_field_blocked", sensitive_inputs_gate
+
+        production_source_gate = _write_backup_manifest_mock_gate({
+            **base_inputs,
+            "source_db_path": production_db_path.as_posix(),
+        })
+        assert production_source_gate["skip_reason"] == "production_source_not_allowed_in_mock_gate", production_source_gate
+
+        outside_backup_path = temp_dir / "outside-backups" / "codex1.db.backup-outside.db"
+        outside_backup_path.parent.mkdir()
+        shutil.copy2(source_db, outside_backup_path)
+        outside_gate = _write_backup_manifest_mock_gate({
+            **base_inputs,
+            "backup_path": outside_backup_path.as_posix(),
+        })
+        assert outside_gate["skip_reason"] == "backup_path_outside_approved_root", outside_gate
+
+        success_gate = _write_backup_manifest_mock_gate(base_inputs)
+        assert success_gate["status"] == "backup_manifest_written", success_gate
+        assert success_gate["manifest_written"] is True, success_gate
+        assert success_gate["real_database_touched"] is False, success_gate
+        assert success_gate["real_backup_created"] is False, success_gate
+        assert success_gate["real_restore_executed"] is False, success_gate
+        assert success_gate["backup_deleted"] is False, success_gate
+        assert success_gate["sqlite_integrity_check"] == "ok", success_gate
+        assert success_gate["backup_sha256"] == _sha256_file(backup_path), success_gate
+        assert success_gate["backup_size_bytes"] == backup_path.stat().st_size, success_gate
+        assert success_gate["baseline_counts"]["stores"] == 1, success_gate
+        assert success_gate["baseline_counts"]["products"] == 1, success_gate
+        assert success_gate["baseline_counts"]["orders"] == 1, success_gate
+        assert success_gate["baseline_counts"]["tested_success_store8"] == 1, success_gate
+        assert success_gate["baseline_counts"]["operation_audit_logs"] == 1, success_gate
+        assert success_gate["protected_from_auto_delete"] is True, success_gate
+
+        manifest_path = Path(success_gate["manifest_path"])
+        assert manifest_path.exists(), manifest_path
+        assert not Path(str(manifest_path) + ".tmp").exists(), manifest_path
+        loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        missing_fields = sorted(REQUIRED_BACKUP_MANIFEST_FIELDS - set(loaded_manifest))
+        assert not missing_fields, missing_fields
+        assert loaded_manifest["backup_sha256"] == success_gate["backup_sha256"], loaded_manifest
+        assert loaded_manifest["backup_size_bytes"] == success_gate["backup_size_bytes"], loaded_manifest
+        assert loaded_manifest["raw_response_saved"] is False, loaded_manifest
+        assert loaded_manifest["secrets_saved"] is False, loaded_manifest
+        assert loaded_manifest["privacy_fields_redacted"] is True, loaded_manifest
+        assert loaded_manifest["sensitive_scan_passed"] is True, loaded_manifest
+        assert loaded_manifest["retention_class"] == "pre_write", loaded_manifest
+        assert loaded_manifest["retention_until"], loaded_manifest
+        assert loaded_manifest["operation_audit_correlation_id"] == "backup-1e-correlation-safe-fixture", loaded_manifest
+
+        manifest_text = json.dumps(loaded_manifest, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_BACKUP_MANIFEST_SENSITIVE_MARKERS:
+            assert marker not in manifest_text, manifest_text
+        for forbidden in [
+            "authorization",
+            "headers",
+            "signature",
+            "bcrypt",
+            "clientsecret",
+            "rawresponse",
+            "channelno",
+            "productorderid",
+            "buyername",
+            "receivername",
+            "buyerphone",
+            "receiverphone",
+            "zipcode",
+        ]:
+            assert forbidden not in manifest_text, manifest_text
+
+        restore_manifest_gate = _validate_backup_manifest_for_restore_dry_run(loaded_manifest, backup_path)
+        assert restore_manifest_gate["status"] == "restore_dry_run_manifest_valid", restore_manifest_gate
+
+        overwrite_gate = _write_backup_manifest_mock_gate(base_inputs)
+        assert overwrite_gate["skip_reason"] == "manifest_already_exists", overwrite_gate
+        assert overwrite_gate["manifest_written"] is False, overwrite_gate
+
+        manual_checkpoint_path = backup_root / "codex1.db.backup-erp-backup-1e-manual.db"
+        shutil.copy2(source_db, manual_checkpoint_path)
+        manual_gate = _write_backup_manifest_mock_gate({
+            **base_inputs,
+            "backup_path": manual_checkpoint_path.as_posix(),
+            "retention_class": "manual_checkpoint",
+            "operation_audit_correlation_id": None,
+        })
+        assert manual_gate["status"] == "backup_manifest_written", manual_gate
+        assert manual_gate["protected_from_auto_delete"] is False, manual_gate
+
+    if production_before is not None:
+        production_after = {
+            "size": production_db_path.stat().st_size,
+            "sha256": _sha256_file(production_db_path),
+        }
+        assert production_after == production_before, {
+            "before": production_before,
+            "after": production_after,
+        }
+
+    print("backup manifest mock implementation gate: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -9525,6 +9952,7 @@ def main() -> None:
         verify_operation_audit_logs_readonly_mock_gate()
         verify_operation_audit_logs_readonly_local_api()
         verify_backup_restore_verification_dry_run()
+        verify_backup_manifest_mock_implementation_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
         verify_naver_product_local_sync_design_docs()
