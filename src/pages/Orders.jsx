@@ -1373,6 +1373,120 @@ function NaverBatchApprovalEvidencePanel() {
   );
 }
 
+const formalBatchDecisionChecklist = [
+  {
+    key: 'readonly_evidence',
+    title: '只读候选证据',
+    status: '需复核',
+    message: '商品和订单候选必须来自最新只读证据，不能用过期截图或口头范围替代。',
+  },
+  {
+    key: 'backup_manifest',
+    title: '备份清单',
+    status: '需复核',
+    message: '写入前必须确认可追溯的数据库备份，并能说明备份文件、时间和校验状态。',
+  },
+  {
+    key: 'permission_gate',
+    title: '权限门禁',
+    status: '需复核',
+    message: '审批人必须具备当前店铺的商品或订单批量写入审批权限。',
+  },
+  {
+    key: 'rollback_report',
+    title: '回滚报告',
+    status: '需复核',
+    message: '必须准备回读和恢复方案；异常时能知道回退到哪个备份和如何验证结果。',
+  },
+  {
+    key: 'sensitive_scan',
+    title: '敏感扫描',
+    status: '需复核',
+    message: '审批材料不得包含 token、请求头、签名、完整买家信息或平台原始响应。',
+  },
+  {
+    key: 'post_write_readback',
+    title: '写后回读',
+    status: '需复核',
+    message: '任何后续写入都必须规划写后回读，确认商品、订单、审计和备份证据一致。',
+  },
+];
+
+function FormalBatchApprovalDecisionPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>正式批量审批决策只读记录</h2>
+          <p>这里把正式商品/订单批量写入前的审批决策材料整理成业务清单。当前只用于人工复核，不批准执行，也不会开启商品或订单批量同步。</p>
+        </div>
+        <span className="period-chip">只读决策</span>
+      </div>
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>决策状态</strong>
+            <span>待人工审批</span>
+          </div>
+          <p>审批材料可以继续整理，但当前没有任何批量写入获得执行批准。</p>
+          <small>后续执行必须另开阶段，并重新确认备份、权限、回读和审计证据。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>执行开关</strong>
+            <span>关闭</span>
+          </div>
+          <p>本面板没有同步按钮，不调用 Naver，也不写入商品、订单、SyncLog 或审计记录。</p>
+          <small>它只是把审批前需要看懂的材料排好，避免非技术人员被门禁字段绕晕。</small>
+        </article>
+        {formalBatchDecisionChecklist.map((item) => (
+          <article className="business-capability-card info" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>未完成复核前，批量写入保持关闭。</small>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title="查看审批决策技术详情"
+        description="阶段、门禁状态和写入开关只放在折叠详情中；主页面只展示业务结论。"
+        items={[
+          { label: 'phase', value: 'ERP-Batch-2H' },
+          { label: 'mock_gate_phase', value: 'ERP-Batch-2F' },
+          { label: 'readonly_api_plan_phase', value: 'ERP-Batch-2G' },
+          { label: 'decision_status', value: 'pending_human_approval' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'decision_checklist_count', value: formalBatchDecisionChecklist.length },
+          { label: 'backend_route_implemented', value: false },
+          { label: 'public_endpoint_enabled', value: false },
+          { label: 'execution_approved', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'formal_product_sync_open', value: false },
+          { label: 'formal_order_sync_open', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          ...formalBatchDecisionChecklist.map((item) => ({
+            label: `decision_check.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
 function NaverOrderBatchAuditReadinessPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({
@@ -1815,6 +1929,7 @@ export default function Orders() {
       <NaverRoleAwareActionVisibilityPanel />
       <FormalBatchOperatorChecklistPanel />
       <NaverBatchApprovalEvidencePanel />
+      <FormalBatchApprovalDecisionPanel />
       <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />

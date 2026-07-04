@@ -1653,3 +1653,33 @@ A future UI should show approval status, scope, evidence readiness, expiry, and 
 The invitation approval checklist UI plan is documented in `PHASE_ERP_MULTISTORE_2B_REAL_USER_INVITATION_READONLY_APPROVAL_CHECKLIST_UI_PLAN.md`.
 
 Real user invitation remains closed. A future readonly checklist should show masked login, role/store scope, approval, backup, audit, expiry, one-time consumption, readback, and rollback or disable-user readiness.
+
+## Phase ERP-Batch-2F - Formal Batch Approval Decision Mock Gate
+
+The formal batch approval decision mock gate is documented in `PHASE_ERP_BATCH_2F_FORMAL_BATCH_APPROVAL_DECISION_MOCK_GATE.md`.
+
+Codex1 now verifies the final approval-decision evidence package before any future formal product/order batch write. The gate requires readonly evidence, approval-audit evidence, backup manifest, rollback report, permission gate, whitelist, duplicate check, sensitive scan, readback, and audit correlation evidence. It does not approve execution or write data.
+
+## Phase ERP-Batch-2G - Formal Batch Approval Decision Readonly API Plan
+
+The readonly API plan is documented in `PHASE_ERP_BATCH_2G_FORMAL_BATCH_APPROVAL_DECISION_READONLY_API_PLAN.md`.
+
+This phase plans a future readonly decision endpoint only. No route is added in this phase.
+
+## Phase ERP-Batch-2H - Formal Batch Approval Decision Readonly UI Implementation
+
+The readonly UI implementation is documented in `PHASE_ERP_BATCH_2H_FORMAL_BATCH_APPROVAL_DECISION_READONLY_UI_IMPLEMENTATION.md`.
+
+Codex2 Orders now shows a readonly formal batch approval decision panel. It presents business checklist items and keeps technical write flags folded.
+
+## Phase ERP-Multistore-2C - Real User Invitation Approval Checklist Mock Gate
+
+The invitation approval checklist mock gate is documented in `PHASE_ERP_MULTISTORE_2C_REAL_USER_INVITATION_APPROVAL_CHECKLIST_MOCK_GATE.md`.
+
+Codex1 now verifies the future real-user invitation checklist: masked login display, store/role scope, approval, backup, audit, expiry, one-time invite, readback, rollback, and privacy display. It does not create users, send invitations, create sessions, assign roles, or write memberships.
+
+## Phase ERP-Multistore-2D - Real User Invitation Approval Checklist UI Implementation Plan
+
+The UI implementation plan is documented in `PHASE_ERP_MULTISTORE_2D_REAL_USER_INVITATION_APPROVAL_CHECKLIST_UI_IMPLEMENTATION_PLAN.md`.
+
+The current plan keeps real invitation closed and defines how a future Accounts UI should present the checklist in business wording.
