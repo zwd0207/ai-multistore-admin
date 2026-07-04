@@ -1773,3 +1773,33 @@ Codex1 now exposes `POST /api/v1/permissions/user-invitation/approval-checklist/
 The readonly UI plan is documented in `PHASE_NAVER_ORDER_BATCH_2C_ORDER_BATCH_EXECUTION_APPROVAL_READONLY_UI_PLAN.md`.
 
 Future order batch execution approval UI must show checklist readiness without implying execution approval. Naver order batch execution remains closed.
+
+## Phase ERP-Multistore-2K - Invitation Approval Checklist Readonly API Frontend Integration Plan
+
+The frontend integration plan is documented in `PHASE_ERP_MULTISTORE_2K_INVITATION_APPROVAL_CHECKLIST_READONLY_API_FRONTEND_INTEGRATION_PLAN.md`.
+
+Accounts should consume the invitation approval checklist readonly API as review evidence only. Real invitation remains closed.
+
+## Phase ERP-Multistore-2L - Invitation Approval Checklist Readonly API Frontend Integration
+
+The frontend integration is documented in `PHASE_ERP_MULTISTORE_2L_INVITATION_APPROVAL_CHECKLIST_READONLY_API_FRONTEND_INTEGRATION.md`.
+
+Codex2 Accounts now calls the route-backed invitation approval checklist readonly check through `dataProvider`, with a mock fallback. The panel shows checklist readiness without creating users, sending invitations, assigning roles, or writing store memberships.
+
+## Phase Naver-Order-Batch-2D - Order Batch Execution Approval Readonly UI Implementation
+
+The readonly UI implementation is documented in `PHASE_NAVER_ORDER_BATCH_2D_ORDER_BATCH_EXECUTION_APPROVAL_READONLY_UI_IMPLEMENTATION.md`.
+
+Codex2 Orders now shows a future order batch execution approval checklist. It contains no execution button and does not call Naver or write local order data.
+
+## Phase ERP-Batch-2O - Formal Batch Approval Decision Audit Linkage Plan
+
+The audit linkage plan is documented in `PHASE_ERP_BATCH_2O_FORMAL_BATCH_APPROVAL_DECISION_AUDIT_LINKAGE_PLAN.md`.
+
+Future formal batch execution should link approval decisions to readonly evidence, backup manifest, permission evidence, sensitive scan, readback plan, rollback report, operator hash, and store scope. This phase does not write audit rows.
+
+## Phase Naver-Product-Batch-2D - Product Batch Execution Approval Boundary Mock Gate
+
+The mock gate is documented in `PHASE_NAVER_PRODUCT_BATCH_2D_PRODUCT_BATCH_EXECUTION_APPROVAL_BOUNDARY_MOCK_GATE.md`.
+
+Codex1 now verifies future Naver product batch execution approval readiness while keeping product writes and formal product batch sync closed.

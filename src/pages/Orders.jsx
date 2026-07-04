@@ -1828,6 +1828,159 @@ function NaverOrderBatchAuditReadinessPanel() {
   );
 }
 
+const naverOrderBatchExecutionChecklist = [
+  {
+    key: 'fresh_candidates',
+    title: '\u6700\u65b0\u53ea\u8bfb\u5019\u9009',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u8ba2\u5355\u6279\u91cf\u6267\u884c\u8303\u56f4\u5fc5\u987b\u6765\u81ea\u6700\u65b0\u53ea\u8bfb\u9884\u89c8\uff0c\u4e0d\u80fd\u4f7f\u7528\u8fc7\u671f\u622a\u56fe\u6216\u53e3\u5934\u8303\u56f4\u3002',
+  },
+  {
+    key: 'backup_readback',
+    title: '\u5907\u4efd\u4e0e\u56de\u8bfb',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u6267\u884c\u524d\u5fc5\u987b\u6709\u53ef\u8ffd\u6eaf\u5907\u4efd\uff0c\u6267\u884c\u540e\u5fc5\u987b\u56de\u8bfb\u8ba2\u5355\u3001\u65f6\u95f4\u7ebf\u548c\u5ba1\u8ba1\u8bc1\u636e\u3002',
+  },
+  {
+    key: 'permission_approval',
+    title: '\u6743\u9650\u4e0e\u4eba\u5de5\u5ba1\u6279',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u64cd\u4f5c\u8005\u5fc5\u987b\u5177\u5907\u5f53\u524d\u5e97\u94fa\u7684\u8ba2\u5355\u6279\u91cf\u5199\u5165\u5ba1\u6279\u6743\u9650\uff0c\u4e14\u672c\u6b21\u8303\u56f4\u8981\u660e\u786e\u88ab\u6279\u51c6\u3002',
+  },
+  {
+    key: 'privacy_whitelist',
+    title: '\u9690\u79c1\u4e0e\u5b57\u6bb5\u767d\u540d\u5355',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u53ea\u5141\u8bb8\u5199\u5165\u767d\u540d\u5355\u4e1a\u52a1\u5b57\u6bb5\uff0c\u4e0d\u4fdd\u5b58\u5b8c\u6574\u4e70\u5bb6\u9690\u79c1\u6216\u5e73\u53f0\u539f\u59cb\u54cd\u5e94\u3002',
+  },
+  {
+    key: 'delivery_claim_mapping',
+    title: '\u914d\u9001\u4e0e\u552e\u540e\u6620\u5c04',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u8ba2\u5355\u72b6\u6001\u3001\u914d\u9001\u72b6\u6001\u548c\u53d6\u6d88\u002f\u9000\u8d27\u002f\u6362\u8d27\u72b6\u6001\u8981\u5148\u80fd\u6b63\u786e\u53ea\u8bfb\u5c55\u793a\u3002',
+  },
+  {
+    key: 'rollback_audit',
+    title: '\u56de\u6eda\u4e0e\u5ba1\u8ba1\u94fe',
+    status: '\u5fc5\u987b\u590d\u6838',
+    message: '\u6279\u91cf\u6267\u884c\u5fc5\u987b\u80fd\u56de\u7b54\u8c01\u6279\u51c6\u3001\u5199\u4e86\u4ec0\u4e48\u3001\u4ec0\u4e48\u65f6\u5019\u5199\u3001\u5f02\u5e38\u600e\u4e48\u6062\u590d\u3002',
+  },
+];
+
+function NaverOrderBatchExecutionApprovalPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({ loading: false, localOrderCount: 0, error: '' });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, localOrderCount: 0, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getOrders({
+      storeId: selectedStoreId,
+      platform: 'naver',
+      page: 1,
+      pageSize: 100,
+    })
+      .then((orderResponse) => {
+        if (cancelled) return;
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        setState({ loading: false, localOrderCount: naverOrders.length, error: '' });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            localOrderCount: 0,
+            error: error?.message || '\u8ba2\u5355\u6279\u91cf\u6267\u884c\u5ba1\u6279\u6750\u6599\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, localOrderCount, error } = state;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>{'\u8ba2\u5355\u6279\u91cf\u6267\u884c\u5ba1\u6279\u53ea\u8bfb\u68c0\u67e5'}</h2>
+          <p>{'\u8fd9\u91cc\u53ea\u5c55\u793a\u672a\u6765\u6b63\u5f0f\u8ba2\u5355\u6279\u91cf\u6267\u884c\u524d\u8981\u590d\u6838\u7684\u4e1a\u52a1\u6750\u6599\u3002\u5f53\u524d\u4e0d\u6267\u884c\u5199\u5165\uff0c\u4e0d\u8c03\u7528 Naver\uff0c\u4e5f\u4e0d\u5f00\u653e\u6b63\u5f0f\u8ba2\u5355\u6279\u91cf\u540c\u6b65\u3002'}</p>
+        </div>
+        <span className="period-chip">{loading ? '\u6574\u7406\u4e2d' : '\u53ea\u8bfb\u5ba1\u6279'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>{'\u6267\u884c\u72b6\u6001'}</strong>
+            <span>{'\u672a\u5f00\u653e'}</span>
+          </div>
+          <p>{'\u5f53\u524d\u53ea\u662f\u8ba2\u5355\u6279\u91cf\u6267\u884c\u5ba1\u6279 UI\uff0c\u6ca1\u6709\u6267\u884c\u6309\u94ae\uff0c\u4e0d\u5199\u8ba2\u5355\u3001\u4e0d\u5199\u65f6\u95f4\u7ebf\u3001\u4e0d\u5199\u5ba1\u8ba1\u8bb0\u5f55\u3002'}</p>
+          <small>{'\u771f\u6b63\u6267\u884c\u4ecd\u5fc5\u987b\u53e6\u5f00\u9636\u6bb5\u5e76\u91cd\u65b0\u5ba1\u6279\u3002'}</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>{'\u672c\u5730\u8ba2\u5355\u8303\u56f4'}</strong>
+            <span>{localOrderCount} {'\u6761'}</span>
+          </div>
+          <p>{'\u672c\u9762\u677f\u53ea\u6839\u636e\u5f53\u524d\u5e97\u94fa\u672c\u5730 Naver \u8ba2\u5355\u6574\u7406\u590d\u6838\u63d0\u793a\uff0c\u4e0d\u4ee3\u8868\u5e73\u53f0\u6709\u65b0\u7684\u5f85\u5199\u5165\u5019\u9009\u3002'}</p>
+          <small>{'\u771f\u5b9e\u5019\u9009\u5fc5\u987b\u6765\u81ea\u5355\u72ec\u7684\u53ea\u8bfb preview\u3002'}</small>
+        </article>
+        {naverOrderBatchExecutionChecklist.map((item) => (
+          <article className="business-capability-card info" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+            <small>{'\u672a\u5168\u90e8\u590d\u6838\u524d\uff0c\u8ba2\u5355\u6279\u91cf\u6267\u884c\u4fdd\u6301\u5173\u95ed\u3002'}</small>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title="查看订单批量执行审批技术详情"
+        description="执行状态、门禁和写入开关仅供管理员排查；主页面只展示业务复核提示。"
+        items={[
+          { label: 'phase', value: 'Naver-Order-Batch-2D' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'local_order_count', value: localOrderCount },
+          { label: 'checklist_item_count', value: naverOrderBatchExecutionChecklist.length },
+          { label: 'execution_approved', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'timeline_events_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'formal_order_sync_open', value: false },
+          { label: 'platform_order_writes_enabled', value: false },
+          { label: 'shipment_write_enabled', value: false },
+          { label: 'cancel_write_enabled', value: false },
+          { label: 'return_write_enabled', value: false },
+          { label: 'exchange_write_enabled', value: false },
+          ...naverOrderBatchExecutionChecklist.map((item) => ({
+            label: `order_batch_execution_check.${item.key}`,
+            value: item.status,
+          })),
+        ]}
+      />
+    </section>
+  );
+}
+
 function DetailItem({ label, value }) {
   return (
     <div className="detail-item">
@@ -2163,6 +2316,7 @@ export default function Orders() {
       <NaverBatchApprovalEvidencePanel />
       <FormalBatchApprovalDecisionRuntimePanel />
       <NaverOrderBatchAuditReadinessPanel />
+      <NaverOrderBatchExecutionApprovalPanel />
       <NaverOrderCompleteDetailPanel />
       <CoupangOrderSyncPanel />
       <ResourcePage

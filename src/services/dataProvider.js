@@ -744,6 +744,99 @@ function mockUserInvitationReadonlyGate(payload = {}) {
   };
 }
 
+function mockUserInvitationApprovalChecklistReadonlyGate(payload = {}) {
+  const approvalChecklist = payload.approval_checklist || payload.approvalChecklist || {};
+  const readonlyApiContext = payload.readonly_api_context || payload.readonlyApiContext || {};
+  const requiredChecklistFlags = [
+    'backup_evidence_ready',
+    'audit_evidence_plan_ready',
+    'membership_assignment_plan_ready',
+    'invite_expiry_configured',
+    'one_time_invite_configured',
+    'post_create_readback_required',
+    'disable_user_rollback_ready',
+    'privacy_display_verified',
+    'formal_login_boundary_acknowledged',
+  ];
+  const requiredApiFlags = [
+    'readonly_api_contract_planned',
+    'business_wording_required',
+    'technical_details_folded',
+    'send_invitation_button_excluded',
+    'write_endpoint_excluded',
+    'masked_identifier_required',
+    'route_requires_separate_implementation',
+    'real_invitation_remains_closed',
+  ];
+  const baseGate = mockUserInvitationReadonlyGate({
+    ...payload,
+    backup_evidence_planned: true,
+    audit_evidence_planned: true,
+    membership_assignment_plan_ready: true,
+  });
+  const missingChecklistFlags = requiredChecklistFlags.filter((flag) => approvalChecklist[flag] !== true);
+  const missingApiFlags = requiredApiFlags.filter((flag) => readonlyApiContext[flag] !== true);
+  let status = 'blocked';
+  let skipReason = baseGate.skip_reason || null;
+  let businessMessage = '用户邀请审批清单只读检查暂未通过，请管理员补齐审批材料。';
+  if (baseGate.status !== 'user_invitation_mock_ready') {
+    skipReason = baseGate.skip_reason || 'user_invitation_base_gate_blocked';
+    businessMessage = baseGate.business_message || businessMessage;
+  } else if (missingChecklistFlags.length) {
+    skipReason = 'approval_checklist_incomplete';
+  } else if (approvalChecklist.invitation_sent || approvalChecklist.users_written || approvalChecklist.membership_written) {
+    skipReason = 'real_invitation_not_allowed_in_readonly_gate';
+  } else if (missingApiFlags.length) {
+    skipReason = 'readonly_api_context_incomplete';
+  } else if (readonlyApiContext.public_endpoint_enabled || readonlyApiContext.backend_route_implemented) {
+    skipReason = 'readonly_api_context_should_describe_pre_route_boundary';
+  } else if (readonlyApiContext.invitation_sent || readonlyApiContext.users_written) {
+    skipReason = 'real_invitation_not_allowed_in_readonly_gate';
+  } else {
+    status = 'user_invitation_approval_checklist_readonly_api_ready';
+    businessMessage = '用户邀请审批清单只读检查已通过。当前只展示审批材料，不会创建用户、发送邀请或分配店铺权限。';
+  }
+  return {
+    ...baseGate,
+    phase: 'ERP-Multistore-2L',
+    status,
+    skip_reason: skipReason,
+    user_invitation_approval_checklist_readonly_api_local: true,
+    checklist_ready: status === 'user_invitation_approval_checklist_readonly_api_ready',
+    required_checklist_flags: requiredChecklistFlags,
+    missing_checklist_flags: missingChecklistFlags,
+    required_api_flags: requiredApiFlags,
+    missing_api_flags: missingApiFlags,
+    route_path: '/api/v1/permissions/user-invitation/approval-checklist/readonly-check',
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    backup_evidence_ready: approvalChecklist.backup_evidence_ready === true,
+    audit_evidence_plan_ready: approvalChecklist.audit_evidence_plan_ready === true,
+    invite_expiry_configured: approvalChecklist.invite_expiry_configured === true,
+    one_time_invite_configured: approvalChecklist.one_time_invite_configured === true,
+    post_create_readback_required: approvalChecklist.post_create_readback_required === true,
+    disable_user_rollback_ready: approvalChecklist.disable_user_rollback_ready === true,
+    privacy_display_verified: approvalChecklist.privacy_display_verified === true,
+    formal_login_boundary_acknowledged: approvalChecklist.formal_login_boundary_acknowledged === true,
+    invitation_would_create_user: false,
+    invitation_would_send: false,
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    role_assignment_written: false,
+    operation_audit_rows_written: false,
+    real_auth_session_created: false,
+    real_database_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    business_message: businessMessage,
+    next_action: '真实邀请仍必须另开审批和写入阶段，并重新确认备份、审计、回读和撤销证据。',
+  };
+}
+
 function adaptPermissionGateResult(data = {}) {
   return {
     ...data,
@@ -864,6 +957,38 @@ function adaptUserInvitationReadonlyResult(data = {}) {
     privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
     formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
     platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function adaptUserInvitationApprovalChecklistReadonlyResult(data = {}) {
+  const base = adaptUserInvitationReadonlyResult(data);
+  return {
+    ...base,
+    phase: data.phase || base.phase || 'ERP-Multistore-2J',
+    checklistReady: Boolean(data.checklist_ready ?? data.checklistReady),
+    requiredChecklistFlags: Array.isArray(data.required_checklist_flags)
+      ? data.required_checklist_flags
+      : (Array.isArray(data.requiredChecklistFlags) ? data.requiredChecklistFlags : []),
+    missingChecklistFlags: Array.isArray(data.missing_checklist_flags)
+      ? data.missing_checklist_flags
+      : (Array.isArray(data.missingChecklistFlags) ? data.missingChecklistFlags : []),
+    requiredApiFlags: Array.isArray(data.required_api_flags)
+      ? data.required_api_flags
+      : (Array.isArray(data.requiredApiFlags) ? data.requiredApiFlags : []),
+    missingApiFlags: Array.isArray(data.missing_api_flags)
+      ? data.missing_api_flags
+      : (Array.isArray(data.missingApiFlags) ? data.missingApiFlags : []),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || '',
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    backupEvidenceReady: Boolean(data.backup_evidence_ready ?? data.backupEvidenceReady ?? data.backup_evidence_planned ?? data.backupEvidencePlanned),
+    auditEvidencePlanReady: Boolean(data.audit_evidence_plan_ready ?? data.auditEvidencePlanReady ?? data.audit_evidence_planned ?? data.auditEvidencePlanned),
+    inviteExpiryConfigured: Boolean(data.invite_expiry_configured ?? data.inviteExpiryConfigured),
+    oneTimeInviteConfigured: Boolean(data.one_time_invite_configured ?? data.oneTimeInviteConfigured),
+    postCreateReadbackRequired: Boolean(data.post_create_readback_required ?? data.postCreateReadbackRequired),
+    disableUserRollbackReady: Boolean(data.disable_user_rollback_ready ?? data.disableUserRollbackReady),
+    privacyDisplayVerified: Boolean(data.privacy_display_verified ?? data.privacyDisplayVerified),
+    formalLoginBoundaryAcknowledged: Boolean(data.formal_login_boundary_acknowledged ?? data.formalLoginBoundaryAcknowledged),
+    nextAction: data.next_action || data.nextAction || '',
   };
 }
 
@@ -1513,6 +1638,29 @@ const sourceMethods = {
     };
     if (!isBackendSource) return adaptUserInvitationReadonlyResult(mockUserInvitationReadonlyGate(request));
     return adaptUserInvitationReadonlyResult(await backendApi.checkUserInvitationReadonly(request));
+  },
+  checkUserInvitationApprovalChecklistReadonly: async (payload = {}) => {
+    const request = {
+      actor_context: payload.actorContext || payload.actor_context || {},
+      target_user_key_hash: payload.targetUserKeyHash || payload.target_user_key_hash,
+      login_identifier_hash: payload.loginIdentifierHash || payload.login_identifier_hash,
+      login_identifier_masked: payload.loginIdentifierMasked || payload.login_identifier_masked,
+      target_store_ids: payload.targetStoreIds || payload.target_store_ids || [],
+      target_role: payload.targetRole || payload.target_role,
+      manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+      invitation_reason: payload.invitationReason || payload.invitation_reason || 'readonly user invitation approval checklist check',
+      approval_checklist: payload.approvalChecklist || payload.approval_checklist || {},
+      readonly_api_context: payload.readonlyApiContext || payload.readonly_api_context || {},
+      existing_user_hashes: payload.existingUserHashes || payload.existing_user_hashes || [],
+    };
+    if (!isBackendSource) {
+      return adaptUserInvitationApprovalChecklistReadonlyResult(
+        mockUserInvitationApprovalChecklistReadonlyGate(request),
+      );
+    }
+    return adaptUserInvitationApprovalChecklistReadonlyResult(
+      await backendApi.checkUserInvitationApprovalChecklistReadonly(request),
+    );
   },
   normalizeBatchReadonlyEvidence: async (payload = {}) => {
     const request = {

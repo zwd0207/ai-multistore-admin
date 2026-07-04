@@ -96,9 +96,72 @@ function auditEvidenceMessage(result) {
   return '真实邀请前必须补齐备份计划、审计证据计划和后续成员分配计划。';
 }
 
+function buildInvitationApprovalChecklist() {
+  return {
+    backup_evidence_ready: true,
+    audit_evidence_plan_ready: true,
+    membership_assignment_plan_ready: true,
+    invite_expiry_configured: true,
+    one_time_invite_configured: true,
+    post_create_readback_required: true,
+    disable_user_rollback_ready: true,
+    privacy_display_verified: true,
+    formal_login_boundary_acknowledged: true,
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    real_auth_session_created: false,
+  };
+}
+
+function buildInvitationReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    send_invitation_button_excluded: true,
+    write_endpoint_excluded: true,
+    masked_identifier_required: true,
+    route_requires_separate_implementation: true,
+    real_invitation_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    invitation_sent: false,
+    users_written: false,
+  };
+}
+
+function checklistStatusTone(result) {
+  if (!result) return 'muted';
+  if (result.status === 'user_invitation_approval_checklist_readonly_api_ready') return 'success';
+  return 'warning';
+}
+
+function checklistStatusLabel(result) {
+  if (!result) return '\u5f85\u68c0\u67e5';
+  if (result.status === 'user_invitation_approval_checklist_readonly_api_ready') return '\u6e05\u5355\u53ef\u590d\u6838';
+  if (result.skipReason === 'approval_checklist_incomplete') return '\u6e05\u5355\u672a\u8865\u9f50';
+  if (result.skipReason === 'readonly_api_context_incomplete') return '\u9875\u9762\u95e8\u7981\u672a\u8865\u9f50';
+  return '\u9700\u8981\u7ba1\u7406\u5458\u590d\u6838';
+}
+
+function checklistBusinessMessage(result) {
+  if (!result) return '\u6b63\u5728\u8bfb\u53d6\u7528\u6237\u9080\u8bf7\u5ba1\u6279\u6e05\u5355\u53ea\u8bfb\u68c0\u67e5\u7ed3\u679c\u3002';
+  if (result.status === 'user_invitation_approval_checklist_readonly_api_ready') {
+    return result.businessMessage || '\u7528\u6237\u9080\u8bf7\u5ba1\u6279\u6e05\u5355\u53ea\u8bfb\u68c0\u67e5\u5df2\u901a\u8fc7\u3002\u5f53\u524d\u53ea\u5c55\u793a\u5ba1\u6279\u6750\u6599\uff0c\u4e0d\u4f1a\u521b\u5efa\u7528\u6237\u3001\u53d1\u9001\u9080\u8bf7\u6216\u5206\u914d\u5e97\u94fa\u6743\u9650\u3002';
+  }
+  return result.businessMessage || '\u7528\u6237\u9080\u8bf7\u5ba1\u6279\u6e05\u5355\u53ea\u8bfb\u68c0\u67e5\u6682\u672a\u901a\u8fc7\uff0c\u8bf7\u7ba1\u7406\u5458\u67e5\u770b\u6298\u53e0\u8be6\u60c5\u3002';
+}
+
 export default function UserInvitationReadonlyPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
-  const [state, setState] = useState({ loading: false, result: null, error: '' });
+  const [state, setState] = useState({
+    loading: false,
+    result: null,
+    checklistResult: null,
+    error: '',
+    checklistError: '',
+  });
   const storeId = Number(selectedStoreId || selectedStore?.id || 8);
 
   const requestPayload = useMemo(() => ({
@@ -116,28 +179,74 @@ export default function UserInvitationReadonlyPanel() {
     existingUserHashes: [],
   }), [storeId]);
 
+  const checklistPayload = useMemo(() => ({
+    actorContext: requestPayload.actorContext,
+    targetUserKeyHash: TARGET_USER_HASH,
+    loginIdentifierHash: TARGET_LOGIN_HASH,
+    loginIdentifierMasked: TARGET_LOGIN_MASKED,
+    targetStoreIds: [storeId],
+    targetRole: TARGET_ROLE,
+    manualApproval: true,
+    invitationReason: 'user invitation approval checklist readonly UI check',
+    approvalChecklist: buildInvitationApprovalChecklist(),
+    readonlyApiContext: buildInvitationReadonlyApiContext(),
+    existingUserHashes: [],
+  }), [requestPayload.actorContext, storeId]);
+
   useEffect(() => {
     if (!storeId) return undefined;
     let cancelled = false;
     setState((current) => ({ ...current, loading: true, error: '' }));
     dataProvider.checkUserInvitationReadonly(requestPayload)
       .then((result) => {
-        if (!cancelled) setState({ loading: false, result, error: '' });
+        if (!cancelled) setState((current) => ({ ...current, loading: false, result, error: '' }));
       })
       .catch((error) => {
         if (!cancelled) {
-          setState({
+          setState((current) => ({
+            ...current,
             loading: false,
             result: null,
             error: error?.message || '用户邀请只读检查暂时无法加载。',
-          });
+          }));
         }
       });
     return () => { cancelled = true; };
   }, [requestPayload, storeId]);
 
-  const { loading, result, error } = state;
+  useEffect(() => {
+    if (!storeId) return undefined;
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, checklistError: '' }));
+    dataProvider.checkUserInvitationApprovalChecklistReadonly(checklistPayload)
+      .then((checklistResult) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            checklistResult,
+            checklistError: '',
+          }));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            checklistResult: null,
+            checklistError: error?.message || '用户邀请审批清单只读检查暂时无法加载。',
+          }));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [checklistPayload, storeId]);
+
+  const {
+    loading, result, checklistResult, error, checklistError,
+  } = state;
   const tone = statusTone(result);
+  const checklistTone = checklistStatusTone(checklistResult);
 
   return (
     <section className="content-card">
@@ -149,6 +258,7 @@ export default function UserInvitationReadonlyPanel() {
         <span className="period-chip">{loading ? '检查中' : '只读检查'}</span>
       </div>
       {error ? <div className="mock-sync-error">{error}</div> : null}
+      {checklistError ? <div className="mock-sync-error">{checklistError}</div> : null}
       <div className="business-capability-grid compact">
         <article className={`business-capability-card ${tone}`}>
           <div className="business-capability-head">
@@ -206,6 +316,14 @@ export default function UserInvitationReadonlyPanel() {
           <p>下面清单只帮助管理员理解真实邀请前还要复核什么，不会发送邀请，也不会创建用户或成员关系。</p>
           <small>后续如果进入真实邀请，仍必须另开审批和写入阶段。</small>
         </article>
+        <article className={`business-capability-card ${checklistTone}`}>
+          <div className="business-capability-head">
+            <strong>邀请审批清单只读 API</strong>
+            <span>{checklistStatusLabel(checklistResult)}</span>
+          </div>
+          <p>{checklistBusinessMessage(checklistResult)}</p>
+          <small>这里只展示审批材料是否可复核，不会发送邀请、创建用户或写入成员关系。</small>
+        </article>
         {invitationApprovalChecklist.map((item) => (
           <article className="business-capability-card info" key={item.key}>
             <div className="business-capability-head">
@@ -223,6 +341,15 @@ export default function UserInvitationReadonlyPanel() {
         items={[
           { label: 'phase', value: result?.phase || 'ERP-Multistore-1T' },
           { label: 'approval_checklist_display_phase', value: 'ERP-Multistore-2F' },
+          { label: 'approval_checklist_api_phase', value: checklistResult?.phase || 'ERP-Multistore-2L' },
+          { label: 'approval_checklist_api_status', value: checklistResult?.status },
+          { label: 'approval_checklist_api_skip_reason', value: checklistResult?.skipReason },
+          { label: 'approval_checklist_route_path', value: checklistResult?.routePath },
+          { label: 'approval_checklist_backend_route_implemented', value: checklistResult?.backendRouteImplemented },
+          { label: 'approval_checklist_public_endpoint_enabled', value: checklistResult?.publicEndpointEnabled },
+          { label: 'approval_checklist_ready', value: checklistResult?.checklistReady },
+          { label: 'approval_checklist_missing_flags', value: checklistResult?.missingChecklistFlags?.join(', ') || '[]' },
+          { label: 'approval_checklist_missing_api_flags', value: checklistResult?.missingApiFlags?.join(', ') || '[]' },
           { label: 'status', value: result?.status },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'approval_checklist_item_count', value: invitationApprovalChecklist.length },
