@@ -6790,6 +6790,289 @@ def evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_execution_preflight_readonly_api_local(
+    *,
+    approval_decision: dict | None,
+    approval_audit_linkage: dict | None,
+    execution_approvals: list[dict] | tuple[dict, ...] | None,
+    preflight_context: dict | None,
+) -> dict:
+    """Unified readonly preflight for future formal product/order batch execution."""
+
+    required_preflight_flags = [
+        "operator_checklist_reviewed",
+        "approval_decision_referenced",
+        "audit_linkage_referenced",
+        "readonly_evidence_referenced",
+        "backup_manifest_referenced",
+        "permission_evidence_referenced",
+        "rollback_report_referenced",
+        "readback_plan_referenced",
+        "sensitive_scan_referenced",
+        "execution_window_limited",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-3A",
+        "formal_batch_execution_preflight_readonly_api_local": True,
+        "status": "blocked",
+        "preflight_status": "blocked",
+        "preflight_ready": False,
+        "skip_reason": None,
+        "required_preflight_flags": required_preflight_flags,
+        "missing_preflight_flags": [],
+        "execution_approval_count": 0,
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "required_actions": [],
+        "route_path": "/api/v1/batch/execution-preflight/readonly-check",
+        "http_method": "POST",
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+    }
+    if not isinstance(approval_decision, dict):
+        result["skip_reason"] = "approval_decision_required"
+        return result
+    if not isinstance(approval_audit_linkage, dict):
+        result["skip_reason"] = "approval_audit_linkage_required"
+        return result
+    if not isinstance(execution_approvals, (list, tuple)) or not execution_approvals:
+        result["skip_reason"] = "execution_approvals_required"
+        return result
+    if len(execution_approvals) > 10:
+        result["skip_reason"] = "execution_approval_count_limit_exceeded"
+        return result
+    if not isinstance(preflight_context, dict):
+        result["skip_reason"] = "preflight_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "approval_decision": approval_decision,
+        "approval_audit_linkage": approval_audit_linkage,
+        "execution_approvals": execution_approvals,
+        "preflight_context": preflight_context,
+    }):
+        result["skip_reason"] = "formal_batch_execution_preflight_sensitive_field_blocked"
+        return result
+
+    if approval_decision.get("status") not in {
+        "formal_batch_approval_decision_mock_ready",
+        "formal_batch_approval_decision_readonly_api_mock_ready",
+        "formal_batch_approval_decision_readonly_api_ready",
+    }:
+        result["skip_reason"] = "approval_decision_not_ready"
+        return result
+    if approval_decision.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_preflight"
+        return result
+    if approval_decision.get("real_database_written") is True:
+        result["skip_reason"] = "approval_decision_wrote_database"
+        return result
+    if approval_decision.get("orders_written") is True or approval_decision.get("products_written") is True:
+        result["skip_reason"] = "approval_decision_business_write_not_allowed"
+        return result
+    if approval_decision.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "approval_decision_audit_write_not_allowed"
+        return result
+    if approval_decision.get("formal_sync_open") is True or approval_decision.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if approval_decision.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+
+    if approval_audit_linkage.get("status") not in {
+        "approval_decision_audit_linkage_mock_ready",
+        "approval_decision_audit_linkage_readonly_api_local_route_mock_ready",
+        "approval_decision_audit_linkage_readonly_api_ready",
+    }:
+        result["skip_reason"] = "approval_audit_linkage_not_ready"
+        return result
+    if approval_audit_linkage.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_preflight"
+        return result
+    if approval_audit_linkage.get("real_database_written") is True:
+        result["skip_reason"] = "approval_audit_linkage_wrote_database"
+        return result
+    if approval_audit_linkage.get("orders_written") is True or approval_audit_linkage.get("products_written") is True:
+        result["skip_reason"] = "approval_audit_linkage_business_write_not_allowed"
+        return result
+    if approval_audit_linkage.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "approval_audit_linkage_audit_write_not_allowed"
+        return result
+    if approval_audit_linkage.get("formal_sync_open") is True or approval_audit_linkage.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if approval_audit_linkage.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "privacy_redaction_required"
+        return result
+
+    preflight_missing_flags = [
+        flag for flag in required_preflight_flags
+        if preflight_context.get(flag) is not True
+    ]
+    result["missing_preflight_flags"] = preflight_missing_flags
+    if preflight_missing_flags:
+        result["skip_reason"] = "execution_preflight_context_incomplete"
+        return result
+    if preflight_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_preflight"
+        return result
+    if preflight_context.get("formal_sync_open") is True or preflight_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if preflight_context.get("real_database_written") is True or preflight_context.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "write_not_allowed_in_preflight"
+        return result
+
+    decision_store_ids = set(_normalize_formal_batch_store_ids(approval_decision.get("store_ids")) or [])
+    linkage_store_ids = set(_normalize_formal_batch_store_ids(approval_audit_linkage.get("store_ids")) or [])
+    decision_actions = set(str(action) for action in (approval_decision.get("required_actions") or []))
+    linkage_actions = set(str(action) for action in (approval_audit_linkage.get("required_actions") or []))
+    if not decision_store_ids or not linkage_store_ids:
+        result["skip_reason"] = "approval_store_scope_required"
+        return result
+
+    accepted_product_statuses = {
+        "naver_product_batch_execution_approval_mock_ready",
+        "naver_product_batch_execution_approval_readonly_api_mock_ready",
+        "naver_product_batch_execution_approval_readonly_api_local_route_mock_ready",
+        "naver_product_batch_execution_approval_readonly_api_ready",
+    }
+    accepted_order_statuses = {
+        "naver_order_batch_execution_approval_mock_ready",
+        "naver_order_batch_execution_approval_readonly_api_mock_ready",
+        "naver_order_batch_execution_approval_readonly_api_local_route_mock_ready",
+        "naver_order_batch_execution_approval_readonly_api_ready",
+    }
+    store_ids: set[int] = set()
+    sync_kinds: set[str] = set()
+    targets: set[str] = set()
+    required_actions: set[str] = set()
+    for index, approval in enumerate(execution_approvals):
+        if not isinstance(approval, dict):
+            result["skip_reason"] = "execution_approval_shape_invalid"
+            result["blocked_index"] = index
+            return result
+        status = str(approval.get("status") or "")
+        if status in accepted_product_statuses:
+            sync_kind = "naver_product_batch"
+            target = "products"
+            ready_key = "product_batch_execution_approval_ready"
+            write_flag = "products_written"
+            platform_write_flag = "platform_product_writes_enabled"
+            formal_target_flag = "formal_product_sync_open"
+        elif status in accepted_order_statuses:
+            sync_kind = "naver_order_batch"
+            target = "orders"
+            ready_key = "order_batch_execution_approval_ready"
+            write_flag = "orders_written"
+            platform_write_flag = "platform_order_writes_enabled"
+            formal_target_flag = "formal_order_sync_open"
+        else:
+            result["skip_reason"] = "execution_approval_status_not_ready"
+            result["blocked_index"] = index
+            return result
+        if approval.get(ready_key) is not True:
+            result["skip_reason"] = "execution_approval_ready_flag_required"
+            result["blocked_index"] = index
+            return result
+        if approval.get("execution_approved") is True:
+            result["skip_reason"] = "execution_approval_not_allowed_in_preflight"
+            result["blocked_index"] = index
+            return result
+        if approval.get("real_api_called") is True or approval.get("real_database_written") is True:
+            result["skip_reason"] = "execution_approval_side_effect_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if approval.get(write_flag) is True:
+            result["skip_reason"] = "execution_approval_business_write_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if approval.get("sync_log_written") is True or approval.get("capability_tested_success_written") is True:
+            result["skip_reason"] = "execution_approval_side_effect_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if approval.get("timeline_events_written") is True or approval.get("operation_audit_rows_written") is True:
+            result["skip_reason"] = "execution_approval_side_effect_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if approval.get("raw_response_saved") is not False or approval.get("privacy_fields_redacted") is not True:
+            result["skip_reason"] = "execution_approval_privacy_boundary_invalid"
+            result["blocked_index"] = index
+            return result
+        if approval.get("formal_sync_open") is True or approval.get(formal_target_flag) is True:
+            result["skip_reason"] = "formal_sync_already_open_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if approval.get("platform_writes_enabled") is True or approval.get(platform_write_flag) is True:
+            result["skip_reason"] = "platform_write_not_allowed_in_preflight"
+            result["blocked_index"] = index
+            return result
+        approval_store_ids = set(_normalize_formal_batch_store_ids(approval.get("store_ids")) or [])
+        if not approval_store_ids:
+            result["skip_reason"] = "execution_approval_store_scope_required"
+            result["blocked_index"] = index
+            return result
+        store_ids.update(approval_store_ids)
+        sync_kinds.add(sync_kind)
+        targets.add(target)
+        required_actions.add(str(FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["required_action"]))
+
+    if not store_ids.issubset(decision_store_ids):
+        result["skip_reason"] = "approval_decision_store_scope_mismatch"
+        return result
+    if not store_ids.issubset(linkage_store_ids):
+        result["skip_reason"] = "approval_audit_linkage_store_scope_mismatch"
+        return result
+    if required_actions and not required_actions.issubset(decision_actions):
+        result["skip_reason"] = "approval_decision_action_scope_mismatch"
+        return result
+    if required_actions and not required_actions.issubset(linkage_actions):
+        result["skip_reason"] = "approval_audit_linkage_action_scope_mismatch"
+        return result
+
+    result.update({
+        "status": "formal_batch_execution_preflight_readonly_ready",
+        "preflight_status": "ready_for_execution_phase_planning",
+        "preflight_ready": True,
+        "execution_approval_count": len(execution_approvals),
+        "store_ids": sorted(store_ids),
+        "sync_kinds": sorted(sync_kinds),
+        "targets": sorted(targets),
+        "required_actions": sorted(required_actions),
+        "business_message": (
+            "Formal batch execution preflight is ready for operator review only. "
+            "It does not approve execution, write products or orders, call platform APIs, or open formal sync."
+        ),
+        "next_action": (
+            "Use this as readonly evidence before a separately approved execution phase. "
+            "Any product or order batch write still requires a new explicit approval."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

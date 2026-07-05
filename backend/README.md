@@ -1443,6 +1443,16 @@ POST /api/v1/batch/naver/products/execution-approval/readonly-check
 
 The route reviews product batch execution approval evidence only. It keeps `execution_approved=false`, `products_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `platform_product_writes_enabled=false`, and formal product batch sync closed.
 
+ERP-Batch-3A exposes a unified local readonly preflight route:
+
+```text
+POST /api/v1/batch/execution-preflight/readonly-check
+```
+
+The route combines formal approval decision evidence, approval audit-linkage evidence, and product/order execution-approval evidence before any future batch execution phase. It is review-only: it keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order batch sync closed.
+
+This preflight does not replace a later explicit execution approval. It only verifies that the operator checklist, approval decision, audit linkage, readonly evidence, backup manifest, permission evidence, rollback report, readback plan, sensitive scan, and limited execution window have been referenced without exposing sensitive identifiers or enabling writes.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

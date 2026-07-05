@@ -71,6 +71,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/approval-audit-evidence",
     "/api/v1/batch/approval-decision/readonly-check",
     "/api/v1/batch/approval-decision/audit-linkage/readonly-check",
+    "/api/v1/batch/execution-preflight/readonly-check",
     "/api/v1/batch/naver/products/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
@@ -1564,6 +1565,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/approval-audit-evidence": {"post"},
         "/api/v1/batch/approval-decision/readonly-check": {"post"},
         "/api/v1/batch/approval-decision/audit-linkage/readonly-check": {"post"},
+        "/api/v1/batch/execution-preflight/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
     }
@@ -13097,6 +13099,213 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert local_audit_linkage["formal_sync_open"] is False, local_audit_linkage
         assert local_audit_linkage["platform_writes_enabled"] is False, local_audit_linkage
 
+        batch_execution_readonly_evidence = {
+            "fresh_readonly_preview": True,
+            "real_sync": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+            "duplicate_check_passed": True,
+            "field_whitelist_verified": True,
+            "formal_sync_open": False,
+            "candidate_hash_count": 2,
+            "source_window_label": "verify_all formal batch preflight readonly evidence",
+        }
+        product_execution_context = {
+            "product_batch_candidates_fresh": True,
+            "product_field_whitelist_verified": True,
+            "price_stock_status_mapping_reviewed": True,
+            "duplicate_protection_ready": True,
+            "audit_chain_ready": True,
+            "post_write_readback_required": True,
+            "rollback_plan_ready": True,
+            "sensitive_scan_passed": True,
+            "platform_product_write_actions_excluded": True,
+            "formal_sync_remains_closed": True,
+            "execution_approved": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        product_execution_api_context = {
+            "readonly_api_contract_planned": True,
+            "business_wording_required": True,
+            "technical_details_folded": True,
+            "execution_button_excluded": True,
+            "write_endpoint_excluded": True,
+            "product_write_endpoint_excluded": True,
+            "sensitive_fields_hidden_from_main_page": True,
+            "audit_row_write_excluded": True,
+            "route_requires_separate_implementation": True,
+            "formal_sync_remains_closed": True,
+            "public_endpoint_enabled": False,
+            "backend_route_implemented": False,
+            "execution_approved": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        product_execution_preflight = (
+            sync_service.evaluate_naver_product_batch_execution_approval_readonly_api_local(
+                actor_context=admin_store8,
+                store_ids=[8],
+                candidate_count=2,
+                batch_size=2,
+                readonly_evidence=batch_execution_readonly_evidence,
+                backup_evidence=backup_evidence,
+                manual_approval=True,
+                execution_context=product_execution_context,
+                readonly_api_context=product_execution_api_context,
+            )
+        )
+        assert product_execution_preflight["status"] == (
+            "naver_product_batch_execution_approval_readonly_api_ready"
+        ), product_execution_preflight
+        order_execution_context = {
+            "order_batch_candidates_fresh": True,
+            "order_privacy_gate_verified": True,
+            "order_field_whitelist_verified": True,
+            "delivery_claim_mapping_reviewed": True,
+            "duplicate_protection_ready": True,
+            "audit_chain_ready": True,
+            "post_write_readback_required": True,
+            "rollback_plan_ready": True,
+            "sensitive_scan_passed": True,
+            "platform_order_write_actions_excluded": True,
+            "formal_sync_remains_closed": True,
+            "execution_approved": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        order_execution_preflight = sync_service.evaluate_naver_order_batch_execution_approval_mock_gate(
+            actor_context=admin_store8,
+            store_ids=[8],
+            candidate_count=2,
+            batch_size=2,
+            readonly_evidence=batch_execution_readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=order_execution_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert order_execution_preflight["status"] == "naver_order_batch_execution_approval_mock_ready", (
+            order_execution_preflight
+        )
+        batch_execution_preflight_context = {
+            "operator_checklist_reviewed": True,
+            "approval_decision_referenced": True,
+            "audit_linkage_referenced": True,
+            "readonly_evidence_referenced": True,
+            "backup_manifest_referenced": True,
+            "permission_evidence_referenced": True,
+            "rollback_report_referenced": True,
+            "readback_plan_referenced": True,
+            "sensitive_scan_referenced": True,
+            "execution_window_limited": True,
+            "formal_sync_remains_closed": True,
+            "execution_approved": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "real_database_written": False,
+            "operation_audit_rows_written": False,
+        }
+        batch_execution_preflight_response = client.post(
+            "/api/v1/batch/execution-preflight/readonly-check",
+            json={
+                "approval_decision": local_decision,
+                "approval_audit_linkage": local_audit_linkage,
+                "execution_approvals": [
+                    product_execution_preflight,
+                    order_execution_preflight,
+                ],
+                "preflight_context": batch_execution_preflight_context,
+            },
+        )
+        assert batch_execution_preflight_response.status_code == 200, (
+            batch_execution_preflight_response.text
+        )
+        batch_execution_preflight = batch_execution_preflight_response.json()["data"]
+        assert batch_execution_preflight["phase"] == "ERP-Batch-3A", batch_execution_preflight
+        assert batch_execution_preflight["status"] == "formal_batch_execution_preflight_readonly_ready", (
+            batch_execution_preflight
+        )
+        assert batch_execution_preflight["preflight_ready"] is True, batch_execution_preflight
+        assert batch_execution_preflight["execution_approval_count"] == 2, batch_execution_preflight
+        assert batch_execution_preflight["sync_kinds"] == ["naver_order_batch", "naver_product_batch"], (
+            batch_execution_preflight
+        )
+        assert batch_execution_preflight["targets"] == ["orders", "products"], batch_execution_preflight
+        assert batch_execution_preflight["required_actions"] == [
+            "orders.batch_sync_write",
+            "products.batch_sync_write",
+        ], batch_execution_preflight
+        assert batch_execution_preflight["execution_approved"] is False, batch_execution_preflight
+        assert batch_execution_preflight["batch_execution_enabled"] is False, batch_execution_preflight
+        assert batch_execution_preflight["write_endpoint_enabled"] is False, batch_execution_preflight
+        assert batch_execution_preflight["real_api_called"] is False, batch_execution_preflight
+        assert batch_execution_preflight["real_database_written"] is False, batch_execution_preflight
+        assert batch_execution_preflight["orders_written"] is False, batch_execution_preflight
+        assert batch_execution_preflight["products_written"] is False, batch_execution_preflight
+        assert batch_execution_preflight["operation_audit_rows_written"] is False, batch_execution_preflight
+        assert batch_execution_preflight["formal_sync_open"] is False, batch_execution_preflight
+        assert batch_execution_preflight["formal_order_sync_open"] is False, batch_execution_preflight
+        assert batch_execution_preflight["formal_product_sync_open"] is False, batch_execution_preflight
+        assert batch_execution_preflight["platform_writes_enabled"] is False, batch_execution_preflight
+        assert batch_execution_preflight["raw_response_saved"] is False, batch_execution_preflight
+        assert batch_execution_preflight["privacy_fields_redacted"] is True, batch_execution_preflight
+
+        batch_execution_preflight_missing_response = client.post(
+            "/api/v1/batch/execution-preflight/readonly-check",
+            json={
+                "approval_decision": local_decision,
+                "approval_audit_linkage": local_audit_linkage,
+                "execution_approvals": [product_execution_preflight],
+                "preflight_context": {
+                    **batch_execution_preflight_context,
+                    "rollback_report_referenced": False,
+                },
+            },
+        )
+        assert batch_execution_preflight_missing_response.status_code == 200, (
+            batch_execution_preflight_missing_response.text
+        )
+        batch_execution_preflight_missing = batch_execution_preflight_missing_response.json()["data"]
+        assert batch_execution_preflight_missing["phase"] == "ERP-Batch-3A", batch_execution_preflight_missing
+        assert batch_execution_preflight_missing["skip_reason"] == "execution_preflight_context_incomplete", (
+            batch_execution_preflight_missing
+        )
+        assert "rollback_report_referenced" in batch_execution_preflight_missing["missing_preflight_flags"], (
+            batch_execution_preflight_missing
+        )
+        assert batch_execution_preflight_missing["real_database_written"] is False, batch_execution_preflight_missing
+
+        batch_execution_preflight_sensitive_response = client.post(
+            "/api/v1/batch/execution-preflight/readonly-check",
+            json={
+                "approval_decision": local_decision,
+                "approval_audit_linkage": local_audit_linkage,
+                "execution_approvals": [
+                    {
+                        **product_execution_preflight,
+                        "productOrderId": "must-not-leak-preflight",
+                    }
+                ],
+                "preflight_context": batch_execution_preflight_context,
+            },
+        )
+        assert batch_execution_preflight_sensitive_response.status_code == 200, (
+            batch_execution_preflight_sensitive_response.text
+        )
+        batch_execution_preflight_sensitive = batch_execution_preflight_sensitive_response.json()["data"]
+        assert batch_execution_preflight_sensitive["phase"] == "ERP-Batch-3A", (
+            batch_execution_preflight_sensitive
+        )
+        assert batch_execution_preflight_sensitive["skip_reason"] == (
+            "formal_batch_execution_preflight_sensitive_field_blocked"
+        ), batch_execution_preflight_sensitive
+        assert batch_execution_preflight_sensitive["real_database_written"] is False, (
+            batch_execution_preflight_sensitive
+        )
+
         local_audit_sensitive_response = client.post("/api/v1/batch/approval-audit-evidence", json={
             "readonly_evidence": {**local_evidence, "productOrderId": "must-not-leak-local-audit"},
             "approval_context": {
@@ -13194,6 +13403,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "local_decision_sensitive": local_decision_sensitive,
             "local_audit_linkage": local_audit_linkage,
             "local_audit_linkage_sensitive": local_audit_linkage_sensitive,
+            "product_execution_preflight": product_execution_preflight,
+            "order_execution_preflight": order_execution_preflight,
+            "batch_execution_preflight": batch_execution_preflight,
+            "batch_execution_preflight_missing": batch_execution_preflight_missing,
+            "batch_execution_preflight_sensitive": batch_execution_preflight_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,

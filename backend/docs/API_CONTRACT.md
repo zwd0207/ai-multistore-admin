@@ -2705,6 +2705,43 @@ Request body:
 
 The response is review evidence only. It must keep `execution_approved=false`, `real_api_called=false`, `real_database_written=false`, `products_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and formal product batch sync closed.
 
+### Formal Batch Execution Preflight Readonly Route
+
+Phase ERP-Batch-3A exposes a unified readonly preflight route:
+
+```text
+POST /api/v1/batch/execution-preflight/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "approval_decision": {},
+  "approval_audit_linkage": {},
+  "execution_approvals": [],
+  "preflight_context": {
+    "operator_checklist_reviewed": true,
+    "approval_decision_referenced": true,
+    "audit_linkage_referenced": true,
+    "readonly_evidence_referenced": true,
+    "backup_manifest_referenced": true,
+    "permission_evidence_referenced": true,
+    "rollback_report_referenced": true,
+    "readback_plan_referenced": true,
+    "sensitive_scan_referenced": true,
+    "execution_window_limited": true,
+    "formal_sync_remains_closed": true
+  }
+}
+```
+
+Purpose: combine approval-decision evidence, audit-linkage evidence, and product/order execution-approval evidence before a later explicit execution phase.
+
+The route is read-only evidence for operator review only. It must keep `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `real_api_called=false`, `real_database_written=false`, `orders_written=false`, `products_written=false`, `sync_log_written=false`, `capability_tested_success_written=false`, `timeline_events_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, `platform_writes_enabled=false`, and formal product/order batch sync closed.
+
+It must reject sensitive payload markers such as token, Authorization, headers, signature, client secret, raw response, full channel number, full product order id, full buyer/receiver privacy, address, or zip code.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text
