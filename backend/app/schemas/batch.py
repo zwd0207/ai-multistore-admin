@@ -60,6 +60,12 @@ class FormalBatchPreExecutionRefreshReadonlyCheckRequest(BaseModel):
     readonly_api_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class FormalBatchWriteExecutionReadonlyCheckRequest(BaseModel):
+    pre_execution_refresh_review: dict[str, Any] = Field(default_factory=dict)
+    write_execution_context: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class NaverProductBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     actor_context: dict[str, Any] = Field(default_factory=dict)
     store_ids: list[int] = Field(default_factory=list, max_length=10)

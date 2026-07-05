@@ -76,6 +76,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/execution-approval/readonly-check",
     "/api/v1/batch/execution-write-boundary/readonly-check",
     "/api/v1/batch/pre-execution-refresh/readonly-check",
+    "/api/v1/batch/write-execution/readonly-check",
     "/api/v1/batch/naver/products/execution-approval/readonly-check",
     "/api/v1/batch/naver/orders/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
@@ -1575,6 +1576,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/execution-write-boundary/readonly-check": {"post"},
         "/api/v1/batch/pre-execution-refresh/readonly-check": {"post"},
+        "/api/v1/batch/write-execution/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
@@ -15050,6 +15052,243 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert batch_write_execution_oversized["max_batch_size"] == 6, batch_write_execution_oversized
         assert batch_write_execution_oversized["real_database_written"] is False, batch_write_execution_oversized
 
+        batch_write_execution_api_context = {
+            "readonly_api_contract_planned": True,
+            "business_wording_required": True,
+            "technical_details_folded": True,
+            "execution_button_excluded": True,
+            "write_endpoint_excluded": True,
+            "product_write_endpoint_excluded": True,
+            "order_write_endpoint_excluded": True,
+            "platform_write_endpoint_excluded": True,
+            "audit_row_write_excluded": True,
+            "sensitive_fields_hidden_from_main_page": True,
+            "route_requires_separate_implementation": True,
+            "formal_sync_remains_closed": True,
+            "public_endpoint_enabled": False,
+            "backend_route_implemented": False,
+            "execution_allowed": False,
+            "execution_approved": False,
+            "batch_execution_enabled": False,
+            "write_endpoint_enabled": False,
+            "real_api_call_requested": False,
+            "local_database_write_requested": False,
+            "real_sync": False,
+            "write_requested": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "real_api_called": False,
+            "real_database_written": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        batch_write_execution_api_ready = sync_service.evaluate_formal_batch_write_execution_readonly_api_mock_gate(
+            pre_execution_refresh_review=batch_pre_execution_refresh_route,
+            write_execution_context=batch_write_execution_context,
+            readonly_api_context=batch_write_execution_api_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_write_execution_api_ready["phase"] == "ERP-Batch-5D", batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["status"] == (
+            "formal_batch_write_execution_readonly_api_mock_ready"
+        ), batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["readonly_api_mock_gate"] is True, batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["route_path_planned"] == (
+            "/api/v1/batch/write-execution/readonly-check"
+        ), batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["backend_route_implemented"] is False, (
+            batch_write_execution_api_ready
+        )
+        assert batch_write_execution_api_ready["public_endpoint_enabled"] is False, (
+            batch_write_execution_api_ready
+        )
+        assert batch_write_execution_api_ready["execution_allowed"] is False, (
+            batch_write_execution_api_ready
+        )
+        assert batch_write_execution_api_ready["orders_written"] is False, batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["products_written"] is False, batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["operation_audit_rows_written"] is False, (
+            batch_write_execution_api_ready
+        )
+        assert batch_write_execution_api_ready["real_api_called"] is False, batch_write_execution_api_ready
+        assert batch_write_execution_api_ready["real_database_written"] is False, (
+            batch_write_execution_api_ready
+        )
+        assert batch_write_execution_api_ready["formal_sync_open"] is False, batch_write_execution_api_ready
+
+        batch_write_execution_api_missing_fold = (
+            sync_service.evaluate_formal_batch_write_execution_readonly_api_mock_gate(
+                pre_execution_refresh_review=batch_pre_execution_refresh_route,
+                write_execution_context=batch_write_execution_context,
+                readonly_api_context={
+                    **batch_write_execution_api_context,
+                    "technical_details_folded": False,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_write_execution_api_missing_fold["phase"] == "ERP-Batch-5D", (
+            batch_write_execution_api_missing_fold
+        )
+        assert batch_write_execution_api_missing_fold["skip_reason"] == "readonly_api_context_incomplete", (
+            batch_write_execution_api_missing_fold
+        )
+        assert "technical_details_folded" in batch_write_execution_api_missing_fold["missing_api_flags"], (
+            batch_write_execution_api_missing_fold
+        )
+        assert batch_write_execution_api_missing_fold["real_database_written"] is False, (
+            batch_write_execution_api_missing_fold
+        )
+
+        batch_write_execution_api_public_endpoint = (
+            sync_service.evaluate_formal_batch_write_execution_readonly_api_mock_gate(
+                pre_execution_refresh_review=batch_pre_execution_refresh_route,
+                write_execution_context=batch_write_execution_context,
+                readonly_api_context={
+                    **batch_write_execution_api_context,
+                    "public_endpoint_enabled": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_write_execution_api_public_endpoint["skip_reason"] == (
+            "public_endpoint_not_allowed_in_mock_gate"
+        ), batch_write_execution_api_public_endpoint
+        assert batch_write_execution_api_public_endpoint["public_endpoint_enabled"] is False, (
+            batch_write_execution_api_public_endpoint
+        )
+
+        batch_write_execution_api_sensitive = (
+            sync_service.evaluate_formal_batch_write_execution_readonly_api_mock_gate(
+                pre_execution_refresh_review=batch_pre_execution_refresh_route,
+                write_execution_context=batch_write_execution_context,
+                readonly_api_context={
+                    **batch_write_execution_api_context,
+                    "productOrderId": "must-not-leak-write-execution-api",
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_write_execution_api_sensitive["skip_reason"] == (
+            "write_execution_readonly_api_sensitive_field_blocked"
+        ), batch_write_execution_api_sensitive
+        assert batch_write_execution_api_sensitive["orders_written"] is False, (
+            batch_write_execution_api_sensitive
+        )
+
+        batch_write_execution_api_write_attempt = (
+            sync_service.evaluate_formal_batch_write_execution_readonly_api_mock_gate(
+                pre_execution_refresh_review=batch_pre_execution_refresh_route,
+                write_execution_context=batch_write_execution_context,
+                readonly_api_context={
+                    **batch_write_execution_api_context,
+                    "orders_written": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_write_execution_api_write_attempt["skip_reason"] == (
+            "write_not_allowed_in_write_execution_readonly_api_mock_gate"
+        ), batch_write_execution_api_write_attempt
+        assert batch_write_execution_api_write_attempt["blocked_flag"] == "orders_written", (
+            batch_write_execution_api_write_attempt
+        )
+        assert batch_write_execution_api_write_attempt["orders_written"] is False, (
+            batch_write_execution_api_write_attempt
+        )
+
+        batch_write_execution_route_response = client.post(
+            "/api/v1/batch/write-execution/readonly-check",
+            json={
+                "pre_execution_refresh_review": batch_pre_execution_refresh_route,
+                "write_execution_context": batch_write_execution_context,
+                "readonly_api_context": batch_write_execution_api_context,
+            },
+        )
+        assert batch_write_execution_route_response.status_code == 200, (
+            batch_write_execution_route_response.text
+        )
+        batch_write_execution_route = batch_write_execution_route_response.json()["data"]
+        assert batch_write_execution_route["phase"] == "ERP-Batch-5E", batch_write_execution_route
+        assert batch_write_execution_route["status"] == "formal_batch_write_execution_readonly_api_ready", (
+            batch_write_execution_route
+        )
+        assert batch_write_execution_route["approval_status"] == "ready_for_local_readonly_review", (
+            batch_write_execution_route
+        )
+        assert batch_write_execution_route["backend_route_implemented"] is True, batch_write_execution_route
+        assert batch_write_execution_route["public_endpoint_enabled"] is True, batch_write_execution_route
+        assert batch_write_execution_route["route_path"] == "/api/v1/batch/write-execution/readonly-check", (
+            batch_write_execution_route
+        )
+        assert batch_write_execution_route["execution_allowed"] is False, batch_write_execution_route
+        assert batch_write_execution_route["execution_approved"] is False, batch_write_execution_route
+        assert batch_write_execution_route["batch_execution_enabled"] is False, batch_write_execution_route
+        assert batch_write_execution_route["write_endpoint_enabled"] is False, batch_write_execution_route
+        assert batch_write_execution_route["orders_written"] is False, batch_write_execution_route
+        assert batch_write_execution_route["products_written"] is False, batch_write_execution_route
+        assert batch_write_execution_route["operation_audit_rows_written"] is False, batch_write_execution_route
+        assert batch_write_execution_route["real_api_called"] is False, batch_write_execution_route
+        assert batch_write_execution_route["real_database_written"] is False, batch_write_execution_route
+        assert batch_write_execution_route["formal_sync_open"] is False, batch_write_execution_route
+        assert batch_write_execution_route["platform_writes_enabled"] is False, batch_write_execution_route
+        assert batch_write_execution_route["raw_response_saved"] is False, batch_write_execution_route
+        assert batch_write_execution_route["privacy_fields_redacted"] is True, batch_write_execution_route
+
+        batch_write_execution_route_missing_response = client.post(
+            "/api/v1/batch/write-execution/readonly-check",
+            json={
+                "pre_execution_refresh_review": batch_pre_execution_refresh_route,
+                "write_execution_context": batch_write_execution_context,
+                "readonly_api_context": {
+                    **batch_write_execution_api_context,
+                    "business_wording_required": False,
+                },
+            },
+        )
+        assert batch_write_execution_route_missing_response.status_code == 200, (
+            batch_write_execution_route_missing_response.text
+        )
+        batch_write_execution_route_missing = batch_write_execution_route_missing_response.json()["data"]
+        assert batch_write_execution_route_missing["phase"] == "ERP-Batch-5E", (
+            batch_write_execution_route_missing
+        )
+        assert batch_write_execution_route_missing["skip_reason"] == "readonly_api_context_incomplete", (
+            batch_write_execution_route_missing
+        )
+        assert "business_wording_required" in batch_write_execution_route_missing["missing_api_flags"], (
+            batch_write_execution_route_missing
+        )
+        assert batch_write_execution_route_missing["real_database_written"] is False, (
+            batch_write_execution_route_missing
+        )
+
+        batch_write_execution_route_sensitive_response = client.post(
+            "/api/v1/batch/write-execution/readonly-check",
+            json={
+                "pre_execution_refresh_review": batch_pre_execution_refresh_route,
+                "write_execution_context": batch_write_execution_context,
+                "readonly_api_context": {
+                    **batch_write_execution_api_context,
+                    "rawResponse": "must-not-leak-write-execution-route",
+                },
+            },
+        )
+        assert batch_write_execution_route_sensitive_response.status_code == 200, (
+            batch_write_execution_route_sensitive_response.text
+        )
+        batch_write_execution_route_sensitive = batch_write_execution_route_sensitive_response.json()["data"]
+        assert batch_write_execution_route_sensitive["phase"] == "ERP-Batch-5E", (
+            batch_write_execution_route_sensitive
+        )
+        assert batch_write_execution_route_sensitive["skip_reason"] == (
+            "write_execution_readonly_api_sensitive_field_blocked"
+        ), batch_write_execution_route_sensitive
+        assert batch_write_execution_route_sensitive["orders_written"] is False, (
+            batch_write_execution_route_sensitive
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -15333,6 +15572,14 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_write_execution_side_effect": batch_write_execution_side_effect,
             "batch_write_execution_scope_mismatch": batch_write_execution_scope_mismatch,
             "batch_write_execution_oversized": batch_write_execution_oversized,
+            "batch_write_execution_api_ready": batch_write_execution_api_ready,
+            "batch_write_execution_api_missing_fold": batch_write_execution_api_missing_fold,
+            "batch_write_execution_api_public_endpoint": batch_write_execution_api_public_endpoint,
+            "batch_write_execution_api_sensitive": batch_write_execution_api_sensitive,
+            "batch_write_execution_api_write_attempt": batch_write_execution_api_write_attempt,
+            "batch_write_execution_route": batch_write_execution_route,
+            "batch_write_execution_route_missing": batch_write_execution_route_missing,
+            "batch_write_execution_route_sensitive": batch_write_execution_route_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
@@ -15366,6 +15613,8 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-write-boundary-api",
         "must-not-leak-write-boundary-route",
         "must-not-leak-write-execution",
+        "must-not-leak-write-execution-api",
+        "must-not-leak-write-execution-route",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

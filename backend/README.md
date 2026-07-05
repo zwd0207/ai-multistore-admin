@@ -1571,6 +1571,16 @@ Passing 5B returns `status=formal_batch_write_execution_mock_gate_ready` and `ap
 
 This is not a public route and not a write endpoint. It does not call Naver, does not write products or orders, does not write audit rows, does not write SyncLog, does not add tested-success rows, and does not open formal product/order batch sync. A later execution phase must be explicitly approved again before any local batch write.
 
+ERP-Batch-5C through 5E expose that final evidence as a local readonly API:
+
+```text
+POST /api/v1/batch/write-execution/readonly-check
+```
+
+The route wraps the 5D readonly API mock gate and 5B execution mock gate. A ready response uses `status=formal_batch_write_execution_readonly_api_ready` and `approval_status=ready_for_local_readonly_review`. It keeps `execution_allowed=false`, `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `real_api_call_requested=false`, `local_database_write_requested=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+This route is readonly evidence only. It does not execute formal batch sync, does not write local products or orders, does not write audit rows, does not create backups, does not call Naver, and does not expose platform writes. A later local batch execution phase must still be separately approved.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

@@ -3429,6 +3429,67 @@ The mock gate blocks incomplete human approval evidence, sensitive markers, real
 
 There is no public route for 5B. Passing this gate does not write products, write orders, write audit rows, write SyncLog, add tested-success rows, call Naver, expose platform writes, or open formal product/order batch sync. It only proves the evidence is complete enough to ask for a separate future local write execution phase.
 
+### Formal Batch Write Execution Readonly Route
+
+Phase ERP-Batch-5C plans a readonly API for final formal product/order batch write-execution evidence. Phase ERP-Batch-5D verifies that route as a mock gate. Phase ERP-Batch-5E exposes the local readonly route:
+
+```text
+POST /api/v1/batch/write-execution/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "pre_execution_refresh_review": {},
+  "write_execution_context": {},
+  "readonly_api_context": {
+    "readonly_api_contract_planned": true,
+    "business_wording_required": true,
+    "technical_details_folded": true,
+    "execution_button_excluded": true,
+    "write_endpoint_excluded": true,
+    "product_write_endpoint_excluded": true,
+    "order_write_endpoint_excluded": true,
+    "platform_write_endpoint_excluded": true,
+    "audit_row_write_excluded": true,
+    "sensitive_fields_hidden_from_main_page": true,
+    "route_requires_separate_implementation": true,
+    "formal_sync_remains_closed": true
+  }
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-5E",
+  "status": "formal_batch_write_execution_readonly_api_ready",
+  "approval_status": "ready_for_local_readonly_review",
+  "formal_batch_write_execution_readonly_api_local": true,
+  "backend_route_implemented": true,
+  "public_endpoint_enabled": true,
+  "route_path": "/api/v1/batch/write-execution/readonly-check",
+  "http_method": "POST",
+  "execution_allowed": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "real_api_call_requested": false,
+  "local_database_write_requested": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The route blocks incomplete readonly API context, sensitive markers, accidental public-route flags in the mock layer, execution approval, real API requests, local write requests, product/order writes, audit-row writes, platform writes, and formal sync opening. It is a readonly evidence route only; it does not execute formal batch sync and does not make product/order batch writes available.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text
