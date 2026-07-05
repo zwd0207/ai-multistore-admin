@@ -65,6 +65,12 @@ export const backendApi = {
   writeShippingTrackingImport: (payload) => sendData('post', '/shipping/tracking-import', payload),
   getShippingTrackingImportHistory: (params) => getData('/shipping/tracking-import-history', params),
   checkShippingTrackingOrderMatchReadonly: (payload) => sendData('post', '/shipping/tracking-order-match/readonly-check', payload),
+  checkShippingTrackingOrderStatusLocalUpdateGate: (payload) => (
+    sendData('post', '/shipping/tracking-order-status/local-update-gate', payload)
+  ),
+  writeShippingTrackingOrderStatusLocalUpdate: (payload) => (
+    sendData('post', '/shipping/tracking-order-status/local-update', payload)
+  ),
   checkShippingShipmentWritebackBoundary: (payload) => sendData('post', '/shipping/shipment-writeback/approval-boundary', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),

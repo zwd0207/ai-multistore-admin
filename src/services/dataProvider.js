@@ -1440,6 +1440,91 @@ function toBackendShippingTrackingOrderMatchPayload(payload = {}) {
   };
 }
 
+function adaptShippingTrackingOrderStatusLocalUpdateResult(data = {}) {
+  const updateCandidates = Array.isArray(data.update_candidates)
+    ? data.update_candidates
+    : (Array.isArray(data.updateCandidates) ? data.updateCandidates : []);
+  const blockedOrders = Array.isArray(data.blocked_orders)
+    ? data.blocked_orders
+    : (Array.isArray(data.blockedOrders) ? data.blockedOrders : []);
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-8B',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    matchingContractAcknowledged: Boolean(data.matching_contract_acknowledged ?? data.matchingContractAcknowledged),
+    backupEvidenceAcknowledged: Boolean(data.backup_evidence_acknowledged ?? data.backupEvidenceAcknowledged),
+    auditEvidenceAcknowledged: Boolean(data.audit_evidence_acknowledged ?? data.auditEvidenceAcknowledged),
+    operatorChecklistAcknowledged: Boolean(data.operator_checklist_acknowledged ?? data.operatorChecklistAcknowledged),
+    trackingOrderStatusLocalUpdateGate: Boolean(
+      data.tracking_order_status_local_update_gate ?? data.trackingOrderStatusLocalUpdateGate,
+    ),
+    trackingOrderStatusLocalUpdate: Boolean(
+      data.tracking_order_status_local_update ?? data.trackingOrderStatusLocalUpdate,
+    ),
+    targetOrderStatus: data.target_order_status ?? data.targetOrderStatus ?? 'DISPATCHED',
+    targetOrderStatusLabelZh: data.target_order_status_label_zh ?? data.targetOrderStatusLabelZh ?? '已发货 / 配送中',
+    importBatchId: data.import_batch_id ?? data.importBatchId ?? null,
+    matchedOrderCount: Number(data.matched_order_count ?? data.matchedOrderCount ?? 0),
+    updateCandidateCount: Number(data.update_candidate_count ?? data.updateCandidateCount ?? updateCandidates.length),
+    alreadyUpdatedCount: Number(data.already_updated_count ?? data.alreadyUpdatedCount ?? 0),
+    blockedOrderCount: Number(data.blocked_order_count ?? data.blockedOrderCount ?? blockedOrders.length),
+    duplicateTrackingRowCount: Number(data.duplicate_tracking_row_count ?? data.duplicateTrackingRowCount ?? 0),
+    unmatchedOrderCount: Number(data.unmatched_order_count ?? data.unmatchedOrderCount ?? 0),
+    updatedOrderCount: Number(data.updated_order_count ?? data.updatedOrderCount ?? 0),
+    skippedOrderCount: Number(data.skipped_order_count ?? data.skippedOrderCount ?? 0),
+    eventRowsWritten: Number(data.event_rows_written ?? data.eventRowsWritten ?? 0),
+    updatedOrderIds: Array.isArray(data.updated_order_ids)
+      ? data.updated_order_ids
+      : (Array.isArray(data.updatedOrderIds) ? data.updatedOrderIds : []),
+    auditCorrelationId: data.audit_correlation_id ?? data.auditCorrelationId ?? null,
+    operationAuditLogId: data.operation_audit_log_id ?? data.operationAuditLogId ?? null,
+    ordersUpdated: Boolean(data.orders_updated ?? data.ordersUpdated),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    orderStatusEventsWritten: Boolean(data.order_status_events_written ?? data.orderStatusEventsWritten),
+    trackingImportBatchUpdated: Boolean(data.tracking_import_batch_updated ?? data.trackingImportBatchUpdated),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    updateCandidates: updateCandidates.map((item) => ({
+      localOrderId: item.local_order_id ?? item.localOrderId ?? null,
+      currentOrderStatus: item.current_order_status ?? item.currentOrderStatus ?? '',
+      nextOrderStatus: item.next_order_status ?? item.nextOrderStatus ?? '',
+      trackingNumberHash: item.tracking_number_hash ?? item.trackingNumberHash ?? '',
+      carrier: item.carrier || '',
+      shippedAt: item.shipped_at ?? item.shippedAt ?? null,
+    })),
+    blockedOrders: blockedOrders.map((item) => ({
+      localOrderId: item.local_order_id ?? item.localOrderId ?? null,
+      currentOrderStatus: item.current_order_status ?? item.currentOrderStatus ?? '',
+      blockReason: item.block_reason ?? item.blockReason ?? '',
+    })),
+  };
+}
+
+function toBackendShippingTrackingOrderStatusLocalUpdatePayload(payload = {}) {
+  const request = toBackendShippingTrackingOrderMatchPayload(payload);
+  return {
+    ...request,
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    backup_evidence_acknowledged: Boolean(payload.backupEvidenceAcknowledged ?? payload.backup_evidence_acknowledged),
+    audit_evidence_acknowledged: Boolean(payload.auditEvidenceAcknowledged ?? payload.audit_evidence_acknowledged),
+    operator_checklist_acknowledged: Boolean(payload.operatorChecklistAcknowledged ?? payload.operator_checklist_acknowledged),
+    target_order_status: payload.targetOrderStatus || payload.target_order_status || 'DISPATCHED',
+  };
+}
+
 function adaptShippingShipmentWritebackBoundaryResult(data = {}) {
   return {
     ...data,
@@ -2922,6 +3007,127 @@ const sourceMethods = {
       ...request,
       store_id: Number(store.id),
     }));
+  },
+  checkShippingTrackingOrderStatusLocalUpdateGate: async (payload = {}) => {
+    const request = toBackendShippingTrackingOrderStatusLocalUpdatePayload(payload);
+    if (!isBackendSource) {
+      const missingReason = !request.manual_approval
+        ? 'manual_approval_required'
+        : (!request.backup_evidence_acknowledged
+          ? 'backup_evidence_required'
+          : (!request.audit_evidence_acknowledged
+            ? 'audit_evidence_required'
+            : (!request.operator_checklist_acknowledged ? 'operator_checklist_required' : null)));
+      return adaptShippingTrackingOrderStatusLocalUpdateResult({
+        phase: 'Shipping-8B',
+        status: missingReason ? 'blocked' : 'tracking_order_status_update_gate_ready',
+        skip_reason: missingReason,
+        business_message: missingReason
+          ? 'Mock local status update is waiting for approval evidence.'
+          : 'Mock local status update gate is ready. Backend mode writes local order status only.',
+        tracking_order_status_local_update_gate: true,
+        manual_approval: request.manual_approval,
+        matching_contract_acknowledged: request.matching_contract_acknowledged,
+        backup_evidence_acknowledged: request.backup_evidence_acknowledged,
+        audit_evidence_acknowledged: request.audit_evidence_acknowledged,
+        operator_checklist_acknowledged: request.operator_checklist_acknowledged,
+        target_order_status: 'DISPATCHED',
+        target_order_status_label_zh: '已发货 / 配送中',
+        import_batch_id: request.import_batch_id,
+        matched_order_count: 1,
+        update_candidate_count: missingReason ? 0 : 1,
+        already_updated_count: 0,
+        blocked_order_count: 0,
+        duplicate_tracking_row_count: 0,
+        unmatched_order_count: 0,
+        update_candidates: missingReason ? [] : [{
+          local_order_id: 'mock-order-1',
+          current_order_status: 'PAYED',
+          next_order_status: 'DISPATCHED',
+          tracking_number_hash: 'id-hash-mocktracking001',
+          carrier: 'Mock carrier',
+          shipped_at: '2026-07-05T18:10:00+09:00',
+        }],
+        orders_updated: false,
+        orders_written: false,
+        order_status_events_written: false,
+        tracking_import_batch_updated: false,
+        operation_audit_rows_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        shipment_writeback_called: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingTrackingOrderStatusLocalUpdateResult(
+      await backendApi.checkShippingTrackingOrderStatusLocalUpdateGate({
+        ...request,
+        store_id: Number(store.id),
+      }),
+    );
+  },
+  writeShippingTrackingOrderStatusLocalUpdate: async (payload = {}) => {
+    const request = toBackendShippingTrackingOrderStatusLocalUpdatePayload(payload);
+    if (!isBackendSource) {
+      const approved = request.manual_approval
+        && request.backup_evidence_acknowledged
+        && request.audit_evidence_acknowledged
+        && request.operator_checklist_acknowledged
+        && request.matching_contract_acknowledged;
+      return adaptShippingTrackingOrderStatusLocalUpdateResult({
+        phase: 'Shipping-8C',
+        status: approved ? 'mock_tracking_order_status_update_ready' : 'tracking_order_status_update_blocked',
+        skip_reason: approved ? null : 'approval_evidence_required',
+        business_message: approved
+          ? 'Mock mode shows the local status update path. No database row is written.'
+          : 'Mock local status update requires approval evidence.',
+        tracking_order_status_local_update: true,
+        manual_approval: request.manual_approval,
+        matching_contract_acknowledged: request.matching_contract_acknowledged,
+        backup_evidence_acknowledged: request.backup_evidence_acknowledged,
+        audit_evidence_acknowledged: request.audit_evidence_acknowledged,
+        operator_checklist_acknowledged: request.operator_checklist_acknowledged,
+        target_order_status: 'DISPATCHED',
+        target_order_status_label_zh: '已发货 / 配送中',
+        import_batch_id: request.import_batch_id,
+        matched_order_count: 1,
+        update_candidate_count: approved ? 1 : 0,
+        updated_order_count: 0,
+        updated_order_ids: [],
+        event_rows_written: 0,
+        orders_updated: false,
+        orders_written: false,
+        order_status_events_written: false,
+        tracking_import_batch_updated: false,
+        operation_audit_rows_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        shipment_writeback_called: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingTrackingOrderStatusLocalUpdateResult(
+      await backendApi.writeShippingTrackingOrderStatusLocalUpdate({
+        ...request,
+        store_id: Number(store.id),
+      }),
+    );
   },
   checkShippingShipmentWritebackBoundary: async (payload = {}) => {
     const request = toBackendShippingShipmentWritebackBoundaryPayload(payload);

@@ -13,6 +13,7 @@ import {
   SHIPPING_TRACKING_IMPORT_MOCK_PHASE,
   SHIPPING_TRACKING_IMPORT_RECORD_PHASE,
   SHIPPING_TRACKING_ORDER_MATCH_PHASE,
+  SHIPPING_ORDER_STATUS_LOCAL_UPDATE_PHASE,
   buildLogisticsInventoryMappingMockGate,
   buildShippingAssistantSummary,
   buildShippingExcelExportMock,
@@ -723,6 +724,131 @@ function TrackingOrderMatchEvidencePanel({
   );
 }
 
+function TrackingOrderStatusLocalUpdatePanel({
+  evidence,
+  gate,
+  result,
+  approvals = {},
+  onToggleApproval,
+  onCheckGate,
+  onWrite,
+  loading = false,
+  error = '',
+  latestImportBatchId = null,
+  backendMode = false,
+}) {
+  const matchedCount = Number(evidence?.matchedOrderCount || 0);
+  const gateReady = gate?.status === 'tracking_order_status_update_gate_ready';
+  const noopReady = gate?.status === 'tracking_order_status_update_noop_ready' || result?.status === 'tracking_order_status_update_noop';
+  const mockReady = result?.status === 'mock_tracking_order_status_update_ready';
+  const updateSucceeded = result?.status === 'tracking_order_status_update_succeeded';
+  const canCheck = Boolean(latestImportBatchId && matchedCount);
+  const canWrite = gateReady && !loading;
+  const approvalRows = [
+    ['manualApproval', '人工批准'],
+    ['backupEvidenceAcknowledged', '备份证据'],
+    ['auditEvidenceAcknowledged', '审计证据'],
+    ['operatorChecklistAcknowledged', '操作清单'],
+  ];
+  const statusText = updateSucceeded
+    ? '本地状态已更新'
+    : mockReady
+      ? 'mock 流程通过'
+      : noopReady
+      ? '无需重复更新'
+      : gateReady
+        ? '可以本地更新'
+        : matchedCount
+          ? '等待审批'
+          : '等待匹配';
+
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>本地订单状态更新</h2>
+          <p>{result?.businessMessage || gate?.businessMessage || '物流单号已匹配后，可在本地把订单标记为已发货 / 配送中；不会回填 Naver。'}</p>
+        </div>
+        <span className={statusToneClass(updateSucceeded || mockReady || gateReady || noopReady ? 'success' : 'neutral')}><i />{statusText}</span>
+      </div>
+
+      <div className="summary-grid shipping-summary-grid">
+        <SummaryCard title="匹配订单" value={matchedCount} note="来自物流单号匹配" tone={matchedCount ? 'success' : 'default'} />
+        <SummaryCard title="可更新" value={gate?.updateCandidateCount ?? 0} note="本地订单状态" tone={gate?.updateCandidateCount ? 'success' : 'default'} />
+        <SummaryCard title="已是发货中" value={gate?.alreadyUpdatedCount ?? result?.alreadyUpdatedCount ?? 0} note="重复执行不写入" tone="default" />
+        <SummaryCard title="已更新" value={result?.updatedOrderCount ?? 0} note={backendMode ? '本地数据库' : 'mock 演示'} tone={updateSucceeded ? 'success' : 'default'} />
+        <SummaryCard title="Naver 回填" value={result?.shipmentWritebackCalled ? '已调用' : '未调用'} note="本阶段保持关闭" tone="default" />
+      </div>
+
+      <div className="shipping-approval-grid">
+        {approvalRows.map(([key, label]) => (
+          <label className="shipping-approval-item" key={key}>
+            <input
+              type="checkbox"
+              checked={Boolean(approvals[key])}
+              onChange={(event) => onToggleApproval?.(key, event.target.checked)}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {gate?.skipReason && gate.status === 'blocked' ? (
+        <div className="mock-sync-error">门禁未通过：{gate.skipReason}</div>
+      ) : null}
+      {updateSucceeded ? (
+        <div className="mock-sync-success">订单状态更新证据已生成；正式批量同步和 Naver 回填仍未开放。</div>
+      ) : null}
+      {mockReady ? (
+        <div className="mock-sync-success">mock 模式已走通审批流程；没有写入数据库。</div>
+      ) : null}
+      {noopReady ? (
+        <div className="mock-sync-success">匹配订单已经处于已发货 / 配送中，本次没有重复写入。</div>
+      ) : null}
+
+      <div className="table-toolbar">
+        <button className="button ghost" type="button" onClick={onCheckGate} disabled={!canCheck || loading}>
+          {loading ? '检查中...' : '检查更新门禁'}
+        </button>
+        <button className="button primary" type="button" onClick={onWrite} disabled={!canWrite}>
+          {loading ? '处理中...' : '更新本地订单状态'}
+        </button>
+      </div>
+
+      <TechnicalDetails
+        title="查看本地状态更新边界"
+        description="Shipping-8 只更新本地订单状态、状态时间线和审计证据，不调用平台发货接口。"
+        items={[
+          { label: 'phase', value: result?.phase || gate?.phase || SHIPPING_ORDER_STATUS_LOCAL_UPDATE_PHASE },
+          { label: 'status', value: result?.status || gate?.status || 'not_checked' },
+          { label: 'import_batch_id', value: latestImportBatchId || 'not_available' },
+          { label: 'target_order_status', value: result?.targetOrderStatus || gate?.targetOrderStatus || 'DISPATCHED' },
+          { label: 'target_order_status_label_zh', value: result?.targetOrderStatusLabelZh || gate?.targetOrderStatusLabelZh || '已发货 / 配送中' },
+          { label: 'matched_order_count', value: matchedCount },
+          { label: 'update_candidate_count', value: gate?.updateCandidateCount ?? 0 },
+          { label: 'updated_order_count', value: result?.updatedOrderCount ?? 0 },
+          { label: 'order_status_events_written', value: result?.orderStatusEventsWritten ?? false },
+          { label: 'tracking_import_batch_updated', value: result?.trackingImportBatchUpdated ?? false },
+          { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten ?? false },
+          { label: 'orders_updated', value: result?.ordersUpdated ?? false },
+          { label: 'orders_written', value: result?.ordersWritten ?? false },
+          { label: 'products_written', value: result?.productsWritten ?? false },
+          { label: 'sync_log_written', value: result?.syncLogWritten ?? false },
+          { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten ?? false },
+          { label: 'real_api_called', value: result?.realApiCalled ?? false },
+          { label: 'real_database_written', value: result?.realDatabaseWritten ?? false },
+          { label: 'formal_order_sync_open', value: result?.formalOrderSyncOpen ?? false },
+          { label: 'platform_writes_enabled', value: result?.platformWritesEnabled ?? false },
+          { label: 'shipment_writeback_called', value: result?.shipmentWritebackCalled ?? false },
+          { label: 'raw_response_saved', value: result?.rawResponseSaved ?? false },
+          { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted ?? true },
+        ]}
+      />
+    </section>
+  );
+}
+
 function ShipmentWritebackBoundaryPanel({ boundary }) {
   const missing = boundary?.missingActions || [];
   return (
@@ -835,6 +961,17 @@ export default function ShippingAssistant() {
   const [trackingMatchEvidence, setTrackingMatchEvidence] = useState(null);
   const [trackingMatchError, setTrackingMatchError] = useState('');
   const [trackingMatchLoading, setTrackingMatchLoading] = useState(false);
+  const [latestTrackingImportBatchId, setLatestTrackingImportBatchId] = useState(null);
+  const [statusUpdateGate, setStatusUpdateGate] = useState(null);
+  const [statusUpdateResult, setStatusUpdateResult] = useState(null);
+  const [statusUpdateError, setStatusUpdateError] = useState('');
+  const [statusUpdateLoading, setStatusUpdateLoading] = useState(false);
+  const [statusUpdateApprovals, setStatusUpdateApprovals] = useState({
+    manualApproval: false,
+    backupEvidenceAcknowledged: false,
+    auditEvidenceAcknowledged: false,
+    operatorChecklistAcknowledged: false,
+  });
   const [shipmentBoundary, setShipmentBoundary] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -864,6 +1001,17 @@ export default function ShippingAssistant() {
       setTrackingParserError('');
       setTrackingMatchEvidence(null);
       setTrackingMatchError('');
+      setLatestTrackingImportBatchId(null);
+      setStatusUpdateGate(null);
+      setStatusUpdateResult(null);
+      setStatusUpdateError('');
+      setStatusUpdateLoading(false);
+      setStatusUpdateApprovals({
+        manualApproval: false,
+        backupEvidenceAcknowledged: false,
+        auditEvidenceAcknowledged: false,
+        operatorChecklistAcknowledged: false,
+      });
       setShipmentBoundary(null);
       setLoadError('');
       return () => { cancelled = true; };
@@ -883,6 +1031,16 @@ export default function ShippingAssistant() {
       setTrackingMatchLoading(true);
       setTrackingMatchError('');
       setTrackingMatchEvidence(null);
+      setLatestTrackingImportBatchId(null);
+      setStatusUpdateGate(null);
+      setStatusUpdateResult(null);
+      setStatusUpdateError('');
+      setStatusUpdateApprovals({
+        manualApproval: false,
+        backupEvidenceAcknowledged: false,
+        auditEvidenceAcknowledged: false,
+        operatorChecklistAcknowledged: false,
+      });
       setShipmentBoundary(null);
       setSaveError('');
       setSaveResult(null);
@@ -938,6 +1096,7 @@ export default function ShippingAssistant() {
         setTrackingImportHistory(trackingHistoryResult.data || []);
         setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
         const latestTrackingBatch = (trackingHistoryResult.data || [])[0];
+        setLatestTrackingImportBatchId(latestTrackingBatch?.id || null);
         const matchResult = await dataProvider.checkShippingTrackingOrderMatchReadonly({
           storeId: selectedStoreId,
           platform: 'naver',
@@ -977,6 +1136,9 @@ export default function ShippingAssistant() {
           setTrackingImportHistory([]);
           setTrackingParserPreview(null);
           setTrackingMatchEvidence(null);
+          setLatestTrackingImportBatchId(null);
+          setStatusUpdateGate(null);
+          setStatusUpdateResult(null);
           setShipmentBoundary(null);
           setTrackingMatchError(error.message || 'Tracking order match check failed.');
           setLoadError(error.message || '发货候选加载失败。');
@@ -1191,6 +1353,95 @@ export default function ShippingAssistant() {
     }
   };
 
+  const changeStatusUpdateApproval = (key, checked) => {
+    setStatusUpdateApprovals((current) => ({ ...current, [key]: checked }));
+    setStatusUpdateGate(null);
+    setStatusUpdateResult(null);
+    setStatusUpdateError('');
+  };
+
+  const buildStatusUpdatePayload = () => ({
+    storeId: selectedStoreId,
+    platform: 'naver',
+    importBatchId: latestTrackingImportBatchId,
+    manualApproval: Boolean(statusUpdateApprovals.manualApproval),
+    matchingContractAcknowledged: true,
+    backupEvidenceAcknowledged: Boolean(statusUpdateApprovals.backupEvidenceAcknowledged),
+    auditEvidenceAcknowledged: Boolean(statusUpdateApprovals.auditEvidenceAcknowledged),
+    operatorChecklistAcknowledged: Boolean(statusUpdateApprovals.operatorChecklistAcknowledged),
+    targetOrderStatus: 'DISPATCHED',
+    actorContext: {
+      role: 'admin',
+      actor_id: 'shipping-local-operator',
+    },
+  });
+
+  const checkStatusUpdateGate = async () => {
+    if (!latestTrackingImportBatchId) {
+      setStatusUpdateError('请先导入物流单号并生成本地导入记录。');
+      return null;
+    }
+    setStatusUpdateLoading(true);
+    setStatusUpdateError('');
+    setStatusUpdateResult(null);
+    try {
+      const result = await dataProvider.checkShippingTrackingOrderStatusLocalUpdateGate(buildStatusUpdatePayload());
+      setStatusUpdateGate(result);
+      return result;
+    } catch (error) {
+      setStatusUpdateGate(null);
+      setStatusUpdateError(error.message || '本地订单状态更新门禁检查失败。');
+      return null;
+    } finally {
+      setStatusUpdateLoading(false);
+    }
+  };
+
+  const writeStatusUpdate = async () => {
+    if (statusUpdateGate?.status !== 'tracking_order_status_update_gate_ready') {
+      setStatusUpdateError('请先通过本地状态更新门禁检查。');
+      return;
+    }
+    setStatusUpdateLoading(true);
+    setStatusUpdateError('');
+    try {
+      const result = await dataProvider.writeShippingTrackingOrderStatusLocalUpdate(buildStatusUpdatePayload());
+      if (!['tracking_order_status_update_succeeded', 'tracking_order_status_update_noop', 'mock_tracking_order_status_update_ready'].includes(result.status)) {
+        throw new Error(result.businessMessage || result.skipReason || '本地订单状态更新未通过。');
+      }
+      setStatusUpdateResult(result);
+      if (result.updatedOrderIds?.length && result.realDatabaseWritten) {
+        const updatedIds = new Set(result.updatedOrderIds.map((item) => String(item)));
+        setOrders((current) => current.map((order) => (
+          updatedIds.has(String(order.id))
+            ? {
+              ...order,
+              rawStatus: 'DISPATCHED',
+              status: result.targetOrderStatusLabelZh || '已发货 / 配送中',
+              deliveryStatus: 'DISPATCHED',
+              deliveryStatusLabelZh: result.targetOrderStatusLabelZh || '已发货 / 配送中',
+            }
+            : order
+        )));
+      }
+      if (isBackendSource) {
+        const trackingHistoryResult = await dataProvider.getShippingTrackingImportHistory({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          limit: 10,
+          includeRows: false,
+        });
+        setTrackingImportHistory(trackingHistoryResult.data || []);
+        setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
+      }
+    } catch (error) {
+      setStatusUpdateResult(null);
+      setStatusUpdateError(error.message || '本地订单状态更新失败。');
+    } finally {
+      setStatusUpdateLoading(false);
+    }
+  };
+
   if (storeLoading) {
     return (
       <>
@@ -1321,6 +1572,19 @@ export default function ShippingAssistant() {
         evidence={trackingMatchEvidence}
         loading={trackingMatchLoading}
         error={trackingMatchError}
+      />
+      <TrackingOrderStatusLocalUpdatePanel
+        evidence={trackingMatchEvidence}
+        gate={statusUpdateGate}
+        result={statusUpdateResult}
+        approvals={statusUpdateApprovals}
+        onToggleApproval={changeStatusUpdateApproval}
+        onCheckGate={checkStatusUpdateGate}
+        onWrite={writeStatusUpdate}
+        loading={statusUpdateLoading}
+        error={statusUpdateError}
+        latestImportBatchId={latestTrackingImportBatchId}
+        backendMode={isBackendSource}
       />
       <ShipmentWritebackBoundaryPanel boundary={shipmentBoundary} />
       <ShippingOperatorRunbookPanel />

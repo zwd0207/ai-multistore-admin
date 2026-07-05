@@ -6,6 +6,7 @@ export const SHIPPING_TRACKING_IMPORT_MOCK_PHASE = 'Shipping-4B';
 export const SHIPPING_TRACKING_IMPORT_XLSX_PARSER_PHASE = 'Shipping-7B';
 export const SHIPPING_TRACKING_IMPORT_RECORD_PHASE = 'Shipping-5E';
 export const SHIPPING_TRACKING_ORDER_MATCH_PHASE = 'Shipping-6B';
+export const SHIPPING_ORDER_STATUS_LOCAL_UPDATE_PHASE = 'Shipping-8B-to-8C';
 export const SHIPPING_SHIPMENT_WRITEBACK_BOUNDARY_PHASE = 'Shipping-6C';
 export const SHIPPING_FILE_TYPE = 'shipping_request';
 export const SHIPPING_FILE_FORMAT = 'xlsx';
