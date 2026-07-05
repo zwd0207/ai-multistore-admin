@@ -1563,3 +1563,36 @@ Next 5 recommended stages:
 3. `Phase Shipping-4C: Export history readonly API plan`
 4. `Phase Shipping-4D: Export history readonly API implementation`
 5. `Phase Shipping-4E: Shipping Assistant export history UI`
+
+### Latest update after `Phase Shipping-4A` to `Phase Shipping-4E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `90% - 94%`
+- ERP real-user landing progress: about `86% - 91%`
+- Production version for long-term non-technical use: about `74% - 81%`
+
+Implemented in this update:
+
+- Approved future tracking-number import schema direction without migrating schema.
+- Added Codex1 tracking import mock parser gate: `POST /api/v1/shipping/tracking-import/mock-parse`.
+- Added Codex1 export-history readonly route: `GET /api/v1/shipping/export-history`.
+- Verified tracking mock parse requires approval, parser-contract acknowledgement, required references, carrier, and tracking number.
+- Verified tracking mock parse blocks sensitive buyer/receiver/address/secrets fields.
+- Verified export history is readonly and does not write orders, products, SyncLog, tested-success rows, tracking records, or platform shipment state.
+- Updated Codex2 `/shipping` with a read-only export history panel.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant trial with unshipped candidates, logistics inventory-code matching, manual logistics stock maintenance, local mapping persistence, local Excel generation, export/audit evidence, and export-history review.
+- Not suitable now: real tracking-number import persistence, Naver shipment writeback, logistics-provider API integration, receiver-privacy export, Coupang shipping workflow, or formal order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-5A: Tracking-number import record schema approval plan`
+2. `Phase Shipping-5B: Tracking-number import record schema migration`
+3. `Phase Shipping-5C: Tracking-number import local write mock gate`
+4. `Phase Shipping-5D: Tracking-number import local write implementation`
+5. `Phase Shipping-5E: Tracking-number import history UI`

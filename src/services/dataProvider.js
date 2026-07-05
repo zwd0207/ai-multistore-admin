@@ -1138,6 +1138,147 @@ function toBackendShippingExcelExportPayload(payload = {}) {
   };
 }
 
+function adaptShippingExportHistoryItem(item = {}) {
+  const rows = Array.isArray(item.rows) ? item.rows : [];
+  return {
+    id: item.id,
+    storeId: item.store_id ?? item.storeId,
+    platform: item.platform || 'naver',
+    fileType: item.file_type ?? item.fileType ?? 'shipping_request',
+    fileFormat: item.file_format ?? item.fileFormat ?? 'xlsx',
+    fileName: item.file_name ?? item.fileName ?? '',
+    filePath: item.file_path ?? item.filePath ?? '',
+    fileSha256: item.file_sha256 ?? item.fileSha256 ?? '',
+    rowCount: Number(item.row_count ?? item.rowCount ?? rows.length),
+    matchedRowCount: Number(item.matched_row_count ?? item.matchedRowCount ?? rows.length),
+    unmatchedRowCount: Number(item.unmatched_row_count ?? item.unmatchedRowCount ?? 0),
+    auditCorrelationId: item.audit_correlation_id ?? item.auditCorrelationId ?? '',
+    exportStatus: item.export_status ?? item.exportStatus ?? 'generated',
+    includeReceiverPrivacy: Boolean(item.include_receiver_privacy ?? item.includeReceiverPrivacy),
+    fileGenerated: Boolean(item.file_generated ?? item.fileGenerated),
+    filePersisted: Boolean(item.file_persisted ?? item.filePersisted),
+    rawResponseSaved: Boolean(item.raw_response_saved ?? item.rawResponseSaved),
+    secretsSaved: Boolean(item.secrets_saved ?? item.secretsSaved),
+    privacyFieldsRedacted: item.privacy_fields_redacted !== false && item.privacyFieldsRedacted !== false,
+    mappingVersion: item.mapping_version ?? item.mappingVersion ?? 'shipping_export_v1',
+    createdAt: item.created_at ?? item.createdAt ?? null,
+    updatedAt: item.updated_at ?? item.updatedAt ?? null,
+    rows: rows.map((row) => ({
+      id: row.id,
+      exportBatchId: row.export_batch_id ?? row.exportBatchId,
+      orderNo: row.order_reference ?? row.orderNo ?? '',
+      productName: row.product_name ?? row.productName ?? '',
+      optionName: row.option_name ?? row.optionName ?? '',
+      quantity: Number(row.quantity ?? 0),
+      logisticsInventoryCode: row.logistics_inventory_code ?? row.logisticsInventoryCode ?? '',
+      logisticsProviderName: row.logistics_provider_name ?? row.logisticsProviderName ?? '',
+      internalSku: row.internal_sku ?? row.internalSku ?? '',
+      rowStatus: row.row_status ?? row.rowStatus ?? 'ready',
+      createdAt: row.created_at ?? row.createdAt ?? null,
+    })),
+  };
+}
+
+function adaptShippingExportHistoryResult(data = {}) {
+  const rows = (data.items || data.data || []).map(adaptShippingExportHistoryItem);
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-4D',
+    status: data.status || 'shipping_export_history_ready',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    data: rows,
+    items: rows,
+    total: Number(data.total ?? rows.length),
+    limit: Number(data.limit ?? 20),
+    offset: Number(data.offset ?? 0),
+    includeRows: Boolean(data.include_rows ?? data.includeRows),
+    readonlyRoute: Boolean(data.readonly_route ?? data.readonlyRoute ?? true),
+    exportHistoryReadonly: Boolean(data.export_history_readonly ?? data.exportHistoryReadonly ?? true),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    importRecordWritten: Boolean(data.import_record_written ?? data.importRecordWritten),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function toBackendShippingTrackingImportPayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    file_type: payload.fileType || payload.file_type || 'tracking_upload',
+    file_format: payload.fileFormat || payload.file_format || 'xlsx',
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    parser_contract_acknowledged: Boolean(payload.parserContractAcknowledged ?? payload.parser_contract_acknowledged),
+    actor_context: payload.actorContext || payload.actor_context || {},
+    tracking_rows: (payload.rows || payload.trackingRows || payload.tracking_rows || []).map((item) => ({
+      order_reference: item.orderReference || item.orderNo || item.order_reference || '',
+      product_order_reference: item.productOrderReference || item.productOrderNo || item.product_order_reference || '',
+      logistics_inventory_code: item.logisticsInventoryCode || item.logistics_inventory_code || '',
+      carrier: item.carrier || '',
+      tracking_number: item.trackingNumber || item.tracking_number || '',
+      shipped_at: item.shippedAt || item.shipped_at || '',
+      operator_note: item.operatorNote || item.operator_note || '',
+    })),
+  };
+}
+
+function adaptShippingTrackingImportMockParseResult(data = {}) {
+  const rows = data.tracking_rows_preview || data.rows || [];
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-4B',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    fileType: data.file_type ?? data.fileType ?? 'tracking_upload',
+    fileFormat: data.file_format ?? data.fileFormat ?? 'xlsx',
+    rowCount: Number(data.row_count ?? data.rowCount ?? rows.length),
+    readyRowCount: Number(data.ready_row_count ?? data.readyRowCount ?? 0),
+    duplicateRowCount: Number(data.duplicate_row_count ?? data.duplicateRowCount ?? 0),
+    fileParsed: Boolean(data.file_parsed ?? data.fileParsed),
+    parserContractAcknowledged: Boolean(data.parser_contract_acknowledged ?? data.parserContractAcknowledged),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    trackingNumbersWritten: Boolean(data.tracking_numbers_written ?? data.trackingNumbersWritten),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    importRecordWritten: Boolean(data.import_record_written ?? data.importRecordWritten),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    rows: rows.map((row) => ({
+      rowIndex: row.row_index ?? row.rowIndex,
+      orderNo: row.order_reference ?? row.orderNo ?? '',
+      productOrderNo: row.product_order_reference ?? row.productOrderNo ?? '',
+      logisticsInventoryCode: row.logistics_inventory_code ?? row.logisticsInventoryCode ?? '',
+      carrier: row.carrier || '',
+      trackingNumber: row.tracking_number ?? row.trackingNumber ?? '',
+      shippedAt: row.shipped_at ?? row.shippedAt ?? null,
+      rowStatus: row.row_status ?? row.rowStatus ?? '',
+      operatorNote: row.operator_note ?? row.operatorNote ?? '',
+      futureWriteAllowed: Boolean(row.future_write_allowed ?? row.futureWriteAllowed),
+    })),
+  };
+}
+
 function adaptStoreMembershipReadonlyResult(data = {}) {
   return {
     ...data,
@@ -2181,6 +2322,115 @@ const sourceMethods = {
     }
     const { store } = await resolveBackendStore({ storeId: request.store_id });
     return adaptShippingExcelExportResult(await backendApi.generateShippingExcelExport({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  getShippingExportHistory: async (params = {}) => {
+    if (!isBackendSource) {
+      return adaptShippingExportHistoryResult({
+        phase: 'Shipping-4D',
+        status: 'mock_export_history_ready',
+        business_message: 'mock 模式展示导出历史示例；不会读取或写入 Codex1 数据库。',
+        export_history_readonly: true,
+        readonly_route: true,
+        tracking_number_import_open: false,
+        shipment_writeback_open: false,
+        import_record_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        total: 1,
+        items: [{
+          id: 'mock-shipping-export-1',
+          store_id: params.storeId || params.store_id || 8,
+          platform: 'naver',
+          file_type: 'shipping_request',
+          file_format: 'xlsx',
+          file_name: 'naver-shipping-request-store-8-mock.xlsx',
+          file_path: '',
+          file_sha256: 'mock-sha256-shipping-export-history',
+          row_count: 1,
+          matched_row_count: 1,
+          unmatched_row_count: 0,
+          audit_correlation_id: 'mock-shipping-export-history',
+          export_status: 'generated',
+          include_receiver_privacy: false,
+          file_generated: false,
+          file_persisted: false,
+          raw_response_saved: false,
+          secrets_saved: false,
+          privacy_fields_redacted: true,
+          mapping_version: 'shipping_export_mock_v1',
+          created_at: '2026-07-05T18:00:00+09:00',
+          rows: [],
+        }],
+      });
+    }
+    const { store } = await resolveBackendStore(params);
+    return adaptShippingExportHistoryResult(await backendApi.getShippingExportHistory({
+      storeId: store.id,
+      platform: params?.platform || 'naver',
+      limit: params?.limit || 20,
+      offset: params?.offset || 0,
+      includeRows: params?.includeRows || false,
+    }));
+  },
+  checkShippingTrackingImportMockParse: async (payload = {}) => {
+    const request = toBackendShippingTrackingImportPayload(payload);
+    if (!isBackendSource) {
+      return adaptShippingTrackingImportMockParseResult({
+        phase: 'Shipping-4B',
+        status: request.manual_approval && request.parser_contract_acknowledged
+          ? 'tracking_import_mock_parse_ready'
+          : 'blocked',
+        skip_reason: request.manual_approval
+          ? (request.parser_contract_acknowledged ? null : 'tracking_parser_contract_required')
+          : 'manual_approval_required',
+        business_message: request.manual_approval && request.parser_contract_acknowledged
+          ? 'mock 模式已验证物流单号导入字段；不会写订单，也不会回填 Naver。'
+          : '请先确认导入解析门禁。',
+        file_type: request.file_type,
+        file_format: request.file_format,
+        row_count: request.tracking_rows.length,
+        ready_row_count: request.tracking_rows.length,
+        duplicate_row_count: 0,
+        file_parsed: request.manual_approval && request.parser_contract_acknowledged,
+        parser_contract_acknowledged: request.parser_contract_acknowledged,
+        tracking_number_import_open: false,
+        tracking_numbers_written: false,
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        import_record_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        tracking_rows_preview: request.tracking_rows.map((row, index) => ({
+          row_index: index + 1,
+          ...row,
+          row_status: 'ready_for_future_review',
+          future_write_allowed: false,
+        })),
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingTrackingImportMockParseResult(await backendApi.checkShippingTrackingImportMockParse({
       ...request,
       store_id: Number(store.id),
     }));

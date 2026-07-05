@@ -2017,3 +2017,15 @@ Codex1 now has local export-record tables and `POST /api/v1/shipping/export-exce
 The real database schema was migrated after a local backup. The new export tables started with zero rows; no fake logistics export was generated from production data.
 
 This phase still does not call Naver, call a logistics-provider API, include receiver privacy by default, import tracking numbers, write orders/products/SyncLog/tested-success rows, or execute shipment/cancel/return/exchange writes.
+
+## Phase Shipping-4A to Shipping-4E - Tracking Import Gate and Export History
+
+Shipping-4A to 4E prepare the next tracking-number import boundary and add export-history visibility:
+
+- Approved the future `tracking_upload / xlsx` schema direction without migrating schema.
+- Added Codex1 `POST /api/v1/shipping/tracking-import/mock-parse` as a mock parser gate only.
+- Added Codex1 `GET /api/v1/shipping/export-history` as a read-only local export-history route.
+- Updated Codex2 `/shipping` to show recent export history.
+- Verified that tracking mock parse writes no orders, products, SyncLog, tested-success rows, tracking records, or platform shipment state.
+
+Tracking-number import, Naver shipment writeback, logistics-provider API integration, receiver-privacy export, tracking persistence, and formal order batch sync remain closed.

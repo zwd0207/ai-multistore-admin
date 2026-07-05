@@ -8,6 +8,7 @@ import { shippingMockInventoryMappings, shippingMockOrders } from '../data/shipp
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
   SHIPPING_EXPORT_MOCK_PHASE,
+  SHIPPING_TRACKING_IMPORT_MOCK_PHASE,
   buildLogisticsInventoryMappingMockGate,
   buildShippingAssistantSummary,
   buildShippingExcelExportMock,
@@ -334,6 +335,90 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate, generating = fals
   );
 }
 
+function ExportHistoryPanel({
+  history = [],
+  loading = false,
+  error = '',
+  businessMessage = '',
+}) {
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>发货导出历史</h2>
+          <p>{businessMessage || '只读查看本地发货 Excel 导出记录，方便运营确认最近生成过哪些文件。'}</p>
+        </div>
+      </div>
+      {loading ? <LoadingPanel /> : null}
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {!loading && !error && !history.length ? (
+        <EmptyState
+          title="暂无导出记录"
+          description="生成本地 Excel 后，这里会显示文件名、导出时间、行数和审计关联。"
+        />
+      ) : null}
+      {!loading && !error && history.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>导出时间</th>
+                <th>文件</th>
+                <th>行数</th>
+                <th>状态</th>
+                <th>审计关联</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((item) => (
+                <tr key={item.id || item.fileSha256 || item.fileName}>
+                  <td>{formatDateTime(item.createdAt)}</td>
+                  <td>
+                    <strong>{displayText(item.fileName)}</strong>
+                    <span className="cell-subtitle">{displayText(item.fileType)} / {displayText(item.fileFormat)}</span>
+                  </td>
+                  <td>{item.rowCount}</td>
+                  <td><span className={statusToneClass(item.fileGenerated ? 'success' : 'neutral')}><i />{item.fileGenerated ? '已生成' : '演示记录'}</span></td>
+                  <td>{displayText(item.auditCorrelationId, '未关联')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TechnicalDetails
+        title="查看导出历史技术详情"
+        description="普通运营只看文件和行数；本地路径、文件哈希、只读边界放在这里。"
+        items={[
+          { label: 'phase', value: 'Shipping-4D' },
+          { label: 'history_count', value: history.length },
+          { label: 'tracking_import_phase', value: SHIPPING_TRACKING_IMPORT_MOCK_PHASE },
+          { label: 'tracking_number_import_open', value: false },
+          { label: 'shipment_writeback_open', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+        ]}
+      >
+        {history.map((item) => (
+          <pre key={`history-${item.id || item.fileName}`}>{JSON.stringify({
+            id: item.id,
+            file_path: item.filePath,
+            file_sha256: item.fileSha256,
+            file_generated: item.fileGenerated,
+            file_persisted: item.filePersisted,
+            raw_response_saved: item.rawResponseSaved,
+            secrets_saved: item.secretsSaved,
+            privacy_fields_redacted: item.privacyFieldsRedacted,
+            mapping_version: item.mappingVersion,
+          }, null, 2)}</pre>
+        ))}
+      </TechnicalDetails>
+    </section>
+  );
+}
+
 export default function ShippingAssistant() {
   const {
     selectedStore,
@@ -349,6 +434,10 @@ export default function ShippingAssistant() {
   const [exportPreview, setExportPreview] = useState(null);
   const [exportError, setExportError] = useState('');
   const [generatingExport, setGeneratingExport] = useState(false);
+  const [exportHistory, setExportHistory] = useState([]);
+  const [historyMessage, setHistoryMessage] = useState('');
+  const [historyError, setHistoryError] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveResult, setSaveResult] = useState(null);
@@ -365,6 +454,9 @@ export default function ShippingAssistant() {
       setOrders([]);
       setMappings([]);
       setDraftMappings([]);
+      setExportHistory([]);
+      setHistoryMessage('');
+      setHistoryError('');
       setLoadError('');
       return () => { cancelled = true; };
     }
@@ -372,10 +464,13 @@ export default function ShippingAssistant() {
     async function loadOrders() {
       setLoading(true);
       setLoadError('');
+      setHistoryLoading(true);
+      setHistoryError('');
+      setHistoryMessage('');
       setSaveError('');
       setSaveResult(null);
       try {
-        const [orderResult, mappingResult] = await Promise.all([
+        const [orderResult, mappingResult, historyResult] = await Promise.all([
           isBackendSource
             ? dataProvider.getOrders({
               storeId: selectedStoreId,
@@ -392,6 +487,12 @@ export default function ShippingAssistant() {
               platform: 'naver',
             })
             : Promise.resolve({ data: [] }),
+          dataProvider.getShippingExportHistory({
+            storeId: selectedStoreId,
+            platform: 'naver',
+            limit: 10,
+            includeRows: false,
+          }),
         ]);
         const nextOrders = orderResult.data || [];
         const persistedMappings = isBackendSource
@@ -409,15 +510,21 @@ export default function ShippingAssistant() {
         setOrders(nextOrders);
         setMappings(persistedMappings);
         setDraftMappings(ensureDraftMappings(nextCandidates, persistedMappings, []));
+        setExportHistory(historyResult.data || []);
+        setHistoryMessage(historyResult.businessMessage || '');
       } catch (error) {
         if (!cancelled) {
           setOrders([]);
           setMappings([]);
           setDraftMappings([]);
+          setExportHistory([]);
           setLoadError(error.message || '发货候选加载失败。');
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setHistoryLoading(false);
+        }
       }
     }
 
@@ -547,6 +654,14 @@ export default function ShippingAssistant() {
           throw new Error(result.businessMessage || result.skipReason || '本地 Excel 生成未通过。');
         }
         setExportPreview(result);
+        const historyResult = await dataProvider.getShippingExportHistory({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          limit: 10,
+          includeRows: false,
+        });
+        setExportHistory(historyResult.data || []);
+        setHistoryMessage(historyResult.businessMessage || '');
         return;
       }
       setExportPreview(buildShippingExcelExportMock({
@@ -666,6 +781,12 @@ export default function ShippingAssistant() {
         generating={generatingExport}
         exportError={exportError}
         backendMode={isBackendSource}
+      />
+      <ExportHistoryPanel
+        history={exportHistory}
+        loading={historyLoading}
+        error={historyError}
+        businessMessage={historyMessage}
       />
 
       <TechnicalDetails

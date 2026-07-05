@@ -6,6 +6,7 @@ const PARAMETER_ALIASES = {
   startDate: 'start_date',
   endDate: 'end_date',
   includeAdvanced: 'include_advanced',
+  includeRows: 'include_rows',
 };
 
 function normalizeParams(params = {}) {
@@ -57,6 +58,8 @@ export const backendApi = {
   checkShippingLogisticsMappingWriteGate: (payload) => sendData('post', '/shipping/logistics-mappings/write-gate', payload),
   writeShippingLogisticsMappings: (payload) => sendData('post', '/shipping/logistics-mappings', payload),
   generateShippingExcelExport: (payload) => sendData('post', '/shipping/export-excel', payload),
+  getShippingExportHistory: (params) => getData('/shipping/export-history', params),
+  checkShippingTrackingImportMockParse: (payload) => sendData('post', '/shipping/tracking-import/mock-parse', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),
   getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),
