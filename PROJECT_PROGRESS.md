@@ -1596,3 +1596,36 @@ Next 5 recommended stages:
 3. `Phase Shipping-5C: Tracking-number import local write mock gate`
 4. `Phase Shipping-5D: Tracking-number import local write implementation`
 5. `Phase Shipping-5E: Tracking-number import history UI`
+
+### Latest update after `Phase Shipping-5A` to `Phase Shipping-5E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `93% - 96%`
+- ERP real-user landing progress: about `88% - 92%`
+- Production version for long-term non-technical use: about `76% - 83%`
+
+Implemented in this update:
+
+- Approved and migrated local tracking-number import record schema.
+- Added `shipping_tracking_import_batches` and `shipping_tracking_import_rows`.
+- Added Codex1 tracking import write-gate, local write, and read-only history routes.
+- Verified write-gate failures do not write local rows.
+- Verified approved local import writes only tracking import records plus one Shipping-5D audit row.
+- Verified orders, products, SyncLog, and tested-success counts remain unchanged.
+- Updated Codex2 `/shipping` with a read-only tracking import history panel.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with unshipped candidates, logistics inventory-code matching, manual logistics stock maintenance, local mapping persistence, local Excel generation, export history, and tracking import record/history review.
+- Not suitable now: Naver shipment writeback, tracking-number-to-order status update, real logistics-provider API integration, receiver-privacy export, Coupang shipping workflow, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-6A: Tracking-number to order matching readonly plan`
+2. `Phase Shipping-6B: Tracking-number to local order matching mock gate`
+3. `Phase Shipping-6C: Naver shipment writeback approval boundary plan`
+4. `Phase Shipping-6D: Shipment writeback readonly evidence UI plan`
+5. `Phase Shipping-6E: Shipping operator runbook and checklist UI`

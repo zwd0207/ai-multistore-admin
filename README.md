@@ -2029,3 +2029,17 @@ Shipping-4A to 4E prepare the next tracking-number import boundary and add expor
 - Verified that tracking mock parse writes no orders, products, SyncLog, tested-success rows, tracking records, or platform shipment state.
 
 Tracking-number import, Naver shipment writeback, logistics-provider API integration, receiver-privacy export, tracking persistence, and formal order batch sync remain closed.
+
+## Phase Shipping-5A to Shipping-5E - Tracking Import Records and History
+
+Shipping-5A to 5E add local tracking-number import records and a read-only history panel:
+
+- `PHASE_SHIPPING_5A_TRACKING_NUMBER_IMPORT_RECORD_SCHEMA_APPROVAL_PLAN.md`
+- `PHASE_SHIPPING_5B_TRACKING_NUMBER_IMPORT_RECORD_SCHEMA_MIGRATION.md`
+- `PHASE_SHIPPING_5C_TRACKING_NUMBER_IMPORT_LOCAL_WRITE_MOCK_GATE.md`
+- `PHASE_SHIPPING_5D_TRACKING_NUMBER_IMPORT_LOCAL_WRITE_IMPLEMENTATION.md`
+- `PHASE_SHIPPING_5E_TRACKING_NUMBER_IMPORT_HISTORY_UI.md`
+
+Codex1 now has `shipping_tracking_import_batches` and `shipping_tracking_import_rows`, plus local routes for write-gate validation, approved local import-record writes, and read-only tracking import history. Codex2 `/shipping` shows a simple read-only "Tracking import history" panel after export history.
+
+This stage may write local tracking import batch/row records and one safe operation audit row only when the backend local write route is called with explicit approval. It does not call Naver, does not call a logistics-provider API, does not update orders, does not write products/SyncLog/tested-success rows, and does not open Naver shipment writeback or formal order batch sync.

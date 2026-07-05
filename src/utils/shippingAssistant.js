@@ -1,8 +1,9 @@
 import { getNaverOrderStatusPresentation, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 
-export const SHIPPING_PHASE = 'Shipping-4A-to-4E';
+export const SHIPPING_PHASE = 'Shipping-5A-to-5E';
 export const SHIPPING_EXPORT_MOCK_PHASE = 'Shipping-4D';
 export const SHIPPING_TRACKING_IMPORT_MOCK_PHASE = 'Shipping-4B';
+export const SHIPPING_TRACKING_IMPORT_RECORD_PHASE = 'Shipping-5E';
 export const SHIPPING_FILE_TYPE = 'shipping_request';
 export const SHIPPING_FILE_FORMAT = 'xlsx';
 

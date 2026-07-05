@@ -9,6 +9,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
   SHIPPING_EXPORT_MOCK_PHASE,
   SHIPPING_TRACKING_IMPORT_MOCK_PHASE,
+  SHIPPING_TRACKING_IMPORT_RECORD_PHASE,
   buildLogisticsInventoryMappingMockGate,
   buildShippingAssistantSummary,
   buildShippingExcelExportMock,
@@ -419,6 +420,97 @@ function ExportHistoryPanel({
   );
 }
 
+function TrackingImportHistoryPanel({
+  history = [],
+  loading = false,
+  error = '',
+  businessMessage = '',
+}) {
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>物流单号导入记录</h2>
+          <p>{businessMessage || '只读查看本地物流单号导入批次；当前不会更新订单，也不会回填 Naver 发货。'}</p>
+        </div>
+      </div>
+      {loading ? <LoadingPanel /> : null}
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {!loading && !error && !history.length ? (
+        <EmptyState
+          title="暂无物流单号导入记录"
+          description="后续导入物流商回传表后，这里会显示导入时间、行数、重复行和审计关联。"
+        />
+      ) : null}
+      {!loading && !error && history.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>导入时间</th>
+                <th>来源文件</th>
+                <th>行数</th>
+                <th>状态</th>
+                <th>回填</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((item) => (
+                <tr key={item.id || item.auditCorrelationId || item.sourceFileName}>
+                  <td>{formatDateTime(item.createdAt)}</td>
+                  <td>
+                    <strong>{displayText(item.sourceFileName, '本地导入记录')}</strong>
+                    <span className="cell-subtitle">{displayText(item.fileType)} / {displayText(item.fileFormat)}</span>
+                  </td>
+                  <td>
+                    <strong>{item.rowCount}</strong>
+                    <span className="cell-subtitle">可处理 {item.readyRowCount} / 重复 {item.duplicateRowCount}</span>
+                  </td>
+                  <td><span className={statusToneClass(item.importStatus === 'recorded' ? 'success' : 'neutral')}><i />{displayText(item.importStatus, 'recorded')}</span></td>
+                  <td><span className={statusToneClass(item.shipmentWritebackCalled ? 'warning' : 'neutral')}><i />{item.shipmentWritebackCalled ? '已回填' : '未回填'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TechnicalDetails
+        title="查看物流单号导入技术边界"
+        description="普通运营只看导入记录；平台回填、订单更新、原始响应和敏感信息边界放在这里核对。"
+        items={[
+          { label: 'phase', value: SHIPPING_TRACKING_IMPORT_RECORD_PHASE },
+          { label: 'history_count', value: history.length },
+          { label: 'tracking_number_import_open', value: false },
+          { label: 'shipment_writeback_open', value: false },
+          { label: 'shipment_writeback_called', value: false },
+          { label: 'orders_updated', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+        ]}
+      >
+        {history.map((item) => (
+          <pre key={`tracking-history-${item.id || item.auditCorrelationId}`}>{JSON.stringify({
+            id: item.id,
+            source_file_name: item.sourceFileName,
+            audit_correlation_id: item.auditCorrelationId,
+            import_status: item.importStatus,
+            parser_contract_acknowledged: item.parserContractAcknowledged,
+            tracking_number_import_open: item.trackingNumberImportOpen,
+            shipment_writeback_called: item.shipmentWritebackCalled,
+            orders_updated: item.ordersUpdated,
+            raw_response_saved: item.rawResponseSaved,
+            secrets_saved: item.secretsSaved,
+            privacy_fields_redacted: item.privacyFieldsRedacted,
+            mapping_version: item.mappingVersion,
+          }, null, 2)}</pre>
+        ))}
+      </TechnicalDetails>
+    </section>
+  );
+}
+
 export default function ShippingAssistant() {
   const {
     selectedStore,
@@ -438,6 +530,10 @@ export default function ShippingAssistant() {
   const [historyMessage, setHistoryMessage] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [trackingImportHistory, setTrackingImportHistory] = useState([]);
+  const [trackingImportHistoryMessage, setTrackingImportHistoryMessage] = useState('');
+  const [trackingImportHistoryError, setTrackingImportHistoryError] = useState('');
+  const [trackingImportHistoryLoading, setTrackingImportHistoryLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveResult, setSaveResult] = useState(null);
@@ -457,6 +553,9 @@ export default function ShippingAssistant() {
       setExportHistory([]);
       setHistoryMessage('');
       setHistoryError('');
+      setTrackingImportHistory([]);
+      setTrackingImportHistoryMessage('');
+      setTrackingImportHistoryError('');
       setLoadError('');
       return () => { cancelled = true; };
     }
@@ -467,10 +566,13 @@ export default function ShippingAssistant() {
       setHistoryLoading(true);
       setHistoryError('');
       setHistoryMessage('');
+      setTrackingImportHistoryLoading(true);
+      setTrackingImportHistoryError('');
+      setTrackingImportHistoryMessage('');
       setSaveError('');
       setSaveResult(null);
       try {
-        const [orderResult, mappingResult, historyResult] = await Promise.all([
+        const [orderResult, mappingResult, historyResult, trackingHistoryResult] = await Promise.all([
           isBackendSource
             ? dataProvider.getOrders({
               storeId: selectedStoreId,
@@ -488,6 +590,12 @@ export default function ShippingAssistant() {
             })
             : Promise.resolve({ data: [] }),
           dataProvider.getShippingExportHistory({
+            storeId: selectedStoreId,
+            platform: 'naver',
+            limit: 10,
+            includeRows: false,
+          }),
+          dataProvider.getShippingTrackingImportHistory({
             storeId: selectedStoreId,
             platform: 'naver',
             limit: 10,
@@ -512,18 +620,22 @@ export default function ShippingAssistant() {
         setDraftMappings(ensureDraftMappings(nextCandidates, persistedMappings, []));
         setExportHistory(historyResult.data || []);
         setHistoryMessage(historyResult.businessMessage || '');
+        setTrackingImportHistory(trackingHistoryResult.data || []);
+        setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
       } catch (error) {
         if (!cancelled) {
           setOrders([]);
           setMappings([]);
           setDraftMappings([]);
           setExportHistory([]);
+          setTrackingImportHistory([]);
           setLoadError(error.message || '发货候选加载失败。');
         }
       } finally {
         if (!cancelled) {
           setLoading(false);
           setHistoryLoading(false);
+          setTrackingImportHistoryLoading(false);
         }
       }
     }
@@ -787,6 +899,12 @@ export default function ShippingAssistant() {
         loading={historyLoading}
         error={historyError}
         businessMessage={historyMessage}
+      />
+      <TrackingImportHistoryPanel
+        history={trackingImportHistory}
+        loading={trackingImportHistoryLoading}
+        error={trackingImportHistoryError}
+        businessMessage={trackingImportHistoryMessage}
       />
 
       <TechnicalDetails
