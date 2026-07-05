@@ -34,6 +34,13 @@ class FormalBatchExecutionPreflightReadonlyCheckRequest(BaseModel):
     preflight_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class FormalBatchExecutionDryRunReadonlyCheckRequest(BaseModel):
+    execution_preflight: dict[str, Any] = Field(default_factory=dict)
+    dry_run_context: dict[str, Any] = Field(default_factory=dict)
+    execution_plan: dict[str, Any] = Field(default_factory=dict)
+    candidate_summaries: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
+
+
 class NaverProductBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     actor_context: dict[str, Any] = Field(default_factory=dict)
     store_ids: list[int] = Field(default_factory=list, max_length=10)

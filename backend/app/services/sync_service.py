@@ -7073,6 +7073,309 @@ def evaluate_formal_batch_execution_preflight_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_execution_dry_run_readonly_api_local(
+    *,
+    execution_preflight: dict | None,
+    dry_run_context: dict | None,
+    execution_plan: dict | None,
+    candidate_summaries: list[dict] | tuple[dict, ...] | None,
+) -> dict:
+    """Readonly dry-run contract for future formal product/order batch execution."""
+
+    required_dry_run_flags = [
+        "preflight_referenced",
+        "readonly_candidates_referenced",
+        "backup_manifest_referenced",
+        "permission_evidence_referenced",
+        "audit_linkage_referenced",
+        "readback_plan_referenced",
+        "rollback_plan_referenced",
+        "sensitive_scan_passed",
+        "execution_window_limited",
+        "dry_run_only",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-3D",
+        "formal_batch_execution_dry_run_readonly_api_local": True,
+        "status": "blocked",
+        "dry_run_status": "blocked",
+        "dry_run_ready": False,
+        "skip_reason": None,
+        "required_dry_run_flags": required_dry_run_flags,
+        "missing_dry_run_flags": [],
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "candidate_summary_count": 0,
+        "total_candidate_count": 0,
+        "total_would_create": 0,
+        "total_would_update": 0,
+        "total_would_refresh_only": 0,
+        "total_would_skip": 0,
+        "changed_fields": [],
+        "candidate_summaries": [],
+        "route_path": "/api/v1/batch/execution-dry-run/readonly-check",
+        "http_method": "POST",
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "dry_run_only": True,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if not isinstance(execution_preflight, dict):
+        result["skip_reason"] = "execution_preflight_required"
+        return result
+    if not isinstance(dry_run_context, dict):
+        result["skip_reason"] = "dry_run_context_required"
+        return result
+    if not isinstance(execution_plan, dict):
+        result["skip_reason"] = "execution_plan_required"
+        return result
+    if not isinstance(candidate_summaries, (list, tuple)) or not candidate_summaries:
+        result["skip_reason"] = "candidate_summaries_required"
+        return result
+    if len(candidate_summaries) > 10:
+        result["skip_reason"] = "candidate_summary_count_limit_exceeded"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "execution_preflight": execution_preflight,
+        "dry_run_context": dry_run_context,
+        "execution_plan": execution_plan,
+        "candidate_summaries": candidate_summaries,
+    }):
+        result["skip_reason"] = "formal_batch_execution_dry_run_sensitive_field_blocked"
+        return result
+
+    if execution_preflight.get("status") != "formal_batch_execution_preflight_readonly_ready":
+        result["skip_reason"] = "execution_preflight_not_ready"
+        return result
+    if execution_preflight.get("preflight_ready") is not True:
+        result["skip_reason"] = "execution_preflight_not_ready"
+        return result
+    preflight_store_ids = set(_normalize_formal_batch_store_ids(execution_preflight.get("store_ids")) or [])
+    preflight_sync_kinds = set(str(kind) for kind in (execution_preflight.get("sync_kinds") or []))
+    preflight_targets = set(str(target) for target in (execution_preflight.get("targets") or []))
+    if not preflight_store_ids or not preflight_sync_kinds:
+        result["skip_reason"] = "execution_preflight_scope_required"
+        return result
+    if execution_preflight.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_dry_run"
+        return result
+    if execution_preflight.get("real_api_called") is True or execution_preflight.get("real_database_written") is True:
+        result["skip_reason"] = "execution_preflight_side_effect_not_allowed"
+        return result
+    if execution_preflight.get("orders_written") is True or execution_preflight.get("products_written") is True:
+        result["skip_reason"] = "execution_preflight_business_write_not_allowed"
+        return result
+    if execution_preflight.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "execution_preflight_audit_write_not_allowed"
+        return result
+    if execution_preflight.get("formal_sync_open") is True or execution_preflight.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if execution_preflight.get("raw_response_saved") is not False or execution_preflight.get("privacy_fields_redacted") is not True:
+        result["skip_reason"] = "execution_preflight_privacy_boundary_invalid"
+        return result
+
+    missing_flags = [flag for flag in required_dry_run_flags if dry_run_context.get(flag) is not True]
+    result["missing_dry_run_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "dry_run_context_incomplete"
+        return result
+    if dry_run_context.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_dry_run"
+        return result
+    if dry_run_context.get("formal_sync_open") is True or dry_run_context.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if dry_run_context.get("real_api_called") is True or dry_run_context.get("real_database_written") is True:
+        result["skip_reason"] = "write_not_allowed_in_dry_run"
+        return result
+    if dry_run_context.get("orders_written") is True or dry_run_context.get("products_written") is True:
+        result["skip_reason"] = "write_not_allowed_in_dry_run"
+        return result
+    if dry_run_context.get("operation_audit_rows_written") is True:
+        result["skip_reason"] = "audit_write_not_allowed_in_dry_run"
+        return result
+
+    if execution_plan.get("mode") not in {"dry_run", "readonly_dry_run", None}:
+        result["skip_reason"] = "execution_plan_mode_not_allowed"
+        return result
+    if execution_plan.get("execution_approved") is True:
+        result["skip_reason"] = "execution_approval_not_allowed_in_dry_run"
+        return result
+    if execution_plan.get("formal_sync_open") is True or execution_plan.get("platform_writes_enabled") is True:
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+    if execution_plan.get("real_api_called") is True or execution_plan.get("real_database_written") is True:
+        result["skip_reason"] = "write_not_allowed_in_dry_run"
+        return result
+
+    normalized_summaries: list[dict] = []
+    summary_store_ids: set[int] = set()
+    summary_sync_kinds: set[str] = set()
+    summary_targets: set[str] = set()
+    changed_fields: set[str] = set()
+    totals = {
+        "candidate_count": 0,
+        "would_create": 0,
+        "would_update": 0,
+        "would_refresh_only": 0,
+        "would_skip": 0,
+    }
+    for index, summary in enumerate(candidate_summaries):
+        if not isinstance(summary, dict):
+            result["skip_reason"] = "candidate_summary_shape_invalid"
+            result["blocked_index"] = index
+            return result
+        sync_kind = str(summary.get("sync_kind") or summary.get("syncKind") or "").strip()
+        config = FORMAL_BATCH_SYNC_GATE_KINDS.get(sync_kind)
+        if not config:
+            result["skip_reason"] = "candidate_summary_sync_kind_invalid"
+            result["blocked_index"] = index
+            return result
+        if sync_kind not in preflight_sync_kinds:
+            result["skip_reason"] = "candidate_summary_not_in_preflight_scope"
+            result["blocked_index"] = index
+            return result
+        target = str(summary.get("target") or config["target"])
+        if target != config["target"] or target not in preflight_targets:
+            result["skip_reason"] = "candidate_summary_target_mismatch"
+            result["blocked_index"] = index
+            return result
+        summary_store_scope = set(_normalize_formal_batch_store_ids(summary.get("store_ids") or summary.get("storeIds")) or [])
+        if not summary_store_scope:
+            result["skip_reason"] = "candidate_summary_store_scope_required"
+            result["blocked_index"] = index
+            return result
+        if not summary_store_scope.issubset(preflight_store_ids):
+            result["skip_reason"] = "candidate_summary_store_scope_mismatch"
+            result["blocked_index"] = index
+            return result
+        try:
+            candidate_count = int(summary.get("candidate_count", summary.get("candidateCount", 0)) or 0)
+            would_create = int(summary.get("would_create", summary.get("wouldCreate", 0)) or 0)
+            would_update = int(summary.get("would_update", summary.get("wouldUpdate", 0)) or 0)
+            would_refresh_only = int(summary.get("would_refresh_only", summary.get("wouldRefreshOnly", 0)) or 0)
+            would_skip = int(summary.get("would_skip", summary.get("wouldSkip", 0)) or 0)
+        except (TypeError, ValueError):
+            result["skip_reason"] = "candidate_summary_counts_invalid"
+            result["blocked_index"] = index
+            return result
+        if min(candidate_count, would_create, would_update, would_refresh_only, would_skip) < 0:
+            result["skip_reason"] = "candidate_summary_counts_invalid"
+            result["blocked_index"] = index
+            return result
+        if candidate_count > int(config["max_batch_size"]):
+            result["skip_reason"] = "dry_run_candidate_count_exceeds_limit"
+            result["blocked_index"] = index
+            result["max_batch_size"] = int(config["max_batch_size"])
+            return result
+        if would_create + would_update + would_refresh_only + would_skip > candidate_count:
+            result["skip_reason"] = "candidate_summary_counts_exceed_candidates"
+            result["blocked_index"] = index
+            return result
+        safe_changed_fields = _normalize_safe_changed_fields(
+            summary.get("changed_fields", summary.get("changedFields", []))
+        )
+        if safe_changed_fields is None:
+            result["skip_reason"] = "candidate_summary_changed_fields_invalid"
+            result["blocked_index"] = index
+            return result
+        if summary.get("execution_approved") is True:
+            result["skip_reason"] = "execution_approval_not_allowed_in_dry_run"
+            result["blocked_index"] = index
+            return result
+        if summary.get("real_api_called") is True or summary.get("real_database_written") is True:
+            result["skip_reason"] = "candidate_summary_side_effect_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if summary.get("orders_written") is True or summary.get("products_written") is True:
+            result["skip_reason"] = "candidate_summary_write_not_allowed"
+            result["blocked_index"] = index
+            return result
+        if summary.get("raw_response_saved") is not False or summary.get("privacy_fields_redacted") is not True:
+            result["skip_reason"] = "candidate_summary_privacy_boundary_invalid"
+            result["blocked_index"] = index
+            return result
+        summary_store_ids.update(summary_store_scope)
+        summary_sync_kinds.add(sync_kind)
+        summary_targets.add(target)
+        changed_fields.update(safe_changed_fields)
+        totals["candidate_count"] += candidate_count
+        totals["would_create"] += would_create
+        totals["would_update"] += would_update
+        totals["would_refresh_only"] += would_refresh_only
+        totals["would_skip"] += would_skip
+        normalized_summaries.append({
+            "sync_kind": sync_kind,
+            "target": target,
+            "store_ids": sorted(summary_store_scope),
+            "candidate_count": candidate_count,
+            "would_create": would_create,
+            "would_update": would_update,
+            "would_refresh_only": would_refresh_only,
+            "would_skip": would_skip,
+            "changed_fields": safe_changed_fields,
+        })
+
+    if not preflight_sync_kinds.issubset(summary_sync_kinds):
+        result["skip_reason"] = "candidate_summaries_missing_preflight_sync_kind"
+        return result
+    if not summary_store_ids.issubset(preflight_store_ids):
+        result["skip_reason"] = "candidate_summary_store_scope_mismatch"
+        return result
+
+    result.update({
+        "status": "formal_batch_execution_dry_run_readonly_ready",
+        "dry_run_status": "ready_for_operator_review",
+        "dry_run_ready": True,
+        "store_ids": sorted(summary_store_ids),
+        "sync_kinds": sorted(summary_sync_kinds),
+        "targets": sorted(summary_targets),
+        "candidate_summary_count": len(normalized_summaries),
+        "total_candidate_count": totals["candidate_count"],
+        "total_would_create": totals["would_create"],
+        "total_would_update": totals["would_update"],
+        "total_would_refresh_only": totals["would_refresh_only"],
+        "total_would_skip": totals["would_skip"],
+        "changed_fields": sorted(changed_fields),
+        "candidate_summaries": normalized_summaries,
+        "business_message": (
+            "Formal batch execution dry-run evidence is ready for operator review only. "
+            "No products or orders are written, no audit rows are created, no platform APIs are called, and formal sync remains closed."
+        ),
+        "next_action": (
+            "Use this dry-run result before a separately approved execution phase. "
+            "Any real product or order batch write still requires explicit approval and fresh verification."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

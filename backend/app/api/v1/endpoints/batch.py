@@ -6,6 +6,7 @@ from app.schemas.batch import (
     BatchApprovalDecisionAuditLinkageReadonlyCheckRequest,
     BatchApprovalDecisionReadonlyCheckRequest,
     BatchReadonlyEvidenceRequest,
+    FormalBatchExecutionDryRunReadonlyCheckRequest,
     FormalBatchExecutionPreflightReadonlyCheckRequest,
     NaverOrderBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductBatchExecutionApprovalReadonlyCheckRequest,
@@ -84,6 +85,22 @@ def check_formal_batch_execution_preflight_readonly(
     return success_response(
         data=result,
         message="formal batch execution preflight readonly check completed",
+    )
+
+
+@router.post("/execution-dry-run/readonly-check")
+def check_formal_batch_execution_dry_run_readonly(
+    payload: FormalBatchExecutionDryRunReadonlyCheckRequest,
+) -> dict:
+    result = sync_service.evaluate_formal_batch_execution_dry_run_readonly_api_local(
+        execution_preflight=payload.execution_preflight,
+        dry_run_context=payload.dry_run_context,
+        execution_plan=payload.execution_plan,
+        candidate_summaries=payload.candidate_summaries,
+    )
+    return success_response(
+        data=result,
+        message="formal batch execution dry-run readonly check completed",
     )
 
 

@@ -2766,6 +2766,57 @@ The route is read-only evidence for operator review only. It must keep `executio
 
 It must reject sensitive payload markers such as token, Authorization, headers, signature, client secret, raw response, full channel number, full product order id, full buyer/receiver privacy, address, or zip code.
 
+### Formal Batch Execution Dry-Run Readonly Route
+
+Phase ERP-Batch-3D exposes a unified readonly dry-run route:
+
+```text
+POST /api/v1/batch/execution-dry-run/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "execution_preflight": {},
+  "dry_run_context": {
+    "preflight_referenced": true,
+    "readonly_candidates_referenced": true,
+    "backup_manifest_referenced": true,
+    "permission_evidence_referenced": true,
+    "audit_linkage_referenced": true,
+    "readback_plan_referenced": true,
+    "rollback_plan_referenced": true,
+    "sensitive_scan_passed": true,
+    "execution_window_limited": true,
+    "dry_run_only": true,
+    "formal_sync_remains_closed": true
+  },
+  "execution_plan": {
+    "mode": "dry_run"
+  },
+  "candidate_summaries": [
+    {
+      "sync_kind": "naver_product_batch",
+      "target": "products",
+      "store_ids": [8],
+      "candidate_count": 5,
+      "would_create": 0,
+      "would_update": 0,
+      "would_refresh_only": 5,
+      "would_skip": 0,
+      "changed_fields": [],
+      "raw_response_saved": false,
+      "privacy_fields_redacted": true
+    }
+  ]
+}
+```
+
+The response is dry-run evidence only. It may return aggregate candidate counts and safe changed-field names, but it must keep `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `real_api_called=false`, `real_database_written=false`, `orders_written=false`, `products_written=false`, `sync_log_written=false`, `capability_tested_success_written=false`, `timeline_events_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, `platform_writes_enabled=false`, and formal product/order batch sync closed.
+
+The route must block sensitive payload markers and candidate windows that exceed the configured small-batch limits (`naver_product_batch=10`, `naver_order_batch=20`). It does not approve formal batch execution.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

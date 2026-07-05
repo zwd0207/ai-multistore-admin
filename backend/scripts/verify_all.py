@@ -1566,6 +1566,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/approval-decision/readonly-check": {"post"},
         "/api/v1/batch/approval-decision/audit-linkage/readonly-check": {"post"},
         "/api/v1/batch/execution-preflight/readonly-check": {"post"},
+        "/api/v1/batch/execution-dry-run/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
@@ -13457,6 +13458,193 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert batch_execution_preflight["platform_writes_enabled"] is False, batch_execution_preflight
         assert batch_execution_preflight["raw_response_saved"] is False, batch_execution_preflight
         assert batch_execution_preflight["privacy_fields_redacted"] is True, batch_execution_preflight
+
+        batch_execution_dry_run_context = {
+            "preflight_referenced": True,
+            "readonly_candidates_referenced": True,
+            "backup_manifest_referenced": True,
+            "permission_evidence_referenced": True,
+            "audit_linkage_referenced": True,
+            "readback_plan_referenced": True,
+            "rollback_plan_referenced": True,
+            "sensitive_scan_passed": True,
+            "execution_window_limited": True,
+            "dry_run_only": True,
+            "formal_sync_remains_closed": True,
+            "execution_approved": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "real_api_called": False,
+            "real_database_written": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+        }
+        batch_execution_dry_run_plan = {
+            "mode": "dry_run",
+            "execution_approved": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "real_api_called": False,
+            "real_database_written": False,
+            "window_label": "verify_all formal batch dry-run window",
+        }
+        batch_execution_candidate_summaries = [
+            {
+                "sync_kind": "naver_product_batch",
+                "target": "products",
+                "store_ids": [8],
+                "candidate_count": 5,
+                "would_create": 0,
+                "would_update": 0,
+                "would_refresh_only": 5,
+                "would_skip": 0,
+                "changed_fields": [],
+                "execution_approved": False,
+                "real_api_called": False,
+                "real_database_written": False,
+                "products_written": False,
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+            },
+            {
+                "sync_kind": "naver_order_batch",
+                "target": "orders",
+                "store_ids": [8],
+                "candidate_count": 2,
+                "would_create": 0,
+                "would_update": 1,
+                "would_refresh_only": 1,
+                "would_skip": 0,
+                "changed_fields": ["order_status"],
+                "execution_approved": False,
+                "real_api_called": False,
+                "real_database_written": False,
+                "orders_written": False,
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+            },
+        ]
+        batch_execution_dry_run_response = client.post(
+            "/api/v1/batch/execution-dry-run/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "dry_run_context": batch_execution_dry_run_context,
+                "execution_plan": batch_execution_dry_run_plan,
+                "candidate_summaries": batch_execution_candidate_summaries,
+            },
+        )
+        assert batch_execution_dry_run_response.status_code == 200, batch_execution_dry_run_response.text
+        batch_execution_dry_run = batch_execution_dry_run_response.json()["data"]
+        assert batch_execution_dry_run["phase"] == "ERP-Batch-3D", batch_execution_dry_run
+        assert batch_execution_dry_run["status"] == "formal_batch_execution_dry_run_readonly_ready", (
+            batch_execution_dry_run
+        )
+        assert batch_execution_dry_run["dry_run_ready"] is True, batch_execution_dry_run
+        assert batch_execution_dry_run["sync_kinds"] == ["naver_order_batch", "naver_product_batch"], (
+            batch_execution_dry_run
+        )
+        assert batch_execution_dry_run["targets"] == ["orders", "products"], batch_execution_dry_run
+        assert batch_execution_dry_run["total_candidate_count"] == 7, batch_execution_dry_run
+        assert batch_execution_dry_run["total_would_update"] == 1, batch_execution_dry_run
+        assert batch_execution_dry_run["total_would_refresh_only"] == 6, batch_execution_dry_run
+        assert batch_execution_dry_run["changed_fields"] == ["order_status"], batch_execution_dry_run
+        assert batch_execution_dry_run["execution_approved"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["batch_execution_enabled"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["write_endpoint_enabled"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["real_api_called"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["real_database_written"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["orders_written"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["products_written"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["operation_audit_rows_written"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["formal_sync_open"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["formal_order_sync_open"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["formal_product_sync_open"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["platform_writes_enabled"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["raw_response_saved"] is False, batch_execution_dry_run
+        assert batch_execution_dry_run["privacy_fields_redacted"] is True, batch_execution_dry_run
+
+        batch_execution_dry_run_missing_response = client.post(
+            "/api/v1/batch/execution-dry-run/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "dry_run_context": {
+                    **batch_execution_dry_run_context,
+                    "rollback_plan_referenced": False,
+                },
+                "execution_plan": batch_execution_dry_run_plan,
+                "candidate_summaries": batch_execution_candidate_summaries,
+            },
+        )
+        assert batch_execution_dry_run_missing_response.status_code == 200, (
+            batch_execution_dry_run_missing_response.text
+        )
+        batch_execution_dry_run_missing = batch_execution_dry_run_missing_response.json()["data"]
+        assert batch_execution_dry_run_missing["phase"] == "ERP-Batch-3D", batch_execution_dry_run_missing
+        assert batch_execution_dry_run_missing["skip_reason"] == "dry_run_context_incomplete", (
+            batch_execution_dry_run_missing
+        )
+        assert "rollback_plan_referenced" in batch_execution_dry_run_missing["missing_dry_run_flags"], (
+            batch_execution_dry_run_missing
+        )
+        assert batch_execution_dry_run_missing["real_database_written"] is False, batch_execution_dry_run_missing
+
+        batch_execution_dry_run_sensitive_response = client.post(
+            "/api/v1/batch/execution-dry-run/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "dry_run_context": batch_execution_dry_run_context,
+                "execution_plan": batch_execution_dry_run_plan,
+                "candidate_summaries": [
+                    {
+                        **batch_execution_candidate_summaries[1],
+                        "productOrderId": "must-not-leak-dry-run",
+                    }
+                ],
+            },
+        )
+        assert batch_execution_dry_run_sensitive_response.status_code == 200, (
+            batch_execution_dry_run_sensitive_response.text
+        )
+        batch_execution_dry_run_sensitive = batch_execution_dry_run_sensitive_response.json()["data"]
+        assert batch_execution_dry_run_sensitive["phase"] == "ERP-Batch-3D", (
+            batch_execution_dry_run_sensitive
+        )
+        assert batch_execution_dry_run_sensitive["skip_reason"] == (
+            "formal_batch_execution_dry_run_sensitive_field_blocked"
+        ), batch_execution_dry_run_sensitive
+        assert batch_execution_dry_run_sensitive["real_database_written"] is False, (
+            batch_execution_dry_run_sensitive
+        )
+
+        batch_execution_dry_run_oversized_response = client.post(
+            "/api/v1/batch/execution-dry-run/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "dry_run_context": batch_execution_dry_run_context,
+                "execution_plan": batch_execution_dry_run_plan,
+                "candidate_summaries": [
+                    {
+                        **batch_execution_candidate_summaries[0],
+                        "candidate_count": 11,
+                        "would_refresh_only": 11,
+                    },
+                    batch_execution_candidate_summaries[1],
+                ],
+            },
+        )
+        assert batch_execution_dry_run_oversized_response.status_code == 200, (
+            batch_execution_dry_run_oversized_response.text
+        )
+        batch_execution_dry_run_oversized = batch_execution_dry_run_oversized_response.json()["data"]
+        assert batch_execution_dry_run_oversized["phase"] == "ERP-Batch-3D", (
+            batch_execution_dry_run_oversized
+        )
+        assert batch_execution_dry_run_oversized["skip_reason"] == "dry_run_candidate_count_exceeds_limit", (
+            batch_execution_dry_run_oversized
+        )
+        assert batch_execution_dry_run_oversized["max_batch_size"] == 10, batch_execution_dry_run_oversized
+        assert batch_execution_dry_run_oversized["products_written"] is False, batch_execution_dry_run_oversized
 
         batch_execution_preflight_missing_response = client.post(
             "/api/v1/batch/execution-preflight/readonly-check",

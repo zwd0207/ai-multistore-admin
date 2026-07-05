@@ -1461,6 +1461,16 @@ The route combines formal approval decision evidence, approval audit-linkage evi
 
 This preflight does not replace a later explicit execution approval. It only verifies that the operator checklist, approval decision, audit linkage, readonly evidence, backup manifest, permission evidence, rollback report, readback plan, sensitive scan, and limited execution window have been referenced without exposing sensitive identifiers or enabling writes.
 
+ERP-Batch-3D exposes a unified local readonly dry-run route:
+
+```text
+POST /api/v1/batch/execution-dry-run/readonly-check
+```
+
+The route reviews the formal execution preflight result plus safe product/order candidate summaries before any later execution phase. It is still dry-run only: it keeps `dry_run_ready=true` only when all dry-run flags are present, candidate counts stay within the configured small-window limits, and all write/platform switches remain closed. It returns aggregate `total_would_create`, `total_would_update`, `total_would_refresh_only`, `total_would_skip`, changed-field names, and per-target summaries for operator review.
+
+The route must keep `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order batch sync closed. It blocks token/header/signature/raw-response markers, full platform order ids, buyer/receiver privacy, addresses, and oversized candidate windows.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text
