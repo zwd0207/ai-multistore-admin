@@ -46,5 +46,17 @@ class NaverProductBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     readonly_api_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class NaverOrderBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+    store_ids: list[int] = Field(default_factory=list, max_length=10)
+    candidate_count: int = Field(default=0, ge=0, le=1000)
+    batch_size: int = Field(default=0, ge=0, le=1000)
+    readonly_evidence: dict[str, Any] = Field(default_factory=dict)
+    backup_evidence: dict[str, Any] = Field(default_factory=dict)
+    manual_approval: bool = False
+    execution_context: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class NaverProductRollbackReadonlyReportRequest(BaseModel):
     rollback_drill_gate: dict[str, Any] = Field(default_factory=dict)

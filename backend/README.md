@@ -1443,6 +1443,14 @@ POST /api/v1/batch/naver/products/execution-approval/readonly-check
 
 The route reviews product batch execution approval evidence only. It keeps `execution_approved=false`, `products_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `platform_product_writes_enabled=false`, and formal product batch sync closed.
 
+Naver-Order-Batch-3A to 3C expose the matching local readonly route for future Naver order batch execution approval:
+
+```text
+POST /api/v1/batch/naver/orders/execution-approval/readonly-check
+```
+
+The route reviews order batch execution approval evidence only. It requires fresh order candidates, privacy gate, field whitelist, delivery/claim mapping review, duplicate protection, audit chain, readback, rollback, sensitive scan, backup evidence, permission evidence, and manual approval. It keeps `execution_approved=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `platform_order_writes_enabled=false`, `shipment_write_enabled=false`, `cancel_write_enabled=false`, `return_write_enabled=false`, `exchange_write_enabled=false`, and formal order batch sync closed.
+
 ERP-Batch-3A exposes a unified local readonly preflight route:
 
 ```text

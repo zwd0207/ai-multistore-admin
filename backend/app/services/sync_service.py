@@ -7203,6 +7203,265 @@ def evaluate_naver_order_batch_execution_approval_mock_gate(
     return result
 
 
+def evaluate_naver_order_batch_execution_approval_readonly_api_mock_gate(
+    *,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    execution_context: dict | None,
+    readonly_api_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for a future readonly API around order batch execution approval."""
+
+    result = evaluate_naver_order_batch_execution_approval_mock_gate(
+        actor_context=actor_context,
+        store_ids=store_ids,
+        candidate_count=candidate_count,
+        batch_size=batch_size,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=manual_approval,
+        execution_context=execution_context,
+        verification_scope=verification_scope,
+    )
+    required_api_flags = [
+        "readonly_api_contract_planned",
+        "business_wording_required",
+        "technical_details_folded",
+        "execution_button_excluded",
+        "write_endpoint_excluded",
+        "order_write_endpoint_excluded",
+        "sensitive_fields_hidden_from_main_page",
+        "buyer_privacy_hidden_from_main_page",
+        "audit_row_write_excluded",
+        "route_requires_separate_implementation",
+        "formal_sync_remains_closed",
+    ]
+    result.update({
+        "phase": "Naver-Order-Batch-3A",
+        "naver_order_batch_execution_approval_readonly_api_mock_gate": True,
+        "readonly_api_mock_gate": True,
+        "required_api_flags": required_api_flags,
+        "missing_api_flags": [],
+        "route_path_planned": "/api/v1/batch/naver/orders/execution-approval/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    })
+    if result.get("status") != "naver_order_batch_execution_approval_mock_ready":
+        return result
+    if verification_scope != "verify_all_temp_db":
+        result["status"] = "blocked"
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(readonly_api_context, dict):
+        result["status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(readonly_api_context):
+        result["status"] = "blocked"
+        result["skip_reason"] = "naver_order_batch_execution_readonly_api_sensitive_field_blocked"
+        return result
+
+    missing_api_flags = [
+        flag for flag in required_api_flags
+        if readonly_api_context.get(flag) is not True
+    ]
+    result["missing_api_flags"] = missing_api_flags
+    if missing_api_flags:
+        result["status"] = "blocked"
+        result["skip_reason"] = "readonly_api_context_incomplete"
+        return result
+    if readonly_api_context.get("public_endpoint_enabled") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "public_endpoint_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("backend_route_implemented") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "backend_route_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("execution_approved") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("orders_written") is True or readonly_api_context.get("operation_audit_rows_written") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "write_not_allowed_in_readonly_api_mock_gate"
+        return result
+    if readonly_api_context.get("formal_sync_open") is True or readonly_api_context.get("platform_writes_enabled") is True:
+        result["status"] = "blocked"
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    result.update({
+        "status": "naver_order_batch_execution_approval_readonly_api_mock_ready",
+        "order_batch_execution_approval_ready": True,
+        "business_message": (
+            "Naver order batch execution approval readonly API mock gate passed. "
+            "It plans review-only display; no order write, audit row, or platform write is performed."
+        ),
+        "next_action": (
+            "Plan a local readonly route separately. Order batch execution still requires a later explicit approval phase."
+        ),
+    })
+    return result
+
+
+def evaluate_naver_order_batch_execution_approval_readonly_api_local_route_mock_gate(
+    *,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    execution_context: dict | None,
+    readonly_api_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for exposing order batch execution approval as a local readonly route."""
+
+    result = evaluate_naver_order_batch_execution_approval_readonly_api_mock_gate(
+        actor_context=actor_context,
+        store_ids=store_ids,
+        candidate_count=candidate_count,
+        batch_size=batch_size,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=manual_approval,
+        execution_context=execution_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "Naver-Order-Batch-3B",
+        "naver_order_batch_execution_approval_readonly_api_local_route_mock_gate": True,
+        "local_route_mock_gate": True,
+        "route_path_planned": "/api/v1/batch/naver/orders/execution-approval/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "naver_order_batch_execution_approval_readonly_api_mock_ready":
+        result["status"] = "naver_order_batch_execution_approval_readonly_api_local_route_mock_ready"
+        result["business_message"] = (
+            "Naver order batch execution approval readonly route mock gate passed. "
+            "It is review-only and does not approve execution, write orders, or call platform write APIs."
+        )
+        result["next_action"] = (
+            "Implement the local readonly route separately. Order batch execution still needs a later approved phase."
+        )
+    return result
+
+
+def evaluate_naver_order_batch_execution_approval_readonly_api_local(
+    *,
+    actor_context: dict | None,
+    store_ids: list[int] | tuple[int, ...] | set[int] | None,
+    candidate_count: int,
+    batch_size: int,
+    readonly_evidence: dict | None,
+    backup_evidence: dict | None,
+    manual_approval: bool,
+    execution_context: dict | None,
+    readonly_api_context: dict | None,
+) -> dict:
+    """Public local readonly helper for order batch execution approval; never writes rows."""
+
+    result = evaluate_naver_order_batch_execution_approval_readonly_api_local_route_mock_gate(
+        actor_context=actor_context,
+        store_ids=store_ids,
+        candidate_count=candidate_count,
+        batch_size=batch_size,
+        readonly_evidence=readonly_evidence,
+        backup_evidence=backup_evidence,
+        manual_approval=manual_approval,
+        execution_context=execution_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "Naver-Order-Batch-3C",
+        "naver_order_batch_execution_approval_readonly_api_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/naver/orders/execution-approval/readonly-check",
+        "http_method": "POST",
+        "execution_approved": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    })
+    if result.get("status") == "naver_order_batch_execution_approval_readonly_api_local_route_mock_ready":
+        result["status"] = "naver_order_batch_execution_approval_readonly_api_ready"
+        result["business_message"] = (
+            "Naver order batch execution approval is available for local readonly review. "
+            "This does not open formal order batch sync or approve any write."
+        )
+        result["next_action"] = (
+            "Use the route as operator evidence only. A separate approved execution phase is required for any order write."
+        )
+    return result
+
+
 def evaluate_naver_product_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

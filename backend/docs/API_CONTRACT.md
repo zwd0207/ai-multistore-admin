@@ -2705,6 +2705,30 @@ Request body:
 
 The response is review evidence only. It must keep `execution_approved=false`, `real_api_called=false`, `real_database_written=false`, `products_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and formal product batch sync closed.
 
+Phase Naver-Order-Batch-3A to 3C now exposes the order batch execution approval readonly route:
+
+```text
+POST /api/v1/batch/naver/orders/execution-approval/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "actor_context": {},
+  "store_ids": [8],
+  "candidate_count": 4,
+  "batch_size": 4,
+  "readonly_evidence": {},
+  "backup_evidence": {},
+  "manual_approval": true,
+  "execution_context": {},
+  "readonly_api_context": {}
+}
+```
+
+The response is review evidence only. It must keep `execution_approved=false`, `real_api_called=false`, `real_database_written=false`, `orders_written=false`, `products_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, `shipment_write_enabled=false`, `cancel_write_enabled=false`, `return_write_enabled=false`, `exchange_write_enabled=false`, and formal order batch sync closed.
+
 ### Formal Batch Execution Preflight Readonly Route
 
 Phase ERP-Batch-3A exposes a unified readonly preflight route:

@@ -1567,6 +1567,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/approval-decision/audit-linkage/readonly-check": {"post"},
         "/api/v1/batch/execution-preflight/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
+        "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
     }
     for batch_path, expected_methods in batch_methods.items():
@@ -11886,6 +11887,122 @@ def verify_formal_batch_sync_production_gate() -> None:
     assert order_execution_sensitive["skip_reason"] == "naver_order_batch_execution_sensitive_field_blocked", order_execution_sensitive
     assert order_execution_sensitive["orders_written"] is False, order_execution_sensitive
 
+    order_execution_readonly_api_context = {
+        "readonly_api_contract_planned": True,
+        "business_wording_required": True,
+        "technical_details_folded": True,
+        "execution_button_excluded": True,
+        "write_endpoint_excluded": True,
+        "order_write_endpoint_excluded": True,
+        "sensitive_fields_hidden_from_main_page": True,
+        "buyer_privacy_hidden_from_main_page": True,
+        "audit_row_write_excluded": True,
+        "route_requires_separate_implementation": True,
+        "formal_sync_remains_closed": True,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "orders_written": False,
+        "operation_audit_rows_written": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    order_execution_readonly_api_ready = (
+        sync_service.evaluate_naver_order_batch_execution_approval_readonly_api_mock_gate(
+            actor_context=admin_multi_store,
+            store_ids=[8],
+            candidate_count=4,
+            batch_size=4,
+            readonly_evidence=readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=order_execution_context,
+            readonly_api_context=order_execution_readonly_api_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert order_execution_readonly_api_ready["phase"] == "Naver-Order-Batch-3A", order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["status"] == (
+        "naver_order_batch_execution_approval_readonly_api_mock_ready"
+    ), order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["readonly_api_mock_gate"] is True, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["backend_route_implemented"] is False, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["public_endpoint_enabled"] is False, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["execution_approved"] is False, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["orders_written"] is False, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["operation_audit_rows_written"] is False, order_execution_readonly_api_ready
+    assert order_execution_readonly_api_ready["formal_order_sync_open"] is False, order_execution_readonly_api_ready
+
+    order_execution_readonly_api_missing_privacy = (
+        sync_service.evaluate_naver_order_batch_execution_approval_readonly_api_mock_gate(
+            actor_context=admin_multi_store,
+            store_ids=[8],
+            candidate_count=4,
+            batch_size=4,
+            readonly_evidence=readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=order_execution_context,
+            readonly_api_context={**order_execution_readonly_api_context, "buyer_privacy_hidden_from_main_page": False},
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert order_execution_readonly_api_missing_privacy["skip_reason"] == "readonly_api_context_incomplete", (
+        order_execution_readonly_api_missing_privacy
+    )
+    assert "buyer_privacy_hidden_from_main_page" in order_execution_readonly_api_missing_privacy["missing_api_flags"], (
+        order_execution_readonly_api_missing_privacy
+    )
+    assert order_execution_readonly_api_missing_privacy["orders_written"] is False, order_execution_readonly_api_missing_privacy
+
+    order_execution_readonly_api_sensitive = (
+        sync_service.evaluate_naver_order_batch_execution_approval_readonly_api_mock_gate(
+            actor_context=admin_multi_store,
+            store_ids=[8],
+            candidate_count=4,
+            batch_size=4,
+            readonly_evidence=readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=order_execution_context,
+            readonly_api_context={
+                **order_execution_readonly_api_context,
+                "productOrderId": "must-not-leak-order-execution-api",
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert order_execution_readonly_api_sensitive["skip_reason"] == (
+        "naver_order_batch_execution_readonly_api_sensitive_field_blocked"
+    ), order_execution_readonly_api_sensitive
+    assert order_execution_readonly_api_sensitive["orders_written"] is False, order_execution_readonly_api_sensitive
+
+    order_execution_route_mock_ready = (
+        sync_service.evaluate_naver_order_batch_execution_approval_readonly_api_local_route_mock_gate(
+            actor_context=admin_multi_store,
+            store_ids=[8],
+            candidate_count=4,
+            batch_size=4,
+            readonly_evidence=readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=order_execution_context,
+            readonly_api_context=order_execution_readonly_api_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert order_execution_route_mock_ready["phase"] == "Naver-Order-Batch-3B", order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["status"] == (
+        "naver_order_batch_execution_approval_readonly_api_local_route_mock_ready"
+    ), order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["local_route_mock_gate"] is True, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["backend_route_implemented"] is False, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["public_endpoint_enabled"] is False, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["execution_approved"] is False, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["orders_written"] is False, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["operation_audit_rows_written"] is False, order_execution_route_mock_ready
+    assert order_execution_route_mock_ready["formal_order_sync_open"] is False, order_execution_route_mock_ready
+
     product_execution_context = {
         "product_batch_candidates_fresh": True,
         "product_field_whitelist_verified": True,
@@ -12130,6 +12247,74 @@ def verify_formal_batch_sync_production_gate() -> None:
         )
         assert product_execution_route_sensitive["products_written"] is False, product_execution_route_sensitive
         assert product_execution_route_sensitive["real_database_written"] is False, product_execution_route_sensitive
+
+        order_execution_route_response = client.post(
+            "/api/v1/batch/naver/orders/execution-approval/readonly-check",
+            json={
+                "actor_context": admin_multi_store,
+                "store_ids": [8],
+                "candidate_count": 4,
+                "batch_size": 4,
+                "readonly_evidence": readonly_evidence,
+                "backup_evidence": backup_evidence,
+                "manual_approval": True,
+                "execution_context": order_execution_context,
+                "readonly_api_context": order_execution_readonly_api_context,
+            },
+        )
+        assert order_execution_route_response.status_code == 200, order_execution_route_response.text
+        order_execution_route = order_execution_route_response.json()["data"]
+        assert order_execution_route["phase"] == "Naver-Order-Batch-3C", order_execution_route
+        assert order_execution_route["status"] == "naver_order_batch_execution_approval_readonly_api_ready", (
+            order_execution_route
+        )
+        assert order_execution_route["naver_order_batch_execution_approval_readonly_api_local"] is True, (
+            order_execution_route
+        )
+        assert order_execution_route["backend_route_implemented"] is True, order_execution_route
+        assert order_execution_route["public_endpoint_enabled"] is True, order_execution_route
+        assert order_execution_route["execution_approved"] is False, order_execution_route
+        assert order_execution_route["orders_written"] is False, order_execution_route
+        assert order_execution_route["products_written"] is False, order_execution_route
+        assert order_execution_route["operation_audit_rows_written"] is False, order_execution_route
+        assert order_execution_route["formal_order_sync_open"] is False, order_execution_route
+        assert order_execution_route["platform_order_writes_enabled"] is False, order_execution_route
+        assert order_execution_route["shipment_write_enabled"] is False, order_execution_route
+        assert order_execution_route["cancel_write_enabled"] is False, order_execution_route
+        assert order_execution_route["return_write_enabled"] is False, order_execution_route
+        assert order_execution_route["exchange_write_enabled"] is False, order_execution_route
+        assert order_execution_route["raw_response_saved"] is False, order_execution_route
+        assert order_execution_route["privacy_fields_redacted"] is True, order_execution_route
+
+        order_execution_route_sensitive_response = client.post(
+            "/api/v1/batch/naver/orders/execution-approval/readonly-check",
+            json={
+                "actor_context": admin_multi_store,
+                "store_ids": [8],
+                "candidate_count": 4,
+                "batch_size": 4,
+                "readonly_evidence": {
+                    **readonly_evidence,
+                    "productOrderId": "must-not-leak-order-execution-route",
+                },
+                "backup_evidence": backup_evidence,
+                "manual_approval": True,
+                "execution_context": order_execution_context,
+                "readonly_api_context": order_execution_readonly_api_context,
+            },
+        )
+        assert order_execution_route_sensitive_response.status_code == 200, (
+            order_execution_route_sensitive_response.text
+        )
+        order_execution_route_sensitive = order_execution_route_sensitive_response.json()["data"]
+        assert order_execution_route_sensitive["phase"] == "Naver-Order-Batch-3C", (
+            order_execution_route_sensitive
+        )
+        assert order_execution_route_sensitive["skip_reason"] == "naver_order_batch_execution_sensitive_field_blocked", (
+            order_execution_route_sensitive
+        )
+        assert order_execution_route_sensitive["orders_written"] is False, order_execution_route_sensitive
+        assert order_execution_route_sensitive["real_database_written"] is False, order_execution_route_sensitive
 
     oversized = sync_service._evaluate_formal_batch_sync_production_gate(
         sync_kind="naver_product_batch",
@@ -13176,7 +13361,27 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "formal_sync_open": False,
             "platform_writes_enabled": False,
         }
-        order_execution_preflight = sync_service.evaluate_naver_order_batch_execution_approval_mock_gate(
+        order_execution_api_context = {
+            "readonly_api_contract_planned": True,
+            "business_wording_required": True,
+            "technical_details_folded": True,
+            "execution_button_excluded": True,
+            "write_endpoint_excluded": True,
+            "order_write_endpoint_excluded": True,
+            "sensitive_fields_hidden_from_main_page": True,
+            "buyer_privacy_hidden_from_main_page": True,
+            "audit_row_write_excluded": True,
+            "route_requires_separate_implementation": True,
+            "formal_sync_remains_closed": True,
+            "public_endpoint_enabled": False,
+            "backend_route_implemented": False,
+            "execution_approved": False,
+            "orders_written": False,
+            "operation_audit_rows_written": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        order_execution_preflight = sync_service.evaluate_naver_order_batch_execution_approval_readonly_api_local(
             actor_context=admin_store8,
             store_ids=[8],
             candidate_count=2,
@@ -13185,9 +13390,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             backup_evidence=backup_evidence,
             manual_approval=True,
             execution_context=order_execution_context,
-            verification_scope=VERIFICATION_SCOPE,
+            readonly_api_context=order_execution_api_context,
         )
-        assert order_execution_preflight["status"] == "naver_order_batch_execution_approval_mock_ready", (
+        assert order_execution_preflight["status"] == "naver_order_batch_execution_approval_readonly_api_ready", (
             order_execution_preflight
         )
         batch_execution_preflight_context = {
