@@ -1850,3 +1850,35 @@ Next 5 recommended stages:
 3. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
 4. `Phase Shipping-10A: Shipment writeback real execution approval plan`
 5. `Phase ERP-Batch-5A: Formal product/order batch write execution approval plan`
+
+### Latest update after `Phase Naver-Product-Batch-3A`, `Phase Naver-Order-Batch-4A`, and `Phase ERP-Batch-4I`
+
+Progress snapshot:
+
+- Project overall planning progress: about `96% - 98%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `94% - 96%`
+- Production version for long-term non-technical use: about `89% - 92%`
+- First landing Shipping Assistant feature progress: about `99%`
+
+Implemented in this update:
+
+- Added the formal Naver product batch execution gate plan.
+- Added the formal Naver order batch execution gate plan.
+- Added the formal batch pre-execution refresh runtime walkthrough record.
+- Consolidated the rule that readonly gates prove evidence can be reviewed, not that execution is approved.
+- Documented the remaining execution boundary: fresh candidates, verified backup, permission evidence, audit correlation, dry-run, readback, rollback, and sensitive scan.
+- Kept Naver API calls, `real_sync=true`, product writes, order writes, SyncLog writes, tested-success writes, audit-row writes, platform writes, and formal product/order batch sync closed.
+
+Current positioning:
+
+- Suitable now: single Naver store local Shipping Assistant trial, local order status update evidence, shipment writeback dry-run/execution mock-gate evidence, and formal product/order batch execution evidence review.
+- Not suitable now: actual Naver shipment writeback execution, automatic unattended status automation, logistics-provider API integration, formal product/order batch writes, or large-scale multi-store unattended production.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-3B: Product batch execution dry-run evidence runtime repeat`
+2. `Phase Naver-Order-Batch-4B: Order batch execution dry-run evidence runtime repeat`
+3. `Phase ERP-Batch-5A: Formal product/order batch write execution approval plan`
+4. `Phase ERP-Batch-5B: Formal batch write execution mock gate`
+5. `Phase Shipping-10A: Shipment writeback real execution approval plan`

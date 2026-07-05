@@ -2107,3 +2107,17 @@ Shipping-9C to 9D connect the existing execution mock gate to the Shipping Assis
 Codex2 now calls `POST /api/v1/shipping/shipment-writeback/execution-mock-gate` through `dataProvider` in backend mode, with a mock fallback in mock mode. The `/shipping` page shows a business-facing `Naver 发货回填执行门禁` panel after the dry-run evidence panel. It displays execution candidate count, Naver call state, platform write state, and local write state while keeping route flags and safety fields folded in `TechnicalDetails`.
 
 This stage is still readonly evidence only. It does not call Naver, call a logistics-provider API, write orders/products/SyncLog/tested-success rows, write audit rows, persist platform payloads, or open formal product/order batch sync.
+
+## Phase Naver-Product-Batch-3A, Naver-Order-Batch-4A, and ERP-Batch-4I - Formal Batch Execution Gate Consolidation
+
+The gate plans and runtime walkthrough are documented in:
+
+- `PHASE_NAVER_PRODUCT_BATCH_3A_FORMAL_PRODUCT_BATCH_EXECUTION_GATE_PLAN.md`
+- `PHASE_NAVER_ORDER_BATCH_4A_FORMAL_ORDER_BATCH_EXECUTION_GATE_PLAN.md`
+- `PHASE_ERP_BATCH_4I_PRE_EXECUTION_REFRESH_RUNTIME_WALKTHROUGH.md`
+
+These phases consolidate the final review boundary before any future formal product or order batch write. Codex1 already exposes readonly review routes for product execution approval, order execution approval, formal batch preflight, dry-run, final approval, write-boundary, and pre-execution backup/audit refresh. Codex2 Orders already shows the combined runtime review panel.
+
+The consolidated rule is unchanged: readonly gates prove evidence can be reviewed; they do not approve execution. Formal product/order batch writes still require a separate explicit execution phase with fresh candidates, backup, permission evidence, audit correlation, dry-run, readback, rollback, and sensitive-field scans.
+
+Closed in these phases: Naver API calls, `real_sync=true`, product writes, order writes, `SyncLog` writes, tested-success writes, audit-row writes, backup/restore execution from the UI, platform product writes, platform order writes, and formal product/order batch sync opening.
