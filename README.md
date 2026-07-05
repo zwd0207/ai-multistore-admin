@@ -1943,3 +1943,19 @@ Codex1 now exposes `POST /api/v1/permissions/user-invitation/approval-audit-link
 ## Phase ERP-Multistore-2U - Invitation Approval Audit Linkage Readonly UI Integration
 
 Codex2 Accounts now shows invitation approval audit-linkage readiness through `UserInvitationReadonlyPanel`. Main-page wording stays business-focused, while route path, phase, missing flags, and write flags remain inside `TechnicalDetails`.
+
+## Phase Shipping-1A to Shipping-1E - Naver Shipping Assistant First Workflow
+
+The first real local landing feature is now scoped as Naver unshipped order download plus logistics inventory-code matching and logistics-provider export. The phase documents are:
+
+- `PHASE_SHIPPING_1A_NAVER_UNSHIPPED_ORDER_WORKFLOW_PLAN.md`
+- `PHASE_SHIPPING_1B_SHIPPING_ASSISTANT_UI_SIMPLIFICATION_PLAN.md`
+- `PHASE_SHIPPING_1C_LOGISTICS_INVENTORY_MAPPING_SCHEMA_PROPOSAL.md`
+- `PHASE_SHIPPING_1D_NAVER_UNSHIPPED_ORDER_READONLY_CANDIDATE_CHECK.md`
+- `PHASE_SHIPPING_1E_LOGISTICS_EXPORT_EXCEL_CONTRACT_PLAN.md`
+
+This shipping-assistant workflow is only the first practical production feature. The long-term direction remains a Korean multi-store operations automation system with Naver, Coupang, product management, inventory, customer service, AI assistance, audit, backup, permissions, and recovery.
+
+Shipping-1A defines the operator flow: select store, read Naver unshipped candidates, match by product name plus option name, maintain logistics inventory code and current stock, export a logistics-provider file, and keep download/export/audit records. Shipping-1B moves ordinary operator UI toward a simple Shipping Assistant workspace and folds technical gates into admin pages. Shipping-1C proposes future mapping, logistics-stock, download-batch, and export-batch tables without migrating schema. Shipping-1D performs a local readonly check only: store 8 currently has one real Naver `PAYED` row that can be treated as an unshipped candidate, while `DELIVERED` rows are excluded. Shipping-1E defines the first `.xlsx` shipping request contract while keeping the file model extensible for tracking uploads, inventory files, and product files.
+
+No Codex2 runtime UI code was changed in these phases. No real Naver API was called, no database schema was changed, no local database write was performed, no Excel file was generated, and formal product/order batch sync remains closed.

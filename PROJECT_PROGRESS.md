@@ -1402,3 +1402,34 @@ Next 5 recommended stages:
 3. `Phase ERP-Batch-3A: Formal batch execution final preflight plan`
 4. `Phase Naver-Product-Batch-3A: Product batch execution dry-run evidence repeat`
 5. `Phase Naver-Order-Batch-3A: Order batch execution dry-run evidence repeat`
+
+### Latest update after `Phase Shipping-1A` to `Phase Shipping-1E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `45% - 55%`
+- ERP real-user landing progress: about `72% - 80%`
+- Production version for long-term non-technical use: about `62% - 70%`
+
+Implemented in this update:
+
+- Documented the Naver unshipped-order shipping workflow as the first real local landing feature.
+- Planned a simplified operator UI direction for Shipping Assistant while keeping admin technical areas available.
+- Proposed logistics inventory-code mapping, manual logistics stock, download-batch, and export-batch schemas without migrating the database.
+- Performed a local readonly candidate check: store 8 has one real Naver `PAYED` row suitable for an unshipped candidate trial; delivered rows are excluded.
+- Defined the first logistics-provider `.xlsx` export contract while keeping file import/export extensible for future tracking uploads, inventory tables, and product tables.
+
+Current positioning:
+
+- Suitable now: local planning and first implementation foundation for Naver Shipping Assistant, local unshipped candidate filtering design, product/option based logistics-code matching design, manual logistics stock design, export contract design, and audit/record boundaries.
+- Not suitable now: one-click formal order batch sync, platform shipment writeback, tracking-number writeback, real logistics-provider integration, Coupang shipping workflow, AI customer service automation, finance/settlement/profit use, or broad multi-store production operation.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-1F: Logistics inventory mapping mock gate`
+2. `Phase Shipping-1G: Shipping assistant local UI shell`
+3. `Phase Shipping-1H: Unshipped order local list view`
+4. `Phase Shipping-1I: Manual logistics stock maintenance mock gate`
+5. `Phase Shipping-1J: Shipping Excel export mock generation gate`
