@@ -4624,6 +4624,102 @@ Blocked examples:
 
 Safety boundary: the route must not call Naver, call a logistics-provider API, write orders, write products, write SyncLog, add capability test success rows, write audit rows, save platform payload previews, persist raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. Formal order sync and Naver shipment writeback remain closed.
 
+### Naver Product Batch Exec-1A to Exec-1C
+
+Purpose: connect controlled local Naver product sync to safe operation-audit evidence and expose a readonly product sync history in Codex2.
+
+#### `POST /api/v1/sync/products/naver/preview`
+
+Additional request fields for audit linkage:
+
+```json
+{
+  "store_id": 8,
+  "credential_id": 7,
+  "page": 1,
+  "size": 5,
+  "real_preview": true,
+  "real_sync": true,
+  "manual_approval": true,
+  "backup_path": "C:/safe-backups/codex1.db.backup-product-sync",
+  "backup_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "actor_context": {
+    "actor_id": "operator-product-sync-safe",
+    "actor_label": "Local operator",
+    "actor_role": "owner"
+  }
+}
+```
+
+When the local sync writes products and audit evidence is valid, `local_sync_result` may include:
+
+```json
+{
+  "status": "success",
+  "products_written": true,
+  "created_count": 0,
+  "updated_count": 5,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "operation_audit_rows_written": true,
+  "operation_audit_log_id": 1,
+  "audit_correlation_id": "naver-product-sync-safe",
+  "raw_response_saved": false
+}
+```
+
+If `manual_approval=false`, product local sync may still run under the existing small-batch gate, but `operation_audit_rows_written=false` and `operation_audit_skip_reason=manual_approval_required_for_audit_linkage`.
+
+Audit row requirements:
+
+- `action=product_batch_local_sync_succeeded`
+- `reason_code=product_batch_local_sync_audit_linked`
+- `target_type=product`
+- `platform=naver`
+- `raw_response_saved=false`
+- `secrets_saved=false`
+- `privacy_fields_redacted=true`
+- safe counts only; no raw response, token, Authorization, headers, signature, client secret, full `channel_no`, or raw platform payload
+
+Boundary:
+
+- still no Naver platform product write API;
+- still no `SyncLog` write;
+- still no `ApiCapabilityTestResult tested_success` write;
+- still no order writes;
+- still no schema change;
+- formal product batch sync is not automatically opened by one successful local sync;
+- `page=2,size<=5` is readonly expansion evidence only and must keep `real_sync=false`.
+
+Codex2 Products may read recent audit rows through `GET /api/v1/operation-audit-logs` and display a business-friendly product sync history. That UI route is readonly and must not call Naver or trigger writes.
+
+### Naver Order Batch Exec-1A
+
+Purpose: freeze the final scope for a later Naver order batch local refresh.
+
+Allowed future scope:
+
+- readonly feed/detail candidate refresh first;
+- local order business-field refresh only after separate approval;
+- backup, permission, dry-run, approval decision, audit linkage, sensitive scan, and readback evidence required;
+- no Naver shipment/cancel/return/exchange/customer-service write APIs;
+- no formal order batch sync open until a separate execution phase approves it.
+
+This contract section is a plan boundary only and does not add an execution endpoint.
+
+### ERP Production-1A
+
+Purpose: consolidate the operator release checklist for local production v1.0.
+
+Required release evidence:
+
+- Shipping Assistant first workflow is usable by non-technical operators;
+- local product/order refresh histories are visible with audit and backup evidence;
+- ordinary operator pages hide technical fields and sensitive data;
+- administrator pages retain logs, audit, backup, restore, permission, and technical diagnostics;
+- restore drill/runbook exists before broader rollout;
+- platform writebacks and formal batch sync remain separately approved.
+
 ### Shipping-9A to Shipping-9B
 
 Shipping-9A to 9B add a readonly execution mock gate for future Naver shipment writeback. It verifies final approval evidence and refuses real platform-call intent.

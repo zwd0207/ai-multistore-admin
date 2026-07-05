@@ -36,6 +36,10 @@ class NaverProductPreviewRequest(BaseModel):
     seller_product_id: str | None = Field(default=None, max_length=120)
     real_preview: bool = False
     real_sync: bool = False
+    manual_approval: bool = False
+    backup_path: str | None = Field(default=None, max_length=500)
+    backup_sha256: str | None = Field(default=None, max_length=64)
+    actor_context: dict = Field(default_factory=dict)
 
 
 class NaverOrderPreviewRequest(BaseModel):

@@ -1841,3 +1841,41 @@ The gate requires:
 If `real_api_call_requested=true`, the route blocks with `real_api_call_not_allowed_in_mock_gate`. When ready, it returns safe execution candidates copied from dry-run evidence, but keeps `execution_allowed=false`, `future_write_allowed=false`, `shipment_writeback_called=false`, `real_api_called=false`, `real_database_written=false`, and `platform_writes_enabled=false`.
 
 This route does not call Naver, does not call a logistics-provider API, does not write orders, does not write products, does not write SyncLog, does not add `ApiCapabilityTestResult tested_success`, does not write audit rows, and does not open formal product/order batch sync. A real Naver shipment writeback execution phase must still be separately approved.
+
+### Naver Product Batch Exec-1A to Exec-1C: Local Product Sync Audit Linkage
+
+Naver product local sync now supports optional operation-audit linkage for the controlled local product sync path. When `/api/v1/sync/products/naver/preview` is called with `real_preview=true`, `real_sync=true`, `manual_approval=true`, and safe backup evidence (`backup_path`, 64-character `backup_sha256`), the local product write can append one `operation_audit_logs` row with action `product_batch_local_sync_succeeded`.
+
+Safety boundary:
+
+- the route still reads Naver products only and does not call any Naver platform product write API;
+- the current local write scope remains `store_id=8`, `credential_id=7`, `page=1`, `size<=5`;
+- `page=2` remains readonly-only and is used only for expansion evidence;
+- full formal product batch sync remains controlled and is not automatically opened;
+- no `SyncLog` row or `ApiCapabilityTestResult tested_success` row is written by this product sync path;
+- token, Authorization, headers, signature, client secret, and raw response are not saved;
+- operation-audit linkage is skipped when manual approval is absent.
+
+Codex2 Products can show recent product local-sync audit history from `GET /api/v1/operation-audit-logs`. The panel is readonly: it does not call Naver, does not write products, and keeps technical audit details folded.
+
+### Naver Order Batch Exec-1A: Final Local Refresh Scope
+
+The next order-batch execution scope should remain local refresh only:
+
+- read Naver order candidates through the existing readonly preview path;
+- update only local order business fields already covered by the approved whitelist;
+- keep Naver shipment, cancel, return, exchange, and customer-service write APIs closed;
+- require fresh backup evidence, permission evidence, approval decision, audit linkage, dry-run evidence, readback, and sensitive scan before any small-batch order refresh write.
+
+This phase is a scope boundary, not an execution approval.
+
+### ERP Production-1A: Operator Release Checklist
+
+Before calling the local ERP v1.0 production-ready for operators, the release checklist must confirm:
+
+- Naver unshipped-order download and Shipping Assistant export are usable by non-technical operators;
+- local product/order refresh writes have visible audit and backup evidence;
+- ordinary pages hide tokens, headers, raw response, signatures, and internal ids;
+- administrator pages keep logs, audit, backup, restore, permissions, and technical details available;
+- rollback and restore instructions are written and tested against a temporary copy;
+- formal batch sync and Naver platform writes remain separated behind explicit approval.

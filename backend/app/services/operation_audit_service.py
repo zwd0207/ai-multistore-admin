@@ -129,6 +129,7 @@ ACTION_LABELS_ZH = {
     "local_write_failed": "\u672c\u5730\u5199\u5165\u5931\u8d25",
     "local_write_succeeded": "\u672c\u5730\u5199\u5165\u6210\u529f",
     "order_refresh_batch_write_succeeded": "\u8ba2\u5355\u5237\u65b0\u5199\u5165",
+    "product_batch_local_sync_succeeded": "\u5546\u54c1\u672c\u5730\u540c\u6b65",
     "post_write_verification_failed": "\u5199\u5165\u540e\u6821\u9a8c\u5931\u8d25",
     "post_write_verification_succeeded": "\u5199\u5165\u540e\u6821\u9a8c\u6210\u529f",
     "pre_write_backup_verified": "\u5199\u5165\u524d\u5907\u4efd\u5df2\u9a8c\u8bc1",
@@ -163,6 +164,7 @@ REASON_LABELS_ZH = {
     "sensitive_scan_failed": "\u654f\u611f\u5b57\u6bb5\u626b\u63cf\u672a\u901a\u8fc7",
     "local_writer_verified": "\u672c\u5730\u5199\u5165\u95e8\u7981\u5df2\u9a8c\u8bc1",
     "manual_operation_blocked": "\u4eba\u5de5\u64cd\u4f5c\u5df2\u963b\u65ad",
+    "product_batch_local_sync_audit_linked": "\u5546\u54c1\u540c\u6b65\u5ba1\u8ba1\u5df2\u5173\u8054",
     "selected_operation_local_mock_gate": "\u9009\u5b9a\u64cd\u4f5c\u5ba1\u8ba1\u9a8c\u8bc1",
 }
 
@@ -467,6 +469,7 @@ def _serialize_audit_log_item(row: OperationAuditLog, *, include_advanced: bool 
             "correlation_id_abbrev": _abbreviate(row.correlation_id),
             "request_id_abbrev": _abbreviate(row.request_id),
             "changed_field_names": changed_field_names if not changed_removed else None,
+            "counts_summary": counts_summary if not counts_removed else None,
             "safe_summary_fields": _safe_summary_field_names(counts_summary) if not counts_removed else [],
             "safety_summary_label_zh": _safety_label(row, sanitized_summary_removed=sanitized_summary_removed),
             "backup_path_label": row.backup_path,

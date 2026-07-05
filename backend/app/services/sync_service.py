@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -25,7 +26,14 @@ from app.models.sync_checkpoint import SyncCheckpoint
 from app.schemas.credential import DecryptedCredential
 from app.services import api_credential_readiness_service
 from app.services.encryption import decrypt_value
-from app.services import credential_service, customer_inquiry_service, order_service, product_service, sync_log_service
+from app.services import (
+    credential_service,
+    customer_inquiry_service,
+    operation_audit_service,
+    order_service,
+    product_service,
+    sync_log_service,
+)
 from app.services.store_service import ensure_store_exists, normalize_platform
 
 
@@ -318,6 +326,10 @@ def preview_naver_products(
     seller_product_id: str | None = None,
     real_preview: bool = False,
     real_sync: bool = False,
+    manual_approval: bool = False,
+    backup_path: str | None = None,
+    backup_sha256: str | None = None,
+    actor_context: dict | None = None,
 ) -> dict:
     normalized_status = _resolve_naver_product_preview_status(status)
     credential = _ensure_naver_product_preview_credential(
@@ -365,6 +377,10 @@ def preview_naver_products(
         seller_product_id=seller_product_id,
         field_observation=field_observation,
         real_sync=real_sync,
+        manual_approval=manual_approval,
+        backup_path=backup_path,
+        backup_sha256=backup_sha256,
+        actor_context=actor_context,
     )
     if not capability_meta.get("minimum_request_body_confirmed"):
         return _build_naver_product_guardrail_preview_result(
@@ -395,6 +411,10 @@ def preview_naver_products(
         status=normalized_status,
         field_observation=field_observation,
         real_sync=real_sync,
+        manual_approval=manual_approval,
+        backup_path=backup_path,
+        backup_sha256=backup_sha256,
+        actor_context=actor_context,
     )
 
 
@@ -1607,6 +1627,10 @@ def _ensure_naver_product_real_preview_allowed(
     seller_product_id: str | None,
     field_observation: dict,
     real_sync: bool = False,
+    manual_approval: bool = False,
+    backup_path: str | None = None,
+    backup_sha256: str | None = None,
+    actor_context: dict | None = None,
 ) -> None:
     settings = get_settings()
     if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
@@ -1640,6 +1664,25 @@ def _ensure_naver_product_real_preview_allowed(
             error_code="guardrail_blocked",
             status_code=400,
         )
+    if real_sync and manual_approval:
+        if not backup_path or not backup_sha256:
+            raise ApiError(
+                message="Naver product audit-linked local sync requires backup evidence",
+                error_code="backup_evidence_required",
+                status_code=400,
+            )
+        if not re.fullmatch(r"[0-9a-f]{64}", str(backup_sha256)):
+            raise ApiError(
+                message="Naver product audit-linked local sync requires a valid backup sha256",
+                error_code="invalid_backup_sha256",
+                status_code=400,
+            )
+        if actor_context is not None and not isinstance(actor_context, dict):
+            raise ApiError(
+                message="Naver product audit-linked local sync requires safe actor context",
+                error_code="invalid_actor_context",
+                status_code=400,
+            )
     if not field_observation.get("channel_no_configured"):
         raise ApiError(
             message="Naver product real micro preview requires configured channel_no",
@@ -1690,6 +1733,10 @@ def _run_naver_product_real_micro_preview(
     status: str,
     field_observation: dict,
     real_sync: bool = False,
+    manual_approval: bool = False,
+    backup_path: str | None = None,
+    backup_sha256: str | None = None,
+    actor_context: dict | None = None,
 ) -> dict:
     context = _build_naver_token_context_from_credential(credential)
     try:
@@ -1742,6 +1789,10 @@ def _run_naver_product_real_micro_preview(
             payload=payload,
             dry_run_diff=dry_run_diff,
             real_sync=real_sync,
+            manual_approval=manual_approval,
+            backup_path=backup_path,
+            backup_sha256=backup_sha256,
+            actor_context=actor_context,
         )
         field_observation["products_written"] = local_sync_result["products_written"]
         preview_status = "success" if sample_ids else "success_empty"
@@ -2600,8 +2651,106 @@ def _default_naver_product_local_sync_result(real_sync: bool = False) -> dict:
         "products_written": False,
         "sync_log_written": False,
         "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "operation_audit_log_id": None,
+        "audit_correlation_id": None,
+        "operation_audit_skip_reason": None,
         "raw_response_saved": False,
         "write_limit": 5,
+    }
+
+
+def _product_batch_target_hash(sample_ids: list[str]) -> str:
+    source = "|".join(str(item) for item in sample_ids[:5]) or "empty"
+    return "product-batch-" + hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+
+
+def _build_naver_product_local_sync_audit_row(
+    *,
+    store_id: int,
+    local_sync_result: dict,
+    dry_run_diff: dict,
+    backup_path: str | None,
+    backup_sha256: str | None,
+    actor_context: dict | None,
+) -> dict[str, Any]:
+    now = get_utc_now()
+    sample_ids = [str(item) for item in (local_sync_result.get("sample_ids") or [])][:5]
+    target_hash = _product_batch_target_hash(sample_ids)
+    correlation_id = f"naver-product-sync-{target_hash[-16:]}"
+    actor_context = actor_context or {}
+    actor_id = _bounded_text(actor_context.get("actor_id") or "operator-safe-hash-product-sync", 120)
+    actor_label = _bounded_text(actor_context.get("actor_label") or "Local operator", 160)
+    actor_role = _bounded_text(actor_context.get("actor_role") or "owner", 80)
+    changed_fields = sorted(set(dry_run_diff.get("changed_fields") or []))
+    if not changed_fields and int(dry_run_diff.get("would_refresh_only") or 0) > 0:
+        changed_fields = ["last_synced_at"]
+    return {
+        "created_at": now,
+        "updated_at": now,
+        "store_id": store_id,
+        "platform": "naver",
+        "environment": "local",
+        "actor_type": "human",
+        "actor_id": actor_id,
+        "actor_label": actor_label,
+        "actor_role": actor_role,
+        "action": "product_batch_local_sync_succeeded",
+        "operation_phase": "Naver-Product-Batch-Exec-1A",
+        "correlation_id": correlation_id,
+        "request_id": f"naver-product-sync-{target_hash[-12:]}",
+        "status": "success",
+        "reason_code": "product_batch_local_sync_audit_linked",
+        "target_type": "product",
+        "target_id": None,
+        "target_hash": target_hash,
+        "target_label": "Naver product local sync batch",
+        "changed_field_names": changed_fields,
+        "before_summary": {
+            "dry_run_would_create": int(dry_run_diff.get("would_create") or 0),
+            "dry_run_would_update": int(dry_run_diff.get("would_update") or 0),
+            "dry_run_would_refresh_only": int(dry_run_diff.get("would_refresh_only") or 0),
+            "dry_run_would_skip": int(dry_run_diff.get("would_skip") or 0),
+        },
+        "after_summary": {
+            "local_sync_status": local_sync_result.get("status"),
+            "source_type": NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+            "raw_response_saved": False,
+            "platform_writes_enabled": False,
+        },
+        "counts_summary": {
+            "created_count": int(local_sync_result.get("created_count") or 0),
+            "updated_count": int(local_sync_result.get("updated_count") or 0),
+            "skipped_count": int(local_sync_result.get("skipped_count") or 0),
+            "products_written": (
+                int(local_sync_result.get("created_count") or 0)
+                + int(local_sync_result.get("updated_count") or 0)
+            ),
+            "orders_written": 0,
+            "sync_logs_written": 0,
+            "capability_results_written": 0,
+            "operation_audit_rows_written": 1,
+        },
+        "safety_flags": {
+            "real_api_called": True,
+            "real_api_write_enabled": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "formal_product_sync_open": False,
+            "full_product_ids_saved": False,
+            "sample_ids_masked": True,
+        },
+        "backup_path": _bounded_text(backup_path, 500) if backup_path else None,
+        "backup_sha256": backup_sha256,
+        "restore_source_path": None,
+        "restore_source_sha256": None,
+        "sensitive_scan_passed": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "notes": "Naver product local sync wrote sanitized product rows only; Naver platform product writes remain closed.",
     }
 
 
@@ -2612,6 +2761,10 @@ def _sync_naver_product_preview_candidate(
     payload: object | None,
     dry_run_diff: dict,
     real_sync: bool,
+    manual_approval: bool = False,
+    backup_path: str | None = None,
+    backup_sha256: str | None = None,
+    actor_context: dict | None = None,
 ) -> dict:
     result = _default_naver_product_local_sync_result(real_sync)
     if not real_sync:
@@ -2674,6 +2827,28 @@ def _sync_naver_product_preview_candidate(
     result["updated_count"] = updated_count
     result["sample_ids"] = sample_ids[:5]
     result["skip_reasons"] = skip_reasons
+    if manual_approval is True:
+        audit_row = _build_naver_product_local_sync_audit_row(
+            store_id=store_id,
+            local_sync_result=result,
+            dry_run_diff=dry_run_diff,
+            backup_path=backup_path,
+            backup_sha256=backup_sha256,
+            actor_context=actor_context,
+        )
+        audit_result = operation_audit_service.write_operation_audit_log_local(
+            db,
+            audit_row,
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=operation_audit_service.LOCAL_WRITER_SCOPE,
+        )
+        result["operation_audit_rows_written"] = bool(audit_result.get("audit_rows_written"))
+        result["operation_audit_log_id"] = audit_result.get("audit_log_id")
+        result["audit_correlation_id"] = audit_row["correlation_id"]
+        result["operation_audit_skip_reason"] = audit_result.get("skip_reason")
+    else:
+        result["operation_audit_skip_reason"] = "manual_approval_required_for_audit_linkage"
     return result
 
 

@@ -3282,6 +3282,9 @@ def verify_sync_preview_schema_and_security() -> None:
                     before_fake_capability_success_count = len(db.execute(text(
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
                     ), {"store_id": naver_store_id}).all())
+                    before_fake_audit_count = db.execute(text(
+                        "SELECT COUNT(*) FROM operation_audit_logs WHERE store_id = :store_id"
+                    ), {"store_id": naver_store_id}).scalar_one()
 
                 FakeNaverProductHttpClient.response_sequence = []
                 FakeNaverProductHttpClient.calls = []
@@ -4388,6 +4391,187 @@ def verify_sync_preview_schema_and_security() -> None:
                         "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
                     ), {"store_id": naver_store_id}).all()
                     assert len(after_sync_capability_success) == before_fake_capability_success_count
+
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "AUDIT-SKIP-ORIGIN-001",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "audit-skip-channel-001",
+                                        "productName": "Audit Skip Product",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 2222,
+                                        "stockQuantity": 6,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_sync_without_audit = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": True,
+                })
+                assert fake_product_sync_without_audit.status_code == 200, fake_product_sync_without_audit.text
+                fake_without_audit_data = fake_product_sync_without_audit.json()["data"]
+                without_audit_sync = fake_without_audit_data["local_sync_result"]
+                assert without_audit_sync["requested"] is True, without_audit_sync
+                assert without_audit_sync["status"] == "success", without_audit_sync
+                assert without_audit_sync["created_count"] == 1, without_audit_sync
+                assert without_audit_sync["products_written"] is True, without_audit_sync
+                assert without_audit_sync["operation_audit_rows_written"] is False, without_audit_sync
+                assert without_audit_sync["operation_audit_skip_reason"] == "manual_approval_required_for_audit_linkage", without_audit_sync
+                assert without_audit_sync["sync_log_written"] is False, without_audit_sync
+                assert without_audit_sync["capability_tested_success_written"] is False, without_audit_sync
+                assert without_audit_sync["raw_response_saved"] is False, without_audit_sync
+                assert fake_without_audit_data["field_observation"]["products_written"] is True, fake_without_audit_data
+                with SessionLocal() as db:
+                    assert db.scalar(select(Product).where(
+                        Product.store_id == naver_store_id,
+                        Product.platform == "naver",
+                        Product.external_product_id == "audit-skip-channel-001",
+                    )) is not None
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_fake_sync_log_count
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_fake_capability_success_count
+                    assert db.execute(text(
+                        "SELECT COUNT(*) FROM operation_audit_logs WHERE store_id = :store_id"
+                    ), {"store_id": naver_store_id}).scalar_one() == before_fake_audit_count
+
+                audit_backup_sha = "a" * 64
+                FakeNaverProductHttpClient.response_sequence = [
+                    FakeNaverProductResponse(200, {
+                        "contents": [
+                            {
+                                "originProductNo": "AUDIT-LINKED-ORIGIN-001",
+                                "channelProducts": [
+                                    {
+                                        "channelProductNo": "audit-linked-channel-001",
+                                        "productName": "Audit Linked Product",
+                                        "statusType": "SALE",
+                                        "channelProductDisplayStatusType": "ON",
+                                        "salePrice": 3333,
+                                        "stockQuantity": 8,
+                                    }
+                                ],
+                            }
+                        ],
+                        "last": True,
+                    })
+                ]
+                fake_product_sync_with_audit = client.post("/api/v1/sync/products/naver/preview", json={
+                    "store_id": naver_store_id,
+                    "credential_id": naver_credential_id,
+                    "page": 1,
+                    "size": 1,
+                    "status": "ALL",
+                    "real_preview": True,
+                    "real_sync": True,
+                    "manual_approval": True,
+                    "backup_path": "C:/safe-backups/codex1.db.backup-product-audit-link",
+                    "backup_sha256": audit_backup_sha,
+                    "actor_context": {
+                        "actor_id": "operator-product-sync-safe",
+                        "actor_label": "Local operator",
+                        "actor_role": "owner",
+                    },
+                })
+                assert fake_product_sync_with_audit.status_code == 200, fake_product_sync_with_audit.text
+                fake_with_audit_data = fake_product_sync_with_audit.json()["data"]
+                with_audit_sync = fake_with_audit_data["local_sync_result"]
+                assert with_audit_sync["requested"] is True, with_audit_sync
+                assert with_audit_sync["status"] == "success", with_audit_sync
+                assert with_audit_sync["created_count"] == 1, with_audit_sync
+                assert with_audit_sync["products_written"] is True, with_audit_sync
+                assert with_audit_sync["operation_audit_rows_written"] is True, with_audit_sync
+                assert with_audit_sync["operation_audit_log_id"], with_audit_sync
+                assert with_audit_sync["audit_correlation_id"].startswith("naver-product-sync-"), with_audit_sync
+                assert with_audit_sync["sync_log_written"] is False, with_audit_sync
+                assert with_audit_sync["capability_tested_success_written"] is False, with_audit_sync
+                assert with_audit_sync["raw_response_saved"] is False, with_audit_sync
+                with SessionLocal() as db:
+                    assert db.scalar(select(Product).where(
+                        Product.store_id == naver_store_id,
+                        Product.platform == "naver",
+                        Product.external_product_id == "audit-linked-channel-001",
+                    )) is not None
+                    assert len(db.scalars(select(SyncLog).where(SyncLog.store_id == naver_store_id)).all()) == before_fake_sync_log_count
+                    assert len(db.execute(text(
+                        "SELECT id FROM api_capability_test_results WHERE store_id = :store_id AND test_status = 'tested_success'"
+                    ), {"store_id": naver_store_id}).all()) == before_fake_capability_success_count
+                    assert db.execute(text(
+                        "SELECT COUNT(*) FROM operation_audit_logs WHERE store_id = :store_id"
+                    ), {"store_id": naver_store_id}).scalar_one() == before_fake_audit_count + 1
+                    audit_row = db.execute(text(
+                        """
+                        SELECT id, action, reason_code, correlation_id, backup_sha256,
+                               counts_summary, raw_response_saved, secrets_saved, privacy_fields_redacted
+                        FROM operation_audit_logs
+                        WHERE id = :audit_id
+                        """
+                    ), {"audit_id": with_audit_sync["operation_audit_log_id"]}).mappings().one()
+                    assert audit_row["action"] == "product_batch_local_sync_succeeded", audit_row
+                    assert audit_row["reason_code"] == "product_batch_local_sync_audit_linked", audit_row
+                    assert audit_row["backup_sha256"] == audit_backup_sha, audit_row
+                    assert audit_row["raw_response_saved"] in (0, False), audit_row
+                    assert audit_row["secrets_saved"] in (0, False), audit_row
+                    assert audit_row["privacy_fields_redacted"] in (1, True), audit_row
+                    assert audit_row["correlation_id"] == with_audit_sync["audit_correlation_id"], audit_row
+                    counts_summary = (
+                        json.loads(audit_row["counts_summary"])
+                        if isinstance(audit_row["counts_summary"], str)
+                        else audit_row["counts_summary"]
+                    )
+                    assert counts_summary["created_count"] == 1, counts_summary
+                    assert counts_summary["updated_count"] == 0, counts_summary
+                    audit_readback = client.get(
+                        "/api/v1/operation-audit-logs",
+                        params={
+                            "store_id": naver_store_id,
+                            "limit": 5,
+                            "offset": 0,
+                            "include_advanced": "true",
+                            "correlation_id": with_audit_sync["audit_correlation_id"],
+                        },
+                    )
+                    assert audit_readback.status_code == 200, audit_readback.text
+                    serialized_audit = audit_readback.json()["data"]["items"][0]
+                    serialized_counts = serialized_audit["advanced_details"]["counts_summary"]
+                    assert serialized_counts["created_count"] == 1, serialized_counts
+                    assert serialized_counts["updated_count"] == 0, serialized_counts
+                    assert serialized_counts["skipped_count"] == 0, serialized_counts
+                    audit_text = json.dumps(dict(audit_row), ensure_ascii=False, default=str).lower()
+                    response_text = json.dumps(fake_product_sync_with_audit.json(), ensure_ascii=False, default=str).lower()
+                    for forbidden in [
+                        "fake-product-token",
+                        "authorization",
+                        "headers",
+                        "signature",
+                        "bcrypt",
+                        "client-secret-value",
+                        "raw response",
+                        "audit-linked-channel-001",
+                        "audit-linked-origin-001",
+                    ]:
+                        assert forbidden not in audit_text, audit_text
+                        assert forbidden not in response_text, response_text
+                    db.execute(text(
+                        "DELETE FROM operation_audit_logs WHERE id = :audit_id"
+                    ), {"audit_id": with_audit_sync["operation_audit_log_id"]})
+                    db.commit()
+                    assert db.execute(text(
+                        "SELECT COUNT(*) FROM operation_audit_logs WHERE store_id = :store_id"
+                    ), {"store_id": naver_store_id}).scalar_one() == before_fake_audit_count
             finally:
                 sync_service.httpx.Client = original_http_client
                 api_credential_readiness_service._request_naver_token_from_context = original_store_bound_token
@@ -16963,7 +17147,11 @@ def verify_operation_audit_logs_readonly_mock_gate() -> None:
         assert "before_summary" not in advanced_item["advanced_details"], advanced_item
         assert "after_summary" not in advanced_item["advanced_details"], advanced_item
         assert "safety_flags" not in advanced_item["advanced_details"], advanced_item
-        assert "counts_summary" not in advanced_item["advanced_details"], advanced_item
+        assert advanced_item["advanced_details"]["counts_summary"] == {
+            "audit_rows_written": 1,
+            "orders_written": 0,
+            "products_written": 0,
+        }, advanced_item
 
         status_filter = list_operation_audit_logs_readonly_mock_gate(
             db,
@@ -17115,7 +17303,11 @@ def verify_operation_audit_logs_readonly_local_api() -> None:
         assert "advanced_details" in advanced_item, advanced_item
         assert "before_summary" not in advanced_item["advanced_details"], advanced_item
         assert "after_summary" not in advanced_item["advanced_details"], advanced_item
-        assert "counts_summary" not in advanced_item["advanced_details"], advanced_item
+        assert advanced_item["advanced_details"]["counts_summary"] == {
+            "audit_rows_written": 1,
+            "orders_written": 0,
+            "products_written": 0,
+        }, advanced_item
         assert "safety_flags" not in advanced_item["advanced_details"], advanced_item
         assert advanced_item["advanced_details"]["target_hash_abbrev"].endswith("..."), advanced_item
 
