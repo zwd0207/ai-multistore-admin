@@ -1,6 +1,6 @@
 import { getNaverOrderStatusPresentation, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 
-export const SHIPPING_PHASE = 'Shipping-1F-to-1J';
+export const SHIPPING_PHASE = 'Shipping-2A-to-2E';
 export const SHIPPING_FILE_TYPE = 'shipping_request';
 export const SHIPPING_FILE_FORMAT = 'xlsx';
 
@@ -226,7 +226,7 @@ export function buildLogisticsInventoryMappingMockGate({
         : 'ready';
 
   return {
-    phase: 'Shipping-1F',
+    phase: 'Shipping-2D',
     status,
     businessMessage: rows.length === 0
       ? '当前没有可用于发货辅助的未发货订单。'
@@ -277,7 +277,7 @@ export function buildShippingExcelExportMock({
   }))));
 
   return {
-    phase: 'Shipping-1J',
+    phase: 'Shipping-2E',
     fileType: SHIPPING_FILE_TYPE,
     fileFormat: SHIPPING_FILE_FORMAT,
     fileName,

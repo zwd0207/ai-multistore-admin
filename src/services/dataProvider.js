@@ -977,6 +977,86 @@ function adaptPermissionGateResult(data = {}) {
   };
 }
 
+function adaptShippingMapping(item = {}) {
+  return {
+    id: item.id,
+    storeId: item.store_id ?? item.storeId,
+    platform: item.platform || 'naver',
+    productName: item.match_product_name ?? item.productName ?? '',
+    optionName: item.match_option_name ?? item.optionName ?? '',
+    normalizedProductName: item.normalized_product_name ?? item.normalizedProductName ?? '',
+    normalizedOptionName: item.normalized_option_name ?? item.normalizedOptionName ?? '',
+    platformProductIdHash: item.platform_product_id_hash ?? item.platformProductIdHash ?? null,
+    platformOptionIdHash: item.platform_option_id_hash ?? item.platformOptionIdHash ?? null,
+    internalSku: item.internal_sku ?? item.internalSku ?? '',
+    logisticsInventoryCode: item.logistics_inventory_code ?? item.logisticsInventoryCode ?? '',
+    logisticsProviderName: item.logistics_provider_name ?? item.logisticsProviderName ?? '',
+    currentStockQuantity: Number(item.current_stock_quantity ?? item.currentStockQuantity ?? 0),
+    stockStatus: item.stock_status ?? item.stockStatus ?? 'unknown',
+    matchPriority: Number(item.match_priority ?? item.matchPriority ?? 100),
+    isActive: item.is_active ?? item.isActive ?? true,
+    mappingVersion: item.mapping_version ?? item.mappingVersion ?? 'shipping_mapping_v1',
+    lastManualCheckedAt: item.last_manual_checked_at ?? item.lastManualCheckedAt ?? null,
+    createdAt: item.created_at ?? item.createdAt ?? null,
+    updatedAt: item.updated_at ?? item.updatedAt ?? null,
+  };
+}
+
+function adaptShippingMappingResult(data = {}) {
+  const rows = (data.items || data.data || []).map(adaptShippingMapping);
+  return {
+    ...data,
+    data: rows,
+    items: rows,
+    total: Number(data.total ?? rows.length),
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    mappingRowsReady: Number(data.mapping_rows_ready ?? data.mappingRowsReady ?? 0),
+    inventoryRowsReady: Number(data.inventory_rows_ready ?? data.inventoryRowsReady ?? 0),
+    createdMappings: Number(data.created_mappings ?? data.createdMappings ?? 0),
+    updatedMappings: Number(data.updated_mappings ?? data.updatedMappings ?? 0),
+    createdInventoryItems: Number(data.created_inventory_items ?? data.createdInventoryItems ?? 0),
+    updatedInventoryItems: Number(data.updated_inventory_items ?? data.updatedInventoryItems ?? 0),
+    shippingMappingsWritten: Boolean(data.shipping_mappings_written ?? data.shippingMappingsWritten),
+    shippingInventoryWritten: Boolean(data.shipping_inventory_written ?? data.shippingInventoryWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: Boolean(data.privacy_fields_redacted ?? data.privacyFieldsRedacted ?? true),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function toBackendShippingMappingPayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    actor_context: payload.actorContext || payload.actor_context || {},
+    mappings: (payload.mappings || []).map((item) => ({
+      match_product_name: item.productName || item.match_product_name || item.matchProductName || '',
+      match_option_name: item.optionName || item.match_option_name || item.matchOptionName || '',
+      platform_product_id_hash: item.platformProductIdHash || item.platform_product_id_hash || null,
+      platform_option_id_hash: item.platformOptionIdHash || item.platform_option_id_hash || null,
+      internal_sku: item.internalSku || item.internal_sku || '',
+      logistics_inventory_code: item.logisticsInventoryCode || item.logistics_inventory_code || '',
+      logistics_provider_name: item.logisticsProviderName || item.logistics_provider_name || '',
+      current_stock_quantity: Number(item.currentStockQuantity ?? item.current_stock_quantity ?? 0),
+      stock_status: item.stockStatus || item.stock_status || null,
+      match_priority: Number(item.matchPriority ?? item.match_priority ?? 100),
+      note: item.note || '',
+      is_active: item.isActive ?? item.is_active ?? true,
+    })),
+  };
+}
+
 function adaptStoreMembershipReadonlyResult(data = {}) {
   return {
     ...data,
@@ -1880,6 +1960,108 @@ const sourceMethods = {
       includeTestOrders: adapted.includeTestOrders,
       testOrdersExcluded: adapted.testOrdersExcluded,
     };
+  },
+  getShippingLogisticsMappings: async (params = {}) => {
+    if (!isBackendSource) {
+      return {
+        phase: 'Shipping-2B',
+        status: 'mock_local_state_only',
+        businessMessage: 'mock 模式使用页面内演示映射；不会读取或写入 Codex1 数据库。',
+        data: [],
+        items: [],
+        total: 0,
+        realDatabaseWritten: false,
+        realApiCalled: false,
+        ordersWritten: false,
+        productsWritten: false,
+        syncLogWritten: false,
+        capabilityTestedSuccessWritten: false,
+        rawResponseSaved: false,
+        secretsSaved: false,
+        privacyFieldsRedacted: true,
+        formalOrderSyncOpen: false,
+        platformWritesEnabled: false,
+      };
+    }
+    const { store } = await resolveBackendStore(params);
+    return adaptShippingMappingResult(await backendApi.getShippingLogisticsMappings({
+      storeId: store.id,
+      platform: params?.platform || 'naver',
+    }));
+  },
+  checkShippingLogisticsMappingWriteGate: async (payload = {}) => {
+    const request = toBackendShippingMappingPayload(payload);
+    if (!isBackendSource) {
+      return adaptShippingMappingResult({
+        phase: 'Shipping-2C',
+        status: request.manual_approval ? 'mapping_stock_write_gate_ready' : 'blocked',
+        skip_reason: request.manual_approval ? null : 'manual_approval_required',
+        business_message: request.manual_approval
+          ? 'mock 模式门禁通过，但不会写入数据库。'
+          : '请先确认本地保存操作。',
+        mapping_rows_ready: request.mappings.length,
+        inventory_rows_ready: new Set(request.mappings.map((item) => item.logistics_inventory_code)).size,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingMappingResult(await backendApi.checkShippingLogisticsMappingWriteGate({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  writeShippingLogisticsMappings: async (payload = {}) => {
+    const request = toBackendShippingMappingPayload(payload);
+    if (!isBackendSource) {
+      return adaptShippingMappingResult({
+        phase: 'Shipping-2D',
+        status: request.manual_approval ? 'mock_mapping_stock_updated' : 'blocked',
+        skip_reason: request.manual_approval ? null : 'manual_approval_required',
+        business_message: request.manual_approval
+          ? 'mock 模式已更新页面状态，不写入数据库。'
+          : '请先确认本地保存操作。',
+        items: request.mappings.map((item, index) => ({
+          id: `mock-shipping-map-${index + 1}`,
+          store_id: request.store_id,
+          platform: request.platform,
+          match_product_name: item.match_product_name,
+          match_option_name: item.match_option_name,
+          logistics_inventory_code: item.logistics_inventory_code,
+          logistics_provider_name: item.logistics_provider_name,
+          current_stock_quantity: item.current_stock_quantity,
+          stock_status: item.current_stock_quantity <= 0 ? 'out_of_stock' : item.current_stock_quantity <= 3 ? 'low_stock' : 'available',
+          is_active: item.is_active,
+          mapping_version: 'shipping_mapping_mock_v1',
+        })),
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        operation_audit_rows_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingMappingResult(await backendApi.writeShippingLogisticsMappings({
+      ...request,
+      store_id: Number(store.id),
+    }));
   },
   getRolePermissionInventory: async () => {
     if (!isBackendSource) {

@@ -214,6 +214,8 @@ tbody tr:hover { background: #fafbff; }
 .shipping-step strong { color: #233047; }
 .shipping-step p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.5; }
 .shipping-stock-input { width: 96px; border: 1px solid #dce1ea; background: white; border-radius: 7px; padding: 8px 10px; color: #344054; }
+.shipping-code-input { width: min(220px, 100%); }
+.shipping-provider-input { width: min(160px, 100%); }
 .shipping-export-preview { display: grid; gap: 16px; }
 @media (max-width: 1400px) { .shipping-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .shipping-step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1200px) { .shipping-summary-grid, .shipping-step-grid { grid-template-columns: 1fr; } }

@@ -1973,3 +1973,15 @@ Shipping-1F to 1J implement the first local Shipping Assistant MVP shell in Code
 The new `/shipping` page reads local Naver unshipped candidates, matches them to logistics inventory codes by product name plus option name, lets the operator adjust logistics stock in page state, and generates an Excel export contract preview. Backend data source uses the existing local orders list; mock data source uses clean Shipping mock orders. Technical flags stay folded in `TechnicalDetails`.
 
 These phases do not modify Codex1 runtime code, do not call Naver, do not write orders/products/SyncLog/tested-success/audit rows, do not generate a real Excel file, and do not open formal order sync or platform shipment writeback.
+
+## Phase Shipping-2A to Shipping-2E - Logistics Mapping Local Persistence
+
+Shipping-2A to 2E promote logistics inventory-code mapping from page-only mock state to controlled local persistence:
+
+- Codex1 adds `logistics_inventory_mappings` and `logistics_inventory_items`.
+- Codex1 exposes local Shipping routes for mapping list, write-gate validation, and local mapping/stock writes.
+- Codex2 `/shipping` now reads backend logistics mappings in backend mode.
+- Operators can fill missing logistics inventory codes, provider names, and current logistics stock, then save them locally.
+- Mock mode still uses page state only and does not write the database.
+
+This phase may write local logistics mapping rows, logistics stock rows, and one safe operation audit row for the maintenance action. It still does not call Naver, does not write orders/products/SyncLog/tested-success rows, does not generate a real Excel file, does not write export records, and does not open Naver shipment writeback, tracking-number upload, or formal product/order batch sync.

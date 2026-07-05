@@ -48,6 +48,55 @@ function statusToneClass(tone) {
   return `status-badge ${tone || 'neutral'}`;
 }
 
+function buildDraftMapping(candidate = {}) {
+  return {
+    id: `shipping-draft-${candidate.id || candidate.mappingKey}`,
+    storeId: candidate.storeId,
+    platform: candidate.platform || 'naver',
+    productName: candidate.productName,
+    optionName: candidate.optionName,
+    logisticsInventoryCode: '',
+    logisticsProviderName: '韩国仓 A',
+    currentStockQuantity: Math.max(Number(candidate.quantity || 0), 0),
+    mappingVersion: 'shipping_mapping_local_draft_v1',
+    isActive: true,
+    isDraft: true,
+    mappingKey: candidate.mappingKey,
+  };
+}
+
+function ensureDraftMappings(candidates = [], mappings = [], existingDrafts = []) {
+  const mappedKeys = new Set(mappings.map((item) => item.mappingKey || buildMappingKeySafe(item.productName, item.optionName)));
+  const draftsByKey = new Map(existingDrafts.map((item) => [item.mappingKey, item]));
+  return candidates
+    .filter((candidate) => !mappedKeys.has(candidate.mappingKey))
+    .map((candidate) => draftsByKey.get(candidate.mappingKey) || buildDraftMapping(candidate));
+}
+
+function buildMappingKeySafe(productName, optionName) {
+  return `${String(productName || '').trim().toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')}::${String(optionName || '').trim().toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')}`;
+}
+
+function hasWritableMapping(mapping = {}) {
+  return Boolean(String(mapping.productName || '').trim() && String(mapping.logisticsInventoryCode || '').trim());
+}
+
+function writableMappingPayload(mapping = {}) {
+  return {
+    productName: mapping.productName,
+    optionName: mapping.optionName || '',
+    platformProductIdHash: mapping.platformProductIdHash || null,
+    platformOptionIdHash: mapping.platformOptionIdHash || null,
+    internalSku: mapping.internalSku || '',
+    logisticsInventoryCode: mapping.logisticsInventoryCode,
+    logisticsProviderName: mapping.logisticsProviderName || '',
+    currentStockQuantity: Number(mapping.currentStockQuantity || 0),
+    stockStatus: mapping.stockStatus || null,
+    matchPriority: Number(mapping.matchPriority || 100),
+    isActive: mapping.isActive !== false,
+  };
+}
+
 function LoadingPanel() {
   return (
     <div className="table-state">
@@ -61,8 +110,8 @@ function ShippingWorkflowSteps() {
   const steps = [
     ['1', '读取未发货订单', '只读取本地候选，不执行平台发货写入。'],
     ['2', '匹配库存编号', '第一阶段按商品名称 + 选项名称匹配。'],
-    ['3', '维护物流库存', '当前为页面内 mock，后续再落库。'],
-    ['4', '生成导出预览', '先生成 Excel 合同预览，不产生真实文件。'],
+    ['3', '维护物流库存', 'backend 模式可保存到本地映射和库存表。'],
+    ['4', '生成导出预览', '真实 Excel 文件生成仍需单独审批。'],
   ];
 
   return (
@@ -134,16 +183,31 @@ function CandidateTable({ rows = [] }) {
   );
 }
 
-function StockMaintenancePanel({ mappings = [], onChangeStock }) {
-  const activeMappings = mappings.filter((item) => item.isActive !== false);
+function StockMaintenancePanel({
+  mappings = [],
+  draftMappings = [],
+  onChangeMapping,
+  onSaveMappings,
+  saving = false,
+  saveResult,
+  saveError = '',
+  backendMode = false,
+}) {
+  const activeMappings = [...mappings, ...draftMappings].filter((item) => item.isActive !== false);
+  const writableCount = activeMappings.filter(hasWritableMapping).length;
   return (
     <section className="content-card">
       <div className="section-heading">
         <div>
           <h2>物流商库存维护</h2>
-          <p>当前是本地页面内 mock，用来验证运营流程；不会写入数据库。</p>
+          <p>{backendMode ? '保存后写入本地物流映射和库存表，不执行平台发货写入。' : 'mock 模式只维护页面状态，不写入数据库。'}</p>
         </div>
+        <button className="button primary" onClick={onSaveMappings} disabled={!writableCount || saving}>
+          {saving ? '保存中...' : '保存映射与库存'}
+        </button>
       </div>
+      {saveError ? <div className="mock-sync-error">{saveError}</div> : null}
+      {saveResult?.businessMessage ? <div className="mock-sync-success">{saveResult.businessMessage}</div> : null}
       {activeMappings.length ? (
         <div className="table-wrap">
           <table>
@@ -153,26 +217,42 @@ function StockMaintenancePanel({ mappings = [], onChangeStock }) {
                 <th>匹配商品</th>
                 <th>物流商</th>
                 <th>当前库存</th>
+                <th>保存状态</th>
               </tr>
             </thead>
             <tbody>
               {activeMappings.map((mapping) => (
                 <tr key={mapping.id}>
-                  <td><strong>{mapping.logisticsInventoryCode}</strong></td>
+                  <td>
+                    <input
+                      className="shipping-stock-input shipping-code-input"
+                      value={mapping.logisticsInventoryCode}
+                      placeholder="库存编号"
+                      onChange={(event) => onChangeMapping(mapping.id, { logisticsInventoryCode: event.target.value }, mapping.isDraft)}
+                    />
+                  </td>
                   <td>
                     <strong>{mapping.productName}</strong>
                     <span className="cell-subtitle">{displayText(mapping.optionName, '无选项')}</span>
                   </td>
-                  <td>{mapping.logisticsProviderName}</td>
+                  <td>
+                    <input
+                      className="shipping-stock-input shipping-provider-input"
+                      value={mapping.logisticsProviderName || ''}
+                      placeholder="物流商"
+                      onChange={(event) => onChangeMapping(mapping.id, { logisticsProviderName: event.target.value }, mapping.isDraft)}
+                    />
+                  </td>
                   <td>
                     <input
                       className="shipping-stock-input"
                       type="number"
                       min="0"
                       value={mapping.currentStockQuantity}
-                      onChange={(event) => onChangeStock(mapping.id, event.target.value)}
+                      onChange={(event) => onChangeMapping(mapping.id, { currentStockQuantity: event.target.value }, mapping.isDraft)}
                     />
                   </td>
+                  <td>{mapping.isDraft ? '待保存' : '已保存'}</td>
                 </tr>
               ))}
             </tbody>
@@ -191,7 +271,7 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate }) {
       <div className="section-heading">
         <div>
           <h2>物流商 Excel 导出预览</h2>
-          <p>当前只生成导出合同预览，不创建真实文件、不写导出记录。</p>
+          <p>当前只生成导出合同预览；真实 Excel 文件生成、导出记录和审计记录仍需单独审批。</p>
         </div>
         <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount}>
           生成 Excel 导出预览
@@ -254,9 +334,13 @@ export default function ShippingAssistant() {
   } = useStoreContext();
   const [orders, setOrders] = useState([]);
   const [mappings, setMappings] = useState([]);
+  const [draftMappings, setDraftMappings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [exportPreview, setExportPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saveResult, setSaveResult] = useState(null);
 
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
 
@@ -268,6 +352,7 @@ export default function ShippingAssistant() {
     if (!selectedStoreId || !isNaverStore) {
       setOrders([]);
       setMappings([]);
+      setDraftMappings([]);
       setLoadError('');
       return () => { cancelled = true; };
     }
@@ -275,15 +360,34 @@ export default function ShippingAssistant() {
     async function loadOrders() {
       setLoading(true);
       setLoadError('');
+      setSaveError('');
+      setSaveResult(null);
       try {
-        const nextOrders = isBackendSource
-          ? (await dataProvider.getOrders({
-            storeId: selectedStoreId,
+        const [orderResult, mappingResult] = await Promise.all([
+          isBackendSource
+            ? dataProvider.getOrders({
+              storeId: selectedStoreId,
+              platform: 'naver',
+              page: 1,
+              pageSize: 100,
+            })
+            : Promise.resolve({
+              data: shippingMockOrders.filter((order) => String(order.storeId || order.store_id) === String(selectedStoreId)),
+            }),
+          isBackendSource
+            ? dataProvider.getShippingLogisticsMappings({
+              storeId: selectedStoreId,
+              platform: 'naver',
+            })
+            : Promise.resolve({ data: [] }),
+        ]);
+        const nextOrders = orderResult.data || [];
+        const persistedMappings = isBackendSource
+          ? (mappingResult.data || [])
+          : createInitialLogisticsMappings(buildUnshippedOrderCandidates(nextOrders, {
+            selectedStoreId,
             platform: 'naver',
-            page: 1,
-            pageSize: 100,
-          })).data || []
-          : shippingMockOrders.filter((order) => String(order.storeId || order.store_id) === String(selectedStoreId));
+          }), shippingMockInventoryMappings);
 
         if (cancelled) return;
         const nextCandidates = buildUnshippedOrderCandidates(nextOrders, {
@@ -291,11 +395,13 @@ export default function ShippingAssistant() {
           platform: 'naver',
         });
         setOrders(nextOrders);
-        setMappings(createInitialLogisticsMappings(nextCandidates, shippingMockInventoryMappings));
+        setMappings(persistedMappings);
+        setDraftMappings(ensureDraftMappings(nextCandidates, persistedMappings, []));
       } catch (error) {
         if (!cancelled) {
           setOrders([]);
           setMappings([]);
+          setDraftMappings([]);
           setLoadError(error.message || '发货候选加载失败。');
         }
       } finally {
@@ -314,16 +420,86 @@ export default function ShippingAssistant() {
 
   const gate = useMemo(() => buildLogisticsInventoryMappingMockGate({
     candidates,
-    mappings,
+    mappings: [...mappings, ...draftMappings.filter(hasWritableMapping)],
     selectedStoreId,
     platform: 'naver',
-  }), [candidates, mappings, selectedStoreId]);
+  }), [candidates, mappings, draftMappings, selectedStoreId]);
 
   const summary = buildShippingAssistantSummary(gate);
 
-  const changeStock = (mappingId, nextQuantity) => {
-    setMappings((current) => updateLogisticsStockQuantity(current, mappingId, nextQuantity));
+  const changeMapping = (mappingId, patch, isDraft = false) => {
+    const updater = (current) => current.map((item) => (
+      String(item.id) === String(mappingId)
+        ? {
+          ...item,
+          ...patch,
+          currentStockQuantity: patch.currentStockQuantity !== undefined
+            ? Math.max(0, Number(patch.currentStockQuantity || 0))
+            : item.currentStockQuantity,
+          lastManualUpdatedAt: new Date().toISOString(),
+        }
+        : item
+    ));
+    if (isDraft) {
+      setDraftMappings(updater);
+    } else if (patch.currentStockQuantity !== undefined && Object.keys(patch).length === 1) {
+      setMappings((current) => updateLogisticsStockQuantity(current, mappingId, patch.currentStockQuantity));
+    } else {
+      setMappings(updater);
+    }
     setExportPreview(null);
+  };
+
+  const saveMappings = async () => {
+    const writableMappings = [...mappings, ...draftMappings].filter(hasWritableMapping).map(writableMappingPayload);
+    if (!writableMappings.length) {
+      setSaveError('请先填写至少一个物流库存编号。');
+      setSaveResult(null);
+      return;
+    }
+    setSaving(true);
+    setSaveError('');
+    setSaveResult(null);
+    try {
+      const payload = {
+        storeId: selectedStoreId,
+        platform: 'naver',
+        manualApproval: true,
+        actorContext: {
+          role: 'admin',
+          actor_id: 'shipping-local-operator',
+        },
+        mappings: writableMappings,
+      };
+      const gateResult = await dataProvider.checkShippingLogisticsMappingWriteGate(payload);
+      if (!['mapping_stock_write_gate_ready', 'mock_mapping_stock_updated'].includes(gateResult.status)) {
+        throw new Error(gateResult.businessMessage || gateResult.skipReason || '物流映射保存门禁未通过。');
+      }
+      const writeResult = await dataProvider.writeShippingLogisticsMappings(payload);
+      if (!['mapping_stock_local_write_succeeded', 'mock_mapping_stock_updated'].includes(writeResult.status)) {
+        throw new Error(writeResult.businessMessage || writeResult.skipReason || '物流映射保存失败。');
+      }
+      const nextMappings = writeResult.data?.length ? writeResult.data : writableMappings.map((item, index) => ({
+        id: `shipping-local-map-${index + 1}`,
+        storeId: selectedStoreId,
+        platform: 'naver',
+        productName: item.productName,
+        optionName: item.optionName,
+        logisticsInventoryCode: item.logisticsInventoryCode,
+        logisticsProviderName: item.logisticsProviderName,
+        currentStockQuantity: item.currentStockQuantity,
+        isActive: true,
+        mappingKey: buildMappingKeySafe(item.productName, item.optionName),
+      }));
+      setMappings(nextMappings);
+      setDraftMappings(ensureDraftMappings(candidates, nextMappings, []));
+      setSaveResult(writeResult);
+      setExportPreview(null);
+    } catch (error) {
+      setSaveError(error.message || '物流映射保存失败。');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const generateExportPreview = () => {
@@ -398,7 +574,7 @@ export default function ShippingAssistant() {
         {!loading && !loadError ? <CandidateTable rows={gate.rows} /> : null}
         <TechnicalDetails
           title="查看发货候选技术边界"
-          description="普通运营只看发货处理信息；技术字段仅用于管理员确认当前仍是本地 mock gate。"
+          description="普通运营只看发货处理信息；技术字段仅用于管理员确认当前只允许本地映射和库存维护。"
           items={[
             { label: 'phase', value: gate.phase },
             { label: 'data_source_backend', value: isBackendSource },
@@ -414,12 +590,24 @@ export default function ShippingAssistant() {
             { label: 'formal_order_sync_open', value: gate.formalOrderSyncOpen },
             { label: 'platform_writes_enabled', value: gate.platformWritesEnabled },
             { label: 'raw_response_saved', value: gate.rawResponseSaved },
+            { label: 'mapping_write_phase', value: saveResult?.phase || 'not_saved_this_session' },
+            { label: 'shipping_mappings_written', value: saveResult?.shippingMappingsWritten ?? false },
+            { label: 'shipping_inventory_written', value: saveResult?.shippingInventoryWritten ?? false },
+            { label: 'mapping_operation_audit_rows_written', value: saveResult?.operationAuditRowsWritten ?? false },
           ]}
         />
       </section>
 
-      <StockMaintenancePanel mappings={mappings} onChangeStock={changeStock} />
-
+      <StockMaintenancePanel
+        mappings={mappings}
+        draftMappings={draftMappings}
+        onChangeMapping={changeMapping}
+        onSaveMappings={saveMappings}
+        saving={saving}
+        saveResult={saveResult}
+        saveError={saveError}
+        backendMode={isBackendSource}
+      />
       <ExportPreviewPanel
         gate={gate}
         exportPreview={exportPreview}
@@ -428,9 +616,9 @@ export default function ShippingAssistant() {
 
       <TechnicalDetails
         title="查看 Excel mock 导出边界"
-        description="本阶段只验证导出字段合同，不创建真实文件、不写导出记录、不写审计记录。"
+        description="本阶段只规划真实 Excel 生成审批边界；当前不创建真实文件、不写导出记录。"
         items={[
-          { label: 'phase', value: exportPreview?.phase || 'Shipping-1J' },
+          { label: 'phase', value: exportPreview?.phase || 'Shipping-2E' },
           { label: 'file_type', value: exportPreview?.fileType || 'shipping_request' },
           { label: 'file_format', value: exportPreview?.fileFormat || 'xlsx' },
           { label: 'file_generated', value: exportPreview?.fileGenerated ?? false },
@@ -447,4 +635,3 @@ export default function ShippingAssistant() {
     </>
   );
 }
-
