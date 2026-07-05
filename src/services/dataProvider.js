@@ -1998,6 +1998,72 @@ function adaptFormalBatchExecutionPreflightReadonlyResult(data = {}) {
   };
 }
 
+function adaptNaverBatchExecutionApprovalReadonlyResult(data = {}, kind = 'order') {
+  const isProduct = kind === 'product';
+  return {
+    ...data,
+    phase: data.phase || (isProduct ? 'Naver-Product-Batch-2L' : 'Naver-Order-Batch-3C'),
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason || data.skipReason || null,
+    businessMessage: data.business_message || data.businessMessage || '',
+    nextAction: data.next_action || data.nextAction || '',
+    storeIds: Array.isArray(data.store_ids) ? data.store_ids : (Array.isArray(data.storeIds) ? data.storeIds : []),
+    candidateCount: Number(data.candidate_count ?? data.candidateCount ?? 0),
+    batchSize: Number(data.batch_size ?? data.batchSize ?? 0),
+    productBatchExecutionApprovalReady: Boolean(
+      data.product_batch_execution_approval_ready ?? data.productBatchExecutionApprovalReady,
+    ),
+    orderBatchExecutionApprovalReady: Boolean(
+      data.order_batch_execution_approval_ready ?? data.orderBatchExecutionApprovalReady,
+    ),
+    requiredExecutionFlags: Array.isArray(data.required_execution_flags)
+      ? data.required_execution_flags
+      : (Array.isArray(data.requiredExecutionFlags) ? data.requiredExecutionFlags : []),
+    missingExecutionFlags: Array.isArray(data.missing_execution_flags)
+      ? data.missing_execution_flags
+      : (Array.isArray(data.missingExecutionFlags) ? data.missingExecutionFlags : []),
+    requiredApiFlags: Array.isArray(data.required_api_flags)
+      ? data.required_api_flags
+      : (Array.isArray(data.requiredApiFlags) ? data.requiredApiFlags : []),
+    missingApiFlags: Array.isArray(data.missing_api_flags)
+      ? data.missing_api_flags
+      : (Array.isArray(data.missingApiFlags) ? data.missingApiFlags : []),
+    permissionVerified: Boolean(data.permission_verified ?? data.permissionVerified),
+    approvalRoleVerified: Boolean(data.approval_role_verified ?? data.approvalRoleVerified),
+    backupEvidenceVerified: Boolean(data.backup_evidence_verified ?? data.backupEvidenceVerified),
+    readonlyEvidenceVerified: Boolean(data.readonly_evidence_verified ?? data.readonlyEvidenceVerified),
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || (
+      isProduct
+        ? '/api/v1/batch/naver/products/execution-approval/readonly-check'
+        : '/api/v1/batch/naver/orders/execution-approval/readonly-check'
+    ),
+    executionApproved: Boolean(data.execution_approved ?? data.executionApproved),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    timelineEventsWritten: Boolean(data.timeline_events_written ?? data.timelineEventsWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    platformOrderWritesEnabled: Boolean(data.platform_order_writes_enabled ?? data.platformOrderWritesEnabled),
+    platformProductWritesEnabled: Boolean(data.platform_product_writes_enabled ?? data.platformProductWritesEnabled),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    shipmentWriteEnabled: Boolean(data.shipment_write_enabled ?? data.shipmentWriteEnabled),
+    cancelWriteEnabled: Boolean(data.cancel_write_enabled ?? data.cancelWriteEnabled),
+    returnWriteEnabled: Boolean(data.return_write_enabled ?? data.returnWriteEnabled),
+    exchangeWriteEnabled: Boolean(data.exchange_write_enabled ?? data.exchangeWriteEnabled),
+  };
+}
+
 function adaptProductRollbackReadonlyReportResult(data = {}) {
   return {
     ...data,
@@ -2451,6 +2517,132 @@ function mockFormalBatchExecutionPreflightReadonly(payload = {}) {
   });
 }
 
+function mockNaverBatchExecutionApprovalReadonly(payload = {}, kind = 'order') {
+  const serialized = JSON.stringify(payload).toLowerCase();
+  const hasSensitiveMarker = serialized.includes('productorderid')
+    || serialized.includes('rawresponse')
+    || serialized.includes('authorization')
+    || serialized.includes('client_secret');
+  const isProduct = kind === 'product';
+  const blockedBase = {
+    phase: isProduct ? 'Naver-Product-Batch-2L' : 'Naver-Order-Batch-3C',
+    status: 'blocked',
+    execution_approved: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    timeline_events_written: false,
+    operation_audit_rows_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    formal_order_sync_open: false,
+    formal_product_sync_open: false,
+    platform_order_writes_enabled: false,
+    platform_product_writes_enabled: false,
+    platform_writes_enabled: false,
+    shipment_write_enabled: false,
+    cancel_write_enabled: false,
+    return_write_enabled: false,
+    exchange_write_enabled: false,
+  };
+  if (hasSensitiveMarker) {
+    return adaptNaverBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: isProduct
+        ? 'naver_product_batch_execution_sensitive_field_blocked'
+        : 'naver_order_batch_execution_sensitive_field_blocked',
+    }, kind);
+  }
+  const executionContext = payload.execution_context || payload.executionContext || {};
+  const readonlyApiContext = payload.readonly_api_context || payload.readonlyApiContext || {};
+  const requiredExecutionFlags = isProduct
+    ? [
+      'product_batch_candidates_fresh',
+      'product_field_whitelist_verified',
+      'price_stock_status_mapping_reviewed',
+      'duplicate_protection_ready',
+      'audit_chain_ready',
+      'post_write_readback_required',
+      'rollback_plan_ready',
+      'sensitive_scan_passed',
+      'platform_product_write_actions_excluded',
+      'formal_sync_remains_closed',
+    ]
+    : [
+      'order_batch_candidates_fresh',
+      'order_privacy_gate_verified',
+      'order_field_whitelist_verified',
+      'delivery_claim_mapping_reviewed',
+      'duplicate_protection_ready',
+      'audit_chain_ready',
+      'post_write_readback_required',
+      'rollback_plan_ready',
+      'sensitive_scan_passed',
+      'platform_order_write_actions_excluded',
+      'formal_sync_remains_closed',
+    ];
+  const requiredApiFlags = [
+    'readonly_api_contract_planned',
+    'business_wording_required',
+    'technical_details_folded',
+    'execution_button_excluded',
+    'write_endpoint_excluded',
+    isProduct ? 'product_write_endpoint_excluded' : 'order_write_endpoint_excluded',
+    'sensitive_fields_hidden_from_main_page',
+    ...(isProduct ? [] : ['buyer_privacy_hidden_from_main_page']),
+    'audit_row_write_excluded',
+    'route_requires_separate_implementation',
+    'formal_sync_remains_closed',
+  ];
+  const missingExecutionFlags = requiredExecutionFlags.filter((flag) => executionContext[flag] !== true);
+  const missingApiFlags = requiredApiFlags.filter((flag) => readonlyApiContext[flag] !== true);
+  const ready = missingExecutionFlags.length === 0
+    && missingApiFlags.length === 0
+    && payload.manual_approval === true
+    && readonlyApiContext.execution_approved !== true
+    && readonlyApiContext.formal_sync_open !== true
+    && readonlyApiContext.platform_writes_enabled !== true;
+  return adaptNaverBatchExecutionApprovalReadonlyResult({
+    ...blockedBase,
+    phase: isProduct ? 'Naver-Product-Batch-2L' : 'Naver-Order-Batch-3C',
+    status: ready
+      ? (isProduct
+        ? 'naver_product_batch_execution_approval_readonly_api_ready'
+        : 'naver_order_batch_execution_approval_readonly_api_ready')
+      : 'blocked',
+    skip_reason: ready ? null : 'execution_approval_readonly_context_incomplete',
+    store_ids: payload.store_ids || [],
+    candidate_count: Number(payload.candidate_count || 0),
+    batch_size: Number(payload.batch_size || 0),
+    product_batch_execution_approval_ready: isProduct && ready,
+    order_batch_execution_approval_ready: !isProduct && ready,
+    required_execution_flags: requiredExecutionFlags,
+    missing_execution_flags: missingExecutionFlags,
+    required_api_flags: requiredApiFlags,
+    missing_api_flags: missingApiFlags,
+    permission_verified: true,
+    approval_role_verified: true,
+    backup_evidence_verified: true,
+    readonly_evidence_verified: true,
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    route_path: isProduct
+      ? '/api/v1/batch/naver/products/execution-approval/readonly-check'
+      : '/api/v1/batch/naver/orders/execution-approval/readonly-check',
+    business_message: ready
+      ? (isProduct
+        ? 'Naver 商品批量执行审批只读材料已可用于人工复核；当前不开放商品批量写入。'
+        : 'Naver 订单批量执行审批只读材料已可用于人工复核；当前不开放订单批量写入。')
+      : '批量执行审批只读材料尚未齐备；请先补齐折叠详情中的门禁项。',
+    next_action: '任何正式批量写入都必须另开明确执行阶段并重新确认备份、审计、回读和敏感扫描。',
+  }, kind);
+}
+
 function mockNaverProductRollbackReadonlyReport(payload = {}) {
   const gate = payload.rollback_drill_gate || payload.rollbackDrillGate || {};
   const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('rawresponse')
@@ -2663,6 +2855,22 @@ function toBatchExecutionApprovalPayload(approval = {}) {
       approval.platformProductWritesEnabled ?? approval.platform_product_writes_enabled,
     ),
     platform_writes_enabled: Boolean(approval.platformWritesEnabled ?? approval.platform_writes_enabled),
+  };
+}
+
+function toNaverBatchExecutionApprovalReadonlyPayload(payload = {}) {
+  return {
+    actor_context: payload.actorContext || payload.actor_context || {},
+    store_ids: Array.isArray(payload.storeIds)
+      ? payload.storeIds.map(Number).filter(Boolean)
+      : (Array.isArray(payload.store_ids) ? payload.store_ids.map(Number).filter(Boolean) : []),
+    candidate_count: Number(payload.candidateCount ?? payload.candidate_count ?? 0),
+    batch_size: Number(payload.batchSize ?? payload.batch_size ?? 0),
+    readonly_evidence: payload.readonlyEvidence || payload.readonly_evidence || {},
+    backup_evidence: payload.backupEvidence || payload.backup_evidence || {},
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    execution_context: payload.executionContext || payload.execution_context || {},
+    readonly_api_context: payload.readonlyApiContext || payload.readonly_api_context || {},
   };
 }
 
@@ -3572,6 +3780,22 @@ const sourceMethods = {
     if (!isBackendSource) return mockBatchApprovalDecisionAuditLinkageReadonly(request);
     return adaptBatchApprovalDecisionAuditLinkageReadonlyResult(
       await backendApi.checkBatchApprovalDecisionAuditLinkageReadonly(request),
+    );
+  },
+  checkNaverProductBatchExecutionApprovalReadonly: async (payload = {}) => {
+    const request = toNaverBatchExecutionApprovalReadonlyPayload(payload);
+    if (!isBackendSource) return mockNaverBatchExecutionApprovalReadonly(request, 'product');
+    return adaptNaverBatchExecutionApprovalReadonlyResult(
+      await backendApi.checkNaverProductBatchExecutionApprovalReadonly(request),
+      'product',
+    );
+  },
+  checkNaverOrderBatchExecutionApprovalReadonly: async (payload = {}) => {
+    const request = toNaverBatchExecutionApprovalReadonlyPayload(payload);
+    if (!isBackendSource) return mockNaverBatchExecutionApprovalReadonly(request, 'order');
+    return adaptNaverBatchExecutionApprovalReadonlyResult(
+      await backendApi.checkNaverOrderBatchExecutionApprovalReadonly(request),
+      'order',
     );
   },
   checkFormalBatchExecutionPreflightReadonly: async (payload = {}) => {

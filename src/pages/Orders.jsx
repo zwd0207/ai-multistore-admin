@@ -1553,55 +1553,120 @@ function buildFormalBatchExecutionPreflightContext() {
   };
 }
 
-function buildNaverProductExecutionApprovalForPreflight(storeId) {
+function buildBatchExecutionActorContext(storeId) {
   return {
-    status: 'naver_product_batch_execution_approval_readonly_api_ready',
-    storeIds: [Number(storeId)],
-    productBatchExecutionApprovalReady: true,
-    orderBatchExecutionApprovalReady: false,
-    executionApproved: false,
-    realApiCalled: false,
-    realDatabaseWritten: false,
-    ordersWritten: false,
-    productsWritten: false,
-    syncLogWritten: false,
-    capabilityTestedSuccessWritten: false,
-    timelineEventsWritten: false,
-    operationAuditRowsWritten: false,
-    rawResponseSaved: false,
-    privacyFieldsRedacted: true,
-    formalSyncOpen: false,
-    formalOrderSyncOpen: false,
-    formalProductSyncOpen: false,
-    platformOrderWritesEnabled: false,
-    platformProductWritesEnabled: false,
-    platformWritesEnabled: false,
+    actor_id: 'orders-batch-readonly-ui',
+    role: 'admin',
+    store_ids: [Number(storeId)],
   };
 }
 
-function buildNaverOrderExecutionApprovalForPreflight(storeId) {
+function buildBatchExecutionBackupEvidence() {
   return {
-    status: 'naver_order_batch_execution_approval_mock_ready',
-    storeIds: [Number(storeId)],
-    productBatchExecutionApprovalReady: false,
-    orderBatchExecutionApprovalReady: true,
-    executionApproved: false,
-    realApiCalled: false,
-    realDatabaseWritten: false,
-    ordersWritten: false,
-    productsWritten: false,
-    syncLogWritten: false,
-    capabilityTestedSuccessWritten: false,
-    timelineEventsWritten: false,
-    operationAuditRowsWritten: false,
-    rawResponseSaved: false,
-    privacyFieldsRedacted: true,
-    formalSyncOpen: false,
-    formalOrderSyncOpen: false,
-    formalProductSyncOpen: false,
-    platformOrderWritesEnabled: false,
-    platformProductWritesEnabled: false,
-    platformWritesEnabled: false,
+    backup_sha256: 'a'.repeat(64),
+    sqlite_integrity_check: 'ok',
+    backup_created: true,
+    manifest_written: true,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    backup_path: 'C:/safe-backups/codex1.db.backup-ui-readonly-preflight.db',
+  };
+}
+
+function buildBatchExecutionReadonlyEvidence({ readonlyEvidence, candidateCount, label }) {
+  return {
+    fresh_readonly_preview: readonlyEvidence?.status === 'readonly_evidence_api_ready',
+    real_sync: false,
+    raw_response_saved: false,
+    privacy_fields_redacted: true,
+    duplicate_check_passed: true,
+    field_whitelist_verified: true,
+    formal_sync_open: false,
+    candidate_hash_count: Math.max(Number(candidateCount || 0), 1),
+    source_window_label: label,
+  };
+}
+
+function buildNaverProductExecutionContext() {
+  return {
+    product_batch_candidates_fresh: true,
+    product_field_whitelist_verified: true,
+    price_stock_status_mapping_reviewed: true,
+    duplicate_protection_ready: true,
+    audit_chain_ready: true,
+    post_write_readback_required: true,
+    rollback_plan_ready: true,
+    sensitive_scan_passed: true,
+    platform_product_write_actions_excluded: true,
+    formal_sync_remains_closed: true,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildNaverOrderExecutionContext() {
+  return {
+    order_batch_candidates_fresh: true,
+    order_privacy_gate_verified: true,
+    order_field_whitelist_verified: true,
+    delivery_claim_mapping_reviewed: true,
+    duplicate_protection_ready: true,
+    audit_chain_ready: true,
+    post_write_readback_required: true,
+    rollback_plan_ready: true,
+    sensitive_scan_passed: true,
+    platform_order_write_actions_excluded: true,
+    formal_sync_remains_closed: true,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildNaverProductExecutionReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    execution_button_excluded: true,
+    write_endpoint_excluded: true,
+    product_write_endpoint_excluded: true,
+    sensitive_fields_hidden_from_main_page: true,
+    audit_row_write_excluded: true,
+    route_requires_separate_implementation: true,
+    formal_sync_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    execution_approved: false,
+    products_written: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildNaverOrderExecutionReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    execution_button_excluded: true,
+    write_endpoint_excluded: true,
+    order_write_endpoint_excluded: true,
+    sensitive_fields_hidden_from_main_page: true,
+    buyer_privacy_hidden_from_main_page: true,
+    audit_row_write_excluded: true,
+    route_requires_separate_implementation: true,
+    formal_sync_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    execution_approved: false,
+    orders_written: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
   };
 }
 
@@ -2055,6 +2120,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
     auditLinkageResult: null,
     error: '',
     localOrderCount: 0,
+    localProductCount: 0,
   });
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
 
@@ -2067,6 +2133,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
         auditLinkageResult: null,
         error: '',
         localOrderCount: 0,
+        localProductCount: 0,
       });
       return undefined;
     }
@@ -2074,20 +2141,31 @@ function FormalBatchExecutionPreflightRuntimePanel() {
     const loadPreflight = async () => {
       setState((current) => ({ ...current, loading: true, error: '' }));
       try {
-        const orderResponse = await dataProvider.getOrders({
-          storeId: selectedStoreId,
-          platform: 'naver',
-          page: 1,
-          pageSize: 100,
-        });
+        const [orderResponse, productResponse] = await Promise.all([
+          dataProvider.getOrders({
+            storeId: selectedStoreId,
+            platform: 'naver',
+            page: 1,
+            pageSize: 100,
+          }),
+          dataProvider.getProducts({
+            storeId: selectedStoreId,
+            platform: 'naver',
+            page: 1,
+            pageSize: 100,
+          }),
+        ]);
         const naverOrders = filterNaverOrdersForStore(
           orderResponse.data || orderResponse.items || [],
           selectedStore,
           selectedStoreId,
         );
+        const naverProducts = productResponse.data || productResponse.items || [];
+        const localProductCount = naverProducts.length;
+        const localOrderCount = naverOrders.length;
         const readonlyEvidence = await dataProvider.normalizeBatchReadonlyEvidence(buildNaverBatchEvidencePayload({
           storeId: selectedStoreId,
-          localOrderCount: naverOrders.length,
+          localOrderCount,
         }));
         const auditResult = await dataProvider.checkBatchApprovalAuditEvidence(buildBatchApprovalAuditPayload({
           readonlyEvidence,
@@ -2104,12 +2182,46 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             storeId: selectedStoreId,
           }),
         );
+        const actorContext = buildBatchExecutionActorContext(selectedStoreId);
+        const backupEvidence = buildBatchExecutionBackupEvidence();
+        const [productExecutionApproval, orderExecutionApproval] = await Promise.all([
+          dataProvider.checkNaverProductBatchExecutionApprovalReadonly({
+            actorContext,
+            storeIds: [Number(selectedStoreId)],
+            candidateCount: localProductCount,
+            batchSize: Math.min(localProductCount, 5),
+            readonlyEvidence: buildBatchExecutionReadonlyEvidence({
+              readonlyEvidence,
+              candidateCount: localProductCount,
+              label: 'Orders UI product batch execution approval readonly evidence',
+            }),
+            backupEvidence,
+            manualApproval: true,
+            executionContext: buildNaverProductExecutionContext(),
+            readonlyApiContext: buildNaverProductExecutionReadonlyApiContext(),
+          }),
+          dataProvider.checkNaverOrderBatchExecutionApprovalReadonly({
+            actorContext,
+            storeIds: [Number(selectedStoreId)],
+            candidateCount: localOrderCount,
+            batchSize: Math.min(localOrderCount, 5),
+            readonlyEvidence: buildBatchExecutionReadonlyEvidence({
+              readonlyEvidence,
+              candidateCount: localOrderCount,
+              label: 'Orders UI order batch execution approval readonly evidence',
+            }),
+            backupEvidence,
+            manualApproval: true,
+            executionContext: buildNaverOrderExecutionContext(),
+            readonlyApiContext: buildNaverOrderExecutionReadonlyApiContext(),
+          }),
+        ]);
         const result = await dataProvider.checkFormalBatchExecutionPreflightReadonly({
           approvalDecision: decisionResult,
           approvalAuditLinkage: auditLinkageResult,
           executionApprovals: [
-            buildNaverProductExecutionApprovalForPreflight(selectedStoreId),
-            buildNaverOrderExecutionApprovalForPreflight(selectedStoreId),
+            productExecutionApproval,
+            orderExecutionApproval,
           ],
           preflightContext: buildFormalBatchExecutionPreflightContext(),
         });
@@ -2120,7 +2232,8 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             decisionResult,
             auditLinkageResult,
             error: '',
-            localOrderCount: naverOrders.length,
+            localOrderCount,
+            localProductCount,
           });
         }
       } catch (error) {
@@ -2132,6 +2245,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             auditLinkageResult: null,
             error: error?.message || '\u6b63\u5f0f\u6279\u91cf\u6267\u884c\u524d\u7f6e\u68c0\u67e5\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
             localOrderCount: 0,
+            localProductCount: 0,
           });
         }
       }
@@ -2143,7 +2257,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   if (!isNaverStore) return null;
 
   const {
-    loading, result, decisionResult, auditLinkageResult, error, localOrderCount,
+    loading, result, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
   } = state;
   const preflightReady = result?.status === 'formal_batch_execution_preflight_readonly_ready';
   const decisionReady = decisionResult?.status === 'formal_batch_approval_decision_readonly_api_ready';
@@ -2200,6 +2314,14 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           <p>{'\u8ba2\u5355\u8303\u56f4\u4ec5\u6765\u81ea\u5f53\u524d\u5e97\u94fa\u7684\u672c\u5730 Naver \u8ba2\u5355\u590d\u6838\u6750\u6599\uff0c\u4e0d\u4ee3\u8868\u5e73\u53f0\u65b0\u5019\u9009\u5df2\u53ef\u5199\u5165\u3002'}</p>
           <small>{'\u771f\u6b63\u5019\u9009\u4ecd\u8981\u4ece\u5355\u72ec\u53ea\u8bfb preview \u6765\u3002'}</small>
         </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>{'\u672c\u5730\u5546\u54c1\u8303\u56f4'}</strong>
+            <span>{localProductCount} {'\u6761'}</span>
+          </div>
+          <p>{'\u5546\u54c1\u6279\u91cf\u6267\u884c\u5ba1\u6279\u6750\u6599\u4f7f\u7528\u5f53\u524d\u5e97\u94fa\u672c\u5730 Naver \u5546\u54c1\u6570\u91cf\u505a\u53ea\u8bfb\u590d\u6838\uff1b\u4e0d\u4ee3\u8868\u5df2\u53ef\u6b63\u5f0f\u540c\u6b65\u3002'}</p>
+          <small>{'\u5546\u54c1\u6b63\u5f0f\u6279\u91cf\u540c\u6b65\u4ecd\u9700\u5355\u72ec\u6267\u884c\u9636\u6bb5\u3002'}</small>
+        </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
             <strong>{'\u6267\u884c\u548c\u5199\u5165'}</strong>
@@ -2220,6 +2342,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'route_path', value: result?.routePath },
           { label: 'selected_store_id', value: selectedStoreId },
           { label: 'local_order_count', value: localOrderCount },
+          { label: 'local_product_count', value: localProductCount },
           { label: 'decision_phase', value: decisionResult?.phase },
           { label: 'decision_status', value: decisionResult?.status },
           { label: 'audit_linkage_phase', value: auditLinkageResult?.phase },

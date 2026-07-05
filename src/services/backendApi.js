@@ -87,6 +87,12 @@ export const backendApi = {
   checkFormalBatchExecutionPreflightReadonly: (payload) => (
     sendData('post', '/batch/execution-preflight/readonly-check', payload)
   ),
+  checkNaverProductBatchExecutionApprovalReadonly: (payload) => (
+    sendData('post', '/batch/naver/products/execution-approval/readonly-check', payload)
+  ),
+  checkNaverOrderBatchExecutionApprovalReadonly: (payload) => (
+    sendData('post', '/batch/naver/orders/execution-approval/readonly-check', payload)
+  ),
   getNaverProductRollbackReadonlyReport: (payload) => sendData('post', '/batch/naver/products/rollback-readonly-report', payload),
   getRolePermissionInventory: () => getData('/permissions/role-inventory'),
   checkPermissionMock: (payload) => sendData('post', '/permissions/mock-check', payload),
