@@ -1,6 +1,7 @@
 import { getNaverOrderStatusPresentation, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 
-export const SHIPPING_PHASE = 'Shipping-2A-to-2E';
+export const SHIPPING_PHASE = 'Shipping-2F-to-2J';
+export const SHIPPING_EXPORT_MOCK_PHASE = 'Shipping-2H';
 export const SHIPPING_FILE_TYPE = 'shipping_request';
 export const SHIPPING_FILE_FORMAT = 'xlsx';
 
@@ -226,7 +227,7 @@ export function buildLogisticsInventoryMappingMockGate({
         : 'ready';
 
   return {
-    phase: 'Shipping-2D',
+    phase: 'Shipping-2F',
     status,
     businessMessage: rows.length === 0
       ? '当前没有可用于发货辅助的未发货订单。'
@@ -277,7 +278,7 @@ export function buildShippingExcelExportMock({
   }))));
 
   return {
-    phase: 'Shipping-2E',
+    phase: SHIPPING_EXPORT_MOCK_PHASE,
     fileType: SHIPPING_FILE_TYPE,
     fileFormat: SHIPPING_FILE_FORMAT,
     fileName,
@@ -290,11 +291,17 @@ export function buildShippingExcelExportMock({
     fileGenerated: false,
     filePersisted: false,
     exportRecordWritten: false,
+    downloadRecordWritten: false,
     operationAuditRowsWritten: false,
+    exportRecordSchemaPlanned: true,
+    auditLinkagePlanned: true,
+    trackingImportContractPlanned: true,
+    trackingNumberImportOpen: false,
     realApiCalled: false,
     realDatabaseWritten: false,
     formalOrderSyncOpen: false,
     platformWritesEnabled: false,
+    businessMessage: '真实 Excel 生成 mock 门禁已通过；当前仍不创建真实文件、不写导出记录、不回传物流单号。',
     rows: exportRows.map((row) => ({
       platform: 'naver',
       storeName: selectedStore?.name || `store-${selectedStoreId || row.storeId || 'local'}`,

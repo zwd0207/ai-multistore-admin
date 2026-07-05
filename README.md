@@ -1985,3 +1985,19 @@ Shipping-2A to 2E promote logistics inventory-code mapping from page-only mock s
 - Mock mode still uses page state only and does not write the database.
 
 This phase may write local logistics mapping rows, logistics stock rows, and one safe operation audit row for the maintenance action. It still does not call Naver, does not write orders/products/SyncLog/tested-success rows, does not generate a real Excel file, does not write export records, and does not open Naver shipment writeback, tracking-number upload, or formal product/order batch sync.
+
+## Phase Shipping-2F to Shipping-2J - Export Gate and Tracking Contract
+
+Shipping-2F to 2J move the Shipping Assistant export flow from an approval note to a verified mock gate and future contract set:
+
+- `PHASE_SHIPPING_2F_SHIPPING_MAPPING_RUNTIME_WALKTHROUGH.md`
+- `PHASE_SHIPPING_2G_SHIPPING_EXPORT_RECORD_SCHEMA_PROPOSAL.md`
+- `PHASE_SHIPPING_2H_REAL_EXCEL_GENERATION_MOCK_GATE.md`
+- `PHASE_SHIPPING_2I_EXPORT_RECORD_AUDIT_LINKAGE_PLAN.md`
+- `PHASE_SHIPPING_2J_TRACKING_NUMBER_IMPORT_CONTRACT_PLAN.md`
+
+Codex1 now has a private `evaluate_real_excel_generation_mock_gate(...)` service helper covered by `verify_all.py`. It proves approval, safe export rows, privacy blocking, export-record schema acknowledgement, audit-linkage acknowledgement, and no writes.
+
+Codex2 `/shipping` now labels the export preview as the Shipping-2H mock gate and shows that real file generation, export records, audit rows, tracking-number import, platform writes, and formal order sync remain closed.
+
+This phase still does not create a real `.xlsx` file, write export/download records, write orders/products/SyncLog/tested-success rows, call Naver, call a logistics-provider API, import tracking numbers, or execute shipment writeback.

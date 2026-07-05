@@ -1496,3 +1496,36 @@ Next 5 recommended stages:
 3. `Phase Shipping-2H: Real Excel generation mock gate`
 4. `Phase Shipping-2I: Export record and audit linkage plan`
 5. `Phase Shipping-2J: Tracking-number import contract plan`
+
+### Latest update after `Phase Shipping-2F` to `Phase Shipping-2J`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `78% - 85%`
+- ERP real-user landing progress: about `82% - 88%`
+- Production version for long-term non-technical use: about `70% - 78%`
+
+Implemented in this update:
+
+- Verified the Shipping mapping runtime walkthrough direction for backend and mock data sources.
+- Proposed future shipping export batch and export row records.
+- Added a private Codex1 real Excel generation mock gate.
+- Added tests proving the mock gate requires approval, blocks receiver privacy, writes no file, writes no export record, writes no audit row, and calls no API.
+- Updated `/shipping` export preview wording and technical flags for Shipping-2H.
+- Planned export-record to audit-log linkage.
+- Planned future tracking-number import contract without opening Naver shipment writeback.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant trial for unshipped candidates, logistics inventory-code matching, manual logistics stock maintenance, local mapping persistence, and verified export mock gate.
+- Not suitable now: real Excel file generation, export-record/download-record persistence, tracking-number import, Naver shipment writeback, logistics-provider API integration, Coupang shipping workflow, or formal order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-3A: Shipping export record schema approval plan`
+2. `Phase Shipping-3B: Shipping export record schema migration`
+3. `Phase Shipping-3C: Real Excel generation approval plan`
+4. `Phase Shipping-3D: Real Excel generation local implementation`
+5. `Phase Shipping-3E: Export record and audit post-generation verification`

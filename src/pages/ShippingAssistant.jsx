@@ -7,6 +7,7 @@ import { useStoreContext } from '../context/StoreContext';
 import { shippingMockInventoryMappings, shippingMockOrders } from '../data/shippingMockData';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
+  SHIPPING_EXPORT_MOCK_PHASE,
   buildLogisticsInventoryMappingMockGate,
   buildShippingAssistantSummary,
   buildShippingExcelExportMock,
@@ -271,7 +272,7 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate }) {
       <div className="section-heading">
         <div>
           <h2>物流商 Excel 导出预览</h2>
-          <p>当前只生成导出合同预览；真实 Excel 文件生成、导出记录和审计记录仍需单独审批。</p>
+          <p>当前通过真实 Excel 生成 mock 门禁；真实文件、导出记录、审计记录和物流单号回传仍需单独审批。</p>
         </div>
         <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount}>
           生成 Excel 导出预览
@@ -556,7 +557,7 @@ export default function ShippingAssistant() {
         <SummaryCard title="已匹配库存编号" value={summary.matchedCount} note="商品名 + 选项名" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="待维护映射" value={summary.unmatchedCount} note="需要人工补齐" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="库存需关注" value={summary.stockAttentionCount} note="物流库存不足或偏低" tone={summary.stockAttentionCount ? 'warning' : 'success'} />
-        <SummaryCard title="可导出行" value={summary.exportReadyCount} note="Excel mock 预览" tone={summary.exportReadyCount ? 'success' : 'default'} />
+        <SummaryCard title="可导出行" value={summary.exportReadyCount} note="Excel mock 门禁" tone={summary.exportReadyCount ? 'success' : 'default'} />
       </div>
 
       <ShippingWorkflowSteps />
@@ -615,16 +616,21 @@ export default function ShippingAssistant() {
       />
 
       <TechnicalDetails
-        title="查看 Excel mock 导出边界"
-        description="本阶段只规划真实 Excel 生成审批边界；当前不创建真实文件、不写导出记录。"
+        title="查看 Excel 生成 mock 门禁"
+        description="当前只确认真实 Excel、导出记录、审计联动和物流单号回传的边界；不创建真实文件、不写导出记录。"
         items={[
-          { label: 'phase', value: exportPreview?.phase || 'Shipping-2E' },
+          { label: 'phase', value: exportPreview?.phase || SHIPPING_EXPORT_MOCK_PHASE },
           { label: 'file_type', value: exportPreview?.fileType || 'shipping_request' },
           { label: 'file_format', value: exportPreview?.fileFormat || 'xlsx' },
           { label: 'file_generated', value: exportPreview?.fileGenerated ?? false },
           { label: 'file_persisted', value: exportPreview?.filePersisted ?? false },
           { label: 'export_record_written', value: exportPreview?.exportRecordWritten ?? false },
+          { label: 'download_record_written', value: exportPreview?.downloadRecordWritten ?? false },
           { label: 'operation_audit_rows_written', value: exportPreview?.operationAuditRowsWritten ?? false },
+          { label: 'export_record_schema_planned', value: exportPreview?.exportRecordSchemaPlanned ?? true },
+          { label: 'audit_linkage_planned', value: exportPreview?.auditLinkagePlanned ?? true },
+          { label: 'tracking_import_contract_planned', value: exportPreview?.trackingImportContractPlanned ?? true },
+          { label: 'tracking_number_import_open', value: exportPreview?.trackingNumberImportOpen ?? false },
           { label: 'receiver_privacy_included', value: exportPreview?.includeReceiverPrivacy ?? false },
           { label: 'real_api_called', value: exportPreview?.realApiCalled ?? false },
           { label: 'real_database_written', value: exportPreview?.realDatabaseWritten ?? false },
