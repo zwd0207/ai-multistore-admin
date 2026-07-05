@@ -2096,3 +2096,14 @@ Shipping-9A to 9B define and verify the final mock gate before any future Naver 
 Codex1 exposes `POST /api/v1/shipping/shipment-writeback/execution-mock-gate`. The route requires execution approval, dry-run evidence acknowledgement, permission evidence acknowledgement, final operator confirmation, and all Shipping-8F dry-run evidence. It also blocks `real_api_call_requested=true` so this phase cannot accidentally become a platform write.
 
 This stage does not call Naver, does not call a logistics-provider API, does not write orders/products/SyncLog/tested-success rows, does not write audit rows, and does not open formal product/order batch sync.
+
+## Phase Shipping-9C to Shipping-9D - Shipment Writeback Execution Evidence UI
+
+Shipping-9C to 9D connect the existing execution mock gate to the Shipping Assistant as readonly evidence:
+
+- `PHASE_SHIPPING_9C_SHIPMENT_WRITEBACK_EXECUTION_EVIDENCE_UI_PLAN.md`
+- `PHASE_SHIPPING_9D_SHIPMENT_WRITEBACK_EXECUTION_EVIDENCE_UI_INTEGRATION.md`
+
+Codex2 now calls `POST /api/v1/shipping/shipment-writeback/execution-mock-gate` through `dataProvider` in backend mode, with a mock fallback in mock mode. The `/shipping` page shows a business-facing `Naver 发货回填执行门禁` panel after the dry-run evidence panel. It displays execution candidate count, Naver call state, platform write state, and local write state while keeping route flags and safety fields folded in `TechnicalDetails`.
+
+This stage is still readonly evidence only. It does not call Naver, call a logistics-provider API, write orders/products/SyncLog/tested-success rows, write audit rows, persist platform payloads, or open formal product/order batch sync.

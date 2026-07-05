@@ -1662,6 +1662,78 @@ function adaptShippingShipmentWritebackDryRunGateResult(data = {}) {
   };
 }
 
+function adaptShippingShipmentWritebackExecutionMockGateResult(data = {}) {
+  const candidates = Array.isArray(data.execution_candidates)
+    ? data.execution_candidates
+    : (Array.isArray(data.executionCandidates) ? data.executionCandidates : []);
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-9B',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyRoute: Boolean(data.readonly_route ?? data.readonlyRoute ?? true),
+    shipmentWritebackExecutionMockGate: Boolean(
+      data.shipment_writeback_execution_mock_gate ?? data.shipmentWritebackExecutionMockGate ?? true,
+    ),
+    shipmentWritebackExecutionReady: Boolean(
+      data.shipment_writeback_execution_ready ?? data.shipmentWritebackExecutionReady,
+    ),
+    executionApproval: Boolean(data.execution_approval ?? data.executionApproval),
+    dryRunEvidenceAcknowledged: Boolean(
+      data.dry_run_evidence_acknowledged ?? data.dryRunEvidenceAcknowledged,
+    ),
+    permissionEvidenceAcknowledged: Boolean(
+      data.permission_evidence_acknowledged ?? data.permissionEvidenceAcknowledged,
+    ),
+    finalOperatorConfirmation: Boolean(
+      data.final_operator_confirmation ?? data.finalOperatorConfirmation,
+    ),
+    realApiCallRequested: Boolean(data.real_api_call_requested ?? data.realApiCallRequested),
+    futureRealWriteRequiresSeparateApproval: (
+      data.future_real_write_requires_separate_approval !== false
+      && data.futureRealWriteRequiresSeparateApproval !== false
+    ),
+    importBatchId: data.import_batch_id ?? data.importBatchId ?? null,
+    matchedOrderCount: Number(data.matched_order_count ?? data.matchedOrderCount ?? 0),
+    unmatchedOrderCount: Number(data.unmatched_order_count ?? data.unmatchedOrderCount ?? 0),
+    dryRunStatus: data.dry_run_status ?? data.dryRunStatus ?? '',
+    dryRunSkipReason: data.dry_run_skip_reason ?? data.dryRunSkipReason ?? null,
+    dryRunCandidateCount: Number(data.dry_run_candidate_count ?? data.dryRunCandidateCount ?? 0),
+    executionCandidateCount: Number(data.execution_candidate_count ?? data.executionCandidateCount ?? candidates.length),
+    executionCandidates: candidates.map((item) => ({
+      localOrderId: item.local_order_id ?? item.localOrderId ?? null,
+      orderReferenceHash: item.order_reference_hash ?? item.orderReferenceHash ?? '',
+      productOrderReferenceHash: item.product_order_reference_hash ?? item.productOrderReferenceHash ?? '',
+      trackingNumberHash: item.tracking_number_hash ?? item.trackingNumberHash ?? '',
+      carrier: item.carrier || '',
+      shippedAt: item.shipped_at ?? item.shippedAt ?? null,
+      currentOrderStatus: item.current_order_status ?? item.currentOrderStatus ?? '',
+      targetDeliveryStatus: item.target_delivery_status ?? item.targetDeliveryStatus ?? 'DISPATCHED',
+      executionAllowed: Boolean(item.execution_allowed ?? item.executionAllowed),
+      futureWriteAllowed: Boolean(item.future_write_allowed ?? item.futureWriteAllowed),
+      payloadPreviewSaved: Boolean(item.payload_preview_saved ?? item.payloadPreviewSaved),
+      rawResponseSaved: Boolean(item.raw_response_saved ?? item.rawResponseSaved),
+    })),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    ordersUpdated: Boolean(data.orders_updated ?? data.ordersUpdated),
+    orderStatusEventsWritten: Boolean(data.order_status_events_written ?? data.orderStatusEventsWritten),
+    trackingImportBatchUpdated: Boolean(data.tracking_import_batch_updated ?? data.trackingImportBatchUpdated),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+  };
+}
+
 function toBackendShippingShipmentWritebackDryRunGatePayload(payload = {}) {
   const request = toBackendShippingTrackingOrderMatchPayload(payload);
   return {
@@ -1673,6 +1745,24 @@ function toBackendShippingShipmentWritebackDryRunGatePayload(payload = {}) {
     naver_writeback_boundary_acknowledged: Boolean(payload.naverWritebackBoundaryAcknowledged ?? payload.naver_writeback_boundary_acknowledged),
     operator_checklist_acknowledged: Boolean(payload.operatorChecklistAcknowledged ?? payload.operator_checklist_acknowledged),
     target_delivery_status: payload.targetDeliveryStatus || payload.target_delivery_status || 'DISPATCHED',
+  };
+}
+
+function toBackendShippingShipmentWritebackExecutionMockGatePayload(payload = {}) {
+  const request = toBackendShippingShipmentWritebackDryRunGatePayload(payload);
+  return {
+    ...request,
+    execution_approval: Boolean(payload.executionApproval ?? payload.execution_approval),
+    dry_run_evidence_acknowledged: Boolean(
+      payload.dryRunEvidenceAcknowledged ?? payload.dry_run_evidence_acknowledged,
+    ),
+    permission_evidence_acknowledged: Boolean(
+      payload.permissionEvidenceAcknowledged ?? payload.permission_evidence_acknowledged,
+    ),
+    final_operator_confirmation: Boolean(
+      payload.finalOperatorConfirmation ?? payload.final_operator_confirmation,
+    ),
+    real_api_call_requested: Boolean(payload.realApiCallRequested ?? payload.real_api_call_requested),
   };
 }
 
@@ -4882,6 +4972,90 @@ const sourceMethods = {
     const { store } = await resolveBackendStore({ storeId: request.store_id });
     return adaptShippingShipmentWritebackDryRunGateResult(
       await backendApi.checkShippingShipmentWritebackDryRunGate({
+        ...request,
+        store_id: Number(store.id),
+      }),
+    );
+  },
+  checkShippingShipmentWritebackExecutionMockGate: async (payload = {}) => {
+    const request = toBackendShippingShipmentWritebackExecutionMockGatePayload(payload);
+    if (!isBackendSource) {
+      const missingReason = !request.execution_approval
+        ? 'execution_approval_required'
+        : (!request.dry_run_evidence_acknowledged
+          ? 'dry_run_evidence_required'
+          : (!request.permission_evidence_acknowledged
+            ? 'permission_evidence_required'
+            : (!request.final_operator_confirmation
+              ? 'final_operator_confirmation_required'
+              : (!request.manual_approval
+                ? 'manual_approval_required'
+                : (!request.backup_evidence_acknowledged
+                  ? 'backup_evidence_required'
+                  : (!request.audit_evidence_acknowledged
+                    ? 'audit_evidence_required'
+                    : (!request.local_status_evidence_acknowledged
+                      ? 'local_status_evidence_required'
+                      : (!request.naver_writeback_boundary_acknowledged
+                        ? 'naver_writeback_boundary_required'
+                        : (!request.operator_checklist_acknowledged ? 'operator_checklist_required' : null)))))))));
+      return adaptShippingShipmentWritebackExecutionMockGateResult({
+        phase: 'Shipping-9B',
+        status: missingReason ? 'blocked' : 'shipment_writeback_execution_mock_gate_ready',
+        skip_reason: missingReason,
+        business_message: missingReason
+          ? 'Mock execution gate is waiting for final approval evidence.'
+          : 'Mock execution evidence is ready for review. Naver is still not called.',
+        readonly_route: true,
+        shipment_writeback_execution_mock_gate: true,
+        shipment_writeback_execution_ready: !missingReason,
+        execution_approval: request.execution_approval,
+        dry_run_evidence_acknowledged: request.dry_run_evidence_acknowledged,
+        permission_evidence_acknowledged: request.permission_evidence_acknowledged,
+        final_operator_confirmation: request.final_operator_confirmation,
+        real_api_call_requested: request.real_api_call_requested,
+        future_real_write_requires_separate_approval: true,
+        import_batch_id: request.import_batch_id,
+        dry_run_status: missingReason ? 'blocked' : 'shipment_writeback_dry_run_gate_ready',
+        dry_run_candidate_count: missingReason ? 0 : 1,
+        execution_candidate_count: missingReason ? 0 : 1,
+        matched_order_count: missingReason ? 0 : 1,
+        unmatched_order_count: 0,
+        execution_candidates: missingReason ? [] : [{
+          local_order_id: 'mock-order-1',
+          order_reference_hash: 'id-hash-mockshippingorder',
+          product_order_reference_hash: 'id-hash-mockproductorder',
+          tracking_number_hash: 'id-hash-mocktracking001',
+          carrier: 'Mock carrier',
+          shipped_at: '2026-07-05T18:10:00+09:00',
+          current_order_status: 'DISPATCHED',
+          target_delivery_status: 'DISPATCHED',
+          execution_allowed: false,
+          future_write_allowed: false,
+          payload_preview_saved: false,
+          raw_response_saved: false,
+        }],
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        platform_writes_enabled: false,
+        orders_updated: false,
+        order_status_events_written: false,
+        tracking_import_batch_updated: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        real_database_written: false,
+        real_api_called: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingShipmentWritebackExecutionMockGateResult(
+      await backendApi.checkShippingShipmentWritebackExecutionMockGate({
         ...request,
         store_id: Number(store.id),
       }),

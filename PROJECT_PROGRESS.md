@@ -1817,3 +1817,36 @@ Next 5 recommended stages:
 3. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
 4. `Phase Shipping-9C: Shipment writeback execution evidence UI plan`
 5. `Phase Shipping-9D: Shipment writeback execution evidence UI integration`
+
+### Latest update after `Phase Shipping-9C` to `Phase Shipping-9D`
+
+Progress snapshot:
+
+- Project overall planning progress: about `96% - 98%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `94% - 96%`
+- Production version for long-term non-technical use: about `89% - 92%`
+- First landing Shipping Assistant feature progress: about `99%`
+
+Implemented in this update:
+
+- Added the Shipping-9C UI plan for shipment writeback execution evidence.
+- Connected Codex2 to the existing Codex1 `POST /api/v1/shipping/shipment-writeback/execution-mock-gate` route.
+- Added backend/mock data-provider support for execution mock-gate evidence.
+- Added a `/shipping` panel named `Naver 发货回填执行门禁`.
+- The panel shows execution candidate count, Naver call state, platform-write state, and local-write state.
+- Kept route details, skip reasons, candidate hashes, and safety flags folded in `TechnicalDetails`.
+- Kept Naver shipment writeback, logistics-provider API calls, database writes, audit writes, and formal product/order batch sync closed.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with tracking import, local order status update evidence, dry-run readiness evidence, and visible final execution mock-gate evidence for future shipment writeback.
+- Not suitable now: actual Naver shipment writeback execution, unattended shipment automation, logistics-provider API integration, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-3A: Formal product batch execution gate plan`
+2. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
+3. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
+4. `Phase Shipping-10A: Shipment writeback real execution approval plan`
+5. `Phase ERP-Batch-5A: Formal product/order batch write execution approval plan`

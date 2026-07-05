@@ -73,6 +73,9 @@ export const backendApi = {
   ),
   checkShippingShipmentWritebackBoundary: (payload) => sendData('post', '/shipping/shipment-writeback/approval-boundary', payload),
   checkShippingShipmentWritebackDryRunGate: (payload) => sendData('post', '/shipping/shipment-writeback/dry-run-gate', payload),
+  checkShippingShipmentWritebackExecutionMockGate: (payload) => (
+    sendData('post', '/shipping/shipment-writeback/execution-mock-gate', payload)
+  ),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),
   getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),
