@@ -1785,3 +1785,35 @@ Next 5 recommended stages:
 3. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
 4. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
 5. `Phase Shipping-9B: Naver shipment writeback execution mock gate`
+
+### Latest update after `Phase Shipping-9A` to `Phase Shipping-9B`
+
+Progress snapshot:
+
+- Project overall planning progress: about `96% - 98%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `94% - 96%`
+- Production version for long-term non-technical use: about `89% - 92%`
+- First landing Shipping Assistant feature progress: about `98% - 99%`
+
+Implemented in this update:
+
+- Added the Shipping-9A approval boundary for a future Naver shipment writeback execution phase.
+- Added Codex1 readonly route `POST /api/v1/shipping/shipment-writeback/execution-mock-gate`.
+- Verified the mock gate blocks missing execution approval.
+- Verified the mock gate blocks any `real_api_call_requested=true` request.
+- Verified the mock gate becomes ready only after Shipping-8F dry-run evidence and final execution evidence are acknowledged.
+- Kept Naver shipment writeback, logistics-provider API calls, database writes, audit writes, and formal product/order batch sync closed.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with local status update evidence, dry-run readiness evidence, and final execution mock-gate evidence for future shipment writeback.
+- Not suitable now: actual Naver shipment writeback execution, unattended shipment automation, logistics-provider API integration, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-3A: Formal product batch execution gate plan`
+2. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
+3. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
+4. `Phase Shipping-9C: Shipment writeback execution evidence UI plan`
+5. `Phase Shipping-9D: Shipment writeback execution evidence UI integration`

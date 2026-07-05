@@ -2085,3 +2085,14 @@ Shipping-8A to 8G connect imported tracking rows to local order status updates a
 - Technical route status, hashes, write flags, and safety flags stay in `TechnicalDetails`.
 
 This stage may update local order status only through the separately approved local status update route. The dry-run evidence panel itself does not write local data. Naver shipment writeback, logistics-provider API calls, formal order batch sync, formal product batch sync, platform payload persistence, SyncLog writes, and tested-success writes remain closed.
+
+## Phase Shipping-9A to Shipping-9B - Shipment Writeback Execution Mock Gate
+
+Shipping-9A to 9B define and verify the final mock gate before any future Naver shipment writeback execution:
+
+- `PHASE_SHIPPING_9A_NAVER_SHIPMENT_WRITEBACK_EXECUTION_APPROVAL_BOUNDARY_PLAN.md`
+- `PHASE_SHIPPING_9B_NAVER_SHIPMENT_WRITEBACK_EXECUTION_MOCK_GATE.md`
+
+Codex1 exposes `POST /api/v1/shipping/shipment-writeback/execution-mock-gate`. The route requires execution approval, dry-run evidence acknowledgement, permission evidence acknowledgement, final operator confirmation, and all Shipping-8F dry-run evidence. It also blocks `real_api_call_requested=true` so this phase cannot accidentally become a platform write.
+
+This stage does not call Naver, does not call a logistics-provider API, does not write orders/products/SyncLog/tested-success rows, does not write audit rows, and does not open formal product/order batch sync.
