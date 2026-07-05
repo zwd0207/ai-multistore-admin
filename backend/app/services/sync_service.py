@@ -8217,6 +8217,12 @@ def evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
         "required_actions": [],
         "candidate_summary_count": 0,
         "total_candidate_count": 0,
+        "total_would_create": 0,
+        "total_would_update": 0,
+        "total_would_refresh_only": 0,
+        "total_would_skip": 0,
+        "changed_fields": [],
+        "candidate_summaries": [],
         "backup_sha256_abbrev": None,
         "audit_correlation_reference": None,
         "route_path": None,
@@ -8412,11 +8418,29 @@ def evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
     try:
         candidate_summary_count = int(write_boundary_review.get("candidate_summary_count") or 0)
         total_candidate_count = int(write_boundary_review.get("total_candidate_count") or 0)
+        total_would_create = int(write_boundary_review.get("total_would_create") or 0)
+        total_would_update = int(write_boundary_review.get("total_would_update") or 0)
+        total_would_refresh_only = int(write_boundary_review.get("total_would_refresh_only") or 0)
+        total_would_skip = int(write_boundary_review.get("total_would_skip") or 0)
     except (TypeError, ValueError):
         result["skip_reason"] = "write_boundary_candidate_counts_invalid"
         return result
-    if candidate_summary_count < 0 or total_candidate_count < 0:
+    if min(
+        candidate_summary_count,
+        total_candidate_count,
+        total_would_create,
+        total_would_update,
+        total_would_refresh_only,
+        total_would_skip,
+    ) < 0:
         result["skip_reason"] = "write_boundary_candidate_counts_invalid"
+        return result
+    if total_would_create + total_would_update + total_would_refresh_only + total_would_skip > total_candidate_count:
+        result["skip_reason"] = "write_boundary_candidate_totals_exceed_candidates"
+        return result
+    changed_fields = _normalize_safe_changed_fields(write_boundary_review.get("changed_fields") or [])
+    if changed_fields is None:
+        result["skip_reason"] = "write_boundary_changed_fields_invalid"
         return result
 
     result.update({
@@ -8431,6 +8455,12 @@ def evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
         "required_actions": sorted(review_required_actions),
         "candidate_summary_count": candidate_summary_count,
         "total_candidate_count": total_candidate_count,
+        "total_would_create": total_would_create,
+        "total_would_update": total_would_update,
+        "total_would_refresh_only": total_would_refresh_only,
+        "total_would_skip": total_would_skip,
+        "changed_fields": changed_fields,
+        "candidate_summaries": write_boundary_review.get("candidate_summaries") or [],
         "backup_sha256_abbrev": f"{backup_sha256[:12]}...",
         "audit_correlation_reference": (
             str(audit_refresh_evidence.get("audit_correlation_id_hash") or "")[:24] or None
@@ -8654,6 +8684,328 @@ def evaluate_formal_batch_pre_execution_refresh_readonly_api_local(
         result["next_action"] = (
             "Use this readonly route as operator evidence before a separately approved execution phase with refreshed backup, audit, readback, rollback, permission, and sensitive-scan evidence."
         )
+    return result
+
+
+def evaluate_formal_batch_write_execution_mock_gate(
+    *,
+    pre_execution_refresh_review: dict | None,
+    write_execution_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Final mock gate before a separately approved formal product/order batch write."""
+
+    required_execution_flags = [
+        "explicit_human_approval_recorded",
+        "approval_decision_referenced",
+        "approval_audit_linkage_referenced",
+        "pre_execution_refresh_referenced",
+        "fresh_backup_referenced",
+        "backup_manifest_verified",
+        "audit_correlation_referenced",
+        "permission_recheck_passed",
+        "dry_run_recheck_passed",
+        "write_scope_frozen",
+        "max_batch_size_enforced",
+        "local_write_plan_whitelisted",
+        "idempotency_key_planned",
+        "duplicate_protection_verified",
+        "readback_plan_locked",
+        "rollback_plan_locked",
+        "sensitive_scan_passed",
+        "operator_confirmation_recorded",
+        "partial_failure_policy_locked",
+        "formal_sync_remains_closed",
+        "platform_writes_remain_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-5B",
+        "formal_batch_write_execution_mock_gate": True,
+        "private_helper_only": True,
+        "status": "blocked",
+        "approval_status": "blocked",
+        "batch_write_ready_for_separate_execution_phase": False,
+        "execution_allowed": False,
+        "skip_reason": None,
+        "required_execution_flags": required_execution_flags,
+        "missing_execution_flags": [],
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "required_actions": [],
+        "candidate_summary_count": 0,
+        "total_candidate_count": 0,
+        "total_would_create": 0,
+        "total_would_update": 0,
+        "total_would_refresh_only": 0,
+        "total_would_skip": 0,
+        "changed_fields": [],
+        "candidate_summaries": [],
+        "max_batch_size": 0,
+        "approval_record_reference": None,
+        "backup_manifest_reference": None,
+        "audit_correlation_reference": None,
+        "idempotency_key_reference": None,
+        "backend_route_implemented": False,
+        "public_endpoint_enabled": False,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_call_requested": False,
+        "local_database_write_requested": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(pre_execution_refresh_review, dict):
+        result["skip_reason"] = "pre_execution_refresh_review_required"
+        return result
+    if not isinstance(write_execution_context, dict):
+        result["skip_reason"] = "write_execution_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "pre_execution_refresh_review": pre_execution_refresh_review,
+        "write_execution_context": write_execution_context,
+    }):
+        result["skip_reason"] = "formal_batch_write_execution_sensitive_field_blocked"
+        return result
+
+    if pre_execution_refresh_review.get("status") != "formal_batch_pre_execution_refresh_readonly_api_ready":
+        result["skip_reason"] = "pre_execution_refresh_review_not_ready"
+        return result
+    if pre_execution_refresh_review.get("pre_execution_backup_audit_refresh_gate_ready") is not True:
+        result["skip_reason"] = "pre_execution_refresh_review_not_ready"
+        return result
+
+    side_effect_flags = [
+        "execution_approved",
+        "batch_execution_enabled",
+        "write_endpoint_enabled",
+        "real_api_called",
+        "real_database_written",
+        "orders_written",
+        "products_written",
+        "sync_log_written",
+        "capability_tested_success_written",
+        "timeline_events_written",
+        "operation_audit_rows_written",
+        "formal_sync_open",
+        "formal_order_sync_open",
+        "formal_product_sync_open",
+        "platform_order_writes_enabled",
+        "platform_product_writes_enabled",
+        "platform_writes_enabled",
+        "shipment_write_enabled",
+        "cancel_write_enabled",
+        "return_write_enabled",
+        "exchange_write_enabled",
+    ]
+    for source_name, payload in (
+        ("pre_execution_refresh_review", pre_execution_refresh_review),
+        ("write_execution_context", write_execution_context),
+    ):
+        for flag in side_effect_flags:
+            if payload.get(flag) is True:
+                if flag == "execution_approved":
+                    result["skip_reason"] = "execution_approval_not_allowed_in_write_execution_mock_gate"
+                else:
+                    result["skip_reason"] = "side_effect_not_allowed_in_write_execution_mock_gate"
+                result["blocked_source"] = source_name
+                result["blocked_flag"] = flag
+                return result
+        if payload.get("raw_response_saved") is not False and "raw_response_saved" in payload:
+            result["skip_reason"] = "raw_response_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("secrets_saved") is not False and "secrets_saved" in payload:
+            result["skip_reason"] = "secrets_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("privacy_fields_redacted") is not True and "privacy_fields_redacted" in payload:
+            result["skip_reason"] = "privacy_redaction_required"
+            result["blocked_source"] = source_name
+            return result
+
+    request_flags = [
+        "real_api_call_requested",
+        "platform_write_requested",
+        "platform_product_write_requested",
+        "platform_order_write_requested",
+        "naver_writeback_requested",
+        "local_database_write_requested",
+        "real_sync",
+        "write_requested",
+    ]
+    for flag in request_flags:
+        if write_execution_context.get(flag) is True:
+            if flag == "real_api_call_requested":
+                result["skip_reason"] = "real_api_call_not_allowed_in_write_execution_mock_gate"
+            elif flag in {"local_database_write_requested", "real_sync", "write_requested"}:
+                result["skip_reason"] = "local_write_request_not_allowed_in_write_execution_mock_gate"
+            else:
+                result["skip_reason"] = "platform_write_not_allowed_in_write_execution_mock_gate"
+            result["blocked_flag"] = flag
+            return result
+
+    missing_flags = [
+        flag for flag in required_execution_flags
+        if write_execution_context.get(flag) is not True
+    ]
+    result["missing_execution_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "write_execution_context_incomplete"
+        return result
+
+    review_store_ids = set(_normalize_formal_batch_store_ids(pre_execution_refresh_review.get("store_ids")) or [])
+    context_store_ids = set(_normalize_formal_batch_store_ids(write_execution_context.get("store_ids")) or [])
+    if not review_store_ids:
+        result["skip_reason"] = "pre_execution_refresh_store_scope_required"
+        return result
+    if context_store_ids != review_store_ids:
+        result["skip_reason"] = "write_execution_store_scope_mismatch"
+        return result
+
+    review_sync_kinds = set(str(kind) for kind in (pre_execution_refresh_review.get("sync_kinds") or []))
+    context_sync_kinds = set(str(kind) for kind in (write_execution_context.get("sync_kinds") or []))
+    if not review_sync_kinds:
+        result["skip_reason"] = "pre_execution_refresh_sync_kind_scope_required"
+        return result
+    if context_sync_kinds != review_sync_kinds:
+        result["skip_reason"] = "write_execution_sync_kind_scope_mismatch"
+        return result
+
+    review_targets = set(str(target) for target in (pre_execution_refresh_review.get("targets") or []))
+    context_targets = set(str(target) for target in (write_execution_context.get("targets") or []))
+    if not review_targets:
+        result["skip_reason"] = "pre_execution_refresh_target_scope_required"
+        return result
+    if context_targets != review_targets:
+        result["skip_reason"] = "write_execution_target_scope_mismatch"
+        return result
+
+    review_required_actions = set(str(action) for action in (pre_execution_refresh_review.get("required_actions") or []))
+    context_required_actions = set(str(action) for action in (write_execution_context.get("required_actions") or []))
+    expected_required_actions = {
+        str(FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["required_action"])
+        for sync_kind in review_sync_kinds
+        if sync_kind in FORMAL_BATCH_SYNC_GATE_KINDS
+    }
+    if not review_required_actions:
+        result["skip_reason"] = "pre_execution_refresh_action_scope_required"
+        return result
+    if expected_required_actions and review_required_actions != expected_required_actions:
+        result["skip_reason"] = "pre_execution_refresh_action_scope_mismatch"
+        return result
+    if context_required_actions != review_required_actions:
+        result["skip_reason"] = "write_execution_action_scope_mismatch"
+        return result
+
+    try:
+        candidate_summary_count = int(pre_execution_refresh_review.get("candidate_summary_count") or 0)
+        total_candidate_count = int(pre_execution_refresh_review.get("total_candidate_count") or 0)
+        max_batch_size = int(write_execution_context.get("max_batch_size") or 0)
+        context_candidate_summary_count = int(
+            write_execution_context.get("candidate_summary_count", candidate_summary_count)
+        )
+        context_total_candidate_count = int(
+            write_execution_context.get("total_candidate_count", total_candidate_count)
+        )
+    except (TypeError, ValueError):
+        result["skip_reason"] = "write_execution_candidate_counts_invalid"
+        return result
+    if min(candidate_summary_count, total_candidate_count, max_batch_size) < 0:
+        result["skip_reason"] = "write_execution_candidate_counts_invalid"
+        return result
+    if candidate_summary_count == 0 or total_candidate_count == 0:
+        result["skip_reason"] = "write_execution_candidate_count_required"
+        return result
+    if context_candidate_summary_count != candidate_summary_count or context_total_candidate_count != total_candidate_count:
+        result["skip_reason"] = "write_execution_candidate_count_mismatch"
+        return result
+    if max_batch_size == 0:
+        result["skip_reason"] = "max_batch_size_required"
+        return result
+    if total_candidate_count > max_batch_size:
+        result["skip_reason"] = "write_execution_candidate_count_exceeds_limit"
+        result["max_batch_size"] = max_batch_size
+        return result
+
+    changed_fields = _normalize_safe_changed_fields(pre_execution_refresh_review.get("changed_fields") or [])
+    if changed_fields is None:
+        result["skip_reason"] = "pre_execution_refresh_changed_fields_invalid"
+        return result
+    approved_changed_fields = write_execution_context.get("approved_changed_fields")
+    if approved_changed_fields is not None:
+        safe_approved_changed_fields = _normalize_safe_changed_fields(approved_changed_fields)
+        if safe_approved_changed_fields is None:
+            result["skip_reason"] = "write_execution_approved_changed_fields_invalid"
+            return result
+        if not set(changed_fields).issubset(set(safe_approved_changed_fields)):
+            result["skip_reason"] = "write_execution_changed_fields_not_approved"
+            return result
+
+    safe_reference_pattern = r"[a-z0-9][a-z0-9._:-]{6,127}"
+    required_references = {
+        "approval_record_hash": "approval_record_reference",
+        "backup_manifest_reference": "backup_manifest_reference",
+        "audit_correlation_id_hash": "audit_correlation_reference",
+        "idempotency_key_hash": "idempotency_key_reference",
+    }
+    safe_references: dict[str, str] = {}
+    for source_key, output_key in required_references.items():
+        value = str(write_execution_context.get(source_key) or "").strip().lower()
+        if not re.fullmatch(safe_reference_pattern, value):
+            result["skip_reason"] = f"{source_key}_invalid"
+            return result
+        safe_references[output_key] = value[:32]
+
+    result.update({
+        "status": "formal_batch_write_execution_mock_gate_ready",
+        "approval_status": "ready_for_separate_write_execution_phase",
+        "batch_write_ready_for_separate_execution_phase": True,
+        "store_ids": sorted(review_store_ids),
+        "sync_kinds": sorted(review_sync_kinds),
+        "targets": sorted(review_targets),
+        "required_actions": sorted(review_required_actions),
+        "candidate_summary_count": candidate_summary_count,
+        "total_candidate_count": total_candidate_count,
+        "total_would_create": int(pre_execution_refresh_review.get("total_would_create") or 0),
+        "total_would_update": int(pre_execution_refresh_review.get("total_would_update") or 0),
+        "total_would_refresh_only": int(pre_execution_refresh_review.get("total_would_refresh_only") or 0),
+        "total_would_skip": int(pre_execution_refresh_review.get("total_would_skip") or 0),
+        "changed_fields": changed_fields,
+        "candidate_summaries": pre_execution_refresh_review.get("candidate_summaries") or [],
+        "max_batch_size": max_batch_size,
+        **safe_references,
+        "business_message": (
+            "Formal product/order batch write execution mock gate is ready for review only. "
+            "It confirms approval, backup, audit, permission, dry-run, idempotency, readback, rollback, and sensitive-scan evidence, but it still does not allow execution, write products or orders, write audit rows, call platform APIs, or open formal sync."
+        ),
+        "next_action": (
+            "A later separately approved execution phase may use this evidence to perform local product/order batch writes with immediate readback, rollback evidence, and audit rows. Platform writes remain closed until separately approved."
+        ),
+    })
     return result
 
 

@@ -1559,6 +1559,18 @@ The route wraps the 4F mock gate for operator and future Codex2 review. A ready 
 
 This route is not a backup endpoint, audit-write endpoint, product/order write endpoint, or batch execution endpoint. It only lets the UI or operator read whether the final pre-execution backup and audit refresh evidence is complete enough to plan a separate execution phase.
 
+ERP-Batch-5A and 5B add the final private mock gate before any future formal product/order batch write:
+
+```text
+evaluate_formal_batch_write_execution_mock_gate(...)
+```
+
+The helper consumes the 4G pre-execution refresh readonly review and a safe write-execution context. It requires explicit human approval evidence, approval-decision reference, approval audit-linkage reference, refreshed backup reference, backup-manifest verification, audit correlation, permission recheck, dry-run recheck, frozen write scope, max batch size, whitelisted local write plan, idempotency planning, duplicate protection, readback plan, rollback plan, sensitive scan, operator confirmation, partial-failure policy, closed formal sync, and closed platform writes.
+
+Passing 5B returns `status=formal_batch_write_execution_mock_gate_ready` and `approval_status=ready_for_separate_write_execution_phase`, but it still keeps `execution_allowed=false`, `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `real_api_call_requested=false`, `local_database_write_requested=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+This is not a public route and not a write endpoint. It does not call Naver, does not write products or orders, does not write audit rows, does not write SyncLog, does not add tested-success rows, and does not open formal product/order batch sync. A later execution phase must be explicitly approved again before any local batch write.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

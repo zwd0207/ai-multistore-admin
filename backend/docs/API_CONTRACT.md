@@ -3361,6 +3361,74 @@ Success response:
 
 The route is readonly review evidence only. It must not create a backup, restore a database, write audit rows, write products, write orders, write SyncLog, add capability test success rows, call Naver or a logistics provider, expose platform writes, or open formal product/order batch sync.
 
+### Formal Batch Write Execution Mock Gate
+
+Phase ERP-Batch-5A plans the final pre-write approval boundary for formal product/order batch execution. Phase ERP-Batch-5B implements it as a private mock gate only:
+
+```text
+evaluate_formal_batch_write_execution_mock_gate(...)
+```
+
+Inputs:
+
+```json
+{
+  "pre_execution_refresh_review": {},
+  "write_execution_context": {
+    "explicit_human_approval_recorded": true,
+    "approval_decision_referenced": true,
+    "approval_audit_linkage_referenced": true,
+    "pre_execution_refresh_referenced": true,
+    "fresh_backup_referenced": true,
+    "backup_manifest_verified": true,
+    "audit_correlation_referenced": true,
+    "permission_recheck_passed": true,
+    "dry_run_recheck_passed": true,
+    "write_scope_frozen": true,
+    "max_batch_size_enforced": true,
+    "local_write_plan_whitelisted": true,
+    "idempotency_key_planned": true,
+    "duplicate_protection_verified": true,
+    "readback_plan_locked": true,
+    "rollback_plan_locked": true,
+    "sensitive_scan_passed": true,
+    "operator_confirmation_recorded": true,
+    "partial_failure_policy_locked": true,
+    "formal_sync_remains_closed": true,
+    "platform_writes_remain_closed": true
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-5B",
+  "status": "formal_batch_write_execution_mock_gate_ready",
+  "approval_status": "ready_for_separate_write_execution_phase",
+  "batch_write_ready_for_separate_execution_phase": true,
+  "execution_allowed": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "real_api_call_requested": false,
+  "local_database_write_requested": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The mock gate blocks incomplete human approval evidence, sensitive markers, real API requests, local write requests, platform write requests, side-effect flags, store/sync/target/action scope mismatches, unapproved changed fields, invalid evidence references, and candidate counts above the approved maximum.
+
+There is no public route for 5B. Passing this gate does not write products, write orders, write audit rows, write SyncLog, add tested-success rows, call Naver, expose platform writes, or open formal product/order batch sync. It only proves the evidence is complete enough to ask for a separate future local write execution phase.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text
