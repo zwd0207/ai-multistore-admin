@@ -13,6 +13,8 @@ from app.schemas.shipping import (
     ShippingTrackingImportWriteRequest,
     ShippingTrackingImportXlsxParseRequest,
     ShippingTrackingOrderMatchReadonlyRequest,
+    ShippingTrackingOrderStatusLocalUpdateGateRequest,
+    ShippingTrackingOrderStatusLocalUpdateRequest,
 )
 from app.services import shipping_service
 
@@ -89,6 +91,50 @@ def check_tracking_order_match_readonly(
         actor_context=payload.actor_context,
     )
     return success_response(data=result, message="shipping tracking order match readonly checked")
+
+
+@router.post("/tracking-order-status/local-update-gate")
+def check_tracking_order_status_local_update_gate(
+    payload: ShippingTrackingOrderStatusLocalUpdateGateRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = shipping_service.evaluate_tracking_order_status_local_update_gate(
+        db,
+        store_id=payload.store_id,
+        platform=payload.platform,
+        import_batch_id=payload.import_batch_id,
+        tracking_rows=[item.model_dump() for item in payload.tracking_rows],
+        manual_approval=payload.manual_approval,
+        matching_contract_acknowledged=payload.matching_contract_acknowledged,
+        backup_evidence_acknowledged=payload.backup_evidence_acknowledged,
+        audit_evidence_acknowledged=payload.audit_evidence_acknowledged,
+        operator_checklist_acknowledged=payload.operator_checklist_acknowledged,
+        target_order_status=payload.target_order_status,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="shipping tracking order status local update gate checked")
+
+
+@router.post("/tracking-order-status/local-update")
+def write_tracking_order_status_local_update(
+    payload: ShippingTrackingOrderStatusLocalUpdateRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = shipping_service.write_tracking_order_status_local_update(
+        db,
+        store_id=payload.store_id,
+        platform=payload.platform,
+        import_batch_id=payload.import_batch_id,
+        tracking_rows=[item.model_dump() for item in payload.tracking_rows],
+        manual_approval=payload.manual_approval,
+        matching_contract_acknowledged=payload.matching_contract_acknowledged,
+        backup_evidence_acknowledged=payload.backup_evidence_acknowledged,
+        audit_evidence_acknowledged=payload.audit_evidence_acknowledged,
+        operator_checklist_acknowledged=payload.operator_checklist_acknowledged,
+        target_order_status=payload.target_order_status,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="shipping tracking order status local update completed")
 
 
 @router.post("/shipment-writeback/approval-boundary")

@@ -3668,3 +3668,100 @@ Blocked examples:
 - sensitive source file name or actor context: `tracking_xlsx_parser_sensitive_field_blocked`
 
 This route must not persist uploaded file content, write parsed rows, write local tracking import records, update orders, write products, write SyncLog, add capability test success rows, call Naver, call a logistics-provider API, or execute shipment/cancel/return/exchange writes.
+
+### Shipping-8A to Shipping-8C
+
+Shipping-8A to 8C add a controlled local order status update after tracking rows are imported and matched to local orders. These routes update local ERP state only. They do not call Naver and do not open formal order sync.
+
+#### `POST /api/v1/shipping/tracking-order-status/local-update-gate`
+
+Purpose: verify whether matched tracking import evidence can update local order status to `DISPATCHED`.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "import_batch_id": 1,
+  "tracking_rows": [],
+  "manual_approval": true,
+  "matching_contract_acknowledged": true,
+  "backup_evidence_acknowledged": true,
+  "audit_evidence_acknowledged": true,
+  "operator_checklist_acknowledged": true,
+  "target_order_status": "DISPATCHED",
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  }
+}
+```
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-8B",
+  "status": "tracking_order_status_update_gate_ready",
+  "tracking_order_status_local_update_gate": true,
+  "target_order_status": "DISPATCHED",
+  "target_order_status_label_zh": "已发货 / 配送中",
+  "matched_order_count": 1,
+  "update_candidate_count": 1,
+  "already_updated_count": 0,
+  "blocked_order_count": 0,
+  "orders_updated": false,
+  "order_status_events_written": false,
+  "tracking_import_batch_updated": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "platform_writes_enabled": false,
+  "formal_order_sync_open": false,
+  "shipment_writeback_called": false
+}
+```
+
+Blocked examples:
+
+- missing manual approval: `manual_approval_required`
+- missing backup evidence: `backup_evidence_required`
+- missing audit evidence: `audit_evidence_required`
+- missing operator checklist: `operator_checklist_required`
+- unmatched tracking rows: `unmatched_tracking_rows_present`
+- unsupported target status: `target_order_status_not_supported`
+- terminal or claim status: `order_status_not_updatable`
+
+#### `POST /api/v1/shipping/tracking-order-status/local-update`
+
+Purpose: after the gate is ready, update matched local orders to `DISPATCHED`, write a deduped status timeline event, and write operation audit evidence.
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-8C",
+  "status": "tracking_order_status_update_succeeded",
+  "updated_order_count": 1,
+  "orders_updated": true,
+  "orders_written": false,
+  "order_status_events_written": true,
+  "tracking_import_batch_updated": true,
+  "operation_audit_rows_written": true,
+  "real_database_written": true,
+  "real_api_called": false,
+  "products_written": false,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "raw_response_saved": false,
+  "secrets_saved": false,
+  "privacy_fields_redacted": true,
+  "formal_order_sync_open": false,
+  "platform_writes_enabled": false,
+  "shipment_writeback_called": false
+}
+```
+
+Repeat behavior: if the matched local order is already `DISPATCHED`, the route returns `tracking_order_status_update_noop` and does not write duplicate timeline or audit rows.
+
+Safety boundary: the route must not insert orders, update products, write SyncLog, add capability test success rows, persist raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. Naver shipment writeback, cancel/return/exchange writes, logistics-provider API calls, and formal order batch sync remain closed.

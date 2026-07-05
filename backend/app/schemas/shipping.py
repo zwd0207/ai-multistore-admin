@@ -120,6 +120,18 @@ class ShippingTrackingOrderMatchReadonlyRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ShippingTrackingOrderStatusLocalUpdateGateRequest(ShippingTrackingOrderMatchReadonlyRequest):
+    manual_approval: bool = False
+    backup_evidence_acknowledged: bool = False
+    audit_evidence_acknowledged: bool = False
+    operator_checklist_acknowledged: bool = False
+    target_order_status: str = Field(default="DISPATCHED", min_length=1, max_length=30)
+
+
+class ShippingTrackingOrderStatusLocalUpdateRequest(ShippingTrackingOrderStatusLocalUpdateGateRequest):
+    pass
+
+
 class ShippingShipmentWritebackBoundaryRequest(BaseModel):
     store_id: int = Field(..., ge=1)
     platform: str = Field(default="naver", min_length=1, max_length=50)

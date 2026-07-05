@@ -1581,6 +1581,8 @@ def verify_openapi() -> None:
         "/api/v1/shipping/tracking-import": {"post"},
         "/api/v1/shipping/tracking-import-history": {"get"},
         "/api/v1/shipping/tracking-order-match/readonly-check": {"post"},
+        "/api/v1/shipping/tracking-order-status/local-update-gate": {"post"},
+        "/api/v1/shipping/tracking-order-status/local-update": {"post"},
         "/api/v1/shipping/shipment-writeback/approval-boundary": {"post"},
     }
     for shipping_path, expected_methods in shipping_methods.items():
@@ -15844,6 +15846,12 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
                 "WHERE store_id=? AND operation_phase='Shipping-5D'",
                 (store_id,),
             ),
+            "order_status_events": table_count("order_status_events", "WHERE store_id=?", (store_id,)),
+            "status_update_audit_logs": table_count(
+                "operation_audit_logs",
+                "WHERE store_id=? AND operation_phase='Shipping-8C'",
+                (store_id,),
+            ),
         }
 
     with sqlite3.connect(VERIFY_DB_PATH) as connection:
@@ -15893,6 +15901,8 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert before_counts["tracking_import_batches"] == 0, before_counts
         assert before_counts["tracking_import_rows"] == 0, before_counts
         assert before_counts["tracking_import_audit_logs"] == 0, before_counts
+        assert before_counts["order_status_events"] == 0, before_counts
+        assert before_counts["status_update_audit_logs"] == 0, before_counts
 
         empty_response = client.get(
             "/api/v1/shipping/logistics-mappings",
@@ -16791,6 +16801,215 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert boundary_ready_payload["privacy_fields_redacted"] is True, boundary_ready_payload
         assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
 
+        status_update_before_counts = shipping_counts(store_id)
+        status_manual_gate = client.post("/api/v1/shipping/tracking-order-status/local-update-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": False,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_manual_gate.status_code == 200, status_manual_gate.text
+        status_manual_gate_payload = status_manual_gate.json()["data"]
+        assert status_manual_gate_payload["phase"] == "Shipping-8B", status_manual_gate_payload
+        assert status_manual_gate_payload["status"] == "blocked", status_manual_gate_payload
+        assert status_manual_gate_payload["skip_reason"] == "manual_approval_required", status_manual_gate_payload
+        assert status_manual_gate_payload["orders_updated"] is False, status_manual_gate_payload
+        assert status_manual_gate_payload["order_status_events_written"] is False, status_manual_gate_payload
+        assert shipping_counts(store_id) == status_update_before_counts, shipping_counts(store_id)
+
+        status_backup_gate = client.post("/api/v1/shipping/tracking-order-status/local-update-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": False,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_backup_gate.status_code == 200, status_backup_gate.text
+        status_backup_gate_payload = status_backup_gate.json()["data"]
+        assert status_backup_gate_payload["status"] == "blocked", status_backup_gate_payload
+        assert status_backup_gate_payload["skip_reason"] == "backup_evidence_required", status_backup_gate_payload
+        assert shipping_counts(store_id) == status_update_before_counts, shipping_counts(store_id)
+
+        status_unmatched_gate = client.post("/api/v1/shipping/tracking-order-status/local-update-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "tracking_rows": [{**safe_tracking_row, "order_reference": "shipping-order-safe-no-match"}],
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_unmatched_gate.status_code == 200, status_unmatched_gate.text
+        status_unmatched_gate_payload = status_unmatched_gate.json()["data"]
+        assert status_unmatched_gate_payload["status"] == "blocked", status_unmatched_gate_payload
+        assert status_unmatched_gate_payload["skip_reason"] == "unmatched_tracking_rows_present", status_unmatched_gate_payload
+        assert status_unmatched_gate_payload["orders_updated"] is False, status_unmatched_gate_payload
+        assert shipping_counts(store_id) == status_update_before_counts, shipping_counts(store_id)
+
+        status_ready_gate = client.post("/api/v1/shipping/tracking-order-status/local-update-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_ready_gate.status_code == 200, status_ready_gate.text
+        status_ready_gate_payload = status_ready_gate.json()["data"]
+        assert status_ready_gate_payload["phase"] == "Shipping-8B", status_ready_gate_payload
+        assert status_ready_gate_payload["status"] == "tracking_order_status_update_gate_ready", status_ready_gate_payload
+        assert status_ready_gate_payload["matched_order_count"] == 2, status_ready_gate_payload
+        assert status_ready_gate_payload["duplicate_tracking_row_count"] == 1, status_ready_gate_payload
+        assert status_ready_gate_payload["update_candidate_count"] == 1, status_ready_gate_payload
+        assert status_ready_gate_payload["target_order_status"] == "DISPATCHED", status_ready_gate_payload
+        assert status_ready_gate_payload["target_order_status_label_zh"] == "已发货 / 配送中", status_ready_gate_payload
+        assert status_ready_gate_payload["orders_updated"] is False, status_ready_gate_payload
+        assert status_ready_gate_payload["real_database_written"] is False, status_ready_gate_payload
+        assert shipping_counts(store_id) == status_update_before_counts, shipping_counts(store_id)
+
+        status_write_response = client.post("/api/v1/shipping/tracking-order-status/local-update", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_write_response.status_code == 200, status_write_response.text
+        status_write_payload = status_write_response.json()["data"]
+        assert status_write_payload["phase"] == "Shipping-8C", status_write_payload
+        assert status_write_payload["status"] == "tracking_order_status_update_succeeded", status_write_payload
+        assert status_write_payload["updated_order_count"] == 1, status_write_payload
+        assert status_write_payload["orders_updated"] is True, status_write_payload
+        assert status_write_payload["orders_written"] is False, status_write_payload
+        assert status_write_payload["order_status_events_written"] is True, status_write_payload
+        assert status_write_payload["tracking_import_batch_updated"] is True, status_write_payload
+        assert status_write_payload["operation_audit_rows_written"] is True, status_write_payload
+        assert status_write_payload["real_database_written"] is True, status_write_payload
+        assert status_write_payload["real_api_called"] is False, status_write_payload
+        assert status_write_payload["products_written"] is False, status_write_payload
+        assert status_write_payload["sync_log_written"] is False, status_write_payload
+        assert status_write_payload["capability_tested_success_written"] is False, status_write_payload
+        assert status_write_payload["raw_response_saved"] is False, status_write_payload
+        assert status_write_payload["privacy_fields_redacted"] is True, status_write_payload
+        assert status_write_payload["formal_order_sync_open"] is False, status_write_payload
+        assert status_write_payload["platform_writes_enabled"] is False, status_write_payload
+        assert status_write_payload["shipment_writeback_called"] is False, status_write_payload
+
+        after_status_write_counts = shipping_counts(store_id)
+        assert after_status_write_counts["orders"] == status_update_before_counts["orders"], after_status_write_counts
+        assert after_status_write_counts["order_status_events"] == status_update_before_counts["order_status_events"] + 1, after_status_write_counts
+        assert after_status_write_counts["status_update_audit_logs"] == status_update_before_counts["status_update_audit_logs"] + 1, after_status_write_counts
+        assert after_status_write_counts["tracking_import_batches"] == status_update_before_counts["tracking_import_batches"], after_status_write_counts
+        assert after_status_write_counts["tracking_import_rows"] == status_update_before_counts["tracking_import_rows"], after_status_write_counts
+        assert after_status_write_counts["products"] == status_update_before_counts["products"], after_status_write_counts
+        assert after_status_write_counts["sync_logs"] == status_update_before_counts["sync_logs"], after_status_write_counts
+        assert after_status_write_counts["tested_success"] == status_update_before_counts["tested_success"], after_status_write_counts
+
+        with sqlite3.connect(VERIFY_DB_PATH) as connection:
+            order_status, order_raw_data = connection.execute(
+                "SELECT order_status, raw_data FROM orders WHERE store_id=? AND external_order_id=?",
+                (store_id, "shipping-order-safe-001"),
+            ).fetchone()
+            import_batch_orders_updated = connection.execute(
+                "SELECT orders_updated FROM shipping_tracking_import_batches WHERE id=? AND store_id=?",
+                (tracking_write_payload["import_batch_id"], store_id),
+            ).fetchone()[0]
+        order_raw_payload = json.loads(order_raw_data)
+        assert order_status == "DISPATCHED", order_status
+        assert order_raw_payload["shipping_status_update_source"] == "shipping_tracking_status_local_update", order_raw_payload
+        assert order_raw_payload["shipping_status_previous_status"] == "PAYED", order_raw_payload
+        assert order_raw_payload["shipping_status_current_status"] == "DISPATCHED", order_raw_payload
+        assert order_raw_payload["raw_response_saved"] is False, order_raw_payload
+        assert order_raw_payload["privacy_fields_redacted"] is True, order_raw_payload
+        assert order_raw_payload["address_saved"] is False, order_raw_payload
+        assert import_batch_orders_updated == 1, import_batch_orders_updated
+
+        status_repeat_response = client.post("/api/v1/shipping/tracking-order-status/local-update", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert status_repeat_response.status_code == 200, status_repeat_response.text
+        status_repeat_payload = status_repeat_response.json()["data"]
+        assert status_repeat_payload["status"] == "tracking_order_status_update_noop", status_repeat_payload
+        assert status_repeat_payload["real_database_written"] is False, status_repeat_payload
+        assert status_repeat_payload["already_updated_count"] == 1, status_repeat_payload
+        assert shipping_counts(store_id) == after_status_write_counts, shipping_counts(store_id)
+
+        with SessionLocal() as seed_db:
+            seed_db.add(Order(
+                store_id=store_id,
+                platform="naver",
+                external_order_id="shipping-order-terminal-001",
+                buyer_name=None,
+                buyer_masked_phone=None,
+                product_name="PXG Wheel Bag",
+                quantity=1,
+                order_amount=499000,
+                currency="KRW",
+                order_status="DELIVERED",
+                paid_at=now,
+                ordered_at=now,
+                source_type="verify_shipping_terminal_order",
+                last_synced_at=now,
+                raw_data={"shipping_verify": True},
+            ))
+            seed_db.commit()
+        terminal_before_counts = shipping_counts(store_id)
+        terminal_status_gate = client.post("/api/v1/shipping/tracking-order-status/local-update-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_order_status": "DISPATCHED",
+            "tracking_rows": [{
+                **safe_tracking_row,
+                "order_reference": "shipping-order-terminal-001",
+                "tracking_number": "TRK202607050002",
+            }],
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert terminal_status_gate.status_code == 200, terminal_status_gate.text
+        terminal_status_payload = terminal_status_gate.json()["data"]
+        assert terminal_status_payload["status"] == "blocked", terminal_status_payload
+        assert terminal_status_payload["skip_reason"] == "order_status_not_updatable", terminal_status_payload
+        assert terminal_status_payload["blocked_order_count"] == 1, terminal_status_payload
+        assert terminal_status_payload["orders_updated"] is False, terminal_status_payload
+        assert shipping_counts(store_id) == terminal_before_counts, shipping_counts(store_id)
+
         excel_serialized = json.dumps({
             "manual": excel_manual_gate,
             "privacy": excel_privacy_gate,
@@ -16819,6 +17038,13 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "unmatched": unmatched_payload,
             "boundary_blocked": boundary_blocked_payload,
             "boundary_ready": boundary_ready_payload,
+            "status_manual_gate": status_manual_gate_payload,
+            "status_backup_gate": status_backup_gate_payload,
+            "status_unmatched_gate": status_unmatched_gate_payload,
+            "status_ready_gate": status_ready_gate_payload,
+            "status_write": status_write_payload,
+            "status_repeat": status_repeat_payload,
+            "terminal_status_gate": terminal_status_payload,
         }, ensure_ascii=False, default=str).lower()
         for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
             assert marker not in excel_serialized, excel_serialized

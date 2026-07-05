@@ -1617,3 +1617,40 @@ This route remains preview-only:
 - it does not open shipment writeback.
 
 The route also avoids saving raw response, token, Authorization, request metadata, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. A future phase may connect accepted parser preview rows to the existing local tracking import write gate, but only with separate approval.
+
+### Shipping-8A to Shipping-8C: Tracking Import to Local Order Status Update
+
+Shipping-8A through 8C connect approved tracking import evidence to local order status updates. This is a local-only Shipping Assistant step: it can mark a matched local order as `DISPATCHED` and add a sanitized `order_status_events` timeline row plus an `operation_audit_logs` row.
+
+New local routes:
+
+```text
+POST /api/v1/shipping/tracking-order-status/local-update-gate
+POST /api/v1/shipping/tracking-order-status/local-update
+```
+
+The gate requires all of the following before any local update is allowed:
+
+- `manual_approval=true`
+- `matching_contract_acknowledged=true`
+- `backup_evidence_acknowledged=true`
+- `audit_evidence_acknowledged=true`
+- `operator_checklist_acknowledged=true`
+- matched local tracking rows with no unmatched rows
+- current local order status in an updatable state, such as `PAYED` or `PLACE_PRODUCT_ORDER`
+
+The write route updates only the local `orders.order_status` to `DISPATCHED`, sets safe local status metadata, writes one deduped `order_status_events` row per updated order, marks the local tracking import batch as `orders_updated=true`, and writes one operation audit row for `Shipping-8C`.
+
+This phase remains closed for platform writes:
+
+- it does not call Naver,
+- it does not call a logistics-provider API,
+- it does not execute Naver shipment writeback,
+- it does not open formal order batch sync,
+- it does not insert new orders,
+- it does not write products,
+- it does not write SyncLog,
+- it does not add `ApiCapabilityTestResult tested_success`,
+- it does not save raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code.
+
+Repeated execution against an already dispatched local order returns a no-op and does not write duplicate timeline or audit rows. Terminal or claim statuses such as delivered, canceled, cancel request, return request, exchange request, and purchase decided are blocked from this local dispatch update path.

@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from app.models.shipping import (
     ShippingTrackingImportRow,
 )
 from app.models.order import Order
+from app.models.order_status_event import OrderStatusEvent
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.store_service import ensure_store_exists
 
@@ -38,10 +40,32 @@ SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
 SHIPPING_TRACKING_IMPORT_MAPPING_VERSION = "shipping_tracking_import_mock_v1"
 SHIPPING_TRACKING_IMPORT_LOCAL_MAPPING_VERSION = "shipping_tracking_import_v1"
 SHIPPING_TRACKING_IMPORT_XLSX_PARSER_VERSION = "shipping_tracking_import_xlsx_parser_v1"
+SHIPPING_ORDER_STATUS_LOCAL_UPDATE_MAPPING_VERSION = "shipping_order_status_local_update_v1"
 SHIPPING_TRACKING_UPLOAD_FILE_TYPE = "tracking_upload"
 DEFAULT_SHIPPING_EXPORT_DIR = Path(__file__).resolve().parents[2] / "exports" / "shipping"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
 MAX_TRACKING_IMPORT_XLSX_BYTES = 1_500_000
+SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS = "DISPATCHED"
+SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH = "\u5df2\u53d1\u8d27 / \u914d\u9001\u4e2d"
+SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE = "shipping_tracking_status_local_update"
+SHIPPING_ORDER_STATUS_UPDATABLE_STATUSES = {
+    "PAYED",
+    "PLACE_PRODUCT_ORDER",
+    "READY",
+    "DELIVERY_READY",
+    "NEW_ORDER",
+    "ORDER_CONFIRMED",
+}
+SHIPPING_ORDER_STATUS_TERMINAL_STATUSES = {
+    "DELIVERED",
+    "DELIVERY_COMPLETION",
+    "CANCELED",
+    "CANCELLED",
+    "CANCEL_REQUEST",
+    "RETURN_REQUEST",
+    "EXCHANGE_REQUEST",
+    "PURCHASE_DECIDED",
+}
 
 TRACKING_IMPORT_HEADER_ALIASES = {
     "order_reference": {
@@ -1631,6 +1655,502 @@ def evaluate_tracking_order_match_readonly(
         "privacy_fields_redacted": True,
         "formal_order_sync_open": False,
         "platform_writes_enabled": False,
+    })
+    return result
+
+
+def _safe_hash_identifier(value: Any) -> str:
+    text = _clean_text(value, max_length=160)
+    if text.startswith("id-hash-") and HASH_PATTERN.fullmatch(text):
+        return text
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else hashlib.sha256(b"empty").hexdigest()[:16]
+    return f"id-hash-{digest}"
+
+
+def _parse_tracking_datetime(value: Any) -> datetime | None:
+    text = _clean_text(value, max_length=80)
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _tracking_order_status_event_dedupe_key(
+    *,
+    store_id: int,
+    platform: str,
+    order_id: int,
+    tracking_hash: str,
+) -> str:
+    return f"shipping-tracking-status|{store_id}|{platform}|{order_id}|{tracking_hash}|DISPATCHED"
+
+
+def _audit_row_for_tracking_order_status_update(
+    *,
+    store_id: int,
+    platform: str,
+    actor_context: dict[str, Any] | None,
+    correlation_id: str,
+    updated_order_ids: list[int],
+    skipped_order_ids: list[int],
+    event_rows_written: int,
+    import_batch_id: int | None,
+) -> dict[str, Any]:
+    now = get_utc_now()
+    target_label = f"Shipping order status update x{len(updated_order_ids)}"
+    return {
+        "created_at": now,
+        "updated_at": now,
+        "store_id": store_id,
+        "platform": platform,
+        "environment": "local",
+        "actor_type": "human",
+        "actor_id": _actor_hash(actor_context) or "actor-hash-shipping-order-status-local",
+        "actor_label": "Local operator",
+        "actor_role": str((actor_context or {}).get("role") or "admin")[:80],
+        "action": "local_write_succeeded",
+        "operation_phase": "Shipping-8C",
+        "correlation_id": correlation_id,
+        "request_id": f"shipping-8c-order-status-{correlation_id[-12:]}",
+        "status": "success",
+        "reason_code": "shipping_tracking_order_status_local_update",
+        "target_type": "order",
+        "target_id": ",".join(str(item) for item in updated_order_ids[:20]) or None,
+        "target_hash": f"id-hash-{hashlib.sha256(correlation_id.encode('utf-8')).hexdigest()[:16]}",
+        "target_label": target_label,
+        "changed_field_names": ["order_status", "last_synced_at", "order_status_events"],
+        "before_summary": {
+            "manual_approval": True,
+            "orders_updated": 0,
+            "import_batch_id": import_batch_id,
+        },
+        "after_summary": {
+            "target_order_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+            "target_order_status_label_zh": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH,
+            "updated_order_count": len(updated_order_ids),
+            "skipped_order_count": len(skipped_order_ids),
+            "event_rows_written": event_rows_written,
+        },
+        "counts_summary": {
+            "orders_updated": len(updated_order_ids),
+            "order_status_events_written": event_rows_written,
+            "shipping_tracking_import_batches_updated": 1 if import_batch_id else 0,
+            "products_written": 0,
+            "sync_logs_written": 0,
+            "capability_results_written": 0,
+        },
+        "safety_flags": {
+            "shipping_order_status_local_update": True,
+            "real_api_called": False,
+            "platform_writes_enabled": False,
+            "shipment_writeback_called": False,
+            "formal_sync_open": False,
+            "orders_written": False,
+            "orders_updated": True,
+            "products_written": False,
+            "sync_log_written": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        "sensitive_scan_passed": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "notes": "Approved local order status update from tracking import evidence. No Naver shipment writeback or logistics-provider API was called.",
+    }
+
+
+def evaluate_tracking_order_status_local_update_gate(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    import_batch_id: int | None = None,
+    tracking_rows: list[dict[str, Any]] | None = None,
+    manual_approval: bool = False,
+    matching_contract_acknowledged: bool = False,
+    backup_evidence_acknowledged: bool = False,
+    audit_evidence_acknowledged: bool = False,
+    operator_checklist_acknowledged: bool = False,
+    target_order_status: str = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+    actor_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = {
+        **_base_result(phase="Shipping-8B"),
+        "manual_approval": bool(manual_approval),
+        "matching_contract_acknowledged": bool(matching_contract_acknowledged),
+        "backup_evidence_acknowledged": bool(backup_evidence_acknowledged),
+        "audit_evidence_acknowledged": bool(audit_evidence_acknowledged),
+        "operator_checklist_acknowledged": bool(operator_checklist_acknowledged),
+        "tracking_order_status_local_update_gate": True,
+        "target_order_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+        "target_order_status_label_zh": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH,
+        "import_batch_id": import_batch_id,
+        "matched_order_count": 0,
+        "update_candidate_count": 0,
+        "already_updated_count": 0,
+        "blocked_order_count": 0,
+        "duplicate_tracking_row_count": 0,
+        "unmatched_order_count": 0,
+        "update_candidates": [],
+        "blocked_orders": [],
+        "orders_updated": False,
+        "order_status_events_written": False,
+        "tracking_import_batch_updated": False,
+        "shipment_writeback_called": False,
+        "tracking_number_import_open": False,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+
+    if target_order_status != SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS:
+        result["skip_reason"] = "target_order_status_not_supported"
+        return result
+    if manual_approval is not True:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+    if backup_evidence_acknowledged is not True:
+        result["skip_reason"] = "backup_evidence_required"
+        return result
+    if audit_evidence_acknowledged is not True:
+        result["skip_reason"] = "audit_evidence_required"
+        return result
+    if operator_checklist_acknowledged is not True:
+        result["skip_reason"] = "operator_checklist_required"
+        return result
+
+    match_result = evaluate_tracking_order_match_readonly(
+        db,
+        store_id=store_id,
+        platform=platform,
+        import_batch_id=import_batch_id,
+        tracking_rows=tracking_rows,
+        matching_contract_acknowledged=matching_contract_acknowledged,
+        actor_context=actor_context,
+    )
+    result["match_status"] = match_result.get("status")
+    result["match_skip_reason"] = match_result.get("skip_reason")
+    if match_result.get("status") != "tracking_order_match_readonly_ready":
+        result["skip_reason"] = match_result.get("skip_reason") or "tracking_match_not_ready"
+        return result
+
+    match_rows = list(match_result.get("match_rows") or [])
+    result["matched_order_count"] = int(match_result.get("matched_order_count") or 0)
+    result["duplicate_tracking_row_count"] = int(match_result.get("duplicate_tracking_row_count") or 0)
+    result["unmatched_order_count"] = int(match_result.get("unmatched_order_count") or 0)
+    if result["unmatched_order_count"] > 0:
+        result["skip_reason"] = "unmatched_tracking_rows_present"
+        return result
+
+    update_candidates: list[dict[str, Any]] = []
+    blocked_orders: list[dict[str, Any]] = []
+    already_updated_count = 0
+    for row in match_rows:
+        if row.get("match_status") != "matched_existing_order":
+            continue
+        if row.get("row_status") != "ready_for_future_review":
+            continue
+        order_summary = row.get("order_summary") or {}
+        local_order_id = int(order_summary.get("local_order_id") or 0)
+        current_status = _clean_text(order_summary.get("order_status"), max_length=30).upper()
+        if current_status == SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS:
+            already_updated_count += 1
+            continue
+        if current_status in SHIPPING_ORDER_STATUS_TERMINAL_STATUSES or current_status not in SHIPPING_ORDER_STATUS_UPDATABLE_STATUSES:
+            blocked_orders.append({
+                "local_order_id": local_order_id,
+                "current_order_status": current_status,
+                "block_reason": "order_status_not_updatable",
+            })
+            continue
+        update_candidates.append({
+            "local_order_id": local_order_id,
+            "order_reference_hash": _safe_hash_identifier(row.get("order_reference")),
+            "product_order_reference_hash": _safe_hash_identifier(row.get("product_order_reference") or row.get("order_reference")),
+            "tracking_number_hash": _safe_hash_identifier(row.get("tracking_number")),
+            "carrier": _clean_text(row.get("carrier"), max_length=80),
+            "shipped_at": row.get("shipped_at"),
+            "current_order_status": current_status,
+            "next_order_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+        })
+
+    result["already_updated_count"] = already_updated_count
+    result["blocked_order_count"] = len(blocked_orders)
+    result["blocked_orders"] = blocked_orders
+    result["update_candidate_count"] = len(update_candidates)
+    result["update_candidates"] = update_candidates
+    if blocked_orders:
+        result["skip_reason"] = "order_status_not_updatable"
+        return result
+    if not update_candidates:
+        result.update({
+            "status": "tracking_order_status_update_noop_ready" if already_updated_count else "blocked",
+            "skip_reason": None if already_updated_count else "no_ready_matched_orders",
+            "business_message": (
+                "Matched local orders are already marked as dispatched. No local order update is needed."
+                if already_updated_count
+                else "No ready matched local orders are available for status update."
+            ),
+        })
+        return result
+
+    result.update({
+        "status": "tracking_order_status_update_gate_ready",
+        "skip_reason": None,
+        "business_message": (
+            "Tracking rows are matched to local orders and can update local order status to dispatched. "
+            "This still does not call Naver or open formal order sync."
+        ),
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+    })
+    return result
+
+
+def write_tracking_order_status_local_update(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    import_batch_id: int | None = None,
+    tracking_rows: list[dict[str, Any]] | None = None,
+    manual_approval: bool = False,
+    matching_contract_acknowledged: bool = False,
+    backup_evidence_acknowledged: bool = False,
+    audit_evidence_acknowledged: bool = False,
+    operator_checklist_acknowledged: bool = False,
+    target_order_status: str = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+    actor_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    gate = evaluate_tracking_order_status_local_update_gate(
+        db,
+        store_id=store_id,
+        platform=platform,
+        import_batch_id=import_batch_id,
+        tracking_rows=tracking_rows,
+        manual_approval=manual_approval,
+        matching_contract_acknowledged=matching_contract_acknowledged,
+        backup_evidence_acknowledged=backup_evidence_acknowledged,
+        audit_evidence_acknowledged=audit_evidence_acknowledged,
+        operator_checklist_acknowledged=operator_checklist_acknowledged,
+        target_order_status=target_order_status,
+        actor_context=actor_context,
+    )
+    result = {
+        **gate,
+        "phase": "Shipping-8C",
+        "tracking_order_status_local_update": True,
+        "orders_updated": False,
+        "order_status_events_written": False,
+        "tracking_import_batch_updated": False,
+    }
+    if gate.get("status") == "tracking_order_status_update_noop_ready":
+        result.update({
+            "status": "tracking_order_status_update_noop",
+            "real_database_written": False,
+        })
+        return result
+    if gate.get("status") != "tracking_order_status_update_gate_ready":
+        result.update({
+            "status": "tracking_order_status_update_blocked",
+            "real_database_written": False,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform) or "naver"
+    candidates = list(gate.get("update_candidates") or [])
+    now = get_utc_now()
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "store_id": store_id,
+                "platform": normalized_platform,
+                "candidates": candidates,
+                "updated_at": now.isoformat(),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    correlation_id = f"shipping-8c-{fingerprint}"
+    updated_order_ids: list[int] = []
+    skipped_order_ids: list[int] = []
+    event_rows_written = 0
+
+    try:
+        orders_by_id = {
+            order.id: order
+            for order in db.scalars(
+                select(Order).where(
+                    Order.store_id == store_id,
+                    Order.platform == normalized_platform,
+                    Order.id.in_([item["local_order_id"] for item in candidates]),
+                )
+            ).all()
+        }
+        for candidate in candidates:
+            order = orders_by_id.get(candidate["local_order_id"])
+            if order is None:
+                skipped_order_ids.append(candidate["local_order_id"])
+                continue
+            previous_status = _clean_text(order.order_status, max_length=30).upper()
+            order.order_status = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS
+            order.last_synced_at = now
+            safe_metadata = dict(order.raw_data or {})
+            for forbidden_key in list(safe_metadata):
+                if _sensitive_fields({forbidden_key: safe_metadata[forbidden_key]}):
+                    safe_metadata.pop(forbidden_key, None)
+            safe_metadata.update({
+                "shipping_status_update_source": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE,
+                "shipping_status_update_phase": "Shipping-8C",
+                "shipping_status_update_correlation_id": correlation_id,
+                "shipping_status_previous_status": previous_status,
+                "shipping_status_current_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+                "shipping_tracking_hash": candidate["tracking_number_hash"],
+                "shipping_carrier_label": candidate["carrier"],
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+                "address_saved": False,
+            })
+            if import_batch_id:
+                safe_metadata["shipping_tracking_import_batch_id"] = import_batch_id
+            order.raw_data = safe_metadata
+            updated_order_ids.append(order.id)
+
+            dedupe_key = _tracking_order_status_event_dedupe_key(
+                store_id=store_id,
+                platform=normalized_platform,
+                order_id=order.id,
+                tracking_hash=candidate["tracking_number_hash"],
+            )
+            existing_event = db.scalar(
+                select(OrderStatusEvent).where(
+                    OrderStatusEvent.store_id == store_id,
+                    OrderStatusEvent.platform == normalized_platform,
+                    OrderStatusEvent.dedupe_key == dedupe_key,
+                )
+            )
+            if existing_event is None:
+                db.add(OrderStatusEvent(
+                    store_id=store_id,
+                    order_id=order.id,
+                    platform=normalized_platform,
+                    external_order_id_hash=candidate["order_reference_hash"],
+                    external_product_order_id_hash=candidate["product_order_reference_hash"],
+                    event_type="shipping_dispatched",
+                    status_raw=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+                    status_label_zh=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH,
+                    payment_status_raw=None,
+                    payment_status_label_zh=None,
+                    delivery_status_raw=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+                    delivery_status_label_zh=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH,
+                    claim_status_raw=None,
+                    claim_status_label_zh=None,
+                    observed_at=_parse_tracking_datetime(candidate.get("shipped_at")) or now,
+                    source_phase="Shipping-8C",
+                    source_type=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE,
+                    mapping_version=SHIPPING_ORDER_STATUS_LOCAL_UPDATE_MAPPING_VERSION,
+                    dedupe_key=dedupe_key,
+                    raw_response_saved=False,
+                    privacy_fields_redacted=True,
+                    address_saved=False,
+                    safe_metadata={
+                        "shipping_tracking_hash": candidate["tracking_number_hash"],
+                        "shipping_carrier_label": candidate["carrier"],
+                        "source_phase": "Shipping-8C",
+                        "raw_response_saved": False,
+                        "privacy_fields_redacted": True,
+                        "address_saved": False,
+                    },
+                ))
+                event_rows_written += 1
+
+        if import_batch_id:
+            import_batch = db.scalar(
+                select(ShippingTrackingImportBatch).where(
+                    ShippingTrackingImportBatch.id == import_batch_id,
+                    ShippingTrackingImportBatch.store_id == store_id,
+                    ShippingTrackingImportBatch.platform == normalized_platform,
+                )
+            )
+            if import_batch:
+                import_batch.orders_updated = bool(updated_order_ids)
+                import_batch.updated_at = now
+
+        audit_result = write_operation_audit_log_local(
+            db,
+            _audit_row_for_tracking_order_status_update(
+                store_id=store_id,
+                platform=normalized_platform,
+                actor_context=actor_context,
+                correlation_id=correlation_id,
+                updated_order_ids=updated_order_ids,
+                skipped_order_ids=skipped_order_ids,
+                event_rows_written=event_rows_written,
+                import_batch_id=import_batch_id,
+            ),
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        if audit_result.get("status") != "audit_row_written":
+            db.rollback()
+            result.update({
+                "status": "tracking_order_status_update_blocked",
+                "skip_reason": audit_result.get("skip_reason") or "audit_write_failed",
+                "orders_updated": False,
+                "order_status_events_written": False,
+                "tracking_import_batch_updated": False,
+                "operation_audit_rows_written": False,
+                "real_database_written": False,
+            })
+            return result
+    except Exception:
+        db.rollback()
+        raise
+
+    result.update({
+        "status": "tracking_order_status_update_succeeded",
+        "skip_reason": None,
+        "business_message": (
+            "Local order status was updated from tracking evidence. "
+            "Naver shipment writeback and formal order sync remain closed."
+        ),
+        "updated_order_count": len(updated_order_ids),
+        "skipped_order_count": len(skipped_order_ids),
+        "updated_order_ids": updated_order_ids,
+        "event_rows_written": event_rows_written,
+        "audit_correlation_id": correlation_id,
+        "operation_audit_log_id": audit_result.get("audit_log_id"),
+        "orders_updated": bool(updated_order_ids),
+        "orders_written": False,
+        "order_status_events_written": event_rows_written > 0,
+        "tracking_import_batch_updated": bool(import_batch_id and updated_order_ids),
+        "operation_audit_rows_written": True,
+        "real_database_written": bool(updated_order_ids),
+        "real_api_called": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "shipment_writeback_called": False,
     })
     return result
 
