@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 from xml.sax.saxutils import escape
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -33,9 +37,84 @@ SHIPPING_EXPORT_FILE_TYPE = "shipping_request"
 SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
 SHIPPING_TRACKING_IMPORT_MAPPING_VERSION = "shipping_tracking_import_mock_v1"
 SHIPPING_TRACKING_IMPORT_LOCAL_MAPPING_VERSION = "shipping_tracking_import_v1"
+SHIPPING_TRACKING_IMPORT_XLSX_PARSER_VERSION = "shipping_tracking_import_xlsx_parser_v1"
 SHIPPING_TRACKING_UPLOAD_FILE_TYPE = "tracking_upload"
 DEFAULT_SHIPPING_EXPORT_DIR = Path(__file__).resolve().parents[2] / "exports" / "shipping"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
+MAX_TRACKING_IMPORT_XLSX_BYTES = 1_500_000
+
+TRACKING_IMPORT_HEADER_ALIASES = {
+    "order_reference": {
+        "orderreference",
+        "orderref",
+        "orderno",
+        "order",
+        "localorder",
+        "safeorderreference",
+        "주문번호",
+        "주문",
+        "订单号",
+        "订单",
+    },
+    "product_order_reference": {
+        "productorderreference",
+        "productorderref",
+        "productorderno",
+        "productorder",
+        "상품주문번호",
+        "상품주문",
+        "商品订单号",
+        "商品订单",
+    },
+    "logistics_inventory_code": {
+        "logisticsinventorycode",
+        "inventorycode",
+        "stockcode",
+        "sku",
+        "internalsku",
+        "물류재고번호",
+        "재고번호",
+        "库存编号",
+        "库存码",
+    },
+    "carrier": {
+        "carrier",
+        "courier",
+        "deliverycompany",
+        "shippingcompany",
+        "택배사",
+        "배송사",
+        "物流商",
+        "快递公司",
+    },
+    "tracking_number": {
+        "trackingnumber",
+        "trackingno",
+        "waybill",
+        "waybillnumber",
+        "운송장번호",
+        "송장번호",
+        "物流单号",
+        "快递单号",
+    },
+    "shipped_at": {
+        "shippedat",
+        "shipdate",
+        "shippingdate",
+        "dispatchdate",
+        "배송일",
+        "发货时间",
+        "发货日期",
+    },
+    "operator_note": {
+        "operatornote",
+        "note",
+        "memo",
+        "remark",
+        "备注",
+        "메모",
+    },
+}
 
 SENSITIVE_KEY_MARKERS = {
     "accesstoken",
@@ -116,6 +195,10 @@ def _clean_text(value: Any, *, max_length: int = 300) -> str:
 
 def _normalize_sensitive_key(value: str) -> str:
     return "".join(char for char in value.lower() if char.isalnum())
+
+
+def _normalize_header_key(value: Any) -> str:
+    return "".join(char for char in str(value or "").strip().lower() if char.isalnum())
 
 
 def _sensitive_fields(payload: Any) -> list[str]:
@@ -501,6 +584,224 @@ def evaluate_real_excel_generation_mock_gate(
             "不会创建文件、不会写导出记录，也不会调用平台或物流商接口。"
         ),
     })
+    return result
+
+
+def _xlsx_cell_text(cell: ElementTree.Element, shared_strings: list[str]) -> str:
+    cell_type = cell.attrib.get("t")
+    if cell_type == "inlineStr":
+        texts = [node.text or "" for node in cell.iter() if node.tag.endswith("}t")]
+        return "".join(texts).strip()
+    value = cell.find("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v")
+    if value is None or value.text is None:
+        return ""
+    if cell_type == "s":
+        try:
+            return shared_strings[int(value.text)].strip()
+        except (IndexError, TypeError, ValueError):
+            return ""
+    return str(value.text or "").strip()
+
+
+def _xlsx_row_values(row: ElementTree.Element, shared_strings: list[str]) -> list[str]:
+    return [
+        _xlsx_cell_text(cell, shared_strings)
+        for cell in row.findall("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c")
+    ]
+
+
+def _parse_xlsx_rows(xlsx_bytes: bytes) -> list[list[str]]:
+    with ZipFile(BytesIO(xlsx_bytes)) as archive:
+        names = set(archive.namelist())
+        if "xl/worksheets/sheet1.xml" not in names:
+            raise ValueError("tracking_xlsx_sheet_missing")
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in names:
+            shared_root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+            for item in shared_root.findall("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si"):
+                texts = [node.text or "" for node in item.iter() if node.tag.endswith("}t")]
+                shared_strings.append("".join(texts))
+        sheet_root = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        rows = sheet_root.findall(
+            ".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row"
+        )
+        return [
+            _xlsx_row_values(row, shared_strings)
+            for row in rows
+            if any(_xlsx_cell_text(cell, shared_strings) for cell in row.findall("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c"))
+        ]
+
+
+def _tracking_header_map(headers: list[str]) -> tuple[dict[int, str], list[str]]:
+    mapped: dict[int, str] = {}
+    unknown_headers: list[str] = []
+    alias_lookup = {
+        alias: field_name
+        for field_name, aliases in TRACKING_IMPORT_HEADER_ALIASES.items()
+        for alias in aliases
+    }
+    for index, header in enumerate(headers):
+        normalized = _normalize_header_key(header)
+        if not normalized:
+            continue
+        field_name = alias_lookup.get(normalized)
+        if field_name:
+            mapped[index] = field_name
+        else:
+            unknown_headers.append(_clean_text(header, max_length=80))
+    return mapped, unknown_headers
+
+
+def evaluate_tracking_import_xlsx_parser_mock(
+    *,
+    store_id: int,
+    platform: str,
+    file_name: str | None,
+    file_content_base64: str,
+    manual_approval: bool,
+    parser_contract_acknowledged: bool,
+    actor_context: dict[str, Any] | None = None,
+    file_type: str = SHIPPING_TRACKING_UPLOAD_FILE_TYPE,
+    file_format: str = SHIPPING_EXPORT_FILE_FORMAT,
+) -> dict[str, Any]:
+    result = {
+        **_base_result(phase="Shipping-7B"),
+        "manual_approval": bool(manual_approval),
+        "file_type": file_type,
+        "file_format": file_format,
+        "source_file_name": _clean_text(file_name, max_length=255) or None,
+        "parser_contract_acknowledged": bool(parser_contract_acknowledged),
+        "parser_version": SHIPPING_TRACKING_IMPORT_XLSX_PARSER_VERSION,
+        "file_received": False,
+        "file_parsed": False,
+        "file_content_saved": False,
+        "parsed_rows_written": False,
+        "import_record_written": False,
+        "tracking_number_import_open": False,
+        "tracking_numbers_written": False,
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "orders_updated": False,
+    }
+
+    forbidden_fields = _sensitive_fields({
+        "source_file_name": file_name or "",
+        "actor_context": actor_context or {},
+    })
+    if forbidden_fields:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "tracking_xlsx_parser_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+            "source_file_name": None,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform)
+    if normalized_platform is None:
+        result["skip_reason"] = "platform_not_supported"
+        return result
+    if not isinstance(store_id, int) or store_id <= 0:
+        result["skip_reason"] = "store_id_invalid"
+        return result
+    if file_type != SHIPPING_TRACKING_UPLOAD_FILE_TYPE:
+        result["skip_reason"] = "tracking_file_type_not_supported"
+        return result
+    if str(file_format).lower() != SHIPPING_EXPORT_FILE_FORMAT:
+        result["skip_reason"] = "tracking_file_format_not_supported"
+        return result
+    if not str(file_name or "").lower().endswith(".xlsx"):
+        result["skip_reason"] = "tracking_xlsx_file_name_required"
+        return result
+    if manual_approval is not True:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+    if parser_contract_acknowledged is not True:
+        result["skip_reason"] = "tracking_parser_contract_required"
+        return result
+    if not file_content_base64:
+        result["skip_reason"] = "tracking_xlsx_file_required"
+        return result
+
+    try:
+        xlsx_bytes = base64.b64decode(file_content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        result["skip_reason"] = "tracking_xlsx_base64_invalid"
+        return result
+    if not xlsx_bytes:
+        result["skip_reason"] = "tracking_xlsx_file_empty"
+        return result
+    if len(xlsx_bytes) > MAX_TRACKING_IMPORT_XLSX_BYTES:
+        result["skip_reason"] = "tracking_xlsx_file_too_large"
+        return result
+
+    try:
+        table_rows = _parse_xlsx_rows(xlsx_bytes)
+    except (BadZipFile, KeyError, ValueError, ElementTree.ParseError):
+        result["skip_reason"] = "tracking_xlsx_parse_failed"
+        return result
+    if len(table_rows) < 2:
+        result["skip_reason"] = "tracking_xlsx_data_rows_required"
+        return result
+
+    headers = table_rows[0]
+    header_map, unknown_headers = _tracking_header_map(headers)
+    required_fields = {"carrier", "tracking_number"}
+    reference_fields = {"order_reference", "product_order_reference"}
+    mapped_fields = set(header_map.values())
+    if not required_fields <= mapped_fields:
+        result["skip_reason"] = "tracking_xlsx_required_columns_missing"
+        result["missing_columns"] = sorted(required_fields - mapped_fields)
+        return result
+    if not reference_fields & mapped_fields:
+        result["skip_reason"] = "tracking_xlsx_order_reference_column_missing"
+        return result
+
+    parsed_rows: list[dict[str, Any]] = []
+    for source_index, values in enumerate(table_rows[1:], start=2):
+        row_payload: dict[str, Any] = {}
+        for column_index, field_name in header_map.items():
+            if column_index < len(values):
+                row_payload[field_name] = values[column_index]
+        if any(str(value or "").strip() for value in row_payload.values()):
+            parsed_rows.append(row_payload)
+    if not parsed_rows:
+        result["skip_reason"] = "tracking_xlsx_data_rows_required"
+        return result
+
+    gate = evaluate_tracking_number_import_mock_gate(
+        store_id=store_id,
+        platform=normalized_platform,
+        tracking_rows=parsed_rows,
+        manual_approval=manual_approval,
+        actor_context=actor_context,
+        file_type=file_type,
+        file_format=file_format,
+        parser_contract_acknowledged=parser_contract_acknowledged,
+    )
+    result.update({
+        **gate,
+        "phase": "Shipping-7B",
+        "parser_version": SHIPPING_TRACKING_IMPORT_XLSX_PARSER_VERSION,
+        "source_file_name": _clean_text(file_name, max_length=255) or None,
+        "file_received": True,
+        "file_size_bytes": len(xlsx_bytes),
+        "file_content_saved": False,
+        "parsed_rows_written": False,
+        "import_record_written": False,
+        "unknown_columns": unknown_headers,
+        "mapped_columns": sorted(mapped_fields),
+        "integration_plan_ready": gate.get("status") == "tracking_import_mock_parse_ready",
+        "next_action": "review_parsed_rows_then_use_existing_tracking_import_write_gate",
+    })
+    if gate.get("status") == "tracking_import_mock_parse_ready":
+        result.update({
+            "status": "tracking_xlsx_parser_mock_ready",
+            "business_message": (
+                "Tracking upload xlsx parsed successfully. This is a parser preview only; "
+                "the file is not saved, rows are not written, orders are not updated, and Naver is not called."
+            ),
+        })
     return result
 
 

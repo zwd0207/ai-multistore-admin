@@ -1588,3 +1588,32 @@ POST /api/v1/shipping/shipment-writeback/approval-boundary
 `shipment-writeback/approval-boundary` reviews whether future Naver shipment writeback evidence is complete. Even when all checklist items are present, it keeps `shipment_writeback_open=false`, `shipment_writeback_called=false`, `orders_updated=false`, `real_api_called=false`, and `platform_writes_enabled=false`. Real Naver shipment writeback must be a separately approved future phase.
 
 Shipping-6E adds an operator checklist direction for the frontend: download unshipped orders, maintain logistics inventory codes, export Excel, import tracking numbers, readonly-match orders, then perform a separate human-approved writeback phase later.
+
+### Shipping-7A to Shipping-7E: Tracking XLSX Parser Preview
+
+Shipping-7A through 7E add a preview-only parser for logistics tracking return `.xlsx` files.
+
+New local preview route:
+
+```text
+POST /api/v1/shipping/tracking-import/parse-xlsx-mock
+```
+
+The parser accepts base64 `.xlsx` content, reads `xl/worksheets/sheet1.xml`, maps safe tracking upload columns, and reuses the existing tracking import row gate. Required fields are `carrier`, `tracking_number`, and at least one of `order_reference` or `product_order_reference`.
+
+When the parser is ready, it returns `status=tracking_xlsx_parser_mock_ready`, row counts, duplicate counts, `mapped_columns`, `unknown_columns`, and normalized row previews.
+
+This route remains preview-only:
+
+- it does not persist the uploaded file content,
+- it does not write parsed rows,
+- it does not write tracking import records,
+- it does not update `orders`,
+- it does not write `products`,
+- it does not write `SyncLog`,
+- it does not add `ApiCapabilityTestResult tested_success`,
+- it does not call Naver,
+- it does not call a logistics-provider API,
+- it does not open shipment writeback.
+
+The route also avoids saving raw response, token, Authorization, request metadata, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. A future phase may connect accepted parser preview rows to the existing local tracking import write gate, but only with separate approval.

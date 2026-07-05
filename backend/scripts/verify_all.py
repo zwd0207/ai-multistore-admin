@@ -7,9 +7,13 @@ import json
 import hashlib
 import shutil
 import sqlite3
+import base64
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
+from xml.sax.saxutils import escape
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from cryptography.fernet import Fernet
 
@@ -76,6 +80,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/shipping/export-excel",
     "/api/v1/shipping/export-history",
     "/api/v1/shipping/tracking-import/mock-parse",
+    "/api/v1/shipping/tracking-import/parse-xlsx-mock",
     "/api/v1/shipping/tracking-import/write-gate",
     "/api/v1/shipping/tracking-import",
     "/api/v1/shipping/tracking-import-history",
@@ -1571,6 +1576,7 @@ def verify_openapi() -> None:
         "/api/v1/shipping/export-excel": {"post"},
         "/api/v1/shipping/export-history": {"get"},
         "/api/v1/shipping/tracking-import/mock-parse": {"post"},
+        "/api/v1/shipping/tracking-import/parse-xlsx-mock": {"post"},
         "/api/v1/shipping/tracking-import/write-gate": {"post"},
         "/api/v1/shipping/tracking-import": {"post"},
         "/api/v1/shipping/tracking-import-history": {"get"},
@@ -15759,9 +15765,38 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
     from app.models.order import Order
     from app.services.shipping_service import (
         evaluate_real_excel_generation_mock_gate,
+        evaluate_tracking_import_xlsx_parser_mock,
         evaluate_tracking_number_import_mock_gate,
         generate_shipping_excel_local,
     )
+
+    def build_tracking_import_xlsx_base64(rows: list[list[str]]) -> str:
+        def column_name(index: int) -> str:
+            name = ""
+            while index:
+                index, remainder = divmod(index - 1, 26)
+                name = chr(65 + remainder) + name
+            return name
+
+        sheet_rows = []
+        for row_index, row in enumerate(rows, start=1):
+            cells = []
+            for column_index, value in enumerate(row, start=1):
+                cell_ref = f"{column_name(column_index)}{row_index}"
+                cells.append(
+                    f'<c r="{cell_ref}" t="inlineStr"><is><t>{escape(str(value or ""))}</t></is></c>'
+                )
+            sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+        sheet_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+            "</worksheet>"
+        )
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
 
     def table_count(table_name: str, where_clause: str = "", params: tuple = ()) -> int:
         with sqlite3.connect(VERIFY_DB_PATH) as connection:
@@ -16177,6 +16212,154 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert tracking_ready_gate["platform_writes_enabled"] is False, tracking_ready_gate
         assert shipping_counts(store_id) == excel_gate_before_counts, shipping_counts(store_id)
 
+        tracking_xlsx_before_counts = shipping_counts(store_id)
+        valid_tracking_xlsx_base64 = build_tracking_import_xlsx_base64([
+            [
+                "order_reference",
+                "product_order_reference",
+                "logistics_inventory_code",
+                "carrier",
+                "tracking_number",
+                "shipped_at",
+                "operator_note",
+            ],
+            [
+                safe_tracking_row["order_reference"],
+                safe_tracking_row["product_order_reference"],
+                safe_tracking_row["logistics_inventory_code"],
+                safe_tracking_row["carrier"],
+                safe_tracking_row["tracking_number"],
+                safe_tracking_row["shipped_at"],
+                safe_tracking_row["operator_note"],
+            ],
+            [
+                safe_tracking_row["order_reference"],
+                safe_tracking_row["product_order_reference"],
+                safe_tracking_row["logistics_inventory_code"],
+                safe_tracking_row["carrier"],
+                safe_tracking_row["tracking_number"],
+                safe_tracking_row["shipped_at"],
+                safe_tracking_row["operator_note"],
+            ],
+        ])
+        xlsx_manual_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="tracking-upload-safe.xlsx",
+            file_content_base64=valid_tracking_xlsx_base64,
+            manual_approval=False,
+            parser_contract_acknowledged=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_manual_gate["phase"] == "Shipping-7B", xlsx_manual_gate
+        assert xlsx_manual_gate["status"] == "blocked", xlsx_manual_gate
+        assert xlsx_manual_gate["skip_reason"] == "manual_approval_required", xlsx_manual_gate
+        assert xlsx_manual_gate["file_content_saved"] is False, xlsx_manual_gate
+        assert xlsx_manual_gate["parsed_rows_written"] is False, xlsx_manual_gate
+        assert xlsx_manual_gate["import_record_written"] is False, xlsx_manual_gate
+        assert xlsx_manual_gate["orders_updated"] is False, xlsx_manual_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
+        xlsx_contract_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="tracking-upload-safe.xlsx",
+            file_content_base64=valid_tracking_xlsx_base64,
+            manual_approval=True,
+            parser_contract_acknowledged=False,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_contract_gate["status"] == "blocked", xlsx_contract_gate
+        assert xlsx_contract_gate["skip_reason"] == "tracking_parser_contract_required", xlsx_contract_gate
+        assert xlsx_contract_gate["file_content_saved"] is False, xlsx_contract_gate
+        assert xlsx_contract_gate["parsed_rows_written"] is False, xlsx_contract_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
+        xlsx_sensitive_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="shipping-token-must-not-leak.xlsx",
+            file_content_base64=valid_tracking_xlsx_base64,
+            manual_approval=True,
+            parser_contract_acknowledged=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_sensitive_gate["status"] == "blocked", xlsx_sensitive_gate
+        assert xlsx_sensitive_gate["skip_reason"] == "tracking_xlsx_parser_sensitive_field_blocked", xlsx_sensitive_gate
+        assert xlsx_sensitive_gate["source_file_name"] is None, xlsx_sensitive_gate
+        assert xlsx_sensitive_gate["file_content_saved"] is False, xlsx_sensitive_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
+        xlsx_base64_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="tracking-upload-safe.xlsx",
+            file_content_base64="not-base64",
+            manual_approval=True,
+            parser_contract_acknowledged=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_base64_gate["status"] == "blocked", xlsx_base64_gate
+        assert xlsx_base64_gate["skip_reason"] == "tracking_xlsx_base64_invalid", xlsx_base64_gate
+        assert xlsx_base64_gate["file_content_saved"] is False, xlsx_base64_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
+        missing_header_xlsx_base64 = build_tracking_import_xlsx_base64([
+            ["order_reference", "carrier"],
+            [safe_tracking_row["order_reference"], safe_tracking_row["carrier"]],
+        ])
+        xlsx_missing_header_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="tracking-upload-safe.xlsx",
+            file_content_base64=missing_header_xlsx_base64,
+            manual_approval=True,
+            parser_contract_acknowledged=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_missing_header_gate["status"] == "blocked", xlsx_missing_header_gate
+        assert xlsx_missing_header_gate["skip_reason"] == "tracking_xlsx_required_columns_missing", xlsx_missing_header_gate
+        assert xlsx_missing_header_gate["parsed_rows_written"] is False, xlsx_missing_header_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
+        xlsx_ready_gate = evaluate_tracking_import_xlsx_parser_mock(
+            store_id=store_id,
+            platform="naver",
+            file_name="tracking-upload-safe.xlsx",
+            file_content_base64=valid_tracking_xlsx_base64,
+            manual_approval=True,
+            parser_contract_acknowledged=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+        )
+        assert xlsx_ready_gate["phase"] == "Shipping-7B", xlsx_ready_gate
+        assert xlsx_ready_gate["status"] == "tracking_xlsx_parser_mock_ready", xlsx_ready_gate
+        assert xlsx_ready_gate["file_received"] is True, xlsx_ready_gate
+        assert xlsx_ready_gate["file_parsed"] is True, xlsx_ready_gate
+        assert xlsx_ready_gate["file_content_saved"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["parsed_rows_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["import_record_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["tracking_number_import_open"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["tracking_numbers_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["shipment_writeback_called"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["orders_updated"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["real_database_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["real_api_called"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["orders_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["products_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["sync_log_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["capability_tested_success_written"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["raw_response_saved"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["secrets_saved"] is False, xlsx_ready_gate
+        assert xlsx_ready_gate["privacy_fields_redacted"] is True, xlsx_ready_gate
+        assert xlsx_ready_gate["row_count"] == 2, xlsx_ready_gate
+        assert xlsx_ready_gate["ready_row_count"] == 1, xlsx_ready_gate
+        assert xlsx_ready_gate["duplicate_row_count"] == 1, xlsx_ready_gate
+        assert "carrier" in xlsx_ready_gate["mapped_columns"], xlsx_ready_gate
+        assert "tracking_number" in xlsx_ready_gate["mapped_columns"], xlsx_ready_gate
+        assert xlsx_ready_gate["integration_plan_ready"] is True, xlsx_ready_gate
+        assert xlsx_ready_gate["next_action"] == "review_parsed_rows_then_use_existing_tracking_import_write_gate", xlsx_ready_gate
+        assert shipping_counts(store_id) == tracking_xlsx_before_counts, shipping_counts(store_id)
+
         with tempfile.TemporaryDirectory() as export_dir:
             with SessionLocal() as export_db:
                 export_result = generate_shipping_excel_local(
@@ -16272,6 +16455,34 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert tracking_route_payload["tracking_numbers_written"] is False, tracking_route_payload
         assert tracking_route_payload["shipment_writeback_called"] is False, tracking_route_payload
         assert tracking_route_payload["real_database_written"] is False, tracking_route_payload
+        assert shipping_counts(store_id) == history_before_counts, shipping_counts(store_id)
+
+        xlsx_route_response = client.post("/api/v1/shipping/tracking-import/parse-xlsx-mock", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "file_type": "tracking_upload",
+            "file_format": "xlsx",
+            "source_file_name": "tracking-upload-safe.xlsx",
+            "file_content_base64": valid_tracking_xlsx_base64,
+            "manual_approval": True,
+            "parser_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert xlsx_route_response.status_code == 200, xlsx_route_response.text
+        xlsx_route_payload = xlsx_route_response.json()["data"]
+        assert xlsx_route_payload["phase"] == "Shipping-7B", xlsx_route_payload
+        assert xlsx_route_payload["status"] == "tracking_xlsx_parser_mock_ready", xlsx_route_payload
+        assert xlsx_route_payload["row_count"] == 2, xlsx_route_payload
+        assert xlsx_route_payload["ready_row_count"] == 1, xlsx_route_payload
+        assert xlsx_route_payload["duplicate_row_count"] == 1, xlsx_route_payload
+        assert xlsx_route_payload["file_content_saved"] is False, xlsx_route_payload
+        assert xlsx_route_payload["parsed_rows_written"] is False, xlsx_route_payload
+        assert xlsx_route_payload["import_record_written"] is False, xlsx_route_payload
+        assert xlsx_route_payload["tracking_number_import_open"] is False, xlsx_route_payload
+        assert xlsx_route_payload["tracking_numbers_written"] is False, xlsx_route_payload
+        assert xlsx_route_payload["shipment_writeback_called"] is False, xlsx_route_payload
+        assert xlsx_route_payload["orders_updated"] is False, xlsx_route_payload
+        assert xlsx_route_payload["real_database_written"] is False, xlsx_route_payload
         assert shipping_counts(store_id) == history_before_counts, shipping_counts(store_id)
 
         tracking_write_gate_before_counts = shipping_counts(store_id)
@@ -16589,7 +16800,14 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "tracking_manual": tracking_manual_gate,
             "tracking_privacy": tracking_sensitive_gate,
             "tracking_ready": tracking_ready_gate,
+            "tracking_xlsx_manual": xlsx_manual_gate,
+            "tracking_xlsx_contract": xlsx_contract_gate,
+            "tracking_xlsx_sensitive": xlsx_sensitive_gate,
+            "tracking_xlsx_base64": xlsx_base64_gate,
+            "tracking_xlsx_missing_header": xlsx_missing_header_gate,
+            "tracking_xlsx_ready": xlsx_ready_gate,
             "tracking_route": tracking_route_payload,
+            "tracking_xlsx_route": xlsx_route_payload,
             "tracking_write_manual": tracking_write_manual_payload,
             "tracking_write_sensitive": tracking_write_sensitive_payload,
             "tracking_write_ready": tracking_write_ready_payload,

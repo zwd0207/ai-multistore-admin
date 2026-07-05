@@ -95,6 +95,20 @@ class ShippingTrackingImportWriteRequest(ShippingTrackingImportMockParseRequest)
     pass
 
 
+class ShippingTrackingImportXlsxParseRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    file_type: str = Field(default="tracking_upload", max_length=80)
+    file_format: str = Field(default="xlsx", max_length=30)
+    source_file_name: str = Field(..., min_length=1, max_length=255)
+    file_content_base64: str = Field(..., min_length=1)
+    manual_approval: bool = False
+    parser_contract_acknowledged: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class ShippingTrackingOrderMatchReadonlyRequest(BaseModel):
     store_id: int = Field(..., ge=1)
     platform: str = Field(default="naver", min_length=1, max_length=50)

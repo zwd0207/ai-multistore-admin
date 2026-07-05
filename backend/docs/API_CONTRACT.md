@@ -3581,3 +3581,90 @@ Response fields:
 ```
 
 This route is approval-boundary evidence only. It does not open Naver shipment writeback. A future real writeback phase must be separately approved, backed up, audited, and verified.
+
+### Shipping-7A to Shipping-7E
+
+Shipping-7A to 7E add a preview-only parser for logistics tracking `.xlsx` return files.
+
+#### `POST /api/v1/shipping/tracking-import/parse-xlsx-mock`
+
+Purpose: parse a logistics tracking upload file for preview only.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "file_type": "tracking_upload",
+  "file_format": "xlsx",
+  "source_file_name": "tracking-upload-safe.xlsx",
+  "file_content_base64": "base64-xlsx-content",
+  "manual_approval": true,
+  "parser_contract_acknowledged": true,
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  }
+}
+```
+
+Required mapped columns:
+
+- `carrier`
+- `tracking_number`
+- at least one of `order_reference` or `product_order_reference`
+
+Optional mapped columns:
+
+- `logistics_inventory_code`
+- `shipped_at`
+- `operator_note`
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-7B",
+  "status": "tracking_xlsx_parser_mock_ready",
+  "parser_version": "shipping_tracking_import_xlsx_parser_v1",
+  "file_received": true,
+  "file_parsed": true,
+  "file_content_saved": false,
+  "parsed_rows_written": false,
+  "import_record_written": false,
+  "tracking_number_import_open": false,
+  "tracking_numbers_written": false,
+  "shipment_writeback_called": false,
+  "orders_updated": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "raw_response_saved": false,
+  "privacy_fields_redacted": true,
+  "row_count": 1,
+  "ready_row_count": 1,
+  "duplicate_row_count": 0,
+  "mapped_columns": ["carrier", "tracking_number", "order_reference"],
+  "unknown_columns": [],
+  "tracking_rows_preview": [
+    {
+      "order_reference": "safe-local-order-reference",
+      "carrier": "safe-carrier",
+      "tracking_number": "TRK202607050001",
+      "row_status": "ready_for_future_review",
+      "future_write_allowed": false
+    }
+  ]
+}
+```
+
+Blocked examples:
+
+- missing manual approval: `manual_approval_required`
+- missing parser contract: `tracking_parser_contract_required`
+- invalid base64 or invalid xlsx: `tracking_xlsx_base64_invalid` / `tracking_xlsx_parse_failed`
+- missing required columns: `tracking_xlsx_required_columns_missing`
+- missing order reference column: `tracking_xlsx_order_reference_column_missing`
+- sensitive source file name or actor context: `tracking_xlsx_parser_sensitive_field_blocked`
+
+This route must not persist uploaded file content, write parsed rows, write local tracking import records, update orders, write products, write SyncLog, add capability test success rows, call Naver, call a logistics-provider API, or execute shipment/cancel/return/exchange writes.

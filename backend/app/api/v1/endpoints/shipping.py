@@ -11,6 +11,7 @@ from app.schemas.shipping import (
     ShippingTrackingImportMockParseRequest,
     ShippingTrackingImportWriteGateRequest,
     ShippingTrackingImportWriteRequest,
+    ShippingTrackingImportXlsxParseRequest,
     ShippingTrackingOrderMatchReadonlyRequest,
 )
 from app.services import shipping_service
@@ -176,6 +177,24 @@ def check_tracking_number_import_mock_parse(
         parser_contract_acknowledged=payload.parser_contract_acknowledged,
     )
     return success_response(data=result, message="shipping tracking import mock parse checked")
+
+
+@router.post("/tracking-import/parse-xlsx-mock")
+def check_tracking_import_xlsx_parser_mock(
+    payload: ShippingTrackingImportXlsxParseRequest,
+) -> dict:
+    result = shipping_service.evaluate_tracking_import_xlsx_parser_mock(
+        store_id=payload.store_id,
+        platform=payload.platform,
+        file_name=payload.source_file_name,
+        file_content_base64=payload.file_content_base64,
+        manual_approval=payload.manual_approval,
+        actor_context=payload.actor_context,
+        file_type=payload.file_type,
+        file_format=payload.file_format,
+        parser_contract_acknowledged=payload.parser_contract_acknowledged,
+    )
+    return success_response(data=result, message="shipping tracking import xlsx parser checked")
 
 
 @router.post("/tracking-import/write-gate")
