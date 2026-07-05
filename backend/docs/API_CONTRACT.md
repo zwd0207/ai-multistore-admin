@@ -2965,3 +2965,122 @@ future_file_type=tracking_upload|inventory_table|product_table
 Receiver privacy fields must not be exported by default. If receiver name, phone, or address is operationally required by the logistics provider, that export must be separately approved, audited, and clearly marked in the export record.
 
 Shipping-1D used local readonly database inspection only. It did not call Naver, write the database, write SyncLog, write tested-success rows, generate files, or open formal order sync.
+
+### Shipping-2A to Shipping-2E
+
+Shipping-2A to 2E add a controlled local persistence contract for logistics inventory-code mapping and manually maintained logistics stock.
+
+New tables:
+
+```text
+logistics_inventory_mappings
+logistics_inventory_items
+```
+
+Every row must include:
+
+```text
+store_id
+platform
+```
+
+The first matching key is:
+
+```text
+match_product_name
+match_option_name
+normalized_product_name
+normalized_option_name
+```
+
+Reserved extension fields:
+
+```text
+platform_product_id_hash
+platform_option_id_hash
+internal_sku
+```
+
+Forbidden schema and payload material:
+
+```text
+token
+Authorization
+headers
+signature
+client_secret
+raw response
+full productOrderId
+full orderId
+buyer name
+buyer phone
+receiver name
+receiver phone
+address
+zip code
+```
+
+#### `GET /api/v1/shipping/logistics-mappings`
+
+Readonly list for local logistics mapping and stock.
+
+Query:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver"
+}
+```
+
+Response data includes:
+
+```json
+{
+  "phase": "Shipping-2B",
+  "status": "ready",
+  "items": [
+    {
+      "store_id": 8,
+      "platform": "naver",
+      "match_product_name": "safe product text",
+      "match_option_name": "safe option text",
+      "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+      "logistics_provider_name": "Korea warehouse A",
+      "current_stock_quantity": 7,
+      "stock_status": "available",
+      "mapping_version": "shipping_mapping_v1"
+    }
+  ],
+  "orders_written": false,
+  "products_written": false,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "raw_response_saved": false,
+  "secrets_saved": false,
+  "privacy_fields_redacted": true,
+  "formal_order_sync_open": false,
+  "platform_writes_enabled": false
+}
+```
+
+#### `POST /api/v1/shipping/logistics-mappings/write-gate`
+
+Validates a future local write without writing rows. It requires `manual_approval=true`.
+
+#### `POST /api/v1/shipping/logistics-mappings`
+
+Controlled local write for logistics mapping and logistics current stock. It may create or update one or more mapping/stock rows and writes safe operation audit evidence. Duplicate product-name plus option-name mappings are updated rather than duplicated.
+
+The endpoint must not:
+
+- call Naver,
+- call a logistics-provider API,
+- write `orders`,
+- write `products`,
+- write `SyncLog`,
+- add `ApiCapabilityTestResult tested_success`,
+- open formal product/order sync,
+- generate a real Excel file.
+
+Shipping-2E only plans real Excel generation approval. Actual file creation and export records require a later phase with backup, audit, file hash, row counts, and explicit operator approval.

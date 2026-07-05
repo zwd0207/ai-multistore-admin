@@ -85,6 +85,16 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    logistics_inventory_mappings = relationship(
+        "LogisticsInventoryMapping",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+    logistics_inventory_items = relationship(
+        "LogisticsInventoryItem",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     customer_inquiries = relationship(
         "CustomerInquiry",
         back_populates="store",

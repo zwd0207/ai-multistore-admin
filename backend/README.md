@@ -1475,3 +1475,23 @@ Backend implications:
 Shipping-1D performed local readonly inspection only. It observed one real store 8 Naver `PAYED` row as a possible unshipped candidate and three real `DELIVERED` rows that must be excluded from shipping download. No real Naver API was called, no schema was changed, no local database write was performed, no SyncLog row was written, and no tested-success record was created.
 
 Formal product/order batch sync, Naver shipment writeback, cancel/return/exchange writes, tracking-number writeback, and logistics-provider API integration remain closed.
+
+### Shipping-2A to Shipping-2E: Logistics Mapping Schema and Local Write Gate
+
+Shipping-2A through 2E moves the Shipping Assistant from page-only mock mapping into a controlled local persistence layer:
+
+- `logistics_inventory_mappings` stores the product-name plus option-name match to a logistics inventory code.
+- `logistics_inventory_items` stores the logistics provider code and manually maintained current stock.
+- `store_id` and `platform` are required on every row. `platform` remains extensible for `naver`, `coupang`, and `future_platform`.
+- Optional `platform_product_id_hash`, `platform_option_id_hash`, and `internal_sku` are reserved for later stronger matching.
+- Full platform order ids, buyer/receiver names, phones, addresses, token, Authorization, headers, signature, client secret, and raw response columns are not part of the schema.
+
+The local routes are:
+
+- `GET /api/v1/shipping/logistics-mappings`
+- `POST /api/v1/shipping/logistics-mappings/write-gate`
+- `POST /api/v1/shipping/logistics-mappings`
+
+The write route requires explicit `manual_approval=true`, writes only logistics mapping and logistics inventory rows, and writes one safe operation audit row for the local maintenance action. It does not write `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`, and it does not call Naver or any logistics-provider API.
+
+Shipping-2E is an approval plan only for future real Excel generation. Real `.xlsx` file creation, export records, download records, tracking-number writeback, shipment writeback, cancel/return/exchange writes, and formal product/order batch sync remain closed.

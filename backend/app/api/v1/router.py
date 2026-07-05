@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     platform_logins,
     permissions,
     products,
+    shipping,
     stats,
     stores,
     sync,
@@ -45,6 +46,7 @@ api_router.include_router(permissions.router)
 api_router.include_router(stores.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
+api_router.include_router(shipping.router)
 api_router.include_router(customer_inquiries.router)
 api_router.include_router(sync.router)
 api_router.include_router(sync_logs.router)

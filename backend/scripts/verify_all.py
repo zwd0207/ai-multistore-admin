@@ -71,6 +71,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
+    "/api/v1/shipping/logistics-mappings",
+    "/api/v1/shipping/logistics-mappings/write-gate",
     "/api/v1/customer-inquiries",
     "/api/v1/sync/products/mock",
     "/api/v1/sync/products/coupang/preview",
@@ -403,6 +405,126 @@ FORBIDDEN_OPERATION_AUDIT_SENSITIVE_MARKERS = [
     "channel-500000000000",
     "order-202607030001",
     "product-order-202607030001",
+    "buyer-real-name-must-not-leak",
+    "receiver-real-name-must-not-leak",
+    "010-1111-2222",
+    "seoul full address must not leak",
+    "zip-12345",
+]
+
+EXPECTED_SHIPPING_TABLE_COLUMNS = {
+    "logistics_inventory_mappings": {
+        "id",
+        "store_id",
+        "platform",
+        "match_product_name",
+        "match_option_name",
+        "normalized_product_name",
+        "normalized_option_name",
+        "platform_product_id_hash",
+        "platform_option_id_hash",
+        "internal_sku",
+        "logistics_inventory_code",
+        "logistics_provider_name",
+        "match_priority",
+        "is_active",
+        "mapping_version",
+        "created_by_actor_hash",
+        "updated_by_actor_hash",
+        "created_at",
+        "updated_at",
+    },
+    "logistics_inventory_items": {
+        "id",
+        "store_id",
+        "platform",
+        "logistics_inventory_code",
+        "logistics_provider_name",
+        "current_stock_quantity",
+        "stock_status",
+        "last_manual_checked_at",
+        "last_manual_updated_by_actor_hash",
+        "note",
+        "is_active",
+        "created_at",
+        "updated_at",
+    },
+}
+
+EXPECTED_SHIPPING_INDEXES = {
+    "uq_logistics_mapping_product_option": (
+        "logistics_inventory_mappings",
+        ["store_id", "platform", "normalized_product_name", "normalized_option_name"],
+        True,
+    ),
+    "ix_logistics_mappings_store_platform": (
+        "logistics_inventory_mappings",
+        ["store_id", "platform"],
+        False,
+    ),
+    "ix_logistics_mappings_match_key": (
+        "logistics_inventory_mappings",
+        ["store_id", "platform", "normalized_product_name", "normalized_option_name"],
+        False,
+    ),
+    "ix_logistics_mappings_inventory_code": (
+        "logistics_inventory_mappings",
+        ["logistics_inventory_code"],
+        False,
+    ),
+    "uq_logistics_inventory_item_code": (
+        "logistics_inventory_items",
+        ["store_id", "platform", "logistics_inventory_code"],
+        True,
+    ),
+    "ix_logistics_inventory_items_store_platform": (
+        "logistics_inventory_items",
+        ["store_id", "platform"],
+        False,
+    ),
+    "ix_logistics_inventory_items_code": (
+        "logistics_inventory_items",
+        ["logistics_inventory_code"],
+        False,
+    ),
+    "ix_logistics_inventory_items_status": (
+        "logistics_inventory_items",
+        ["store_id", "platform", "stock_status"],
+        False,
+    ),
+}
+
+FORBIDDEN_SHIPPING_COLUMNS = {
+    "access_token",
+    "authorization",
+    "buyer_name",
+    "buyer_phone",
+    "channel_no",
+    "client_secret",
+    "detailed_address",
+    "headers",
+    "order_id",
+    "product_order_id",
+    "raw_data",
+    "raw_request",
+    "raw_response",
+    "receiver_name",
+    "receiver_phone",
+    "refresh_token",
+    "signature",
+    "token",
+    "zip_code",
+}
+
+FORBIDDEN_SHIPPING_SENSITIVE_MARKERS = [
+    "shipping-token-must-not-leak",
+    "shipping-client-secret-must-not-leak",
+    "authorization: bearer shipping-must-not-leak",
+    "shipping-headers-must-not-leak",
+    "shipping-signature-must-not-leak",
+    "shipping-raw-response-must-not-leak",
+    "productorderid-must-not-leak",
+    "orderid-must-not-leak",
     "buyer-real-name-must-not-leak",
     "receiver-real-name-must-not-leak",
     "010-1111-2222",
@@ -15454,6 +15576,239 @@ def verify_backup_report_readonly_local_api() -> None:
     print("backup report readonly local API: ok")
 
 
+def verify_shipping_mapping_schema_and_local_write() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    def table_count(table_name: str, where_clause: str = "", params: tuple = ()) -> int:
+        with sqlite3.connect(VERIFY_DB_PATH) as connection:
+            return connection.execute(
+                f"SELECT COUNT(*) FROM {table_name} {where_clause}",
+                params,
+            ).fetchone()[0]
+
+    def shipping_counts(store_id: int) -> dict[str, int]:
+        return {
+            "orders": table_count("orders", "WHERE store_id=?", (store_id,)),
+            "products": table_count("products", "WHERE store_id=?", (store_id,)),
+            "sync_logs": table_count("sync_logs", "WHERE store_id=?", (store_id,)),
+            "tested_success": table_count(
+                "api_capability_test_results",
+                "WHERE store_id=? AND test_status='tested_success'",
+                (store_id,),
+            ),
+            "mappings": table_count("logistics_inventory_mappings", "WHERE store_id=?", (store_id,)),
+            "inventory_items": table_count("logistics_inventory_items", "WHERE store_id=?", (store_id,)),
+            "audit_logs": table_count(
+                "operation_audit_logs",
+                "WHERE store_id=? AND operation_phase='Shipping-2D'",
+                (store_id,),
+            ),
+        }
+
+    with sqlite3.connect(VERIFY_DB_PATH) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert set(EXPECTED_SHIPPING_TABLE_COLUMNS) <= tables, tables
+        for table_name, expected_columns in EXPECTED_SHIPPING_TABLE_COLUMNS.items():
+            table_info = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+            columns = {row[1] for row in table_info}
+            assert expected_columns <= columns, (table_name, expected_columns - columns)
+            forbidden_columns = sorted({column.lower() for column in columns} & FORBIDDEN_SHIPPING_COLUMNS)
+            assert not forbidden_columns, (table_name, forbidden_columns)
+
+        observed_indexes = {}
+        for table_name in EXPECTED_SHIPPING_TABLE_COLUMNS:
+            for row in connection.execute(f"PRAGMA index_list({table_name})").fetchall():
+                observed_indexes[row[1]] = (table_name, bool(row[2]))
+        for index_name, (expected_table, expected_columns, expected_unique) in EXPECTED_SHIPPING_INDEXES.items():
+            assert index_name in observed_indexes, index_name
+            observed_table, observed_unique = observed_indexes[index_name]
+            assert observed_table == expected_table, (index_name, observed_table)
+            assert observed_unique == expected_unique, (index_name, observed_unique)
+            rows = connection.execute(f"PRAGMA index_info({index_name})").fetchall()
+            assert [row[2] for row in rows] == expected_columns, (index_name, rows)
+
+    with TestClient(app) as client:
+        suffix = uuid.uuid4().hex[:8]
+        store_response = client.post("/api/v1/stores", json={
+            "name": f"Shipping Verify Store {suffix}",
+            "platform": "naver",
+            "country": "KR",
+            "language": "ko-KR",
+            "status": "active",
+        })
+        assert store_response.status_code == 201, store_response.text
+        store_id = store_response.json()["data"]["id"]
+        before_counts = shipping_counts(store_id)
+        assert before_counts["orders"] == 0, before_counts
+        assert before_counts["products"] == 0, before_counts
+        assert before_counts["sync_logs"] == 0, before_counts
+        assert before_counts["tested_success"] == 0, before_counts
+
+        empty_response = client.get(
+            "/api/v1/shipping/logistics-mappings",
+            params={"store_id": store_id, "platform": "naver"},
+        )
+        assert empty_response.status_code == 200, empty_response.text
+        empty_payload = empty_response.json()["data"]
+        assert empty_payload["status"] == "ready", empty_payload
+        assert empty_payload["total"] == 0, empty_payload
+        assert empty_payload["orders_written"] is False, empty_payload
+        assert empty_payload["products_written"] is False, empty_payload
+        assert empty_payload["sync_log_written"] is False, empty_payload
+
+        base_mapping = {
+            "match_product_name": "PXG 휠 캐디백",
+            "match_option_name": "Black / OS",
+            "platform_product_id_hash": "id-hash-shippingproduct001",
+            "platform_option_id_hash": "id-hash-shippingoption001",
+            "internal_sku": "SKU-PXG-WHEEL-BAG-BK",
+            "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+            "logistics_provider_name": "한국창고 A",
+            "current_stock_quantity": 7,
+            "match_priority": 10,
+            "note": "manual shipping stock verification",
+        }
+
+        blocked_response = client.post("/api/v1/shipping/logistics-mappings/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": False,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "mappings": [base_mapping],
+        })
+        assert blocked_response.status_code == 200, blocked_response.text
+        blocked_payload = blocked_response.json()["data"]
+        assert blocked_payload["status"] == "blocked", blocked_payload
+        assert blocked_payload["skip_reason"] == "manual_approval_required", blocked_payload
+        assert shipping_counts(store_id) == before_counts, shipping_counts(store_id)
+
+        sensitive_response = client.post("/api/v1/shipping/logistics-mappings/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "mappings": [{
+                **base_mapping,
+                "productOrderId": "productorderid-must-not-leak",
+                "receiverPhone": "010-1111-2222",
+            }],
+        })
+        assert sensitive_response.status_code == 200, sensitive_response.text
+        sensitive_payload = sensitive_response.json()["data"]
+        assert sensitive_payload["status"] == "blocked", sensitive_payload
+        assert sensitive_payload["skip_reason"] == "shipping_sensitive_field_blocked", sensitive_payload
+        assert shipping_counts(store_id) == before_counts, shipping_counts(store_id)
+
+        approved_gate_response = client.post("/api/v1/shipping/logistics-mappings/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "mappings": [base_mapping],
+        })
+        assert approved_gate_response.status_code == 200, approved_gate_response.text
+        approved_gate = approved_gate_response.json()["data"]
+        assert approved_gate["status"] == "mapping_stock_write_gate_ready", approved_gate
+        assert approved_gate["mapping_rows_ready"] == 1, approved_gate
+        assert approved_gate["inventory_rows_ready"] == 1, approved_gate
+        assert approved_gate["real_database_written"] is False, approved_gate
+
+        write_response = client.post("/api/v1/shipping/logistics-mappings", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "mappings": [base_mapping],
+        })
+        assert write_response.status_code == 200, write_response.text
+        write_payload = write_response.json()["data"]
+        assert write_payload["status"] == "mapping_stock_local_write_succeeded", write_payload
+        assert write_payload["created_mappings"] == 1, write_payload
+        assert write_payload["created_inventory_items"] == 1, write_payload
+        assert write_payload["shipping_mappings_written"] is True, write_payload
+        assert write_payload["shipping_inventory_written"] is True, write_payload
+        assert write_payload["operation_audit_rows_written"] is True, write_payload
+        assert write_payload["orders_written"] is False, write_payload
+        assert write_payload["products_written"] is False, write_payload
+        assert write_payload["sync_log_written"] is False, write_payload
+        assert write_payload["capability_tested_success_written"] is False, write_payload
+        assert write_payload["raw_response_saved"] is False, write_payload
+        assert write_payload["secrets_saved"] is False, write_payload
+        assert write_payload["privacy_fields_redacted"] is True, write_payload
+        after_first_write = shipping_counts(store_id)
+        assert after_first_write["mappings"] == 1, after_first_write
+        assert after_first_write["inventory_items"] == 1, after_first_write
+        assert after_first_write["audit_logs"] == 1, after_first_write
+        assert after_first_write["orders"] == before_counts["orders"], after_first_write
+        assert after_first_write["products"] == before_counts["products"], after_first_write
+        assert after_first_write["sync_logs"] == before_counts["sync_logs"], after_first_write
+        assert after_first_write["tested_success"] == before_counts["tested_success"], after_first_write
+
+        duplicate_response = client.post("/api/v1/shipping/logistics-mappings", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "mappings": [{**base_mapping, "current_stock_quantity": 2}],
+        })
+        assert duplicate_response.status_code == 200, duplicate_response.text
+        duplicate_payload = duplicate_response.json()["data"]
+        assert duplicate_payload["created_mappings"] == 0, duplicate_payload
+        assert duplicate_payload["updated_mappings"] == 1, duplicate_payload
+        assert duplicate_payload["created_inventory_items"] == 0, duplicate_payload
+        assert duplicate_payload["updated_inventory_items"] == 1, duplicate_payload
+        after_duplicate = shipping_counts(store_id)
+        assert after_duplicate["mappings"] == 1, after_duplicate
+        assert after_duplicate["inventory_items"] == 1, after_duplicate
+        assert after_duplicate["audit_logs"] == 2, after_duplicate
+        assert after_duplicate["orders"] == before_counts["orders"], after_duplicate
+        assert after_duplicate["products"] == before_counts["products"], after_duplicate
+        assert after_duplicate["sync_logs"] == before_counts["sync_logs"], after_duplicate
+        assert after_duplicate["tested_success"] == before_counts["tested_success"], after_duplicate
+
+        list_response = client.get(
+            "/api/v1/shipping/logistics-mappings",
+            params={"store_id": store_id, "platform": "naver"},
+        )
+        assert list_response.status_code == 200, list_response.text
+        list_payload = list_response.json()["data"]
+        assert list_payload["total"] == 1, list_payload
+        assert list_payload["items"][0]["logistics_inventory_code"] == "PXG-WHEEL-BAG-BK-OS", list_payload
+        assert list_payload["items"][0]["current_stock_quantity"] == 2, list_payload
+        assert list_payload["items"][0]["stock_status"] == "low_stock", list_payload
+
+        serialized = json.dumps({
+            "empty": empty_payload,
+            "blocked": blocked_payload,
+            "sensitive": sensitive_payload,
+            "approved_gate": approved_gate,
+            "write": write_payload,
+            "duplicate": duplicate_payload,
+            "list": list_payload,
+        }, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
+            assert marker not in serialized, serialized
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "buyer-real-name",
+            "receiver-real-name",
+            "seoul full address",
+        ]:
+            assert forbidden not in serialized, serialized
+
+    print("shipping mapping schema and local write: ok")
+
+
 def verify_git_tracking() -> None:
     tracked = run(["git", "ls-files"], cwd=ROOT_DIR, echo=False).splitlines()
     forbidden = [
@@ -15478,6 +15833,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/orders.py",
         " M backend/app/api/v1/endpoints/permissions.py",
         "A  backend/app/api/v1/endpoints/permissions.py",
+        "A  backend/app/api/v1/endpoints/shipping.py",
         " M backend/app/api/v1/endpoints/stats.py",
         " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
@@ -15494,6 +15850,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/operation_audit_log.py",
         "A  backend/app/models/operation_audit_log.py",
         " M backend/app/models/product.py",
+        "A  backend/app/models/shipping.py",
         " M backend/app/models/store.py",
         "M  backend/app/models/store.py",
         " M backend/app/schemas/api_credential_readiness.py",
@@ -15504,6 +15861,7 @@ def verify_git_tracking() -> None:
         " M backend/app/schemas/permission.py",
         "A  backend/app/schemas/permission.py",
         " M backend/app/schemas/product.py",
+        "A  backend/app/schemas/shipping.py",
         " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
         " M backend/app/services/api_capability_service.py",
@@ -15516,6 +15874,7 @@ def verify_git_tracking() -> None:
         "A  backend/app/services/operation_audit_service.py",
         "A  backend/app/services/permission_service.py",
         "A  backend/app/services/invitation_audit_linkage_service.py",
+        "A  backend/app/services/shipping_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
@@ -15534,6 +15893,7 @@ def verify_git_tracking() -> None:
         "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
         " M backend/scripts/upgrade_auth_schema.py",
         "A  backend/scripts/upgrade_auth_schema.py",
+        "A  backend/scripts/upgrade_shipping_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
@@ -15542,16 +15902,19 @@ def verify_git_tracking() -> None:
         "?? backend/app/api/v1/endpoints/backups.py",
         "?? backend/app/api/v1/endpoints/operation_audit_logs.py",
         "?? backend/app/api/v1/endpoints/permissions.py",
+        "?? backend/app/api/v1/endpoints/shipping.py",
         "?? backend/app/models/api_capability.py",
         "?? backend/app/models/auth.py",
         "?? backend/app/models/financial.py",
         "?? backend/app/models/order_status_event.py",
         "?? backend/app/models/operation_audit_log.py",
+        "?? backend/app/models/shipping.py",
         "?? backend/app/models/sync_checkpoint.py",
         "?? backend/app/schemas/api_credential_readiness.py",
         "?? backend/app/schemas/api_capability.py",
         "?? backend/app/schemas/batch.py",
         "?? backend/app/schemas/permission.py",
+        "?? backend/app/schemas/shipping.py",
         "?? backend/app/schemas/sync.py",
         "?? backend/app/services/api_capability_service.py",
         "?? backend/app/services/api_credential_readiness_service.py",
@@ -15559,6 +15922,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/operation_audit_service.py",
         "?? backend/app/services/permission_service.py",
         "?? backend/app/services/invitation_audit_linkage_service.py",
+        "?? backend/app/services/shipping_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
         "?? backend/app/schemas/platform_login.py",
@@ -15568,6 +15932,7 @@ def verify_git_tracking() -> None:
         "?? backend/scripts/upgrade_auth_schema.py",
         "?? backend/scripts/upgrade_order_status_events_schema.py",
         "?? backend/scripts/upgrade_operation_audit_logs_schema.py",
+        "?? backend/scripts/upgrade_shipping_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/verify_all.py",
     )
@@ -15714,6 +16079,7 @@ def main() -> None:
         verify_formal_batch_sync_production_gate()
         verify_product_stock_change_and_readonly_evidence_gates()
         verify_product_rollback_backend_route_mock_gate()
+        verify_shipping_mapping_schema_and_local_write()
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
         verify_restore_runbook_mock_drill_gate()
