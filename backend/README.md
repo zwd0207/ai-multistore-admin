@@ -1796,3 +1796,26 @@ The gate requires:
 When ready, the route returns safe dry-run candidates with local order id, hashed order references, hashed tracking number, carrier, shipped time, and target delivery status. It does not call Naver, does not call a logistics-provider API, does not write the database, does not save a platform payload, and does not open formal order batch sync.
 
 The route blocks candidates when local orders are not yet dispatched, when tracking rows are unmatched, when any approval evidence is missing, or when sensitive fields are present. It keeps `shipment_writeback_called=false`, `shipment_writeback_open=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and `future_platform_write_requires_separate_approval=true`.
+
+### Shipping-9A to Shipping-9B: Shipment Writeback Execution Mock Gate
+
+Shipping-9A and 9B define and verify the final mock gate before any future Naver shipment writeback execution phase.
+
+New local readonly route:
+
+```text
+POST /api/v1/shipping/shipment-writeback/execution-mock-gate
+```
+
+The gate requires:
+
+- all Shipping-8F dry-run gate evidence to be ready,
+- `execution_approval=true`,
+- `dry_run_evidence_acknowledged=true`,
+- `permission_evidence_acknowledged=true`,
+- `final_operator_confirmation=true`,
+- `real_api_call_requested=false`.
+
+If `real_api_call_requested=true`, the route blocks with `real_api_call_not_allowed_in_mock_gate`. When ready, it returns safe execution candidates copied from dry-run evidence, but keeps `execution_allowed=false`, `future_write_allowed=false`, `shipment_writeback_called=false`, `real_api_called=false`, `real_database_written=false`, and `platform_writes_enabled=false`.
+
+This route does not call Naver, does not call a logistics-provider API, does not write orders, does not write products, does not write SyncLog, does not add `ApiCapabilityTestResult tested_success`, does not write audit rows, and does not open formal product/order batch sync. A real Naver shipment writeback execution phase must still be separately approved.

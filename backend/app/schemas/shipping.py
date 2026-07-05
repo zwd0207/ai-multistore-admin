@@ -158,6 +158,14 @@ class ShippingShipmentWritebackDryRunGateRequest(ShippingTrackingOrderMatchReado
     target_delivery_status: str = Field(default="DISPATCHED", min_length=1, max_length=30)
 
 
+class ShippingShipmentWritebackExecutionMockGateRequest(ShippingShipmentWritebackDryRunGateRequest):
+    execution_approval: bool = False
+    dry_run_evidence_acknowledged: bool = False
+    permission_evidence_acknowledged: bool = False
+    final_operator_confirmation: bool = False
+    real_api_call_requested: bool = False
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int

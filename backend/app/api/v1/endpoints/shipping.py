@@ -9,6 +9,7 @@ from app.schemas.shipping import (
     ShippingMappingWriteRequest,
     ShippingShipmentWritebackBoundaryRequest,
     ShippingShipmentWritebackDryRunGateRequest,
+    ShippingShipmentWritebackExecutionMockGateRequest,
     ShippingTrackingImportMockParseRequest,
     ShippingTrackingImportWriteGateRequest,
     ShippingTrackingImportWriteRequest,
@@ -182,6 +183,35 @@ def check_shipment_writeback_dry_run_gate(
         actor_context=payload.actor_context,
     )
     return success_response(data=result, message="shipping shipment writeback dry run gate checked")
+
+
+@router.post("/shipment-writeback/execution-mock-gate")
+def check_shipment_writeback_execution_mock_gate(
+    payload: ShippingShipmentWritebackExecutionMockGateRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = shipping_service.evaluate_shipment_writeback_execution_mock_gate(
+        db,
+        store_id=payload.store_id,
+        platform=payload.platform,
+        import_batch_id=payload.import_batch_id,
+        tracking_rows=[item.model_dump() for item in payload.tracking_rows],
+        manual_approval=payload.manual_approval,
+        matching_contract_acknowledged=payload.matching_contract_acknowledged,
+        backup_evidence_acknowledged=payload.backup_evidence_acknowledged,
+        audit_evidence_acknowledged=payload.audit_evidence_acknowledged,
+        local_status_evidence_acknowledged=payload.local_status_evidence_acknowledged,
+        naver_writeback_boundary_acknowledged=payload.naver_writeback_boundary_acknowledged,
+        operator_checklist_acknowledged=payload.operator_checklist_acknowledged,
+        target_delivery_status=payload.target_delivery_status,
+        execution_approval=payload.execution_approval,
+        dry_run_evidence_acknowledged=payload.dry_run_evidence_acknowledged,
+        permission_evidence_acknowledged=payload.permission_evidence_acknowledged,
+        final_operator_confirmation=payload.final_operator_confirmation,
+        real_api_call_requested=payload.real_api_call_requested,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="shipping shipment writeback execution mock gate checked")
 
 
 @router.post("/logistics-mappings/write-gate")

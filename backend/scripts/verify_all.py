@@ -1597,6 +1597,7 @@ def verify_openapi() -> None:
         "/api/v1/shipping/tracking-order-status/local-update": {"post"},
         "/api/v1/shipping/shipment-writeback/approval-boundary": {"post"},
         "/api/v1/shipping/shipment-writeback/dry-run-gate": {"post"},
+        "/api/v1/shipping/shipment-writeback/execution-mock-gate": {"post"},
     }
     for shipping_path, expected_methods in shipping_methods.items():
         methods = set(openapi_json["paths"][shipping_path].keys())
@@ -18905,6 +18906,103 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert writeback_ready_payload["platform_writes_enabled"] is False, writeback_ready_payload
         assert shipping_counts(store_id) == after_status_write_counts, shipping_counts(store_id)
 
+        writeback_execution_missing = client.post("/api/v1/shipping/shipment-writeback/execution-mock-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "local_status_evidence_acknowledged": True,
+            "naver_writeback_boundary_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_delivery_status": "DISPATCHED",
+            "execution_approval": False,
+            "dry_run_evidence_acknowledged": True,
+            "permission_evidence_acknowledged": True,
+            "final_operator_confirmation": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert writeback_execution_missing.status_code == 200, writeback_execution_missing.text
+        writeback_execution_missing_payload = writeback_execution_missing.json()["data"]
+        assert writeback_execution_missing_payload["phase"] == "Shipping-9B", writeback_execution_missing_payload
+        assert writeback_execution_missing_payload["status"] == "blocked", writeback_execution_missing_payload
+        assert writeback_execution_missing_payload["skip_reason"] == "execution_approval_required", writeback_execution_missing_payload
+        assert writeback_execution_missing_payload["shipment_writeback_called"] is False, writeback_execution_missing_payload
+        assert writeback_execution_missing_payload["real_api_called"] is False, writeback_execution_missing_payload
+        assert writeback_execution_missing_payload["real_database_written"] is False, writeback_execution_missing_payload
+        assert shipping_counts(store_id) == after_status_write_counts, shipping_counts(store_id)
+
+        writeback_execution_api_blocked = client.post("/api/v1/shipping/shipment-writeback/execution-mock-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "local_status_evidence_acknowledged": True,
+            "naver_writeback_boundary_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_delivery_status": "DISPATCHED",
+            "execution_approval": True,
+            "dry_run_evidence_acknowledged": True,
+            "permission_evidence_acknowledged": True,
+            "final_operator_confirmation": True,
+            "real_api_call_requested": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert writeback_execution_api_blocked.status_code == 200, writeback_execution_api_blocked.text
+        writeback_execution_api_blocked_payload = writeback_execution_api_blocked.json()["data"]
+        assert writeback_execution_api_blocked_payload["phase"] == "Shipping-9B", writeback_execution_api_blocked_payload
+        assert writeback_execution_api_blocked_payload["status"] == "blocked", writeback_execution_api_blocked_payload
+        assert writeback_execution_api_blocked_payload["skip_reason"] == "real_api_call_not_allowed_in_mock_gate", writeback_execution_api_blocked_payload
+        assert writeback_execution_api_blocked_payload["shipment_writeback_called"] is False, writeback_execution_api_blocked_payload
+        assert writeback_execution_api_blocked_payload["real_api_called"] is False, writeback_execution_api_blocked_payload
+        assert shipping_counts(store_id) == after_status_write_counts, shipping_counts(store_id)
+
+        writeback_execution_ready = client.post("/api/v1/shipping/shipment-writeback/execution-mock-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "manual_approval": True,
+            "matching_contract_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "local_status_evidence_acknowledged": True,
+            "naver_writeback_boundary_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "target_delivery_status": "DISPATCHED",
+            "execution_approval": True,
+            "dry_run_evidence_acknowledged": True,
+            "permission_evidence_acknowledged": True,
+            "final_operator_confirmation": True,
+            "real_api_call_requested": False,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert writeback_execution_ready.status_code == 200, writeback_execution_ready.text
+        writeback_execution_ready_payload = writeback_execution_ready.json()["data"]
+        assert writeback_execution_ready_payload["phase"] == "Shipping-9B", writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["status"] == "shipment_writeback_execution_mock_gate_ready", writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["shipment_writeback_execution_ready"] is True, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["execution_candidate_count"] == 1, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["execution_candidates"][0]["execution_allowed"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["execution_candidates"][0]["future_write_allowed"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["shipment_writeback_called"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["shipment_writeback_open"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["orders_updated"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["real_database_written"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["real_api_called"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["orders_written"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["products_written"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["sync_log_written"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["capability_tested_success_written"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["raw_response_saved"] is False, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["privacy_fields_redacted"] is True, writeback_execution_ready_payload
+        assert writeback_execution_ready_payload["platform_writes_enabled"] is False, writeback_execution_ready_payload
+        assert shipping_counts(store_id) == after_status_write_counts, shipping_counts(store_id)
+
         with sqlite3.connect(VERIFY_DB_PATH) as connection:
             order_status, order_raw_data = connection.execute(
                 "SELECT order_status, raw_data FROM orders WHERE store_id=? AND external_order_id=?",
@@ -19023,6 +19121,9 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "writeback_before_local": writeback_before_local_payload,
             "status_write": status_write_payload,
             "writeback_ready": writeback_ready_payload,
+            "writeback_execution_missing": writeback_execution_missing_payload,
+            "writeback_execution_api_blocked": writeback_execution_api_blocked_payload,
+            "writeback_execution_ready": writeback_execution_ready_payload,
             "status_repeat": status_repeat_payload,
             "terminal_status_gate": terminal_status_payload,
         }, ensure_ascii=False, default=str).lower()
