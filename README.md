@@ -1863,3 +1863,33 @@ The future API may expose review evidence only. It must not call Naver, write pr
 The mock gate is documented in `PHASE_ERP_MULTISTORE_2N_INVITATION_APPROVAL_AUDIT_LINKAGE_MOCK_GATE.md`.
 
 Codex1 now verifies future invitation approval audit linkage while keeping user creation, invitation sending, auth sessions, role assignment, membership writes, and audit-row writes closed.
+
+## Phase ERP-Batch-2T - Approval Decision Audit Linkage Readonly API Local Route Mock Gate
+
+The local route mock gate is documented in `PHASE_ERP_BATCH_2T_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_API_LOCAL_ROUTE_MOCK_GATE.md`.
+
+Codex1 now verifies the local route boundary for approval-decision audit linkage review while keeping the route unexposed at the mock-gate layer.
+
+## Phase ERP-Batch-2U - Approval Decision Audit Linkage Readonly API Local Implementation
+
+The local implementation is documented in `PHASE_ERP_BATCH_2U_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_API_LOCAL_IMPLEMENTATION.md`.
+
+Codex1 now exposes `POST /api/v1/batch/approval-decision/audit-linkage/readonly-check` as a readonly review route. It does not approve execution, write audit rows, write products, or write orders.
+
+## Phase Naver-Product-Batch-2I - Product Batch Execution Approval Readonly API Mock Gate
+
+The mock gate is documented in `PHASE_NAVER_PRODUCT_BATCH_2I_PRODUCT_BATCH_EXECUTION_APPROVAL_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now verifies the future Naver product batch execution approval readonly API shape while keeping routes, product writes, audit writes, platform writes, and formal product batch sync closed.
+
+## Phase ERP-Multistore-2O - Invitation Approval Audit Linkage Readonly API Plan
+
+The readonly API plan is documented in `PHASE_ERP_MULTISTORE_2O_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_API_PLAN.md`.
+
+Future invitation approval audit linkage APIs may review sanitized evidence only. Real invitation remains closed.
+
+## Phase ERP-Multistore-2P - Invitation Approval Audit Linkage Readonly API Mock Gate
+
+The mock gate is documented in `PHASE_ERP_MULTISTORE_2P_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now verifies the future invitation approval audit-linkage readonly API shape while keeping routes, invitations, user creation, memberships, and audit-row writes closed.
