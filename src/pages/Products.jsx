@@ -1038,6 +1038,157 @@ function NaverProductBatchExecutionApprovalPanel() {
   );
 }
 
+const PRODUCT_BATCH_SYNC_ACTION = 'product_batch_local_sync_succeeded';
+
+function isProductBatchSyncAudit(row = {}) {
+  const action = row.advancedDetails?.action || row.action || row.rawAction || '';
+  const actionType = String(row.actionType || '');
+  return action === PRODUCT_BATCH_SYNC_ACTION || actionType.includes('\u5546\u54c1\u672c\u5730\u540c\u6b65');
+}
+
+function auditCount(row = {}, key) {
+  const counts = row.advancedDetails?.counts_summary || row.advancedDetails?.countsSummary || {};
+  return Number(counts[key] ?? counts[key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())] ?? 0);
+}
+
+function backupEvidenceLabel(row = {}) {
+  const backup = row.backupEvidence || row.advancedDetails?.backup_path || row.advancedDetails?.backupPath;
+  if (!backup || String(backup).includes('\u6682\u65e0')) return '\u672a\u5173\u8054\u5907\u4efd';
+  return '\u5df2\u5173\u8054\u5907\u4efd';
+}
+
+function NaverProductBatchSyncHistoryPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const { versions } = useSyncRefresh();
+  const [state, setState] = useState({ loading: false, rows: [], error: '' });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, rows: [], error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getOperationAuditLogs({
+      storeId: selectedStoreId,
+      page: 1,
+      pageSize: 20,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = (result.data || result.items || [])
+          .filter(isProductBatchSyncAudit)
+          .slice(0, 3);
+        setState({ loading: false, rows, error: '' });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            rows: [],
+            error: error?.message || '\u5546\u54c1\u540c\u6b65\u5386\u53f2\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStoreId, versions.products]);
+
+  if (!isNaverStore) return null;
+
+  const { loading, rows, error } = state;
+  const latest = rows[0];
+  const createdCount = auditCount(latest, 'created_count');
+  const updatedCount = auditCount(latest, 'updated_count');
+  const skippedCount = auditCount(latest, 'skipped_count');
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>{'\u6700\u8fd1\u5546\u54c1\u540c\u6b65\u8bb0\u5f55'}</h2>
+          <p>{'\u8fd9\u91cc\u53ea\u5c55\u793a\u5df2\u5b8c\u6210\u7684\u672c\u5730\u5546\u54c1\u540c\u6b65\u5ba1\u8ba1\u6458\u8981\uff0c\u7528\u6765\u8ba9\u8fd0\u8425\u4eba\u5458\u770b\u61c2\u6700\u8fd1\u5199\u5165\u4e86\u4ec0\u4e48\u3002\u4e0d\u8c03\u7528 Naver\uff0c\u4e0d\u6267\u884c\u65b0\u5199\u5165\u3002'}</p>
+        </div>
+        <span className="period-chip">{loading ? '\u52a0\u8f7d\u4e2d' : '\u53ea\u8bfb\u5386\u53f2'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={latest ? 'business-capability-card success' : 'business-capability-card muted'}>
+          <div className="business-capability-head">
+            <strong>{'\u6700\u8fd1\u4e00\u6b21'}</strong>
+            <span>{latest ? '\u5df2\u8bb0\u5f55' : '\u6682\u65e0'}</span>
+          </div>
+          <p>{latest
+            ? `\u6700\u8fd1\u672c\u5730\u5546\u54c1\u540c\u6b65\uff1a\u65b0\u589e ${createdCount} \u6761\uff0c\u66f4\u65b0 ${updatedCount} \u6761\uff0c\u8df3\u8fc7 ${skippedCount} \u6761\u3002`
+            : '\u5f53\u524d\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u5546\u54c1\u540c\u6b65\u5ba1\u8ba1\u8bb0\u5f55\u3002'}</p>
+          <small>{latest?.time ? formatKstDateTimeWithLabel(latest.time) : '\u6267\u884c\u540e\u4f1a\u5728\u8fd9\u91cc\u663e\u793a\u65f6\u95f4\u3001\u7ed3\u679c\u548c\u5907\u4efd\u8bc1\u636e\u3002'}</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>{'\u5907\u4efd\u8bc1\u636e'}</strong>
+            <span>{backupEvidenceLabel(latest)}</span>
+          </div>
+          <p>{latest ? '\u8be5\u8bb0\u5f55\u5df2\u4ece\u5ba1\u8ba1\u65e5\u5fd7\u8bfb\u53d6\uff0c\u53ef\u7528\u4e8e\u540e\u7eed\u56de\u6eda\u548c\u95ee\u9898\u8ffd\u8e2a\u3002' : '\u5c1a\u65e0\u53ef\u7528\u7684\u5546\u54c1\u540c\u6b65\u5907\u4efd\u8bc1\u636e\u3002'}</p>
+          <small>{'\u9875\u9762\u4e0d\u5c55\u793a\u5b8c\u6574\u5e73\u53f0\u7f16\u53f7\u3001token\u3001headers\u3001signature \u6216 raw response\u3002'}</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>{'\u540c\u6b65\u8fb9\u754c'}</strong>
+            <span>{'\u4ecd\u9700\u53d7\u63a7'}</span>
+          </div>
+          <p>{'\u5386\u53f2\u5c55\u793a\u53ea\u662f\u5b89\u5168\u5ba1\u8ba1\u6458\u8981\uff0c\u4e0d\u80fd\u4f5c\u4e3a\u5546\u54c1\u6279\u91cf\u540c\u6b65\u5f00\u653e\u4f9d\u636e\uff1b\u6269\u5927\u9875\u6570\u3001\u6279\u91cf\u5199\u5165\u548c\u5e73\u53f0\u5199\u64cd\u4f5c\u4ecd\u9700\u5355\u72ec\u5ba1\u6279\u3002'}</p>
+          <small>{'\u5f53\u524d\u662f\u672c\u5730 products \u884c\u7684\u5b89\u5168\u5ba1\u8ba1\u6458\u8981\u3002'}</small>
+        </article>
+      </div>
+      {rows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{'\u65f6\u95f4'}</th>
+                <th>{'\u7ed3\u679c'}</th>
+                <th>{'\u65b0\u589e'}</th>
+                <th>{'\u66f4\u65b0'}</th>
+                <th>{'\u5907\u4efd'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id || row.auditId}>
+                  <td>{row.time ? formatKstDateTimeWithLabel(row.time) : '-'}</td>
+                  <td>{row.status || '\u5df2\u5b8c\u6210'}</td>
+                  <td>{auditCount(row, 'created_count')}</td>
+                  <td>{auditCount(row, 'updated_count')}</td>
+                  <td>{backupEvidenceLabel(row)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TechnicalDetails
+        title={"\u67e5\u770b\u5546\u54c1\u540c\u6b65\u5ba1\u8ba1\u6280\u672f\u6458\u8981"}
+        description={"\u8fd9\u91cc\u4ec5\u4fdd\u7559\u7ba1\u7406\u5458\u6392\u67e5\u6240\u9700\u7684\u5df2\u8131\u654f\u5ba1\u8ba1\u5b57\u6bb5\u3002"}
+        items={[
+          { label: 'phase', value: 'Naver-Product-Batch-Exec-1B' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'history_rows_loaded', value: rows.length },
+          { label: 'readonly_api_used', value: true },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          { label: 'latest_audit_summary', value: latest?.advancedDetails || {} },
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -1046,6 +1197,7 @@ export default function Products() {
   return (
     <>
       <NaverProductPreviewStatusPanel />
+      <NaverProductBatchSyncHistoryPanel />
       <ProductRollbackReadonlyReportRoutePanel />
       <ProductBatchApprovalEvidenceLinkagePanel />
       <NaverProductBatchExecutionApprovalPanel />
