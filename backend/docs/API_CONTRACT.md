@@ -2817,6 +2817,75 @@ The response is dry-run evidence only. It may return aggregate candidate counts 
 
 The route must block sensitive payload markers and candidate windows that exceed the configured small-batch limits (`naver_product_batch=10`, `naver_order_batch=20`). It does not approve formal batch execution.
 
+### Formal Batch Execution Approval Mock Gate
+
+Phase ERP-Batch-3G adds a private service helper only:
+
+```text
+evaluate_formal_batch_execution_approval_mock_gate(...)
+```
+
+No public route is added in this phase.
+
+Input contract:
+
+```json
+{
+  "execution_preflight": {
+    "status": "formal_batch_execution_preflight_readonly_ready"
+  },
+  "execution_dry_run": {
+    "status": "formal_batch_execution_dry_run_readonly_ready"
+  },
+  "final_approval_context": {
+    "latest_dry_run_referenced": true,
+    "manual_execution_phase_required": true,
+    "backup_manifest_verified": true,
+    "permission_evidence_verified": true,
+    "audit_linkage_verified": true,
+    "readback_plan_verified": true,
+    "rollback_plan_verified": true,
+    "sensitive_scan_passed": true,
+    "operator_identity_verified": true,
+    "store_scope_verified": true,
+    "execution_window_limited": true,
+    "manual_approval_record_planned": true,
+    "formal_sync_remains_closed": true,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-3G",
+  "status": "formal_batch_execution_approval_mock_ready",
+  "approval_status": "ready_for_separate_execution_phase",
+  "final_approval_ready": true,
+  "private_helper_only": true,
+  "backend_route_implemented": false,
+  "public_endpoint_enabled": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The helper must block missing final-approval flags, sensitive markers, accidental execution approval, write flags, platform-write flags, raw response storage, privacy-boundary failures, and mismatched store/sync/action scopes. Passing this gate means only that review material is ready for a separate execution phase; it does not approve or perform product/order batch sync.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

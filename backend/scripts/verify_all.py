@@ -13564,6 +13564,151 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         assert batch_execution_dry_run["raw_response_saved"] is False, batch_execution_dry_run
         assert batch_execution_dry_run["privacy_fields_redacted"] is True, batch_execution_dry_run
 
+        batch_execution_final_approval_context = {
+            "latest_dry_run_referenced": True,
+            "manual_execution_phase_required": True,
+            "backup_manifest_verified": True,
+            "permission_evidence_verified": True,
+            "audit_linkage_verified": True,
+            "readback_plan_verified": True,
+            "rollback_plan_verified": True,
+            "sensitive_scan_passed": True,
+            "operator_identity_verified": True,
+            "store_scope_verified": True,
+            "execution_window_limited": True,
+            "manual_approval_record_planned": True,
+            "formal_sync_remains_closed": True,
+            "store_ids": [8],
+            "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+            "targets": ["products", "orders"],
+            "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            "execution_approved": False,
+            "batch_execution_enabled": False,
+            "write_endpoint_enabled": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "real_api_called": False,
+            "real_database_written": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+        }
+        batch_execution_approval_ready = sync_service.evaluate_formal_batch_execution_approval_mock_gate(
+            execution_preflight=batch_execution_preflight,
+            execution_dry_run=batch_execution_dry_run,
+            final_approval_context=batch_execution_final_approval_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_execution_approval_ready["phase"] == "ERP-Batch-3G", batch_execution_approval_ready
+        assert batch_execution_approval_ready["status"] == "formal_batch_execution_approval_mock_ready", (
+            batch_execution_approval_ready
+        )
+        assert batch_execution_approval_ready["final_approval_ready"] is True, batch_execution_approval_ready
+        assert batch_execution_approval_ready["private_helper_only"] is True, batch_execution_approval_ready
+        assert batch_execution_approval_ready["backend_route_implemented"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["public_endpoint_enabled"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["store_ids"] == [8], batch_execution_approval_ready
+        assert batch_execution_approval_ready["sync_kinds"] == ["naver_order_batch", "naver_product_batch"], (
+            batch_execution_approval_ready
+        )
+        assert batch_execution_approval_ready["targets"] == ["orders", "products"], batch_execution_approval_ready
+        assert batch_execution_approval_ready["required_actions"] == [
+            "orders.batch_sync_write",
+            "products.batch_sync_write",
+        ], batch_execution_approval_ready
+        assert batch_execution_approval_ready["total_candidate_count"] == 7, batch_execution_approval_ready
+        assert batch_execution_approval_ready["total_would_update"] == 1, batch_execution_approval_ready
+        assert batch_execution_approval_ready["total_would_refresh_only"] == 6, batch_execution_approval_ready
+        assert batch_execution_approval_ready["changed_fields"] == ["order_status"], batch_execution_approval_ready
+        assert batch_execution_approval_ready["execution_approved"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["batch_execution_enabled"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["write_endpoint_enabled"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["real_api_called"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["real_database_written"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["orders_written"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["products_written"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["operation_audit_rows_written"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["formal_sync_open"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["formal_order_sync_open"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["formal_product_sync_open"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["platform_writes_enabled"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["raw_response_saved"] is False, batch_execution_approval_ready
+        assert batch_execution_approval_ready["privacy_fields_redacted"] is True, batch_execution_approval_ready
+
+        batch_execution_approval_missing = sync_service.evaluate_formal_batch_execution_approval_mock_gate(
+            execution_preflight=batch_execution_preflight,
+            execution_dry_run=batch_execution_dry_run,
+            final_approval_context={
+                **batch_execution_final_approval_context,
+                "rollback_plan_verified": False,
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_execution_approval_missing["phase"] == "ERP-Batch-3G", batch_execution_approval_missing
+        assert batch_execution_approval_missing["skip_reason"] == "final_approval_context_incomplete", (
+            batch_execution_approval_missing
+        )
+        assert "rollback_plan_verified" in batch_execution_approval_missing["missing_final_approval_flags"], (
+            batch_execution_approval_missing
+        )
+        assert batch_execution_approval_missing["real_database_written"] is False, batch_execution_approval_missing
+
+        batch_execution_approval_sensitive = sync_service.evaluate_formal_batch_execution_approval_mock_gate(
+            execution_preflight=batch_execution_preflight,
+            execution_dry_run=batch_execution_dry_run,
+            final_approval_context={
+                **batch_execution_final_approval_context,
+                "productOrderId": "must-not-leak-final-approval",
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_execution_approval_sensitive["phase"] == "ERP-Batch-3G", batch_execution_approval_sensitive
+        assert batch_execution_approval_sensitive["skip_reason"] == (
+            "formal_batch_execution_approval_sensitive_field_blocked"
+        ), batch_execution_approval_sensitive
+        assert batch_execution_approval_sensitive["real_database_written"] is False, (
+            batch_execution_approval_sensitive
+        )
+
+        batch_execution_approval_executed = sync_service.evaluate_formal_batch_execution_approval_mock_gate(
+            execution_preflight=batch_execution_preflight,
+            execution_dry_run=batch_execution_dry_run,
+            final_approval_context={
+                **batch_execution_final_approval_context,
+                "execution_approved": True,
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_execution_approval_executed["phase"] == "ERP-Batch-3G", batch_execution_approval_executed
+        assert batch_execution_approval_executed["skip_reason"] == (
+            "execution_approval_not_allowed_in_approval_mock_gate"
+        ), batch_execution_approval_executed
+        assert batch_execution_approval_executed["blocked_flag"] == "execution_approved", (
+            batch_execution_approval_executed
+        )
+        assert batch_execution_approval_executed["batch_execution_enabled"] is False, (
+            batch_execution_approval_executed
+        )
+
+        batch_execution_approval_write_attempt = sync_service.evaluate_formal_batch_execution_approval_mock_gate(
+            execution_preflight=batch_execution_preflight,
+            execution_dry_run=batch_execution_dry_run,
+            final_approval_context={
+                **batch_execution_final_approval_context,
+                "real_database_written": True,
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+        assert batch_execution_approval_write_attempt["phase"] == "ERP-Batch-3G", (
+            batch_execution_approval_write_attempt
+        )
+        assert batch_execution_approval_write_attempt["skip_reason"] == (
+            "side_effect_not_allowed_in_approval_mock_gate"
+        ), batch_execution_approval_write_attempt
+        assert batch_execution_approval_write_attempt["blocked_flag"] == "real_database_written", (
+            batch_execution_approval_write_attempt
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -13801,6 +13946,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_execution_preflight": batch_execution_preflight,
             "batch_execution_preflight_missing": batch_execution_preflight_missing,
             "batch_execution_preflight_sensitive": batch_execution_preflight_sensitive,
+            "batch_execution_approval_ready": batch_execution_approval_ready,
+            "batch_execution_approval_missing": batch_execution_approval_missing,
+            "batch_execution_approval_sensitive": batch_execution_approval_sensitive,
+            "batch_execution_approval_executed": batch_execution_approval_executed,
+            "batch_execution_approval_write_attempt": batch_execution_approval_write_attempt,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,

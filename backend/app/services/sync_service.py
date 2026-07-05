@@ -7376,6 +7376,274 @@ def evaluate_formal_batch_execution_dry_run_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_execution_approval_mock_gate(
+    *,
+    execution_preflight: dict | None,
+    execution_dry_run: dict | None,
+    final_approval_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Private mock gate for the final review before any later formal batch execution."""
+
+    required_final_approval_flags = [
+        "latest_dry_run_referenced",
+        "manual_execution_phase_required",
+        "backup_manifest_verified",
+        "permission_evidence_verified",
+        "audit_linkage_verified",
+        "readback_plan_verified",
+        "rollback_plan_verified",
+        "sensitive_scan_passed",
+        "operator_identity_verified",
+        "store_scope_verified",
+        "execution_window_limited",
+        "manual_approval_record_planned",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-3G",
+        "formal_batch_execution_approval_mock_gate": True,
+        "private_helper_only": True,
+        "status": "blocked",
+        "approval_status": "blocked",
+        "final_approval_ready": False,
+        "skip_reason": None,
+        "required_final_approval_flags": required_final_approval_flags,
+        "missing_final_approval_flags": [],
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "required_actions": [],
+        "candidate_summary_count": 0,
+        "total_candidate_count": 0,
+        "total_would_create": 0,
+        "total_would_update": 0,
+        "total_would_refresh_only": 0,
+        "total_would_skip": 0,
+        "changed_fields": [],
+        "candidate_summaries": [],
+        "route_path": None,
+        "http_method": None,
+        "backend_route_implemented": False,
+        "public_endpoint_enabled": False,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(execution_preflight, dict):
+        result["skip_reason"] = "execution_preflight_required"
+        return result
+    if not isinstance(execution_dry_run, dict):
+        result["skip_reason"] = "execution_dry_run_required"
+        return result
+    if not isinstance(final_approval_context, dict):
+        result["skip_reason"] = "final_approval_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "execution_preflight": execution_preflight,
+        "execution_dry_run": execution_dry_run,
+        "final_approval_context": final_approval_context,
+    }):
+        result["skip_reason"] = "formal_batch_execution_approval_sensitive_field_blocked"
+        return result
+
+    if execution_preflight.get("status") != "formal_batch_execution_preflight_readonly_ready":
+        result["skip_reason"] = "execution_preflight_not_ready"
+        return result
+    if execution_preflight.get("preflight_ready") is not True:
+        result["skip_reason"] = "execution_preflight_not_ready"
+        return result
+    if execution_dry_run.get("status") != "formal_batch_execution_dry_run_readonly_ready":
+        result["skip_reason"] = "execution_dry_run_not_ready"
+        return result
+    if execution_dry_run.get("dry_run_ready") is not True:
+        result["skip_reason"] = "execution_dry_run_not_ready"
+        return result
+
+    side_effect_flags = [
+        "execution_approved",
+        "batch_execution_enabled",
+        "write_endpoint_enabled",
+        "real_api_called",
+        "real_database_written",
+        "orders_written",
+        "products_written",
+        "sync_log_written",
+        "capability_tested_success_written",
+        "timeline_events_written",
+        "operation_audit_rows_written",
+        "formal_sync_open",
+        "formal_order_sync_open",
+        "formal_product_sync_open",
+        "platform_order_writes_enabled",
+        "platform_product_writes_enabled",
+        "platform_writes_enabled",
+        "shipment_write_enabled",
+        "cancel_write_enabled",
+        "return_write_enabled",
+        "exchange_write_enabled",
+    ]
+    for source_name, payload in (
+        ("execution_preflight", execution_preflight),
+        ("execution_dry_run", execution_dry_run),
+        ("final_approval_context", final_approval_context),
+    ):
+        for flag in side_effect_flags:
+            if payload.get(flag) is True:
+                if flag == "execution_approved":
+                    result["skip_reason"] = "execution_approval_not_allowed_in_approval_mock_gate"
+                else:
+                    result["skip_reason"] = "side_effect_not_allowed_in_approval_mock_gate"
+                result["blocked_source"] = source_name
+                result["blocked_flag"] = flag
+                return result
+        if payload.get("raw_response_saved") is not False and "raw_response_saved" in payload:
+            result["skip_reason"] = "raw_response_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("privacy_fields_redacted") is not True and "privacy_fields_redacted" in payload:
+            result["skip_reason"] = "privacy_redaction_required"
+            result["blocked_source"] = source_name
+            return result
+
+    missing_flags = [
+        flag for flag in required_final_approval_flags
+        if final_approval_context.get(flag) is not True
+    ]
+    result["missing_final_approval_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "final_approval_context_incomplete"
+        return result
+
+    preflight_store_ids = set(_normalize_formal_batch_store_ids(execution_preflight.get("store_ids")) or [])
+    dry_run_store_ids = set(_normalize_formal_batch_store_ids(execution_dry_run.get("store_ids")) or [])
+    final_store_ids = set(_normalize_formal_batch_store_ids(final_approval_context.get("store_ids")) or [])
+    if not preflight_store_ids or not dry_run_store_ids:
+        result["skip_reason"] = "batch_execution_scope_required"
+        return result
+    if not dry_run_store_ids.issubset(preflight_store_ids):
+        result["skip_reason"] = "execution_dry_run_store_scope_mismatch"
+        return result
+    if not final_store_ids or not dry_run_store_ids.issubset(final_store_ids):
+        result["skip_reason"] = "final_approval_store_scope_mismatch"
+        return result
+
+    preflight_sync_kinds = set(str(kind) for kind in (execution_preflight.get("sync_kinds") or []))
+    dry_run_sync_kinds = set(str(kind) for kind in (execution_dry_run.get("sync_kinds") or []))
+    final_sync_kinds = set(str(kind) for kind in (final_approval_context.get("sync_kinds") or []))
+    if not preflight_sync_kinds or not dry_run_sync_kinds:
+        result["skip_reason"] = "batch_execution_sync_kind_scope_required"
+        return result
+    if not dry_run_sync_kinds.issubset(preflight_sync_kinds):
+        result["skip_reason"] = "execution_dry_run_sync_kind_mismatch"
+        return result
+    if not final_sync_kinds or not dry_run_sync_kinds.issubset(final_sync_kinds):
+        result["skip_reason"] = "final_approval_sync_kind_scope_mismatch"
+        return result
+
+    preflight_targets = set(str(target) for target in (execution_preflight.get("targets") or []))
+    dry_run_targets = set(str(target) for target in (execution_dry_run.get("targets") or []))
+    final_targets = set(str(target) for target in (final_approval_context.get("targets") or []))
+    if not dry_run_targets.issubset(preflight_targets):
+        result["skip_reason"] = "execution_dry_run_target_mismatch"
+        return result
+    if not final_targets or not dry_run_targets.issubset(final_targets):
+        result["skip_reason"] = "final_approval_target_scope_mismatch"
+        return result
+
+    required_actions = set(str(action) for action in (execution_preflight.get("required_actions") or []))
+    final_required_actions = set(str(action) for action in (final_approval_context.get("required_actions") or []))
+    expected_required_actions = {
+        str(FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["required_action"])
+        for sync_kind in dry_run_sync_kinds
+        if sync_kind in FORMAL_BATCH_SYNC_GATE_KINDS
+    }
+    if expected_required_actions and not expected_required_actions.issubset(required_actions):
+        result["skip_reason"] = "execution_preflight_action_scope_mismatch"
+        return result
+    if expected_required_actions and not expected_required_actions.issubset(final_required_actions):
+        result["skip_reason"] = "final_approval_action_scope_mismatch"
+        return result
+
+    try:
+        candidate_summary_count = int(execution_dry_run.get("candidate_summary_count") or 0)
+        total_candidate_count = int(execution_dry_run.get("total_candidate_count") or 0)
+        total_would_create = int(execution_dry_run.get("total_would_create") or 0)
+        total_would_update = int(execution_dry_run.get("total_would_update") or 0)
+        total_would_refresh_only = int(execution_dry_run.get("total_would_refresh_only") or 0)
+        total_would_skip = int(execution_dry_run.get("total_would_skip") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "execution_dry_run_totals_invalid"
+        return result
+    if min(
+        candidate_summary_count,
+        total_candidate_count,
+        total_would_create,
+        total_would_update,
+        total_would_refresh_only,
+        total_would_skip,
+    ) < 0:
+        result["skip_reason"] = "execution_dry_run_totals_invalid"
+        return result
+    if total_would_create + total_would_update + total_would_refresh_only + total_would_skip > total_candidate_count:
+        result["skip_reason"] = "execution_dry_run_totals_exceed_candidates"
+        return result
+    changed_fields = _normalize_safe_changed_fields(execution_dry_run.get("changed_fields") or [])
+    if changed_fields is None:
+        result["skip_reason"] = "execution_dry_run_changed_fields_invalid"
+        return result
+
+    result.update({
+        "status": "formal_batch_execution_approval_mock_ready",
+        "approval_status": "ready_for_separate_execution_phase",
+        "final_approval_ready": True,
+        "store_ids": sorted(dry_run_store_ids),
+        "sync_kinds": sorted(dry_run_sync_kinds),
+        "targets": sorted(dry_run_targets),
+        "required_actions": sorted(expected_required_actions),
+        "candidate_summary_count": candidate_summary_count,
+        "total_candidate_count": total_candidate_count,
+        "total_would_create": total_would_create,
+        "total_would_update": total_would_update,
+        "total_would_refresh_only": total_would_refresh_only,
+        "total_would_skip": total_would_skip,
+        "changed_fields": changed_fields,
+        "candidate_summaries": execution_dry_run.get("candidate_summaries") or [],
+        "business_message": (
+            "Formal batch execution approval mock gate passed for review only. "
+            "It does not approve execution, expose a write endpoint, write products or orders, call platform APIs, or open formal sync."
+        ),
+        "next_action": (
+            "Plan a separate explicitly approved execution phase with fresh backup, readback, rollback, audit evidence, and sensitive-field scans."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

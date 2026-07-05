@@ -1471,6 +1471,16 @@ The route reviews the formal execution preflight result plus safe product/order 
 
 The route must keep `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order batch sync closed. It blocks token/header/signature/raw-response markers, full platform order ids, buyer/receiver privacy, addresses, and oversized candidate windows.
 
+ERP-Batch-3G adds a private final approval mock gate:
+
+```text
+evaluate_formal_batch_execution_approval_mock_gate(...)
+```
+
+The helper reviews the 3A preflight result, the 3D dry-run result, and final approval context before any future execution phase. It requires the latest dry-run reference, backup manifest, permission evidence, audit linkage, readback plan, rollback plan, sensitive scan, operator identity, store scope, limited execution window, and planned manual approval record. Passing the gate returns `status=formal_batch_execution_approval_mock_ready` and `approval_status=ready_for_separate_execution_phase`, but it still keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+No public route is added in 3G. Product or order batch execution still requires a separate explicit execution phase with fresh backup, readback, rollback, audit evidence, and sensitive-field scans.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text
