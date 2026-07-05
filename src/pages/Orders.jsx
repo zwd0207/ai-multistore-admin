@@ -1514,6 +1514,39 @@ const formalBatchDecisionChecklist = [
   },
 ];
 
+const formalBatchFinalBoundaryChecklist = [
+  {
+    key: 'fresh_dry_run',
+    title: '最新 dry-run 证据',
+    status: '必须满足',
+    message: '商品和订单都必须有最新只读 dry-run 摘要，候选数量、预计动作和变化字段必须可复核。',
+  },
+  {
+    key: 'manual_execution_phase',
+    title: '单独执行阶段',
+    status: '必须另开',
+    message: '当前页面不能直接执行批量同步；真正写入必须进入单独阶段并再次确认范围。',
+  },
+  {
+    key: 'backup_restore',
+    title: '备份与恢复',
+    status: '必须满足',
+    message: '执行前必须有可验证备份，执行后必须有回读结果，失败时必须能按回滚计划恢复。',
+  },
+  {
+    key: 'audit_permission',
+    title: '审计与权限',
+    status: '必须满足',
+    message: '操作人、店铺范围、批准动作、审计关联和权限证据必须形成可追踪链路。',
+  },
+  {
+    key: 'platform_boundary',
+    title: '平台写入边界',
+    status: '默认关闭',
+    message: '正式商品/订单批量写入不等于 Naver 发货、取消、退货、换货或商品平台写操作自动开放。',
+  },
+];
+
 function batchDecisionStatusMessage(result) {
   if (!result) return '正在整理批量同步审批决策材料；本次只做只读检查，不批准执行。';
   if (result.status === 'formal_batch_approval_decision_readonly_api_ready') {
@@ -2640,6 +2673,90 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   );
 }
 
+function FormalBatchExecutionFinalBoundaryPanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+  if (!isNaverStore) return null;
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>正式批量执行最终边界</h2>
+          <p>这里给管理员确认最后一道执行边界：当前只是批准前计划，不是正式商品或订单批量同步执行入口。</p>
+        </div>
+        <span className="period-chip">计划边界</span>
+      </div>
+      <div className="business-capability-grid compact">
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>当前结论</strong>
+            <span>未批准执行</span>
+          </div>
+          <p>商品和订单批量同步还停留在证据复核、dry-run 和审批边界阶段，没有真实批量写入许可。</p>
+          <small>后续若要执行，必须另开执行阶段，重新确认范围、备份、审计、权限、回读和回滚证据。</small>
+        </article>
+        <article className="business-capability-card success">
+          <div className="business-capability-head">
+            <strong>可进入下一步</strong>
+            <span>mock gate</span>
+          </div>
+          <p>下一步可以做正式批量执行批准 mock gate，验证最终批准材料能否被系统识别，但仍不写库。</p>
+          <small>mock gate 通过也不等于正式同步开放，只代表批准材料格式可被复核。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>执行入口</strong>
+            <span>不存在</span>
+          </div>
+          <p>当前页面没有批量执行按钮，不会调用 Naver，也不会写入 orders、products、SyncLog、tested_success 或审计行。</p>
+          <small>平台发货、取消、退货、换货和商品平台写操作仍保持关闭。</small>
+        </article>
+      </div>
+      <div className="business-capability-grid compact">
+        {formalBatchFinalBoundaryChecklist.map((item) => (
+          <article className="business-capability-card muted" key={item.key}>
+            <div className="business-capability-head">
+              <strong>{item.title}</strong>
+              <span>{item.status}</span>
+            </div>
+            <p>{item.message}</p>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title="查看最终执行边界技术详情"
+        description="这些字段只用于管理员核对执行边界；普通运营只需要看当前未批准执行和下一步 mock gate。"
+        items={[
+          { label: 'phase', value: 'ERP-Batch-3F' },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'final_boundary_plan_ready', value: true },
+          { label: 'next_phase', value: 'ERP-Batch-3G' },
+          { label: 'execution_approved', value: false },
+          { label: 'batch_execution_enabled', value: false },
+          { label: 'formal_product_sync_open', value: false },
+          { label: 'formal_order_sync_open', value: false },
+          { label: 'real_api_called', value: false },
+          { label: 'real_database_written', value: false },
+          { label: 'orders_written', value: false },
+          { label: 'products_written', value: false },
+          { label: 'sync_log_written', value: false },
+          { label: 'tested_success_written', value: false },
+          { label: 'operation_audit_rows_written', value: false },
+          { label: 'platform_writes_enabled', value: false },
+          { label: 'shipment_write_enabled', value: false },
+          { label: 'cancel_write_enabled', value: false },
+          { label: 'return_write_enabled', value: false },
+          { label: 'exchange_write_enabled', value: false },
+          { label: 'raw_response_saved', value: false },
+          { label: 'privacy_fields_redacted', value: true },
+          { label: 'boundary_item_count', value: formalBatchFinalBoundaryChecklist.length },
+        ]}
+      />
+    </section>
+  );
+}
+
 function NaverOrderBatchAuditReadinessPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({
@@ -3238,6 +3355,7 @@ export default function Orders() {
       <FormalBatchApprovalDecisionRuntimePanel />
       <FormalBatchApprovalDecisionAuditLinkageRuntimePanel />
       <FormalBatchExecutionPreflightRuntimePanel />
+      <FormalBatchExecutionFinalBoundaryPanel />
       <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderBatchExecutionApprovalPanel />
       <NaverOrderCompleteDetailPanel />
