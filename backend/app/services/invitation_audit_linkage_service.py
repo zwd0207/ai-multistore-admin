@@ -299,3 +299,105 @@ def evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(
         ),
     })
     return result
+
+
+def evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local_route_mock_gate(
+    *,
+    invitation_approval: dict[str, Any] | None,
+    audit_linkage_context: dict[str, Any] | None,
+    readonly_api_context: dict[str, Any] | None,
+    verification_scope: str | None = None,
+) -> dict[str, Any]:
+    """Mock gate for exposing invitation approval audit linkage as a local readonly route."""
+
+    result = evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(
+        invitation_approval=invitation_approval,
+        audit_linkage_context=audit_linkage_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope=verification_scope,
+    )
+    result.update({
+        "phase": "ERP-Multistore-2S",
+        "real_user_invitation_approval_audit_linkage_readonly_api_local_route_mock_gate": True,
+        "local_route_mock_gate": True,
+        "route_path_planned": "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "user_invitation_approval_audit_linkage_readonly_api_mock_ready":
+        result["status"] = "user_invitation_approval_audit_linkage_readonly_route_mock_ready"
+        result["business_message"] = (
+            "User invitation approval audit linkage readonly route mock gate passed. "
+            "It is review-only and does not send invitations, create users, assign memberships, or write audit rows."
+        )
+        result["next_action"] = (
+            "Implement the local readonly route separately. Real invitation remains closed until a later approved phase."
+        )
+    return result
+
+
+def evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local(
+    *,
+    invitation_approval: dict[str, Any] | None,
+    audit_linkage_context: dict[str, Any] | None,
+    readonly_api_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Public local readonly helper for invitation approval audit linkage; never writes rows."""
+
+    result = evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local_route_mock_gate(
+        invitation_approval=invitation_approval,
+        audit_linkage_context=audit_linkage_context,
+        readonly_api_context=readonly_api_context,
+        verification_scope=VERIFICATION_SCOPE,
+    )
+    result.update({
+        "phase": "ERP-Multistore-2T",
+        "real_user_invitation_approval_audit_linkage_readonly_api_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check",
+        "http_method": "POST",
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "role_assignment_written": False,
+        "real_auth_session_created": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    if result.get("status") == "user_invitation_approval_audit_linkage_readonly_route_mock_ready":
+        result["status"] = "user_invitation_approval_audit_linkage_readonly_api_ready"
+        result["business_message"] = (
+            "User invitation approval audit linkage is available for local readonly review. "
+            "This does not send invitations, create users, assign memberships, or create audit rows."
+        )
+        result["next_action"] = (
+            "Use the route as review evidence only. A separate approved write phase is still required for real invitation."
+        )
+    return result

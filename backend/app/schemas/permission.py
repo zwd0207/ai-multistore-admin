@@ -52,3 +52,9 @@ class UserInvitationApprovalChecklistReadonlyCheckRequest(BaseModel):
     approval_checklist: dict[str, Any] = Field(default_factory=dict)
     readonly_api_context: dict[str, Any] = Field(default_factory=dict)
     existing_user_hashes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class UserInvitationApprovalAuditLinkageReadonlyCheckRequest(BaseModel):
+    invitation_approval: dict[str, Any] = Field(default_factory=dict)
+    audit_linkage_context: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)

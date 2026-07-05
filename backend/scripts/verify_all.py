@@ -62,9 +62,12 @@ EXPECTED_API_PATHS = {
     "/api/v1/permissions/store-membership/readonly-check",
     "/api/v1/permissions/user-invitation/readonly-check",
     "/api/v1/permissions/user-invitation/approval-checklist/readonly-check",
+    "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check",
     "/api/v1/batch/readonly-evidence",
     "/api/v1/batch/approval-audit-evidence",
     "/api/v1/batch/approval-decision/readonly-check",
+    "/api/v1/batch/approval-decision/audit-linkage/readonly-check",
+    "/api/v1/batch/naver/products/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
@@ -1265,6 +1268,7 @@ def verify_openapi() -> None:
         "/api/v1/permissions/store-membership/readonly-check": {"post"},
         "/api/v1/permissions/user-invitation/readonly-check": {"post"},
         "/api/v1/permissions/user-invitation/approval-checklist/readonly-check": {"post"},
+        "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check": {"post"},
     }
     for permission_path, expected_methods in permission_methods.items():
         methods = set(openapi_json["paths"][permission_path].keys())
@@ -1273,6 +1277,8 @@ def verify_openapi() -> None:
         "/api/v1/batch/readonly-evidence": {"post"},
         "/api/v1/batch/approval-audit-evidence": {"post"},
         "/api/v1/batch/approval-decision/readonly-check": {"post"},
+        "/api/v1/batch/approval-decision/audit-linkage/readonly-check": {"post"},
+        "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
     }
     for batch_path, expected_methods in batch_methods.items():
@@ -10991,6 +10997,108 @@ def verify_store_membership_assignment_mock_gate() -> None:
         invitation_audit_linkage_readonly_api_sensitive
     )
 
+    invitation_audit_linkage_route_mock_ready = (
+        invitation_audit_linkage_service.evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local_route_mock_gate(
+            invitation_approval=invitation_checklist_success,
+            audit_linkage_context=invitation_audit_linkage_context,
+            readonly_api_context=invitation_audit_linkage_readonly_api_context,
+            verification_scope=permission_service.VERIFICATION_SCOPE,
+        )
+    )
+    assert invitation_audit_linkage_route_mock_ready["phase"] == "ERP-Multistore-2S", (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["status"] == (
+        "user_invitation_approval_audit_linkage_readonly_route_mock_ready"
+    ), invitation_audit_linkage_route_mock_ready
+    assert invitation_audit_linkage_route_mock_ready["local_route_mock_gate"] is True, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["backend_route_implemented"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["public_endpoint_enabled"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["invitation_sent"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["users_written"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["membership_written"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["operation_audit_rows_written"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+    assert invitation_audit_linkage_route_mock_ready["real_database_written"] is False, (
+        invitation_audit_linkage_route_mock_ready
+    )
+
+    with TestClient(app) as client:
+        invitation_audit_linkage_route_response = client.post(
+            "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check",
+            json={
+                "invitation_approval": invitation_checklist_success,
+                "audit_linkage_context": invitation_audit_linkage_context,
+                "readonly_api_context": invitation_audit_linkage_readonly_api_context,
+            },
+        )
+        assert invitation_audit_linkage_route_response.status_code == 200, (
+            invitation_audit_linkage_route_response.text
+        )
+        invitation_audit_linkage_route = invitation_audit_linkage_route_response.json()["data"]
+        assert invitation_audit_linkage_route["phase"] == "ERP-Multistore-2T", invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["status"] == (
+            "user_invitation_approval_audit_linkage_readonly_api_ready"
+        ), invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["real_user_invitation_approval_audit_linkage_readonly_api_local"] is True, (
+            invitation_audit_linkage_route
+        )
+        assert invitation_audit_linkage_route["backend_route_implemented"] is True, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["public_endpoint_enabled"] is True, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["invitation_sent"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["users_written"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["membership_written"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["role_assignment_written"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["real_auth_session_created"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["operation_audit_rows_written"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["real_database_written"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["raw_response_saved"] is False, invitation_audit_linkage_route
+        assert invitation_audit_linkage_route["privacy_fields_redacted"] is True, invitation_audit_linkage_route
+
+        invitation_audit_linkage_route_sensitive_response = client.post(
+            "/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check",
+            json={
+                "invitation_approval": invitation_checklist_success,
+                "audit_linkage_context": {
+                    **invitation_audit_linkage_context,
+                    "authorization": "bearer must-not-leak-invitation-linkage-route",
+                },
+                "readonly_api_context": invitation_audit_linkage_readonly_api_context,
+            },
+        )
+        assert invitation_audit_linkage_route_sensitive_response.status_code == 200, (
+            invitation_audit_linkage_route_sensitive_response.text
+        )
+        invitation_audit_linkage_route_sensitive = invitation_audit_linkage_route_sensitive_response.json()["data"]
+        assert invitation_audit_linkage_route_sensitive["phase"] == "ERP-Multistore-2T", (
+            invitation_audit_linkage_route_sensitive
+        )
+        assert invitation_audit_linkage_route_sensitive["skip_reason"] == (
+            "invitation_approval_audit_linkage_sensitive_material_blocked"
+        ), invitation_audit_linkage_route_sensitive
+        assert invitation_audit_linkage_route_sensitive["users_written"] is False, (
+            invitation_audit_linkage_route_sensitive
+        )
+        assert invitation_audit_linkage_route_sensitive["membership_written"] is False, (
+            invitation_audit_linkage_route_sensitive
+        )
+        assert invitation_audit_linkage_route_sensitive["real_database_written"] is False, (
+            invitation_audit_linkage_route_sensitive
+        )
+
     runtime_user_hash = "user-hash-cccccccccccccccc"
     missing_user = None
     runtime_success = None
@@ -11182,6 +11290,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "invitation_audit_linkage_readonly_api_ready": invitation_audit_linkage_readonly_api_ready,
             "invitation_audit_linkage_readonly_api_missing_fold": invitation_audit_linkage_readonly_api_missing_fold,
             "invitation_audit_linkage_readonly_api_sensitive": invitation_audit_linkage_readonly_api_sensitive,
+            "invitation_audit_linkage_route_mock_ready": invitation_audit_linkage_route_mock_ready,
+            "invitation_audit_linkage_route": invitation_audit_linkage_route,
+            "invitation_audit_linkage_route_sensitive": invitation_audit_linkage_route_sensitive,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -11208,6 +11319,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "must-not-leak-checklist",
         "must-not-leak-invitation-linkage",
         "must-not-leak-invitation-linkage-api",
+        "must-not-leak-invitation-linkage-route",
         "operator@example.com",
     ]:
         assert forbidden not in serialized, serialized
@@ -11216,9 +11328,11 @@ def verify_store_membership_assignment_mock_gate() -> None:
 
 
 def verify_formal_batch_sync_production_gate() -> None:
+    from fastapi.testclient import TestClient
     from sqlalchemy import text
 
     from app.database import SessionLocal
+    from app.main import app
     from app.services import sync_service
     from app.services.permission_service import VERIFICATION_SCOPE
 
@@ -11620,6 +11734,97 @@ def verify_formal_batch_sync_production_gate() -> None:
     ), product_execution_readonly_api_sensitive
     assert product_execution_readonly_api_sensitive["products_written"] is False, product_execution_readonly_api_sensitive
 
+    product_execution_route_mock_ready = (
+        sync_service.evaluate_naver_product_batch_execution_approval_readonly_api_local_route_mock_gate(
+            actor_context=admin_multi_store,
+            store_ids=[8],
+            candidate_count=5,
+            batch_size=5,
+            readonly_evidence=readonly_evidence,
+            backup_evidence=backup_evidence,
+            manual_approval=True,
+            execution_context=product_execution_context,
+            readonly_api_context=product_execution_readonly_api_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert product_execution_route_mock_ready["phase"] == "Naver-Product-Batch-2K", product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["status"] == (
+        "naver_product_batch_execution_approval_readonly_api_local_route_mock_ready"
+    ), product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["local_route_mock_gate"] is True, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["backend_route_implemented"] is False, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["public_endpoint_enabled"] is False, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["execution_approved"] is False, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["products_written"] is False, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["operation_audit_rows_written"] is False, product_execution_route_mock_ready
+    assert product_execution_route_mock_ready["formal_product_sync_open"] is False, product_execution_route_mock_ready
+
+    with TestClient(app) as client:
+        product_execution_route_response = client.post(
+            "/api/v1/batch/naver/products/execution-approval/readonly-check",
+            json={
+                "actor_context": admin_multi_store,
+                "store_ids": [8],
+                "candidate_count": 5,
+                "batch_size": 5,
+                "readonly_evidence": readonly_evidence,
+                "backup_evidence": backup_evidence,
+                "manual_approval": True,
+                "execution_context": product_execution_context,
+                "readonly_api_context": product_execution_readonly_api_context,
+            },
+        )
+        assert product_execution_route_response.status_code == 200, product_execution_route_response.text
+        product_execution_route = product_execution_route_response.json()["data"]
+        assert product_execution_route["phase"] == "Naver-Product-Batch-2L", product_execution_route
+        assert product_execution_route["status"] == "naver_product_batch_execution_approval_readonly_api_ready", (
+            product_execution_route
+        )
+        assert product_execution_route["naver_product_batch_execution_approval_readonly_api_local"] is True, (
+            product_execution_route
+        )
+        assert product_execution_route["backend_route_implemented"] is True, product_execution_route
+        assert product_execution_route["public_endpoint_enabled"] is True, product_execution_route
+        assert product_execution_route["execution_approved"] is False, product_execution_route
+        assert product_execution_route["products_written"] is False, product_execution_route
+        assert product_execution_route["orders_written"] is False, product_execution_route
+        assert product_execution_route["operation_audit_rows_written"] is False, product_execution_route
+        assert product_execution_route["formal_product_sync_open"] is False, product_execution_route
+        assert product_execution_route["platform_product_writes_enabled"] is False, product_execution_route
+        assert product_execution_route["raw_response_saved"] is False, product_execution_route
+        assert product_execution_route["privacy_fields_redacted"] is True, product_execution_route
+
+        product_execution_route_sensitive_response = client.post(
+            "/api/v1/batch/naver/products/execution-approval/readonly-check",
+            json={
+                "actor_context": admin_multi_store,
+                "store_ids": [8],
+                "candidate_count": 5,
+                "batch_size": 5,
+                "readonly_evidence": {
+                    **readonly_evidence,
+                    "external_product_id_full": "must-not-leak-product-execution-route",
+                },
+                "backup_evidence": backup_evidence,
+                "manual_approval": True,
+                "execution_context": product_execution_context,
+                "readonly_api_context": product_execution_readonly_api_context,
+            },
+        )
+        assert product_execution_route_sensitive_response.status_code == 200, (
+            product_execution_route_sensitive_response.text
+        )
+        product_execution_route_sensitive = product_execution_route_sensitive_response.json()["data"]
+        assert product_execution_route_sensitive["phase"] == "Naver-Product-Batch-2L", (
+            product_execution_route_sensitive
+        )
+        assert product_execution_route_sensitive["skip_reason"] == "naver_product_batch_execution_sensitive_field_blocked", (
+            product_execution_route_sensitive
+        )
+        assert product_execution_route_sensitive["products_written"] is False, product_execution_route_sensitive
+        assert product_execution_route_sensitive["real_database_written"] is False, product_execution_route_sensitive
+
     oversized = sync_service._evaluate_formal_batch_sync_production_gate(
         sync_kind="naver_product_batch",
         actor_context=admin_multi_store,
@@ -11664,6 +11869,9 @@ def verify_formal_batch_sync_production_gate() -> None:
             "product_execution_readonly_api_ready": product_execution_readonly_api_ready,
             "product_execution_readonly_api_missing_fold": product_execution_readonly_api_missing_fold,
             "product_execution_readonly_api_sensitive": product_execution_readonly_api_sensitive,
+            "product_execution_route_mock_ready": product_execution_route_mock_ready,
+            "product_execution_route": product_execution_route,
+            "product_execution_route_sensitive": product_execution_route_sensitive,
             "no_approval": no_approval,
             "missing_backup": missing_backup,
             "operator_blocked": operator_blocked,
@@ -11682,6 +11890,7 @@ def verify_formal_batch_sync_production_gate() -> None:
         "productorderid",
         "external_product_id_full",
         "must-not-leak-product-execution-api",
+        "must-not-leak-product-execution-route",
         "buyername",
         "buyerphone",
         "receivername",

@@ -1426,3 +1426,35 @@ POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
 No endpoint is added in this phase. A future route may wrap `evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(...)` for review evidence only, and must keep invitation sending, user creation, auth sessions, role assignment, membership writes, audit-row writes, and formal sync closed.
 
 ERP-Multistore-2R is a Codex2 UI plan only. A future Accounts panel may show invitation approval audit-linkage readiness, but real invitation and membership writes remain closed.
+
+Naver-Product-Batch-2K adds a local-route mock gate:
+
+```text
+evaluate_naver_product_batch_execution_approval_readonly_api_local_route_mock_gate(...)
+```
+
+It verifies the future route boundary for Naver product batch execution approval readonly review while keeping the route unexposed in the mock gate. It does not approve execution, write products, write audit rows, call Naver, or open formal product batch sync.
+
+Naver-Product-Batch-2L exposes a local readonly route:
+
+```text
+POST /api/v1/batch/naver/products/execution-approval/readonly-check
+```
+
+The route reviews product batch execution approval evidence only. It keeps `execution_approved=false`, `products_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `platform_product_writes_enabled=false`, and formal product batch sync closed.
+
+ERP-Multistore-2S adds a local-route mock gate:
+
+```text
+evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local_route_mock_gate(...)
+```
+
+It verifies the route boundary for invitation approval audit-linkage readonly review while keeping the route unexposed in the mock gate. It does not send invitations, create users, create auth sessions, assign roles, write memberships, or write audit rows.
+
+ERP-Multistore-2T exposes a local readonly route:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
+```
+
+The route reviews invitation approval audit-linkage evidence only. It keeps `invitation_sent=false`, `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, `operation_audit_rows_written=false`, and `real_database_written=false`.

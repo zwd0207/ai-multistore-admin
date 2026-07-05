@@ -6,6 +6,7 @@ from app.schemas.batch import (
     BatchApprovalDecisionAuditLinkageReadonlyCheckRequest,
     BatchApprovalDecisionReadonlyCheckRequest,
     BatchReadonlyEvidenceRequest,
+    NaverProductBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductRollbackReadonlyReportRequest,
 )
 from app.services import sync_service
@@ -65,6 +66,27 @@ def check_batch_approval_decision_audit_linkage_readonly(
     return success_response(
         data=result,
         message="batch approval decision audit linkage readonly check completed",
+    )
+
+
+@router.post("/naver/products/execution-approval/readonly-check")
+def check_naver_product_batch_execution_approval_readonly(
+    payload: NaverProductBatchExecutionApprovalReadonlyCheckRequest,
+) -> dict:
+    result = sync_service.evaluate_naver_product_batch_execution_approval_readonly_api_local(
+        actor_context=payload.actor_context,
+        store_ids=payload.store_ids,
+        candidate_count=payload.candidate_count,
+        batch_size=payload.batch_size,
+        readonly_evidence=payload.readonly_evidence,
+        backup_evidence=payload.backup_evidence,
+        manual_approval=payload.manual_approval,
+        execution_context=payload.execution_context,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="naver product batch execution approval readonly check completed",
     )
 
 

@@ -2681,6 +2681,48 @@ POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
 
 This route is not exposed yet. If implemented later, it must review target user hash, masked login identifier, store scope, target role, approval actor, permission evidence, backup evidence, readback plan, rollback plan, and audit correlation evidence only. It must keep `invitation_sent=false`, `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, `operation_audit_rows_written=false`, and `real_database_written=false`.
 
+Phase Naver-Product-Batch-2L now exposes the product batch execution approval readonly route:
+
+```text
+POST /api/v1/batch/naver/products/execution-approval/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "actor_context": {},
+  "store_ids": [8],
+  "candidate_count": 5,
+  "batch_size": 5,
+  "readonly_evidence": {},
+  "backup_evidence": {},
+  "manual_approval": true,
+  "execution_context": {},
+  "readonly_api_context": {}
+}
+```
+
+The response is review evidence only. It must keep `execution_approved=false`, `real_api_called=false`, `real_database_written=false`, `products_written=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and formal product batch sync closed.
+
+Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "invitation_approval": {},
+  "audit_linkage_context": {},
+  "readonly_api_context": {}
+}
+```
+
+The response is review evidence only. It must keep `invitation_sent=false`, `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, `operation_audit_rows_written=false`, `raw_response_saved=false`, `privacy_fields_redacted=true`, and real invitation closed.
+
 ### Naver Order Batch Execution Approval Readonly UI
 
 Phase Naver-Order-Batch-2D adds Codex2 UI only. It displays future execution approval readiness but must keep Naver calls, local order writes, timeline writes, audit-row writes, and shipment/cancel/return/exchange writes closed.

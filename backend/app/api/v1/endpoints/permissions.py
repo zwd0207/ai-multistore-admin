@@ -7,8 +7,12 @@ from app.schemas.permission import (
     PermissionMockCheckRequest,
     SensitiveActionPermissionMockCheckRequest,
     StoreMembershipReadonlyCheckRequest,
+    UserInvitationApprovalAuditLinkageReadonlyCheckRequest,
     UserInvitationApprovalChecklistReadonlyCheckRequest,
     UserInvitationReadonlyCheckRequest,
+)
+from app.services.invitation_audit_linkage_service import (
+    evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local,
 )
 from app.services.permission_service import (
     VERIFICATION_SCOPE,
@@ -217,4 +221,19 @@ def check_user_invitation_approval_checklist_readonly_gate(
     return success_response(
         data=result,
         message="user invitation approval checklist readonly checked",
+    )
+
+
+@router.post("/user-invitation/approval-audit-linkage/readonly-check")
+def check_user_invitation_approval_audit_linkage_readonly_gate(
+    payload: UserInvitationApprovalAuditLinkageReadonlyCheckRequest,
+) -> dict:
+    result = evaluate_real_user_invitation_approval_audit_linkage_readonly_api_local(
+        invitation_approval=payload.invitation_approval,
+        audit_linkage_context=payload.audit_linkage_context,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="user invitation approval audit linkage readonly checked",
     )
