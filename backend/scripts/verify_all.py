@@ -10274,6 +10274,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
     from app.main import app
     from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
     from app.models.store import Store
+    from app.services import invitation_audit_linkage_service
     from app.services import permission_service
 
     admin_store8 = {
@@ -10819,6 +10820,83 @@ def verify_store_membership_assignment_mock_gate() -> None:
         assert route_invitation_checklist_sensitive["membership_written"] is False, route_invitation_checklist_sensitive
         assert route_invitation_checklist_sensitive["real_database_written"] is False, route_invitation_checklist_sensitive
 
+    invitation_audit_linkage_context = {
+        "target_user_key_hash": "user-hash-dddddddddddddddd",
+        "target_store_ids": [8],
+        "target_role": "operator",
+        "invitation_decision_id_planned": True,
+        "target_user_hash_planned": True,
+        "masked_login_identifier_planned": True,
+        "store_scope_planned": True,
+        "target_role_planned": True,
+        "approval_actor_hash_planned": True,
+        "permission_evidence_reference_planned": True,
+        "backup_evidence_reference_planned": True,
+        "invitation_expiry_policy_reference_planned": True,
+        "readback_plan_reference_planned": True,
+        "rollback_plan_reference_planned": True,
+        "audit_correlation_id_planned": True,
+        "append_only_audit_rows_planned": True,
+        "real_invitation_remains_closed": True,
+        "invitation_sent": False,
+        "users_written": False,
+        "membership_written": False,
+        "real_auth_session_created": False,
+        "operation_audit_rows_written": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    invitation_audit_linkage_ready = (
+        invitation_audit_linkage_service.evaluate_real_user_invitation_approval_audit_linkage_mock_gate(
+            invitation_approval=invitation_checklist_success,
+            audit_linkage_context=invitation_audit_linkage_context,
+            verification_scope=permission_service.VERIFICATION_SCOPE,
+        )
+    )
+    assert invitation_audit_linkage_ready["phase"] == "ERP-Multistore-2N", invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["status"] == "user_invitation_approval_audit_linkage_mock_ready", invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["audit_linkage_ready"] is True, invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["target_store_ids"] == [8], invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["target_role"] == "operator", invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["invitation_sent"] is False, invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["users_written"] is False, invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["membership_written"] is False, invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["operation_audit_rows_planned"] is True, invitation_audit_linkage_ready
+    assert invitation_audit_linkage_ready["operation_audit_rows_written"] is False, invitation_audit_linkage_ready
+
+    invitation_audit_linkage_missing_backup = (
+        invitation_audit_linkage_service.evaluate_real_user_invitation_approval_audit_linkage_mock_gate(
+            invitation_approval=invitation_checklist_success,
+            audit_linkage_context={
+                **invitation_audit_linkage_context,
+                "backup_evidence_reference_planned": False,
+            },
+            verification_scope=permission_service.VERIFICATION_SCOPE,
+        )
+    )
+    assert invitation_audit_linkage_missing_backup["skip_reason"] == (
+        "invitation_approval_audit_linkage_incomplete"
+    ), invitation_audit_linkage_missing_backup
+    assert "backup_evidence_reference_planned" in invitation_audit_linkage_missing_backup["missing_linkage_flags"], (
+        invitation_audit_linkage_missing_backup
+    )
+    assert invitation_audit_linkage_missing_backup["users_written"] is False, invitation_audit_linkage_missing_backup
+
+    invitation_audit_linkage_sensitive = (
+        invitation_audit_linkage_service.evaluate_real_user_invitation_approval_audit_linkage_mock_gate(
+            invitation_approval=invitation_checklist_success,
+            audit_linkage_context={
+                **invitation_audit_linkage_context,
+                "authorization": "bearer must-not-leak-invitation-linkage",
+            },
+            verification_scope=permission_service.VERIFICATION_SCOPE,
+        )
+    )
+    assert invitation_audit_linkage_sensitive["skip_reason"] == (
+        "invitation_approval_audit_linkage_sensitive_material_blocked"
+    ), invitation_audit_linkage_sensitive
+    assert invitation_audit_linkage_sensitive["real_database_written"] is False, invitation_audit_linkage_sensitive
+
     runtime_user_hash = "user-hash-cccccccccccccccc"
     missing_user = None
     runtime_success = None
@@ -11004,6 +11082,9 @@ def verify_store_membership_assignment_mock_gate() -> None:
             "invitation_readonly_route_mock_ready": invitation_readonly_route_mock_ready,
             "route_invitation_checklist": route_invitation_checklist,
             "route_invitation_checklist_sensitive": route_invitation_checklist_sensitive,
+            "invitation_audit_linkage_ready": invitation_audit_linkage_ready,
+            "invitation_audit_linkage_missing_backup": invitation_audit_linkage_missing_backup,
+            "invitation_audit_linkage_sensitive": invitation_audit_linkage_sensitive,
             "route_missing_user": route_missing_user,
             "route_success": route_success,
             "route_duplicate": route_duplicate,
@@ -11028,6 +11109,7 @@ def verify_store_membership_assignment_mock_gate() -> None:
         "must-not-leak-route-invite",
         "must-not-leak-invite",
         "must-not-leak-checklist",
+        "must-not-leak-invitation-linkage",
         "operator@example.com",
     ]:
         assert forbidden not in serialized, serialized
@@ -11948,6 +12030,82 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         batch_decision_audit_linkage_sensitive
     )
 
+    batch_decision_audit_linkage_api_context = {
+        "readonly_api_contract_planned": True,
+        "business_wording_required": True,
+        "technical_details_folded": True,
+        "execution_button_excluded": True,
+        "write_endpoint_excluded": True,
+        "sensitive_fields_hidden_from_main_page": True,
+        "audit_row_write_excluded": True,
+        "route_requires_separate_implementation": True,
+        "formal_sync_remains_closed": True,
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "operation_audit_rows_written": False,
+        "formal_sync_open": False,
+        "platform_writes_enabled": False,
+    }
+    batch_decision_audit_linkage_api_ready = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_mock_gate(
+            approval_decision=batch_decision_ready,
+            audit_linkage_context=batch_decision_audit_linkage_context,
+            readonly_api_context=batch_decision_audit_linkage_api_context,
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_api_ready["phase"] == "ERP-Batch-2R", batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["status"] == (
+        "approval_decision_audit_linkage_readonly_api_mock_ready"
+    ), batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["readonly_api_mock_gate"] is True, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["backend_route_implemented"] is False, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["public_endpoint_enabled"] is False, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["execution_approved"] is False, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["operation_audit_rows_written"] is False, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["orders_written"] is False, batch_decision_audit_linkage_api_ready
+    assert batch_decision_audit_linkage_api_ready["products_written"] is False, batch_decision_audit_linkage_api_ready
+
+    batch_decision_audit_linkage_api_missing_fold = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_mock_gate(
+            approval_decision=batch_decision_ready,
+            audit_linkage_context=batch_decision_audit_linkage_context,
+            readonly_api_context={
+                **batch_decision_audit_linkage_api_context,
+                "technical_details_folded": False,
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_api_missing_fold["skip_reason"] == "readonly_api_context_incomplete", (
+        batch_decision_audit_linkage_api_missing_fold
+    )
+    assert "technical_details_folded" in batch_decision_audit_linkage_api_missing_fold["missing_api_flags"], (
+        batch_decision_audit_linkage_api_missing_fold
+    )
+    assert batch_decision_audit_linkage_api_missing_fold["real_database_written"] is False, (
+        batch_decision_audit_linkage_api_missing_fold
+    )
+
+    batch_decision_audit_linkage_api_sensitive = (
+        sync_service.evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_mock_gate(
+            approval_decision=batch_decision_ready,
+            audit_linkage_context=batch_decision_audit_linkage_context,
+            readonly_api_context={
+                **batch_decision_audit_linkage_api_context,
+                "rawResponse": "must-not-leak-linkage-api",
+            },
+            verification_scope=VERIFICATION_SCOPE,
+        )
+    )
+    assert batch_decision_audit_linkage_api_sensitive["skip_reason"] == (
+        "approval_decision_audit_linkage_readonly_api_sensitive_field_blocked"
+    ), batch_decision_audit_linkage_api_sensitive
+    assert batch_decision_audit_linkage_api_sensitive["operation_audit_rows_written"] is False, (
+        batch_decision_audit_linkage_api_sensitive
+    )
+
     batch_audit_missing_plan = sync_service._evaluate_batch_approval_audit_evidence_mock_gate(
         readonly_evidence=readonly_success,
         approval_context={
@@ -12258,6 +12416,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_decision_audit_linkage_ready": batch_decision_audit_linkage_ready,
             "batch_decision_audit_linkage_missing_hash": batch_decision_audit_linkage_missing_hash,
             "batch_decision_audit_linkage_sensitive": batch_decision_audit_linkage_sensitive,
+            "batch_decision_audit_linkage_api_ready": batch_decision_audit_linkage_api_ready,
+            "batch_decision_audit_linkage_api_missing_fold": batch_decision_audit_linkage_api_missing_fold,
+            "batch_decision_audit_linkage_api_sensitive": batch_decision_audit_linkage_api_sensitive,
             "local_evidence": local_evidence,
             "local_audit": local_audit,
             "local_audit_sensitive": local_audit_sensitive,
@@ -12289,6 +12450,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-audit",
         "must-not-leak-local-audit",
         "must-not-leak-linkage",
+        "must-not-leak-linkage-api",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized
@@ -14883,8 +15045,10 @@ def verify_git_tracking() -> None:
         " M backend/app/services/credential_service.py",
         " M backend/app/services/operation_audit_service.py",
         " M backend/app/services/permission_service.py",
+        " M backend/app/services/invitation_audit_linkage_service.py",
         "A  backend/app/services/operation_audit_service.py",
         "A  backend/app/services/permission_service.py",
+        "A  backend/app/services/invitation_audit_linkage_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
@@ -14927,6 +15091,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/backup_service.py",
         "?? backend/app/services/operation_audit_service.py",
         "?? backend/app/services/permission_service.py",
+        "?? backend/app/services/invitation_audit_linkage_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
         "?? backend/app/models/platform_login_credential.py",
         "?? backend/app/schemas/platform_login.py",

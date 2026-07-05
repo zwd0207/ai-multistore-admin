@@ -1342,3 +1342,25 @@ ERP-Batch-2Q is a readonly API plan only. A future route may review approval-dec
 Naver-Product-Batch-2E and 2F plan and implement Codex2 readonly UI for future product batch execution approval. The UI may show local product context and review checklist items only; it must not call Naver, write products, expose an execution button, or imply formal product batch sync is open.
 
 ERP-Multistore-2M plans invitation approval audit linkage. Future real invitation approval must link target user hash, masked login, store scope, target role, approver hash, permission evidence, backup evidence, expiry policy, readback plan, rollback plan, and audit correlation id before any user, role, or membership write.
+
+ERP-Batch-2R adds a service-level mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_mock_gate(...)
+```
+
+It verifies a future readonly API contract for approval-decision audit linkage while keeping `public_endpoint_enabled=false`, `backend_route_implemented=false`, `execution_approved=false`, `operation_audit_rows_written=false`, `products_written=false`, `orders_written=false`, and formal product/order batch execution closed.
+
+ERP-Batch-2S is a local implementation plan only for a future approval-decision audit-linkage readonly route. No route is added in this phase.
+
+Naver-Product-Batch-2G is a runtime walkthrough phase for the Codex2 Products readonly approval checklist. It calls no Naver API and writes no product data.
+
+Naver-Product-Batch-2H is a readonly API plan only for future product batch execution approval evidence. Product batch execution remains closed.
+
+ERP-Multistore-2N adds a service-level mock gate:
+
+```text
+evaluate_real_user_invitation_approval_audit_linkage_mock_gate(...)
+```
+
+It verifies that a future real invitation approval can link to sanitized audit evidence references before any user, session, role, invitation, membership, or audit-row write.
