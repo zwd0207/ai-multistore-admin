@@ -1782,6 +1782,26 @@ function batchExecutionDryRunStatusMessage(result) {
   return result.businessMessage || '正式批量 dry-run 已返回，执行和写入开关保持关闭。';
 }
 
+function findDryRunSummary(result, target) {
+  const summaries = Array.isArray(result?.candidateSummaries) ? result.candidateSummaries : [];
+  return summaries.find((item) => item.target === target) || null;
+}
+
+function dryRunSummaryChangedFieldText(summary = {}) {
+  const fields = Array.isArray(summary.changedFields) ? summary.changedFields : [];
+  if (!fields.length) return '暂无业务字段变化';
+  return fields.map((field) => batchEvidenceFieldLabels[field] || field).join('、');
+}
+
+function dryRunSummaryActionText(summary = {}) {
+  return [
+    `新增 ${summary.wouldCreate ?? 0}`,
+    `更新 ${summary.wouldUpdate ?? 0}`,
+    `刷新 ${summary.wouldRefreshOnly ?? 0}`,
+    `跳过 ${summary.wouldSkip ?? 0}`,
+  ].join(' / ');
+}
+
 function FormalBatchApprovalDecisionPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
@@ -2376,6 +2396,8 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   const dryRunReady = dryRunResult?.status === 'formal_batch_execution_dry_run_readonly_ready';
   const decisionReady = decisionResult?.status === 'formal_batch_approval_decision_readonly_api_ready';
   const linkageReady = auditLinkageResult?.status === 'approval_decision_audit_linkage_readonly_api_ready';
+  const productDryRunSummary = findDryRunSummary(dryRunResult, 'products');
+  const orderDryRunSummary = findDryRunSummary(dryRunResult, 'orders');
 
   return (
     <section className="content-card">
@@ -2410,11 +2432,39 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             <span>{dryRunResult?.totalCandidateCount ?? 0} 条</span>
           </div>
           <p>
-            商品 {dryRunResult?.candidateSummaries?.find((item) => item.target === 'products')?.candidateCount ?? 0}
-            {' '}条，订单 {dryRunResult?.candidateSummaries?.find((item) => item.target === 'orders')?.candidateCount ?? 0}
+            商品 {productDryRunSummary?.candidateCount ?? 0}
+            {' '}条，订单 {orderDryRunSummary?.candidateCount ?? 0}
             {' '}条，均来自当前店铺本地只读复核范围。
           </p>
           <small>每类最多纳入 5 条 dry-run 摘要，防止误当成正式大批量执行窗口。</small>
+        </article>
+        <article className={dryRunReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>订单 dry-run 摘要</strong>
+            <span>{orderDryRunSummary?.candidateCount ?? 0} 条</span>
+          </div>
+          <p>
+            {orderDryRunSummary
+              ? `订单批量演练范围已生成：${dryRunSummaryActionText(orderDryRunSummary)}。`
+              : '订单批量演练摘要尚未生成。'}
+          </p>
+          <small>订单正式批量同步仍未开放；这只是审批前的只读候选摘要。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>订单变化字段</strong>
+            <span>{orderDryRunSummary?.changedFields?.length ? '需复核' : '无变化'}</span>
+          </div>
+          <p>{dryRunSummaryChangedFieldText(orderDryRunSummary || {})}</p>
+          <small>订单状态、配送状态、售后状态和付款状态变化后，必须先进入 dry-run 摘要，再进入人工审批。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>订单写入边界</strong>
+            <span>关闭</span>
+          </div>
+          <p>本轮不会更新订单，不会写时间线，不会写审计行，也不会调用 Naver 发货、取消、退货或换货接口。</p>
+          <small>后续真正执行必须另开批准阶段，并带备份、权限、回读和回滚证据。</small>
         </article>
         <article className="business-capability-card muted">
           <div className="business-capability-head">
@@ -2502,6 +2552,13 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'total_would_refresh_only', value: dryRunResult?.totalWouldRefreshOnly },
           { label: 'total_would_skip', value: dryRunResult?.totalWouldSkip },
           { label: 'dry_run_changed_fields', value: dryRunResult?.changedFields?.join(', ') || '[]' },
+          { label: 'order_dry_run_sync_kind', value: orderDryRunSummary?.syncKind || 'naver_order_batch' },
+          { label: 'order_dry_run_candidate_count', value: orderDryRunSummary?.candidateCount ?? 0 },
+          { label: 'order_dry_run_would_create', value: orderDryRunSummary?.wouldCreate ?? 0 },
+          { label: 'order_dry_run_would_update', value: orderDryRunSummary?.wouldUpdate ?? 0 },
+          { label: 'order_dry_run_would_refresh_only', value: orderDryRunSummary?.wouldRefreshOnly ?? 0 },
+          { label: 'order_dry_run_would_skip', value: orderDryRunSummary?.wouldSkip ?? 0 },
+          { label: 'order_dry_run_changed_fields', value: orderDryRunSummary?.changedFields?.join(', ') || '[]' },
           { label: 'decision_phase', value: decisionResult?.phase },
           { label: 'decision_status', value: decisionResult?.status },
           { label: 'audit_linkage_phase', value: auditLinkageResult?.phase },
