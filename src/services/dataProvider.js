@@ -837,6 +837,116 @@ function mockUserInvitationApprovalChecklistReadonlyGate(payload = {}) {
   };
 }
 
+function mockUserInvitationApprovalAuditLinkageReadonlyGate(payload = {}) {
+  const invitationApproval = payload.invitation_approval || payload.invitationApproval || {};
+  const auditLinkageContext = payload.audit_linkage_context || payload.auditLinkageContext || {};
+  const readonlyApiContext = payload.readonly_api_context || payload.readonlyApiContext || {};
+  const requiredLinkageFlags = [
+    'invitation_decision_id_planned',
+    'target_user_hash_planned',
+    'masked_login_identifier_planned',
+    'store_scope_planned',
+    'target_role_planned',
+    'approval_actor_hash_planned',
+    'permission_evidence_reference_planned',
+    'backup_evidence_reference_planned',
+    'invitation_expiry_policy_reference_planned',
+    'readback_plan_reference_planned',
+    'rollback_plan_reference_planned',
+    'audit_correlation_id_planned',
+    'append_only_audit_rows_planned',
+    'real_invitation_remains_closed',
+  ];
+  const requiredApiFlags = [
+    'readonly_api_contract_planned',
+    'business_wording_required',
+    'technical_details_folded',
+    'send_invitation_button_excluded',
+    'write_endpoint_excluded',
+    'masked_identifier_required',
+    'audit_row_write_excluded',
+    'route_requires_separate_implementation',
+    'real_invitation_remains_closed',
+  ];
+  const hasSensitiveMarker = JSON.stringify(payload).toLowerCase().includes('authorization')
+    || JSON.stringify(payload).toLowerCase().includes('rawresponse')
+    || JSON.stringify(payload).toLowerCase().includes('client_secret')
+    || JSON.stringify(payload).toLowerCase().includes('bearer ');
+  const missingLinkageFlags = requiredLinkageFlags.filter((flag) => auditLinkageContext[flag] !== true);
+  const missingApiFlags = requiredApiFlags.filter((flag) => readonlyApiContext[flag] !== true);
+  const targetStoreIds = Array.isArray(invitationApproval.target_store_ids || invitationApproval.targetStoreIds)
+    ? (invitationApproval.target_store_ids || invitationApproval.targetStoreIds)
+    : [];
+  const targetRole = invitationApproval.target_role || invitationApproval.targetRole || null;
+  let status = 'blocked';
+  let skipReason = null;
+  let businessMessage = '邀请审批审计链路只读检查暂未通过，请管理员查看折叠详情。';
+
+  if (hasSensitiveMarker) {
+    skipReason = 'invitation_approval_audit_linkage_sensitive_material_blocked';
+  } else if (![
+    'user_invitation_approval_checklist_readonly_api_ready',
+    'user_invitation_approval_checklist_readonly_route_mock_ready',
+    'user_invitation_approval_checklist_readonly_api_mock_ready',
+    'user_invitation_approval_checklist_mock_ready',
+  ].includes(invitationApproval.status)) {
+    skipReason = 'invitation_approval_not_ready';
+  } else if (missingLinkageFlags.length) {
+    skipReason = 'invitation_approval_audit_linkage_incomplete';
+  } else if (missingApiFlags.length) {
+    skipReason = 'readonly_api_context_incomplete';
+  } else if (readonlyApiContext.public_endpoint_enabled || readonlyApiContext.backend_route_implemented) {
+    skipReason = 'readonly_api_context_should_describe_pre_route_boundary';
+  } else if (auditLinkageContext.invitation_sent || auditLinkageContext.users_written || auditLinkageContext.membership_written) {
+    skipReason = 'real_invitation_not_allowed_in_linkage_mock_gate';
+  } else if (auditLinkageContext.operation_audit_rows_written || readonlyApiContext.operation_audit_rows_written) {
+    skipReason = 'audit_write_not_allowed_in_readonly_api_mock_gate';
+  } else {
+    status = 'user_invitation_approval_audit_linkage_readonly_api_ready';
+    businessMessage = '邀请审批和审计证据链路已可只读复核。当前不会发送邀请、创建用户、分配店铺权限或写入审计记录。';
+  }
+
+  return {
+    phase: 'ERP-Multistore-2T',
+    status,
+    skip_reason: skipReason,
+    real_user_invitation_approval_audit_linkage_readonly_api_local: true,
+    audit_linkage_ready: status === 'user_invitation_approval_audit_linkage_readonly_api_ready',
+    required_linkage_flags: requiredLinkageFlags,
+    missing_linkage_flags: missingLinkageFlags,
+    required_api_flags: requiredApiFlags,
+    missing_api_flags: missingApiFlags,
+    target_user_key_hash: invitationApproval.target_user_key_hash || invitationApproval.targetUserKeyHash || null,
+    login_identifier_hash: invitationApproval.login_identifier_hash || invitationApproval.loginIdentifierHash || null,
+    login_identifier_masked: invitationApproval.login_identifier_masked || invitationApproval.loginIdentifierMasked || null,
+    target_store_ids: targetStoreIds,
+    target_role: targetRole,
+    backend_route_implemented: true,
+    public_endpoint_enabled: true,
+    route_path: '/api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check',
+    http_method: 'POST',
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    role_assignment_written: false,
+    real_auth_session_created: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    operation_audit_rows_planned: true,
+    operation_audit_rows_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    business_message: businessMessage,
+    next_action: '真实邀请仍需单独审批和写入阶段；当前只作为管理员复核证据。',
+  };
+}
+
 function adaptPermissionGateResult(data = {}) {
   return {
     ...data,
@@ -988,6 +1098,34 @@ function adaptUserInvitationApprovalChecklistReadonlyResult(data = {}) {
     disableUserRollbackReady: Boolean(data.disable_user_rollback_ready ?? data.disableUserRollbackReady),
     privacyDisplayVerified: Boolean(data.privacy_display_verified ?? data.privacyDisplayVerified),
     formalLoginBoundaryAcknowledged: Boolean(data.formal_login_boundary_acknowledged ?? data.formalLoginBoundaryAcknowledged),
+    nextAction: data.next_action || data.nextAction || '',
+  };
+}
+
+function adaptUserInvitationApprovalAuditLinkageReadonlyResult(data = {}) {
+  const base = adaptUserInvitationReadonlyResult(data);
+  return {
+    ...base,
+    phase: data.phase || base.phase || 'ERP-Multistore-2T',
+    auditLinkageReady: Boolean(data.audit_linkage_ready ?? data.auditLinkageReady),
+    requiredLinkageFlags: Array.isArray(data.required_linkage_flags)
+      ? data.required_linkage_flags
+      : (Array.isArray(data.requiredLinkageFlags) ? data.requiredLinkageFlags : []),
+    missingLinkageFlags: Array.isArray(data.missing_linkage_flags)
+      ? data.missing_linkage_flags
+      : (Array.isArray(data.missingLinkageFlags) ? data.missingLinkageFlags : []),
+    requiredApiFlags: Array.isArray(data.required_api_flags)
+      ? data.required_api_flags
+      : (Array.isArray(data.requiredApiFlags) ? data.requiredApiFlags : []),
+    missingApiFlags: Array.isArray(data.missing_api_flags)
+      ? data.missing_api_flags
+      : (Array.isArray(data.missingApiFlags) ? data.missingApiFlags : []),
+    routePath: data.route_path || data.routePath || data.route_path_planned || data.routePathPlanned || '',
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    auditCorrelationIdPlanned: Boolean(data.audit_correlation_id_planned ?? data.auditCorrelationIdPlanned),
+    appendOnlyAuditRowsPlanned: Boolean(data.append_only_audit_rows_planned ?? data.appendOnlyAuditRowsPlanned),
+    invitationDecisionIdPlanned: Boolean(data.invitation_decision_id_planned ?? data.invitationDecisionIdPlanned),
+    approvalActorHashPlanned: Boolean(data.approval_actor_hash_planned ?? data.approvalActorHashPlanned),
     nextAction: data.next_action || data.nextAction || '',
   };
 }
@@ -1848,6 +1986,21 @@ const sourceMethods = {
     }
     return adaptUserInvitationApprovalChecklistReadonlyResult(
       await backendApi.checkUserInvitationApprovalChecklistReadonly(request),
+    );
+  },
+  checkUserInvitationApprovalAuditLinkageReadonly: async (payload = {}) => {
+    const request = {
+      invitation_approval: payload.invitationApproval || payload.invitation_approval || {},
+      audit_linkage_context: payload.auditLinkageContext || payload.audit_linkage_context || {},
+      readonly_api_context: payload.readonlyApiContext || payload.readonly_api_context || {},
+    };
+    if (!isBackendSource) {
+      return adaptUserInvitationApprovalAuditLinkageReadonlyResult(
+        mockUserInvitationApprovalAuditLinkageReadonlyGate(request),
+      );
+    }
+    return adaptUserInvitationApprovalAuditLinkageReadonlyResult(
+      await backendApi.checkUserInvitationApprovalAuditLinkageReadonly(request),
     );
   },
   normalizeBatchReadonlyEvidence: async (payload = {}) => {

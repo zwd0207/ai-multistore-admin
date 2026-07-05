@@ -131,6 +131,57 @@ function buildInvitationReadonlyApiContext() {
   };
 }
 
+function buildInvitationAuditLinkageContext(storeId) {
+  return {
+    target_user_key_hash: TARGET_USER_HASH,
+    target_store_ids: [storeId],
+    target_role: TARGET_ROLE,
+    invitation_decision_id_planned: true,
+    target_user_hash_planned: true,
+    masked_login_identifier_planned: true,
+    store_scope_planned: true,
+    target_role_planned: true,
+    approval_actor_hash_planned: true,
+    permission_evidence_reference_planned: true,
+    backup_evidence_reference_planned: true,
+    invitation_expiry_policy_reference_planned: true,
+    readback_plan_reference_planned: true,
+    rollback_plan_reference_planned: true,
+    audit_correlation_id_planned: true,
+    append_only_audit_rows_planned: true,
+    real_invitation_remains_closed: true,
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    real_auth_session_created: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildInvitationAuditLinkageReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    send_invitation_button_excluded: true,
+    write_endpoint_excluded: true,
+    masked_identifier_required: true,
+    audit_row_write_excluded: true,
+    route_requires_separate_implementation: true,
+    real_invitation_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    invitation_sent: false,
+    users_written: false,
+    membership_written: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
 function checklistStatusTone(result) {
   if (!result) return 'muted';
   if (result.status === 'user_invitation_approval_checklist_readonly_api_ready') return 'success';
@@ -153,14 +204,39 @@ function checklistBusinessMessage(result) {
   return result.businessMessage || '\u7528\u6237\u9080\u8bf7\u5ba1\u6279\u6e05\u5355\u53ea\u8bfb\u68c0\u67e5\u6682\u672a\u901a\u8fc7\uff0c\u8bf7\u7ba1\u7406\u5458\u67e5\u770b\u6298\u53e0\u8be6\u60c5\u3002';
 }
 
+function auditLinkageStatusTone(result) {
+  if (!result) return 'muted';
+  if (result.status === 'user_invitation_approval_audit_linkage_readonly_api_ready') return 'success';
+  return 'warning';
+}
+
+function auditLinkageStatusLabel(result) {
+  if (!result) return '待检查';
+  if (result.status === 'user_invitation_approval_audit_linkage_readonly_api_ready') return '审计链路可复核';
+  if (result.skipReason === 'invitation_approval_not_ready') return '审批清单未就绪';
+  if (result.skipReason === 'invitation_approval_audit_linkage_incomplete') return '审计证据未补齐';
+  if (result.skipReason === 'readonly_api_context_incomplete') return '只读门禁未补齐';
+  return '需要管理员复核';
+}
+
+function auditLinkageBusinessMessage(result) {
+  if (!result) return '正在读取邀请审批审计链路只读检查结果。';
+  if (result.status === 'user_invitation_approval_audit_linkage_readonly_api_ready') {
+    return result.businessMessage || '邀请审批和审计证据链路已可只读复核。当前不会发送邀请、创建用户、分配店铺权限或写入审计记录。';
+  }
+  return result.businessMessage || '邀请审批审计链路只读检查暂未通过，请管理员查看折叠详情。';
+}
+
 export default function UserInvitationReadonlyPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [state, setState] = useState({
     loading: false,
     result: null,
     checklistResult: null,
+    auditLinkageResult: null,
     error: '',
     checklistError: '',
+    auditLinkageError: '',
   });
   const storeId = Number(selectedStoreId || selectedStore?.id || 8);
 
@@ -242,11 +318,58 @@ export default function UserInvitationReadonlyPanel() {
     return () => { cancelled = true; };
   }, [checklistPayload, storeId]);
 
+  useEffect(() => {
+    if (!storeId || !state.checklistResult) return undefined;
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true, auditLinkageError: '' }));
+    dataProvider.checkUserInvitationApprovalAuditLinkageReadonly({
+      invitationApproval: {
+        ...state.checklistResult,
+        target_user_key_hash: state.checklistResult.targetUserKeyHash || TARGET_USER_HASH,
+        login_identifier_hash: state.checklistResult.loginIdentifierHash || TARGET_LOGIN_HASH,
+        login_identifier_masked: state.checklistResult.loginIdentifierMasked || TARGET_LOGIN_MASKED,
+        target_store_ids: state.checklistResult.targetStoreIds?.length ? state.checklistResult.targetStoreIds : [storeId],
+        target_role: state.checklistResult.targetRole || TARGET_ROLE,
+        invitation_sent: false,
+        users_written: false,
+        membership_written: false,
+        role_assignment_written: false,
+        real_auth_session_created: false,
+        operation_audit_rows_written: false,
+        privacy_fields_redacted: true,
+      },
+      auditLinkageContext: buildInvitationAuditLinkageContext(storeId),
+      readonlyApiContext: buildInvitationAuditLinkageReadonlyApiContext(),
+    })
+      .then((auditLinkageResult) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            auditLinkageResult,
+            auditLinkageError: '',
+          }));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            auditLinkageResult: null,
+            auditLinkageError: error?.message || '邀请审批审计链路只读检查暂时无法加载。',
+          }));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [state.checklistResult, storeId]);
+
   const {
-    loading, result, checklistResult, error, checklistError,
+    loading, result, checklistResult, auditLinkageResult, error, checklistError, auditLinkageError,
   } = state;
   const tone = statusTone(result);
   const checklistTone = checklistStatusTone(checklistResult);
+  const auditLinkageTone = auditLinkageStatusTone(auditLinkageResult);
 
   return (
     <section className="content-card">
@@ -259,6 +382,7 @@ export default function UserInvitationReadonlyPanel() {
       </div>
       {error ? <div className="mock-sync-error">{error}</div> : null}
       {checklistError ? <div className="mock-sync-error">{checklistError}</div> : null}
+      {auditLinkageError ? <div className="mock-sync-error">{auditLinkageError}</div> : null}
       <div className="business-capability-grid compact">
         <article className={`business-capability-card ${tone}`}>
           <div className="business-capability-head">
@@ -324,6 +448,14 @@ export default function UserInvitationReadonlyPanel() {
           <p>{checklistBusinessMessage(checklistResult)}</p>
           <small>这里只展示审批材料是否可复核，不会发送邀请、创建用户或写入成员关系。</small>
         </article>
+        <article className={`business-capability-card ${auditLinkageTone}`}>
+          <div className="business-capability-head">
+            <strong>邀请审批审计链路</strong>
+            <span>{auditLinkageStatusLabel(auditLinkageResult)}</span>
+          </div>
+          <p>{auditLinkageBusinessMessage(auditLinkageResult)}</p>
+          <small>这里只展示审批和审计证据是否可复核，不会发送邀请、创建用户、分配权限或写入审计记录。</small>
+        </article>
         {invitationApprovalChecklist.map((item) => (
           <article className="business-capability-card info" key={item.key}>
             <div className="business-capability-head">
@@ -350,6 +482,16 @@ export default function UserInvitationReadonlyPanel() {
           { label: 'approval_checklist_ready', value: checklistResult?.checklistReady },
           { label: 'approval_checklist_missing_flags', value: checklistResult?.missingChecklistFlags?.join(', ') || '[]' },
           { label: 'approval_checklist_missing_api_flags', value: checklistResult?.missingApiFlags?.join(', ') || '[]' },
+          { label: 'audit_linkage_display_phase', value: 'ERP-Multistore-2U' },
+          { label: 'audit_linkage_api_phase', value: auditLinkageResult?.phase || 'ERP-Multistore-2T' },
+          { label: 'audit_linkage_api_status', value: auditLinkageResult?.status },
+          { label: 'audit_linkage_api_skip_reason', value: auditLinkageResult?.skipReason },
+          { label: 'audit_linkage_route_path', value: auditLinkageResult?.routePath },
+          { label: 'audit_linkage_backend_route_implemented', value: auditLinkageResult?.backendRouteImplemented },
+          { label: 'audit_linkage_public_endpoint_enabled', value: auditLinkageResult?.publicEndpointEnabled },
+          { label: 'audit_linkage_ready', value: auditLinkageResult?.auditLinkageReady },
+          { label: 'audit_linkage_missing_flags', value: auditLinkageResult?.missingLinkageFlags?.join(', ') || '[]' },
+          { label: 'audit_linkage_missing_api_flags', value: auditLinkageResult?.missingApiFlags?.join(', ') || '[]' },
           { label: 'status', value: result?.status },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'approval_checklist_item_count', value: invitationApprovalChecklist.length },

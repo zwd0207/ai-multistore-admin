@@ -1923,3 +1923,23 @@ The future route remains planned only. Real invitation, user creation, membershi
 The UI plan is documented in `PHASE_ERP_MULTISTORE_2R_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_UI_PLAN.md`.
 
 Future Accounts UI may show invitation approval audit-linkage review evidence only. It must not send invitations or create users/memberships.
+
+## Phase Naver-Product-Batch-2K - Product Batch Execution Approval Readonly API Local Route Mock Gate
+
+Codex1 now has a local-route mock gate for `POST /api/v1/batch/naver/products/execution-approval/readonly-check`. It remains review-only and does not approve product execution, write products, write audit rows, call Naver, or open formal product batch sync.
+
+## Phase Naver-Product-Batch-2L - Product Batch Execution Approval Readonly API Local Implementation
+
+Codex1 now exposes `POST /api/v1/batch/naver/products/execution-approval/readonly-check` as local readonly review evidence. The route keeps execution and all writes closed.
+
+## Phase ERP-Multistore-2S - Invitation Approval Audit Linkage Readonly API Local Route Mock Gate
+
+Codex1 now has a local-route mock gate for invitation approval audit-linkage readonly review. It does not send invitations, create users, assign memberships, create auth sessions, or write audit rows.
+
+## Phase ERP-Multistore-2T - Invitation Approval Audit Linkage Readonly API Local Implementation
+
+Codex1 now exposes `POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check` as local readonly review evidence. It keeps real invitation and membership writes closed.
+
+## Phase ERP-Multistore-2U - Invitation Approval Audit Linkage Readonly UI Integration
+
+Codex2 Accounts now shows invitation approval audit-linkage readiness through `UserInvitationReadonlyPanel`. Main-page wording stays business-focused, while route path, phase, missing flags, and write flags remain inside `TechnicalDetails`.

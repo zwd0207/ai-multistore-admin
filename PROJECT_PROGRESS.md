@@ -1372,3 +1372,33 @@ Next 5 recommended stages:
 3. `Phase ERP-Multistore-2S: Invitation approval audit linkage readonly API local route mock gate`
 4. `Phase ERP-Multistore-2T: Invitation approval audit linkage readonly API local implementation`
 5. `Phase ERP-Multistore-2U: Invitation approval audit linkage readonly UI integration`
+
+### Latest update after `Phase Naver-Product-Batch-2K` to `Phase ERP-Multistore-2U`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- ERP real-user landing progress: about `98% - 99%`
+- Production version for long-term non-technical use: about `95% - 97%`
+
+Implemented in this update:
+
+- Added Codex1 local-route mock gate for Naver product batch execution approval readonly review.
+- Exposed `POST /api/v1/batch/naver/products/execution-approval/readonly-check` as local readonly review evidence.
+- Added Codex1 local-route mock gate for invitation approval audit-linkage readonly review.
+- Exposed `POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check` as local readonly review evidence.
+- Integrated Codex2 Accounts invitation panel with the invitation approval audit-linkage readonly route and mock fallback.
+
+Current positioning:
+
+- Suitable now: single Naver store internal trial, local product/order/inventory/sales viewing, controlled preview/single/small refresh/manual review, backup report display, restore dry-run evidence, audit trail review, role-aware action visibility, migrated auth foundation tables, readonly batch evidence API normalization, approval evidence UI display, controlled stock-only local product update, readonly membership assignment readiness checks, readonly invitation approval checklist and audit-linkage review, Accounts/Orders/Products readiness panels, approval-decision audit linkage readonly API review and UI display, product execution approval readonly route review, order/product execution approval mock gates, product rollback report review, and operator-facing formal batch checklist review.
+- Not suitable now: executing formal product/order batch writes, broad product writes, active multi-user login production use, sending real user invitations, real store membership assignment, large-scale multi-store production operation, automated shipment/cancel/return/exchange, real production restore, or final finance/settlement/profit use.
+
+Next 5 recommended stages:
+
+1. `Phase Naver-Product-Batch-2M: Product batch execution approval readonly UI walkthrough`
+2. `Phase ERP-Multistore-2V: Invitation approval audit linkage readonly UI walkthrough`
+3. `Phase ERP-Batch-3A: Formal batch execution final preflight plan`
+4. `Phase Naver-Product-Batch-3A: Product batch execution dry-run evidence repeat`
+5. `Phase Naver-Order-Batch-3A: Order batch execution dry-run evidence repeat`
