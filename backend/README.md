@@ -1515,6 +1515,16 @@ Passing 4B returns `status=formal_batch_execution_write_boundary_readonly_api_mo
 
 No public route is added in 4B. A later 4C may expose a readonly review route only; real product/order batch execution still requires another explicit phase.
 
+ERP-Batch-4C exposes the write-boundary review as a local readonly API:
+
+```text
+POST /api/v1/batch/execution-write-boundary/readonly-check
+```
+
+The route wraps the 4B mock gate for operator and future Codex2 review. A ready response uses `status=formal_batch_execution_write_boundary_readonly_api_ready` and `approval_status=ready_for_local_readonly_review`. It keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+This route is not a write endpoint and not a batch execution endpoint. It only lets the UI or operator read whether the formal batch write boundary is complete enough to plan a separate execution phase.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

@@ -74,6 +74,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/execution-preflight/readonly-check",
     "/api/v1/batch/execution-dry-run/readonly-check",
     "/api/v1/batch/execution-approval/readonly-check",
+    "/api/v1/batch/execution-write-boundary/readonly-check",
     "/api/v1/batch/naver/products/execution-approval/readonly-check",
     "/api/v1/batch/naver/orders/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
@@ -1571,6 +1572,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/execution-preflight/readonly-check": {"post"},
         "/api/v1/batch/execution-dry-run/readonly-check": {"post"},
         "/api/v1/batch/execution-approval/readonly-check": {"post"},
+        "/api/v1/batch/execution-write-boundary/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
@@ -14165,6 +14167,130 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_execution_write_boundary_api_write_attempt
         )
 
+        batch_execution_write_boundary_route_response = client.post(
+            "/api/v1/batch/execution-write-boundary/readonly-check",
+            json={
+                "execution_approval": batch_execution_approval_route,
+                "write_boundary_context": batch_execution_write_boundary_context,
+                "readonly_api_context": batch_execution_write_boundary_api_context,
+            },
+        )
+        assert batch_execution_write_boundary_route_response.status_code == 200, (
+            batch_execution_write_boundary_route_response.text
+        )
+        batch_execution_write_boundary_route = batch_execution_write_boundary_route_response.json()["data"]
+        assert batch_execution_write_boundary_route["phase"] == "ERP-Batch-4C", (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["status"] == (
+            "formal_batch_execution_write_boundary_readonly_api_ready"
+        ), batch_execution_write_boundary_route
+        assert batch_execution_write_boundary_route["approval_status"] == "ready_for_local_readonly_review", (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["backend_route_implemented"] is True, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["public_endpoint_enabled"] is True, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["route_path"] == (
+            "/api/v1/batch/execution-write-boundary/readonly-check"
+        ), batch_execution_write_boundary_route
+        assert batch_execution_write_boundary_route["execution_approved"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["batch_execution_enabled"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["write_endpoint_enabled"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["orders_written"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["products_written"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["operation_audit_rows_written"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["real_api_called"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["real_database_written"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["formal_sync_open"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["platform_writes_enabled"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["raw_response_saved"] is False, (
+            batch_execution_write_boundary_route
+        )
+        assert batch_execution_write_boundary_route["privacy_fields_redacted"] is True, (
+            batch_execution_write_boundary_route
+        )
+
+        batch_execution_write_boundary_route_missing_response = client.post(
+            "/api/v1/batch/execution-write-boundary/readonly-check",
+            json={
+                "execution_approval": batch_execution_approval_route,
+                "write_boundary_context": batch_execution_write_boundary_context,
+                "readonly_api_context": {
+                    **batch_execution_write_boundary_api_context,
+                    "business_wording_required": False,
+                },
+            },
+        )
+        assert batch_execution_write_boundary_route_missing_response.status_code == 200, (
+            batch_execution_write_boundary_route_missing_response.text
+        )
+        batch_execution_write_boundary_route_missing = (
+            batch_execution_write_boundary_route_missing_response.json()["data"]
+        )
+        assert batch_execution_write_boundary_route_missing["phase"] == "ERP-Batch-4C", (
+            batch_execution_write_boundary_route_missing
+        )
+        assert batch_execution_write_boundary_route_missing["skip_reason"] == (
+            "readonly_api_context_incomplete"
+        ), batch_execution_write_boundary_route_missing
+        assert "business_wording_required" in batch_execution_write_boundary_route_missing["missing_api_flags"], (
+            batch_execution_write_boundary_route_missing
+        )
+        assert batch_execution_write_boundary_route_missing["real_database_written"] is False, (
+            batch_execution_write_boundary_route_missing
+        )
+
+        batch_execution_write_boundary_route_sensitive_response = client.post(
+            "/api/v1/batch/execution-write-boundary/readonly-check",
+            json={
+                "execution_approval": batch_execution_approval_route,
+                "write_boundary_context": batch_execution_write_boundary_context,
+                "readonly_api_context": {
+                    **batch_execution_write_boundary_api_context,
+                    "productOrderId": "must-not-leak-write-boundary-route",
+                },
+            },
+        )
+        assert batch_execution_write_boundary_route_sensitive_response.status_code == 200, (
+            batch_execution_write_boundary_route_sensitive_response.text
+        )
+        batch_execution_write_boundary_route_sensitive = (
+            batch_execution_write_boundary_route_sensitive_response.json()["data"]
+        )
+        assert batch_execution_write_boundary_route_sensitive["phase"] == "ERP-Batch-4C", (
+            batch_execution_write_boundary_route_sensitive
+        )
+        assert batch_execution_write_boundary_route_sensitive["skip_reason"] == (
+            "write_boundary_readonly_api_sensitive_field_blocked"
+        ), batch_execution_write_boundary_route_sensitive
+        assert batch_execution_write_boundary_route_sensitive["orders_written"] is False, (
+            batch_execution_write_boundary_route_sensitive
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -14422,6 +14548,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             ),
             "batch_execution_write_boundary_api_sensitive": batch_execution_write_boundary_api_sensitive,
             "batch_execution_write_boundary_api_write_attempt": batch_execution_write_boundary_api_write_attempt,
+            "batch_execution_write_boundary_route": batch_execution_write_boundary_route,
+            "batch_execution_write_boundary_route_missing": batch_execution_write_boundary_route_missing,
+            "batch_execution_write_boundary_route_sensitive": batch_execution_write_boundary_route_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
@@ -14453,6 +14582,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-final-route",
         "must-not-leak-write-boundary",
         "must-not-leak-write-boundary-api",
+        "must-not-leak-write-boundary-route",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

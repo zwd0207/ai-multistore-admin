@@ -47,6 +47,12 @@ class FormalBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     final_approval_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class FormalBatchExecutionWriteBoundaryReadonlyCheckRequest(BaseModel):
+    execution_approval: dict[str, Any] = Field(default_factory=dict)
+    write_boundary_context: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class NaverProductBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     actor_context: dict[str, Any] = Field(default_factory=dict)
     store_ids: list[int] = Field(default_factory=list, max_length=10)

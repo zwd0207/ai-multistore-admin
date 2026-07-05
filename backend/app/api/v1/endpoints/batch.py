@@ -9,6 +9,7 @@ from app.schemas.batch import (
     FormalBatchExecutionApprovalReadonlyCheckRequest,
     FormalBatchExecutionDryRunReadonlyCheckRequest,
     FormalBatchExecutionPreflightReadonlyCheckRequest,
+    FormalBatchExecutionWriteBoundaryReadonlyCheckRequest,
     NaverOrderBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductRollbackReadonlyReportRequest,
@@ -117,6 +118,21 @@ def check_formal_batch_execution_approval_readonly(
     return success_response(
         data=result,
         message="formal batch execution approval readonly check completed",
+    )
+
+
+@router.post("/execution-write-boundary/readonly-check")
+def check_formal_batch_execution_write_boundary_readonly(
+    payload: FormalBatchExecutionWriteBoundaryReadonlyCheckRequest,
+) -> dict:
+    result = sync_service.evaluate_formal_batch_execution_write_boundary_readonly_api_local(
+        execution_approval=payload.execution_approval,
+        write_boundary_context=payload.write_boundary_context,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="formal batch execution write boundary readonly check completed",
     )
 
 

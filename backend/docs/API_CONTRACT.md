@@ -3107,6 +3107,51 @@ Success response:
 
 The mock gate blocks incomplete readonly API context, sensitive markers, accidental public route exposure, accidental backend-route implementation, execution approval, local writes, audit-row writes, platform writes, and formal sync opening. Passing 4B only means a readonly review API can be planned; it still does not expose a route or approve formal batch execution.
 
+### Formal Batch Execution Write Boundary Readonly Route
+
+Phase ERP-Batch-4C exposes the write-boundary review as a local readonly route:
+
+```text
+POST /api/v1/batch/execution-write-boundary/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "execution_approval": {},
+  "write_boundary_context": {},
+  "readonly_api_context": {}
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-4C",
+  "status": "formal_batch_execution_write_boundary_readonly_api_ready",
+  "approval_status": "ready_for_local_readonly_review",
+  "formal_batch_execution_write_boundary_readonly_api_local": true,
+  "backend_route_implemented": true,
+  "public_endpoint_enabled": true,
+  "route_path": "/api/v1/batch/execution-write-boundary/readonly-check",
+  "http_method": "POST",
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The route is readonly review evidence only. It must not write products, orders, SyncLog, capability test results, timeline events, or operation audit rows. It must not call Naver or a logistics provider, must not expose shipment/cancel/return/exchange writes, and must keep formal product/order batch sync closed.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text
