@@ -1626,6 +1626,40 @@ function buildFormalBatchExecutionDryRunPlan({ selectedStoreId }) {
   };
 }
 
+function buildFormalBatchExecutionFinalApprovalContext({ selectedStoreId }) {
+  return {
+    latest_dry_run_referenced: true,
+    manual_execution_phase_required: true,
+    backup_manifest_verified: true,
+    permission_evidence_verified: true,
+    audit_linkage_verified: true,
+    readback_plan_verified: true,
+    rollback_plan_verified: true,
+    sensitive_scan_passed: true,
+    operator_identity_verified: true,
+    store_scope_verified: true,
+    execution_window_limited: true,
+    manual_approval_record_planned: true,
+    formal_sync_remains_closed: true,
+    store_ids: [Number(selectedStoreId)],
+    sync_kinds: ['naver_product_batch', 'naver_order_batch'],
+    targets: ['products', 'orders'],
+    required_actions: ['products.batch_sync_write', 'orders.batch_sync_write'],
+    execution_approved: false,
+    batch_execution_enabled: false,
+    write_endpoint_enabled: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    operation_audit_rows_written: false,
+    raw_response_saved: false,
+    privacy_fields_redacted: true,
+  };
+}
+
 function buildFormalBatchExecutionDryRunCandidateSummaries({
   selectedStoreId,
   localOrderCount,
@@ -1813,6 +1847,19 @@ function batchExecutionDryRunStatusMessage(result) {
     return '正式批量 dry-run 证据暂未通过，请管理员查看折叠详情并补齐前置材料。';
   }
   return result.businessMessage || '正式批量 dry-run 已返回，执行和写入开关保持关闭。';
+}
+
+function batchExecutionApprovalStatusMessage(result) {
+  if (!result) {
+    return '正在整理正式批量最终审批复核材料；当前不会批准执行，也不会写入商品或订单。';
+  }
+  if (result.status === 'formal_batch_execution_approval_readonly_api_ready') {
+    return result.businessMessage || '最终审批只读复核已完成；当前仍不批准执行，也没有批量写入入口。';
+  }
+  if (result.skipReason) {
+    return '最终审批复核暂未通过，请管理员查看折叠详情并补齐审批、备份、审计、回读或回滚证据。';
+  }
+  return result.businessMessage || '最终审批复核已返回，执行和写入开关保持关闭。';
 }
 
 function findDryRunSummary(result, target) {
@@ -2269,6 +2316,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
     loading: false,
     result: null,
     dryRunResult: null,
+    finalApprovalResult: null,
     decisionResult: null,
     auditLinkageResult: null,
     error: '',
@@ -2283,6 +2331,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
         loading: false,
         result: null,
         dryRunResult: null,
+        finalApprovalResult: null,
         decisionResult: null,
         auditLinkageResult: null,
         error: '',
@@ -2389,11 +2438,17 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             localProductCount,
           }),
         });
+        const finalApprovalResult = await dataProvider.checkFormalBatchExecutionApprovalReadonly({
+          executionPreflight: result,
+          executionDryRun: dryRunResult,
+          finalApprovalContext: buildFormalBatchExecutionFinalApprovalContext({ selectedStoreId }),
+        });
         if (!cancelled) {
           setState({
             loading: false,
             result,
             dryRunResult,
+            finalApprovalResult,
             decisionResult,
             auditLinkageResult,
             error: '',
@@ -2407,6 +2462,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             loading: false,
             result: null,
             dryRunResult: null,
+            finalApprovalResult: null,
             decisionResult: null,
             auditLinkageResult: null,
             error: error?.message || '\u6b63\u5f0f\u6279\u91cf\u6267\u884c\u524d\u7f6e\u68c0\u67e5\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
@@ -2423,10 +2479,11 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   if (!isNaverStore) return null;
 
   const {
-    loading, result, dryRunResult, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
+    loading, result, dryRunResult, finalApprovalResult, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
   } = state;
   const preflightReady = result?.status === 'formal_batch_execution_preflight_readonly_ready';
   const dryRunReady = dryRunResult?.status === 'formal_batch_execution_dry_run_readonly_ready';
+  const finalApprovalReady = finalApprovalResult?.status === 'formal_batch_execution_approval_readonly_api_ready';
   const decisionReady = decisionResult?.status === 'formal_batch_approval_decision_readonly_api_ready';
   const linkageReady = auditLinkageResult?.status === 'approval_decision_audit_linkage_readonly_api_ready';
   const productDryRunSummary = findDryRunSummary(dryRunResult, 'products');
@@ -2458,6 +2515,14 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           </div>
           <p>{batchExecutionDryRunStatusMessage(dryRunResult)}</p>
           <small>只汇总候选与动作模拟；没有批量执行入口，也不会写入本地业务数据。</small>
+        </article>
+        <article className={finalApprovalReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>最终审批复核</strong>
+            <span>{finalApprovalReady ? '可复核' : '待补齐'}</span>
+          </div>
+          <p>{batchExecutionApprovalStatusMessage(finalApprovalResult)}</p>
+          <small>这仍不是执行批准；正式商品/订单批量写入必须另开执行阶段。</small>
         </article>
         <article className="business-capability-card info">
           <div className="business-capability-head">
@@ -2601,6 +2666,12 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'dry_run_ready', value: dryRunResult?.dryRunReady },
           { label: 'dry_run_route_path', value: dryRunResult?.routePath },
           { label: 'dry_run_skip_reason', value: dryRunResult?.skipReason },
+          { label: 'final_approval_phase', value: finalApprovalResult?.phase || 'ERP-Batch-3J' },
+          { label: 'final_approval_status', value: finalApprovalResult?.status },
+          { label: 'final_approval_ready', value: finalApprovalResult?.finalApprovalReady },
+          { label: 'final_approval_route_path', value: finalApprovalResult?.routePath },
+          { label: 'final_approval_skip_reason', value: finalApprovalResult?.skipReason },
+          { label: 'final_approval_missing_flags', value: finalApprovalResult?.missingFinalApprovalFlags?.join(', ') || '[]' },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'route_path', value: result?.routePath },
           { label: 'selected_store_id', value: selectedStoreId },
@@ -2613,6 +2684,13 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'total_would_refresh_only', value: dryRunResult?.totalWouldRefreshOnly },
           { label: 'total_would_skip', value: dryRunResult?.totalWouldSkip },
           { label: 'dry_run_changed_fields', value: dryRunResult?.changedFields?.join(', ') || '[]' },
+          { label: 'final_approval_candidate_summary_count', value: finalApprovalResult?.candidateSummaryCount },
+          { label: 'final_approval_total_candidate_count', value: finalApprovalResult?.totalCandidateCount },
+          { label: 'final_approval_total_would_create', value: finalApprovalResult?.totalWouldCreate },
+          { label: 'final_approval_total_would_update', value: finalApprovalResult?.totalWouldUpdate },
+          { label: 'final_approval_total_would_refresh_only', value: finalApprovalResult?.totalWouldRefreshOnly },
+          { label: 'final_approval_total_would_skip', value: finalApprovalResult?.totalWouldSkip },
+          { label: 'final_approval_changed_fields', value: finalApprovalResult?.changedFields?.join(', ') || '[]' },
           { label: 'product_dry_run_sync_kind', value: productDryRunSummary?.syncKind || 'naver_product_batch' },
           { label: 'product_dry_run_candidate_count', value: productDryRunSummary?.candidateCount ?? 0 },
           { label: 'product_dry_run_would_create', value: productDryRunSummary?.wouldCreate ?? 0 },
@@ -2650,6 +2728,16 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
           { label: 'timeline_events_written', value: result?.timelineEventsWritten },
           { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
+          { label: 'final_approval_backend_route_implemented', value: finalApprovalResult?.backendRouteImplemented },
+          { label: 'final_approval_public_endpoint_enabled', value: finalApprovalResult?.publicEndpointEnabled },
+          { label: 'final_approval_execution_approved', value: finalApprovalResult?.executionApproved },
+          { label: 'final_approval_batch_execution_enabled', value: finalApprovalResult?.batchExecutionEnabled },
+          { label: 'final_approval_write_endpoint_enabled', value: finalApprovalResult?.writeEndpointEnabled },
+          { label: 'final_approval_real_api_called', value: finalApprovalResult?.realApiCalled },
+          { label: 'final_approval_real_database_written', value: finalApprovalResult?.realDatabaseWritten },
+          { label: 'final_approval_orders_written', value: finalApprovalResult?.ordersWritten },
+          { label: 'final_approval_products_written', value: finalApprovalResult?.productsWritten },
+          { label: 'final_approval_operation_audit_rows_written', value: finalApprovalResult?.operationAuditRowsWritten },
           { label: 'dry_run_real_api_called', value: dryRunResult?.realApiCalled },
           { label: 'dry_run_real_database_written', value: dryRunResult?.realDatabaseWritten },
           { label: 'dry_run_orders_written', value: dryRunResult?.ordersWritten },
@@ -2662,11 +2750,17 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'dry_run_formal_product_sync_open', value: dryRunResult?.formalProductSyncOpen },
           { label: 'dry_run_formal_order_sync_open', value: dryRunResult?.formalOrderSyncOpen },
           { label: 'dry_run_platform_writes_enabled', value: dryRunResult?.platformWritesEnabled },
+          { label: 'final_approval_formal_sync_open', value: finalApprovalResult?.formalSyncOpen },
+          { label: 'final_approval_formal_product_sync_open', value: finalApprovalResult?.formalProductSyncOpen },
+          { label: 'final_approval_formal_order_sync_open', value: finalApprovalResult?.formalOrderSyncOpen },
+          { label: 'final_approval_platform_writes_enabled', value: finalApprovalResult?.platformWritesEnabled },
           { label: 'platform_writes_enabled', value: result?.platformWritesEnabled },
           { label: 'platform_product_writes_enabled', value: result?.platformProductWritesEnabled },
           { label: 'platform_order_writes_enabled', value: result?.platformOrderWritesEnabled },
           { label: 'raw_response_saved', value: result?.rawResponseSaved },
           { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted },
+          { label: 'final_approval_raw_response_saved', value: finalApprovalResult?.rawResponseSaved },
+          { label: 'final_approval_privacy_fields_redacted', value: finalApprovalResult?.privacyFieldsRedacted },
         ]}
       />
     </section>
@@ -2683,7 +2777,7 @@ function FormalBatchExecutionFinalBoundaryPanel() {
       <div className="panel-heading-row">
         <div>
           <h2>正式批量执行最终边界</h2>
-          <p>这里给管理员确认最后一道执行边界：当前只是批准前计划，不是正式商品或订单批量同步执行入口。</p>
+          <p>这里给管理员确认执行边界：最终审批已可只读复核，但当前仍不是正式商品或订单批量同步执行入口。</p>
         </div>
         <span className="period-chip">计划边界</span>
       </div>
@@ -2699,10 +2793,10 @@ function FormalBatchExecutionFinalBoundaryPanel() {
         <article className="business-capability-card success">
           <div className="business-capability-head">
             <strong>可进入下一步</strong>
-            <span>mock gate</span>
+            <span>执行计划</span>
           </div>
-          <p>下一步可以做正式批量执行批准 mock gate，验证最终批准材料能否被系统识别，但仍不写库。</p>
-          <small>mock gate 通过也不等于正式同步开放，只代表批准材料格式可被复核。</small>
+          <p>下一步可以规划正式批量执行写入边界审批，但仍必须单独确认备份、权限、审计、回读和回滚证据。</p>
+          <small>只读审批通过也不等于正式同步开放，只代表执行材料可被复核。</small>
         </article>
         <article className="business-capability-card warning">
           <div className="business-capability-head">
@@ -2728,10 +2822,11 @@ function FormalBatchExecutionFinalBoundaryPanel() {
         title="查看最终执行边界技术详情"
         description="这些字段只用于管理员核对执行边界；普通运营只需要看当前未批准执行和下一步 mock gate。"
         items={[
-          { label: 'phase', value: 'ERP-Batch-3F' },
+          { label: 'phase', value: 'ERP-Batch-3J' },
           { label: 'selected_store_id', value: selectedStoreId },
           { label: 'final_boundary_plan_ready', value: true },
-          { label: 'next_phase', value: 'ERP-Batch-3G' },
+          { label: 'readonly_route_path', value: '/api/v1/batch/execution-approval/readonly-check' },
+          { label: 'next_phase', value: 'ERP-Batch-4A' },
           { label: 'execution_approved', value: false },
           { label: 'batch_execution_enabled', value: false },
           { label: 'formal_product_sync_open', value: false },

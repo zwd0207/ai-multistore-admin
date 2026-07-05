@@ -2073,6 +2073,84 @@ function adaptFormalBatchExecutionDryRunReadonlyResult(data = {}) {
   };
 }
 
+function adaptFormalBatchExecutionApprovalReadonlyResult(data = {}) {
+  const candidateSummaries = Array.isArray(data.candidate_summaries)
+    ? data.candidate_summaries
+    : (Array.isArray(data.candidateSummaries) ? data.candidateSummaries : []);
+  return {
+    ...data,
+    phase: data.phase || 'ERP-Batch-3J',
+    status: data.status || 'blocked',
+    approvalStatus: data.approval_status || data.approvalStatus || 'blocked',
+    finalApprovalReady: Boolean(data.final_approval_ready ?? data.finalApprovalReady),
+    privateHelperOnly: Boolean(data.private_helper_only ?? data.privateHelperOnly),
+    skipReason: data.skip_reason || data.skipReason || null,
+    businessMessage: data.business_message || data.businessMessage || '',
+    nextAction: data.next_action || data.nextAction || '',
+    storeIds: Array.isArray(data.store_ids) ? data.store_ids : (Array.isArray(data.storeIds) ? data.storeIds : []),
+    syncKinds: Array.isArray(data.sync_kinds) ? data.sync_kinds : (Array.isArray(data.syncKinds) ? data.syncKinds : []),
+    targets: Array.isArray(data.targets) ? data.targets : [],
+    requiredActions: Array.isArray(data.required_actions)
+      ? data.required_actions
+      : (Array.isArray(data.requiredActions) ? data.requiredActions : []),
+    requiredFinalApprovalFlags: Array.isArray(data.required_final_approval_flags)
+      ? data.required_final_approval_flags
+      : (Array.isArray(data.requiredFinalApprovalFlags) ? data.requiredFinalApprovalFlags : []),
+    missingFinalApprovalFlags: Array.isArray(data.missing_final_approval_flags)
+      ? data.missing_final_approval_flags
+      : (Array.isArray(data.missingFinalApprovalFlags) ? data.missingFinalApprovalFlags : []),
+    candidateSummaryCount: Number(data.candidate_summary_count ?? data.candidateSummaryCount ?? candidateSummaries.length),
+    totalCandidateCount: Number(data.total_candidate_count ?? data.totalCandidateCount ?? 0),
+    totalWouldCreate: Number(data.total_would_create ?? data.totalWouldCreate ?? 0),
+    totalWouldUpdate: Number(data.total_would_update ?? data.totalWouldUpdate ?? 0),
+    totalWouldRefreshOnly: Number(data.total_would_refresh_only ?? data.totalWouldRefreshOnly ?? 0),
+    totalWouldSkip: Number(data.total_would_skip ?? data.totalWouldSkip ?? 0),
+    changedFields: Array.isArray(data.changed_fields)
+      ? data.changed_fields
+      : (Array.isArray(data.changedFields) ? data.changedFields : []),
+    candidateSummaries: candidateSummaries.map((item = {}) => ({
+      syncKind: item.sync_kind || item.syncKind || '',
+      target: item.target || '',
+      storeIds: Array.isArray(item.store_ids) ? item.store_ids : (Array.isArray(item.storeIds) ? item.storeIds : []),
+      candidateCount: Number(item.candidate_count ?? item.candidateCount ?? 0),
+      wouldCreate: Number(item.would_create ?? item.wouldCreate ?? 0),
+      wouldUpdate: Number(item.would_update ?? item.wouldUpdate ?? 0),
+      wouldRefreshOnly: Number(item.would_refresh_only ?? item.wouldRefreshOnly ?? 0),
+      wouldSkip: Number(item.would_skip ?? item.wouldSkip ?? 0),
+      changedFields: Array.isArray(item.changed_fields)
+        ? item.changed_fields
+        : (Array.isArray(item.changedFields) ? item.changedFields : []),
+    })),
+    routePath: data.route_path || data.routePath || '/api/v1/batch/execution-approval/readonly-check',
+    backendRouteImplemented: Boolean(data.backend_route_implemented ?? data.backendRouteImplemented),
+    publicEndpointEnabled: Boolean(data.public_endpoint_enabled ?? data.publicEndpointEnabled),
+    executionApproved: Boolean(data.execution_approved ?? data.executionApproved),
+    batchExecutionEnabled: Boolean(data.batch_execution_enabled ?? data.batchExecutionEnabled),
+    writeEndpointEnabled: Boolean(data.write_endpoint_enabled ?? data.writeEndpointEnabled),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    timelineEventsWritten: Boolean(data.timeline_events_written ?? data.timelineEventsWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalSyncOpen: Boolean(data.formal_sync_open ?? data.formalSyncOpen),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    formalProductSyncOpen: Boolean(data.formal_product_sync_open ?? data.formalProductSyncOpen),
+    platformOrderWritesEnabled: Boolean(data.platform_order_writes_enabled ?? data.platformOrderWritesEnabled),
+    platformProductWritesEnabled: Boolean(data.platform_product_writes_enabled ?? data.platformProductWritesEnabled),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    shipmentWriteEnabled: Boolean(data.shipment_write_enabled ?? data.shipmentWriteEnabled),
+    cancelWriteEnabled: Boolean(data.cancel_write_enabled ?? data.cancelWriteEnabled),
+    returnWriteEnabled: Boolean(data.return_write_enabled ?? data.returnWriteEnabled),
+    exchangeWriteEnabled: Boolean(data.exchange_write_enabled ?? data.exchangeWriteEnabled),
+  };
+}
+
 function adaptNaverBatchExecutionApprovalReadonlyResult(data = {}, kind = 'order') {
   const isProduct = kind === 'product';
   return {
@@ -2777,6 +2855,158 @@ function mockFormalBatchExecutionDryRunReadonly(payload = {}) {
   });
 }
 
+function mockFormalBatchExecutionApprovalReadonly(payload = {}) {
+  const requiredFlags = [
+    'latest_dry_run_referenced',
+    'manual_execution_phase_required',
+    'backup_manifest_verified',
+    'permission_evidence_verified',
+    'audit_linkage_verified',
+    'readback_plan_verified',
+    'rollback_plan_verified',
+    'sensitive_scan_passed',
+    'operator_identity_verified',
+    'store_scope_verified',
+    'execution_window_limited',
+    'manual_approval_record_planned',
+    'formal_sync_remains_closed',
+  ];
+  const serialized = JSON.stringify(payload);
+  const hasSensitiveMarker = [
+    /["']productOrderId["']\s*:/i,
+    /["']product_order_id["']\s*:/i,
+    /["']orderId["']\s*:/i,
+    /["']order_id["']\s*:/i,
+    /["']rawResponse["']\s*:/i,
+    /["']raw_response["']\s*:/i,
+    /["']authorization["']\s*:/i,
+    /["']headers?["']\s*:/i,
+    /["']clientSecret["']\s*:/i,
+    /["']client_secret["']\s*:/i,
+    /["']buyerPhone["']\s*:/i,
+    /["']buyer_phone["']\s*:/i,
+    /["']receiverPhone["']\s*:/i,
+    /["']receiver_phone["']\s*:/i,
+    /["']address["']\s*:/i,
+    /["']detailedAddress["']\s*:/i,
+    /["']detailed_address["']\s*:/i,
+  ].some((pattern) => pattern.test(serialized));
+  const blockedBase = {
+    phase: 'ERP-Batch-3J',
+    status: 'blocked',
+    approval_status: 'blocked',
+    final_approval_ready: false,
+    required_final_approval_flags: requiredFlags,
+    missing_final_approval_flags: [],
+    route_path: '/api/v1/batch/execution-approval/readonly-check',
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    execution_approved: false,
+    batch_execution_enabled: false,
+    write_endpoint_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    timeline_events_written: false,
+    operation_audit_rows_written: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+    formal_sync_open: false,
+    formal_order_sync_open: false,
+    formal_product_sync_open: false,
+    platform_order_writes_enabled: false,
+    platform_product_writes_enabled: false,
+    platform_writes_enabled: false,
+    shipment_write_enabled: false,
+    cancel_write_enabled: false,
+    return_write_enabled: false,
+    exchange_write_enabled: false,
+  };
+  if (hasSensitiveMarker) {
+    return adaptFormalBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: 'formal_batch_execution_approval_sensitive_field_blocked',
+    });
+  }
+
+  const preflight = payload.execution_preflight || payload.executionPreflight || {};
+  const dryRun = payload.execution_dry_run || payload.executionDryRun || {};
+  const approvalContext = payload.final_approval_context || payload.finalApprovalContext || {};
+  if (preflight.status !== 'formal_batch_execution_preflight_readonly_ready' || preflight.preflight_ready !== true) {
+    return adaptFormalBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: 'execution_preflight_not_ready',
+    });
+  }
+  if (dryRun.status !== 'formal_batch_execution_dry_run_readonly_ready' || dryRun.dry_run_ready !== true) {
+    return adaptFormalBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: 'execution_dry_run_not_ready',
+    });
+  }
+  const missingFlags = requiredFlags.filter((flag) => approvalContext[flag] !== true);
+  if (missingFlags.length) {
+    return adaptFormalBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: 'final_approval_context_incomplete',
+      missing_final_approval_flags: missingFlags,
+    });
+  }
+  const sideEffectBlocked = [
+    preflight,
+    dryRun,
+    approvalContext,
+  ].some((item) => item.execution_approved === true
+    || item.batch_execution_enabled === true
+    || item.write_endpoint_enabled === true
+    || item.real_api_called === true
+    || item.real_database_written === true
+    || item.orders_written === true
+    || item.products_written === true
+    || item.operation_audit_rows_written === true
+    || item.formal_sync_open === true
+    || item.platform_writes_enabled === true);
+  if (sideEffectBlocked) {
+    return adaptFormalBatchExecutionApprovalReadonlyResult({
+      ...blockedBase,
+      skip_reason: 'side_effect_not_allowed_in_approval_mock_gate',
+    });
+  }
+
+  const candidateSummaries = Array.isArray(dryRun.candidate_summaries)
+    ? dryRun.candidate_summaries
+    : (Array.isArray(dryRun.candidateSummaries) ? dryRun.candidateSummaries : []);
+  return adaptFormalBatchExecutionApprovalReadonlyResult({
+    ...blockedBase,
+    status: 'formal_batch_execution_approval_readonly_api_ready',
+    approval_status: 'ready_for_local_readonly_review',
+    final_approval_ready: true,
+    skip_reason: null,
+    store_ids: Array.isArray(dryRun.store_ids) ? dryRun.store_ids : (Array.isArray(dryRun.storeIds) ? dryRun.storeIds : []),
+    sync_kinds: Array.isArray(dryRun.sync_kinds) ? dryRun.sync_kinds : (Array.isArray(dryRun.syncKinds) ? dryRun.syncKinds : []),
+    targets: Array.isArray(dryRun.targets) ? dryRun.targets : [],
+    required_actions: Array.isArray(approvalContext.required_actions)
+      ? approvalContext.required_actions
+      : (Array.isArray(approvalContext.requiredActions) ? approvalContext.requiredActions : []),
+    candidate_summary_count: Number(dryRun.candidate_summary_count ?? dryRun.candidateSummaryCount ?? candidateSummaries.length),
+    total_candidate_count: Number(dryRun.total_candidate_count ?? dryRun.totalCandidateCount ?? 0),
+    total_would_create: Number(dryRun.total_would_create ?? dryRun.totalWouldCreate ?? 0),
+    total_would_update: Number(dryRun.total_would_update ?? dryRun.totalWouldUpdate ?? 0),
+    total_would_refresh_only: Number(dryRun.total_would_refresh_only ?? dryRun.totalWouldRefreshOnly ?? 0),
+    total_would_skip: Number(dryRun.total_would_skip ?? dryRun.totalWouldSkip ?? 0),
+    changed_fields: Array.isArray(dryRun.changed_fields) ? dryRun.changed_fields : (Array.isArray(dryRun.changedFields) ? dryRun.changedFields : []),
+    candidate_summaries: candidateSummaries,
+    backend_route_implemented: false,
+    public_endpoint_enabled: false,
+    business_message: 'mock 最终审批只读复核已通过；当前不批准执行、不写商品或订单、不调用 Naver，也不开放正式批量同步。',
+    next_action: '如要进入真实批量写入，必须另开执行阶段并重新确认备份、审计、权限、回读和回滚证据。',
+  });
+}
+
 function mockNaverBatchExecutionApprovalReadonly(payload = {}, kind = 'order') {
   const serialized = JSON.stringify(payload).toLowerCase();
   const hasSensitiveMarker = serialized.includes('productorderid')
@@ -3167,6 +3397,14 @@ function toFormalBatchExecutionDryRunReadonlyPayload(payload = {}) {
     candidate_summaries: (
       payload.candidateSummaries || payload.candidate_summaries || []
     ).map(toFormalBatchExecutionDryRunCandidateSummary),
+  };
+}
+
+function toFormalBatchExecutionApprovalReadonlyPayload(payload = {}) {
+  return {
+    execution_preflight: payload.executionPreflight || payload.execution_preflight || {},
+    execution_dry_run: payload.executionDryRun || payload.execution_dry_run || {},
+    final_approval_context: payload.finalApprovalContext || payload.final_approval_context || {},
   };
 }
 
@@ -4115,6 +4353,13 @@ const sourceMethods = {
     if (!isBackendSource) return mockFormalBatchExecutionDryRunReadonly(request);
     return adaptFormalBatchExecutionDryRunReadonlyResult(
       await backendApi.checkFormalBatchExecutionDryRunReadonly(request),
+    );
+  },
+  checkFormalBatchExecutionApprovalReadonly: async (payload = {}) => {
+    const request = toFormalBatchExecutionApprovalReadonlyPayload(payload);
+    if (!isBackendSource) return mockFormalBatchExecutionApprovalReadonly(request);
+    return adaptFormalBatchExecutionApprovalReadonlyResult(
+      await backendApi.checkFormalBatchExecutionApprovalReadonly(request),
     );
   },
   getNaverProductRollbackReadonlyReport: async (payload = {}) => {

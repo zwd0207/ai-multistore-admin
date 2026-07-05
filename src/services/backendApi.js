@@ -90,6 +90,9 @@ export const backendApi = {
   checkFormalBatchExecutionDryRunReadonly: (payload) => (
     sendData('post', '/batch/execution-dry-run/readonly-check', payload)
   ),
+  checkFormalBatchExecutionApprovalReadonly: (payload) => (
+    sendData('post', '/batch/execution-approval/readonly-check', payload)
+  ),
   checkNaverProductBatchExecutionApprovalReadonly: (payload) => (
     sendData('post', '/batch/naver/products/execution-approval/readonly-check', payload)
   ),
