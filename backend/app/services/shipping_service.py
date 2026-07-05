@@ -3,13 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.timezone import get_utc_now
-from app.models.shipping import LogisticsInventoryItem, LogisticsInventoryMapping
+from app.models.shipping import (
+    LogisticsInventoryItem,
+    LogisticsInventoryMapping,
+    ShippingExportBatch,
+    ShippingExportBatchRow,
+)
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.store_service import ensure_store_exists
 
@@ -17,8 +25,10 @@ from app.services.store_service import ensure_store_exists
 SHIPPING_WRITE_SCOPE = "shipping_mapping_stock_local"
 SHIPPING_MAPPING_VERSION = "shipping_mapping_v1"
 SHIPPING_EXPORT_MAPPING_VERSION = "shipping_export_mock_v1"
+SHIPPING_EXPORT_LOCAL_MAPPING_VERSION = "shipping_export_v1"
 SHIPPING_EXPORT_FILE_TYPE = "shipping_request"
 SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
+DEFAULT_SHIPPING_EXPORT_DIR = Path(__file__).resolve().parents[2] / "exports" / "shipping"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
 
 SENSITIVE_KEY_MARKERS = {
@@ -424,6 +434,343 @@ def evaluate_real_excel_generation_mock_gate(
             "真实 Excel 生成 mock 门禁已通过；当前只确认导出字段、导出记录和审计联动边界，"
             "不会创建文件、不会写导出记录，也不会调用平台或物流商接口。"
         ),
+    })
+    return result
+
+
+def _xlsx_column_name(index: int) -> str:
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _xlsx_cell(value: Any, row_index: int, column_index: int) -> str:
+    reference = f"{_xlsx_column_name(column_index)}{row_index}"
+    if isinstance(value, int):
+        return f'<c r="{reference}"><v>{value}</v></c>'
+    text = escape(str(value or ""))
+    return f'<c r="{reference}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+
+def _build_xlsx_bytes(rows: list[dict[str, Any]]) -> bytes:
+    from io import BytesIO
+
+    headers = [
+        ("order_reference", "订单号"),
+        ("product_name", "商品名称"),
+        ("option_name", "选项名称"),
+        ("quantity", "数量"),
+        ("logistics_inventory_code", "物流库存编号"),
+        ("logistics_provider_name", "物流商"),
+        ("logistics_current_stock", "物流当前库存"),
+        ("internal_sku", "内部 SKU"),
+    ]
+    sheet_rows = []
+    header_cells = [_xlsx_cell(label, 1, column_index) for column_index, (_key, label) in enumerate(headers, start=1)]
+    sheet_rows.append(f'<row r="1">{"".join(header_cells)}</row>')
+    for row_index, row in enumerate(rows, start=2):
+        cells = [
+            _xlsx_cell(row.get(key), row_index, column_index)
+            for column_index, (key, _label) in enumerate(headers, start=1)
+        ]
+        sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData>'
+        f'{"".join(sheet_rows)}'
+        '</sheetData>'
+        '</worksheet>'
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Shipping Request" sheetId="1" r:id="rId1"/></sheets>'
+        '</workbook>'
+    )
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '</Relationships>'
+    )
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types_xml)
+        archive.writestr("_rels/.rels", root_rels_xml)
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return buffer.getvalue()
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _audit_row_for_export(
+    *,
+    store_id: int,
+    platform: str,
+    actor_context: dict[str, Any] | None,
+    export_batch_id: int,
+    file_sha256: str,
+    file_name: str,
+    row_count: int,
+    correlation_id: str,
+) -> dict[str, Any]:
+    now = get_utc_now()
+    return {
+        "created_at": now,
+        "updated_at": now,
+        "store_id": store_id,
+        "platform": platform,
+        "environment": "local",
+        "actor_type": "human",
+        "actor_id": _actor_hash(actor_context) or "actor-hash-shipping-export-local",
+        "actor_label": "Local operator",
+        "actor_role": str((actor_context or {}).get("role") or "admin")[:80],
+        "action": "local_write_succeeded",
+        "operation_phase": "Shipping-3D",
+        "correlation_id": correlation_id,
+        "request_id": f"shipping-3d-export-{export_batch_id}",
+        "status": "success",
+        "reason_code": "shipping_excel_export_local_write",
+        "target_type": "settings",
+        "target_id": str(export_batch_id),
+        "target_hash": f"id-hash-{file_sha256[:16]}",
+        "target_label": "Shipping Excel export",
+        "changed_field_names": ["shipping_export_batches", "shipping_export_batch_rows"],
+        "before_summary": {"manual_approval": True, "file_generated": False},
+        "after_summary": {
+            "file_name": file_name,
+            "file_sha256": file_sha256,
+            "row_count": row_count,
+        },
+        "counts_summary": {
+            "shipping_export_batches_written": 1,
+            "shipping_export_batch_rows_written": row_count,
+            "orders_written": 0,
+            "products_written": 0,
+            "sync_logs_written": 0,
+            "capability_results_written": 0,
+        },
+        "safety_flags": {
+            "shipping_excel_export_local_write": True,
+            "real_api_called": False,
+            "platform_writes_enabled": False,
+            "formal_sync_open": False,
+            "orders_written": False,
+            "products_written": False,
+            "sync_log_written": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "privacy_payload_included": False,
+        },
+        "sensitive_scan_passed": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "notes": "Approved local Shipping Excel export. No Naver or logistics-provider API was called.",
+    }
+
+
+def generate_shipping_excel_local(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str,
+    export_rows: list[dict[str, Any]],
+    manual_approval: bool,
+    actor_context: dict[str, Any] | None = None,
+    include_receiver_privacy: bool = False,
+    export_directory: Path | None = None,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    gate = evaluate_real_excel_generation_mock_gate(
+        store_id=store_id,
+        platform=platform,
+        export_rows=export_rows,
+        manual_approval=manual_approval,
+        actor_context=actor_context,
+        include_receiver_privacy=include_receiver_privacy,
+        export_record_schema_acknowledged=True,
+        audit_linkage_acknowledged=True,
+        tracking_import_contract_acknowledged=True,
+    )
+    result = {**gate, "phase": "Shipping-3D"}
+    if gate.get("status") != "real_excel_generation_mock_ready":
+        result.update({
+            "file_generated": False,
+            "file_persisted": False,
+            "export_record_written": False,
+            "download_record_written": False,
+            "operation_audit_rows_written": False,
+            "real_database_written": False,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform) or "naver"
+    normalized_rows = list(gate.get("export_rows_preview") or [])
+    now = get_utc_now()
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {"store_id": store_id, "platform": normalized_platform, "rows": normalized_rows, "timestamp": timestamp},
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    file_name = f"{normalized_platform}-shipping-request-store-{store_id}-{timestamp}-{fingerprint}.xlsx"
+    target_dir = export_directory or DEFAULT_SHIPPING_EXPORT_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    file_path = target_dir / file_name
+
+    xlsx_bytes = _build_xlsx_bytes(normalized_rows)
+    file_path.write_bytes(xlsx_bytes)
+    file_sha256 = _sha256_bytes(xlsx_bytes)
+    correlation_id = f"shipping-3d-{fingerprint}"
+    actor_hash = _actor_hash(actor_context)
+
+    try:
+        export_batch = ShippingExportBatch(
+            store_id=store_id,
+            platform=normalized_platform,
+            file_type=SHIPPING_EXPORT_FILE_TYPE,
+            file_format=SHIPPING_EXPORT_FILE_FORMAT,
+            file_name=file_name,
+            file_path=str(file_path),
+            file_sha256=file_sha256,
+            row_count=len(normalized_rows),
+            matched_row_count=len(normalized_rows),
+            unmatched_row_count=0,
+            actor_id_hash=actor_hash,
+            audit_correlation_id=correlation_id,
+            export_status="generated",
+            include_receiver_privacy=False,
+            file_generated=True,
+            file_persisted=True,
+            raw_response_saved=False,
+            secrets_saved=False,
+            privacy_fields_redacted=True,
+            mapping_version=SHIPPING_EXPORT_LOCAL_MAPPING_VERSION,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(export_batch)
+        db.flush()
+        for row in normalized_rows:
+            db.add(ShippingExportBatchRow(
+                export_batch_id=export_batch.id,
+                store_id=store_id,
+                platform=normalized_platform,
+                order_reference=row["order_reference"],
+                product_name=row["product_name"],
+                option_name=row["option_name"],
+                quantity=row["quantity"],
+                logistics_inventory_code=row["logistics_inventory_code"],
+                logistics_provider_name=row["logistics_provider_name"],
+                internal_sku=row["internal_sku"],
+                platform_product_id_hash=row["platform_product_id_hash"],
+                platform_option_id_hash=row["platform_option_id_hash"],
+                row_status="ready",
+                created_at=now,
+            ))
+
+        audit_result = write_operation_audit_log_local(
+            db,
+            _audit_row_for_export(
+                store_id=store_id,
+                platform=normalized_platform,
+                actor_context=actor_context,
+                export_batch_id=export_batch.id,
+                file_sha256=file_sha256,
+                file_name=file_name,
+                row_count=len(normalized_rows),
+                correlation_id=correlation_id,
+            ),
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        if audit_result.get("status") != "audit_row_written":
+            db.rollback()
+            file_path.unlink(missing_ok=True)
+            result.update({
+                "status": "shipping_excel_export_blocked",
+                "skip_reason": audit_result.get("skip_reason") or "audit_write_failed",
+                "file_generated": False,
+                "file_persisted": False,
+                "export_record_written": False,
+                "operation_audit_rows_written": False,
+                "real_database_written": False,
+            })
+            return result
+    except Exception:
+        db.rollback()
+        file_path.unlink(missing_ok=True)
+        raise
+
+    result.update({
+        "status": "shipping_excel_local_export_succeeded",
+        "skip_reason": None,
+        "business_message": "本地 Excel 文件已生成，并已写入导出记录和审计证据。未调用 Naver 或物流商接口。",
+        "export_batch_id": export_batch.id,
+        "export_batch_row_count": len(normalized_rows),
+        "file_name": file_name,
+        "file_path": str(file_path),
+        "file_sha256": file_sha256,
+        "file_size_bytes": len(xlsx_bytes),
+        "row_count": len(normalized_rows),
+        "matched_row_count": len(normalized_rows),
+        "unmatched_row_count": 0,
+        "file_generated": True,
+        "file_persisted": True,
+        "export_record_written": True,
+        "download_record_written": False,
+        "operation_audit_rows_written": True,
+        "operation_audit_log_id": audit_result.get("audit_log_id"),
+        "audit_correlation_id": correlation_id,
+        "real_database_written": True,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "tracking_number_import_open": False,
+        "export_rows_preview": normalized_rows,
     })
     return result
 

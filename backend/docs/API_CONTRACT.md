@@ -3159,3 +3159,98 @@ Forbidden payload material remains:
 Future export records should use `shipping_export_batches` and `shipping_export_batch_rows` or equivalent names, always scoped by `store_id` and `platform`, with file hash, row counts, actor hash, and audit correlation id. Future tracking-number import should use `file_type=tracking_upload`, but parsing files and writing tracking numbers remain closed.
 
 No real Excel file, export record, audit row, order row, product row, SyncLog row, tested-success row, Naver request, logistics-provider request, tracking-number import, or shipment writeback is added in Shipping-2F to 2J.
+
+### Shipping-3A to Shipping-3E
+
+Shipping-3A to 3E add local export-record schema and a controlled local Excel generation route.
+
+New tables:
+
+```text
+shipping_export_batches
+shipping_export_batch_rows
+```
+
+Every export record remains scoped by:
+
+```text
+store_id
+platform
+```
+
+#### `POST /api/v1/shipping/export-excel`
+
+Controlled local Excel generation for export-ready Shipping Assistant rows.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "manual_approval": true,
+  "include_receiver_privacy": false,
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  },
+  "export_rows": [
+    {
+      "order_reference": "safe order reference",
+      "product_name": "safe product text",
+      "option_name": "safe option text",
+      "quantity": 1,
+      "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+      "logistics_provider_name": "Korea warehouse A",
+      "logistics_current_stock": 7,
+      "platform_product_id_hash": "id-hash-safe",
+      "platform_option_id_hash": "id-hash-safe",
+      "internal_sku": "SKU-SAFE"
+    }
+  ]
+}
+```
+
+Successful response data includes:
+
+```json
+{
+  "phase": "Shipping-3D",
+  "status": "shipping_excel_local_export_succeeded",
+  "file_generated": true,
+  "file_persisted": true,
+  "export_record_written": true,
+  "download_record_written": false,
+  "operation_audit_rows_written": true,
+  "real_database_written": true,
+  "real_api_called": false,
+  "orders_written": false,
+  "products_written": false,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "raw_response_saved": false,
+  "secrets_saved": false,
+  "privacy_fields_redacted": true,
+  "platform_writes_enabled": false,
+  "tracking_number_import_open": false
+}
+```
+
+The route writes only:
+
+- a local `.xlsx` file under the backend export directory,
+- one `shipping_export_batches` row,
+- one or more `shipping_export_batch_rows`,
+- one safe `operation_audit_logs` row.
+
+The route must not:
+
+- call Naver,
+- call a logistics-provider API,
+- import tracking numbers,
+- execute shipment/cancel/return/exchange writes,
+- write `orders`,
+- write `products`,
+- write `SyncLog`,
+- add `ApiCapabilityTestResult tested_success`,
+- include receiver name, receiver phone, address, zip code, token, Authorization, headers, signature, client secret, or raw response.

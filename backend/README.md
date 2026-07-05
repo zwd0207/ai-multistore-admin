@@ -1509,3 +1509,24 @@ Shipping-2F through 2J add verification and planning for the next Shipping Assis
 `evaluate_real_excel_generation_mock_gate(...)` is not a public route. It checks manual approval, safe export rows, file type `shipping_request`, file format `xlsx`, export-record plan acknowledgement, audit-linkage acknowledgement, receiver privacy exclusion, and sensitive-field blocking. When ready, it still returns `file_generated=false`, `file_persisted=false`, `export_record_written=false`, `download_record_written=false`, `operation_audit_rows_written=false`, `real_database_written=false`, `real_api_called=false`, and `tracking_number_import_open=false`.
 
 These phases do not modify database schema, create real Excel files, write export records, write audit rows, write `orders`, write `products`, write `SyncLog`, add `ApiCapabilityTestResult tested_success`, call Naver, call a logistics-provider API, import tracking numbers, or execute shipment/cancel/return/exchange writes.
+
+### Shipping-3A to Shipping-3E: Local Excel Export Records
+
+Shipping-3A through 3E implement the first real local Excel export path for the Shipping Assistant.
+
+New local tables:
+
+- `shipping_export_batches`
+- `shipping_export_batch_rows`
+
+New local route:
+
+```text
+POST /api/v1/shipping/export-excel
+```
+
+The route requires `manual_approval=true`, export-ready rows, `file_type=shipping_request`, `file_format=xlsx`, and `include_receiver_privacy=false`. It generates a local `.xlsx` file, writes one export batch, writes export rows, and writes one safe operation audit row linked by `audit_correlation_id`.
+
+The real local `codex1.db` was backed up before the schema migration. After migration, `shipping_export_batches=0` and `shipping_export_batch_rows=0`; no fake logistics export was generated from production rows.
+
+This phase does not call Naver, call a logistics-provider API, import tracking numbers, include receiver privacy by default, write `orders`, write `products`, write `SyncLog`, add `ApiCapabilityTestResult tested_success`, or execute shipment/cancel/return/exchange writes.

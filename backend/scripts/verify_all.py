@@ -73,6 +73,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/orders",
     "/api/v1/shipping/logistics-mappings",
     "/api/v1/shipping/logistics-mappings/write-gate",
+    "/api/v1/shipping/export-excel",
     "/api/v1/customer-inquiries",
     "/api/v1/sync/products/mock",
     "/api/v1/sync/products/coupang/preview",
@@ -449,6 +450,48 @@ EXPECTED_SHIPPING_TABLE_COLUMNS = {
         "created_at",
         "updated_at",
     },
+    "shipping_export_batches": {
+        "id",
+        "store_id",
+        "platform",
+        "file_type",
+        "file_format",
+        "file_name",
+        "file_path",
+        "file_sha256",
+        "row_count",
+        "matched_row_count",
+        "unmatched_row_count",
+        "actor_id_hash",
+        "audit_correlation_id",
+        "export_status",
+        "include_receiver_privacy",
+        "file_generated",
+        "file_persisted",
+        "raw_response_saved",
+        "secrets_saved",
+        "privacy_fields_redacted",
+        "mapping_version",
+        "created_at",
+        "updated_at",
+    },
+    "shipping_export_batch_rows": {
+        "id",
+        "export_batch_id",
+        "store_id",
+        "platform",
+        "order_reference",
+        "product_name",
+        "option_name",
+        "quantity",
+        "logistics_inventory_code",
+        "logistics_provider_name",
+        "internal_sku",
+        "platform_product_id_hash",
+        "platform_option_id_hash",
+        "row_status",
+        "created_at",
+    },
 }
 
 EXPECTED_SHIPPING_INDEXES = {
@@ -490,6 +533,41 @@ EXPECTED_SHIPPING_INDEXES = {
     "ix_logistics_inventory_items_status": (
         "logistics_inventory_items",
         ["store_id", "platform", "stock_status"],
+        False,
+    ),
+    "ix_shipping_export_batches_store_platform_created": (
+        "shipping_export_batches",
+        ["store_id", "platform", "created_at"],
+        False,
+    ),
+    "ix_shipping_export_batches_file_type_status": (
+        "shipping_export_batches",
+        ["file_type", "export_status"],
+        False,
+    ),
+    "ix_shipping_export_batches_audit_correlation": (
+        "shipping_export_batches",
+        ["audit_correlation_id"],
+        False,
+    ),
+    "ix_shipping_export_batches_file_sha256": (
+        "shipping_export_batches",
+        ["file_sha256"],
+        False,
+    ),
+    "ix_shipping_export_rows_batch": (
+        "shipping_export_batch_rows",
+        ["export_batch_id"],
+        False,
+    ),
+    "ix_shipping_export_rows_store_platform": (
+        "shipping_export_batch_rows",
+        ["store_id", "platform"],
+        False,
+    ),
+    "ix_shipping_export_rows_inventory_code": (
+        "shipping_export_batch_rows",
+        ["logistics_inventory_code"],
         False,
     ),
 }
@@ -1406,6 +1484,14 @@ def verify_openapi() -> None:
     for batch_path, expected_methods in batch_methods.items():
         methods = set(openapi_json["paths"][batch_path].keys())
         assert methods == expected_methods, {batch_path: methods}
+    shipping_methods = {
+        "/api/v1/shipping/logistics-mappings": {"get", "post"},
+        "/api/v1/shipping/logistics-mappings/write-gate": {"post"},
+        "/api/v1/shipping/export-excel": {"post"},
+    }
+    for shipping_path, expected_methods in shipping_methods.items():
+        methods = set(openapi_json["paths"][shipping_path].keys())
+        assert methods == expected_methods, {shipping_path: methods}
     print("openapi/docs: ok")
 
 
@@ -15580,7 +15666,11 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
     from fastapi.testclient import TestClient
 
     from app.main import app
-    from app.services.shipping_service import evaluate_real_excel_generation_mock_gate
+    from app.database import SessionLocal
+    from app.services.shipping_service import (
+        evaluate_real_excel_generation_mock_gate,
+        generate_shipping_excel_local,
+    )
 
     def table_count(table_name: str, where_clause: str = "", params: tuple = ()) -> int:
         with sqlite3.connect(VERIFY_DB_PATH) as connection:
@@ -15604,6 +15694,13 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "audit_logs": table_count(
                 "operation_audit_logs",
                 "WHERE store_id=? AND operation_phase='Shipping-2D'",
+                (store_id,),
+            ),
+            "export_batches": table_count("shipping_export_batches", "WHERE store_id=?", (store_id,)),
+            "export_rows": table_count("shipping_export_batch_rows", "WHERE store_id=?", (store_id,)),
+            "export_audit_logs": table_count(
+                "operation_audit_logs",
+                "WHERE store_id=? AND operation_phase='Shipping-3D'",
                 (store_id,),
             ),
         }
@@ -15649,6 +15746,9 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert before_counts["products"] == 0, before_counts
         assert before_counts["sync_logs"] == 0, before_counts
         assert before_counts["tested_success"] == 0, before_counts
+        assert before_counts["export_batches"] == 0, before_counts
+        assert before_counts["export_rows"] == 0, before_counts
+        assert before_counts["export_audit_logs"] == 0, before_counts
 
         empty_response = client.get(
             "/api/v1/shipping/logistics-mappings",
@@ -15895,10 +15995,64 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert excel_approved_gate["tracking_import_contract_planned"] is True, excel_approved_gate
         assert shipping_counts(store_id) == excel_gate_before_counts, shipping_counts(store_id)
 
+        with tempfile.TemporaryDirectory() as export_dir:
+            with SessionLocal() as export_db:
+                export_result = generate_shipping_excel_local(
+                    db=export_db,
+                    store_id=store_id,
+                    platform="naver",
+                    export_rows=[safe_export_row],
+                    manual_approval=True,
+                    actor_context={"role": "admin", "actor_id": "shipping-operator"},
+                    export_directory=Path(export_dir),
+                )
+            assert export_result["phase"] == "Shipping-3D", export_result
+            assert export_result["status"] == "shipping_excel_local_export_succeeded", export_result
+            assert export_result["file_generated"] is True, export_result
+            assert export_result["file_persisted"] is True, export_result
+            assert export_result["export_record_written"] is True, export_result
+            assert export_result["download_record_written"] is False, export_result
+            assert export_result["operation_audit_rows_written"] is True, export_result
+            assert export_result["real_database_written"] is True, export_result
+            assert export_result["real_api_called"] is False, export_result
+            assert export_result["orders_written"] is False, export_result
+            assert export_result["products_written"] is False, export_result
+            assert export_result["sync_log_written"] is False, export_result
+            assert export_result["capability_tested_success_written"] is False, export_result
+            assert export_result["raw_response_saved"] is False, export_result
+            assert export_result["secrets_saved"] is False, export_result
+            assert export_result["privacy_fields_redacted"] is True, export_result
+            assert export_result["platform_writes_enabled"] is False, export_result
+            assert export_result["tracking_number_import_open"] is False, export_result
+            assert export_result["row_count"] == 1, export_result
+            exported_file = Path(export_result["file_path"])
+            assert exported_file.exists(), export_result
+            assert exported_file.suffix == ".xlsx", export_result
+            assert _sha256_file(exported_file) == export_result["file_sha256"], export_result
+            import zipfile
+
+            with zipfile.ZipFile(exported_file) as archive:
+                names = set(archive.namelist())
+                assert "[Content_Types].xml" in names, names
+                assert "xl/worksheets/sheet1.xml" in names, names
+                sheet_text = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+                assert "PXG-WHEEL-BAG-BK-OS" in sheet_text, sheet_text
+                assert "shipping-order-safe-001" in sheet_text, sheet_text
+
+        after_export_counts = shipping_counts(store_id)
+        assert after_export_counts["export_batches"] == excel_gate_before_counts["export_batches"] + 1, after_export_counts
+        assert after_export_counts["export_rows"] == excel_gate_before_counts["export_rows"] + 1, after_export_counts
+        assert after_export_counts["export_audit_logs"] == excel_gate_before_counts["export_audit_logs"] + 1, after_export_counts
+        assert after_export_counts["orders"] == excel_gate_before_counts["orders"], after_export_counts
+        assert after_export_counts["products"] == excel_gate_before_counts["products"], after_export_counts
+        assert after_export_counts["sync_logs"] == excel_gate_before_counts["sync_logs"], after_export_counts
+        assert after_export_counts["tested_success"] == excel_gate_before_counts["tested_success"], after_export_counts
+
         excel_serialized = json.dumps({
             "manual": excel_manual_gate,
             "privacy": excel_privacy_gate,
             "approved": excel_approved_gate,
+            "export_result": export_result,
         }, ensure_ascii=False, default=str).lower()
         for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
             assert marker not in excel_serialized, excel_serialized
@@ -15932,6 +16086,7 @@ def verify_git_tracking() -> None:
     allowed_prefixes = (
         " M backend/README.md",
         "M  backend/README.md",
+        " M .gitignore",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
         " M backend/app/api/v1/endpoints/batch.py",
@@ -15943,6 +16098,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/orders.py",
         " M backend/app/api/v1/endpoints/permissions.py",
         "A  backend/app/api/v1/endpoints/permissions.py",
+        " M backend/app/api/v1/endpoints/shipping.py",
         "A  backend/app/api/v1/endpoints/shipping.py",
         " M backend/app/api/v1/endpoints/stats.py",
         " M backend/app/api/v1/endpoints/sync.py",
@@ -15960,6 +16116,7 @@ def verify_git_tracking() -> None:
         " M backend/app/models/operation_audit_log.py",
         "A  backend/app/models/operation_audit_log.py",
         " M backend/app/models/product.py",
+        " M backend/app/models/shipping.py",
         "A  backend/app/models/shipping.py",
         " M backend/app/models/store.py",
         "M  backend/app/models/store.py",
@@ -15971,6 +16128,7 @@ def verify_git_tracking() -> None:
         " M backend/app/schemas/permission.py",
         "A  backend/app/schemas/permission.py",
         " M backend/app/schemas/product.py",
+        " M backend/app/schemas/shipping.py",
         "A  backend/app/schemas/shipping.py",
         " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
@@ -16004,6 +16162,7 @@ def verify_git_tracking() -> None:
         "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
         " M backend/scripts/upgrade_auth_schema.py",
         "A  backend/scripts/upgrade_auth_schema.py",
+        " M backend/scripts/upgrade_shipping_schema.py",
         "A  backend/scripts/upgrade_shipping_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
         "?? backend/app/core/timezone.py",

@@ -95,6 +95,11 @@ class Store(Base):
         back_populates="store",
         cascade="all, delete-orphan",
     )
+    shipping_export_batches = relationship(
+        "ShippingExportBatch",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
     customer_inquiries = relationship(
         "CustomerInquiry",
         back_populates="store",

@@ -35,6 +35,32 @@ class ShippingMappingWriteRequest(ShippingMappingWriteGateRequest):
     pass
 
 
+class ShippingExcelExportRowInput(BaseModel):
+    order_reference: str = Field(..., min_length=1, max_length=160)
+    product_name: str = Field(..., min_length=1, max_length=300)
+    option_name: str = Field(default="", max_length=300)
+    quantity: int = Field(default=1, ge=1, le=1_000_000)
+    logistics_inventory_code: str = Field(..., min_length=1, max_length=120)
+    logistics_provider_name: str | None = Field(default=None, max_length=160)
+    logistics_current_stock: int = Field(default=0, ge=0, le=1_000_000)
+    platform_product_id_hash: str | None = Field(default=None, max_length=160)
+    platform_option_id_hash: str | None = Field(default=None, max_length=160)
+    internal_sku: str | None = Field(default=None, max_length=120)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ShippingExcelExportRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    export_rows: list[ShippingExcelExportRowInput] = Field(default_factory=list, max_length=100)
+    manual_approval: bool = False
+    include_receiver_privacy: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int

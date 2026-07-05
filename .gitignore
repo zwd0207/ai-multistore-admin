@@ -39,6 +39,7 @@ backups/
 *.log
 logs/
 raw_responses/
+exports/
 
 # Build and packaging output
 build/
