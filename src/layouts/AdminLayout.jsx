@@ -4,6 +4,7 @@ import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 
 const menuItems = [
+  ['发', '发货辅助', '/shipping'],
   ['总', '总览', '/dashboard'],
   ['店', '店铺管理', '/stores'],
   ['品', '商品管理', '/products'],

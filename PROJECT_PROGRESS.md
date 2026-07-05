@@ -1433,3 +1433,35 @@ Next 5 recommended stages:
 3. `Phase Shipping-1H: Unshipped order local list view`
 4. `Phase Shipping-1I: Manual logistics stock maintenance mock gate`
 5. `Phase Shipping-1J: Shipping Excel export mock generation gate`
+
+### Latest update after `Phase Shipping-1F` to `Phase Shipping-1J`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `60% - 70%`
+- ERP real-user landing progress: about `76% - 84%`
+- Production version for long-term non-technical use: about `65% - 73%`
+
+Implemented in this update:
+
+- Added the Shipping Assistant route `/shipping`.
+- Added a business-first `发货辅助` entry to the main navigation.
+- Added local Naver unshipped-order candidate filtering.
+- Added logistics inventory-code matching mock gate using product name plus option name.
+- Added page-level manual logistics stock maintenance mock.
+- Added Excel export contract preview mock for `shipping_request / xlsx`.
+
+Current positioning:
+
+- Suitable now: local operator walkthrough for Naver unshipped order candidates, inventory-code matching, stock readiness review, and export contract preview.
+- Not suitable now: real Excel file generation, persistent logistics mapping writes, persistent logistics stock writes, export-record/audit writes, Naver shipment writeback, tracking-number upload, Coupang shipping workflow, or formal order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-2A: Logistics inventory mapping schema approval plan`
+2. `Phase Shipping-2B: Logistics inventory mapping schema migration`
+3. `Phase Shipping-2C: Mapping and stock local write approval gate`
+4. `Phase Shipping-2D: Mapping and stock local write implementation`
+5. `Phase Shipping-2E: Real Excel file generation approval plan`

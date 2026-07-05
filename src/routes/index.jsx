@@ -14,6 +14,7 @@ import Accounts from '../pages/Accounts';
 import Settings from '../pages/Settings';
 import Logs from '../pages/Logs';
 import ApiCapabilities from '../pages/ApiCapabilities';
+import ShippingAssistant from '../pages/ShippingAssistant';
 
 export default function AppRoutes() {
   return (
@@ -24,6 +25,7 @@ export default function AppRoutes() {
         <Route path="stores" element={<Stores />} />
         <Route path="products" element={<Products />} />
         <Route path="orders" element={<Orders />} />
+        <Route path="shipping" element={<ShippingAssistant />} />
         <Route path="customer-service" element={<CustomerService />} />
         <Route path="sales" element={<Sales />} />
         <Route path="devices" element={<Devices />} />

@@ -1959,3 +1959,17 @@ This shipping-assistant workflow is only the first practical production feature.
 Shipping-1A defines the operator flow: select store, read Naver unshipped candidates, match by product name plus option name, maintain logistics inventory code and current stock, export a logistics-provider file, and keep download/export/audit records. Shipping-1B moves ordinary operator UI toward a simple Shipping Assistant workspace and folds technical gates into admin pages. Shipping-1C proposes future mapping, logistics-stock, download-batch, and export-batch tables without migrating schema. Shipping-1D performs a local readonly check only: store 8 currently has one real Naver `PAYED` row that can be treated as an unshipped candidate, while `DELIVERED` rows are excluded. Shipping-1E defines the first `.xlsx` shipping request contract while keeping the file model extensible for tracking uploads, inventory files, and product files.
 
 No Codex2 runtime UI code was changed in these phases. No real Naver API was called, no database schema was changed, no local database write was performed, no Excel file was generated, and formal product/order batch sync remains closed.
+
+## Phase Shipping-1F to Shipping-1J - Shipping Assistant Local MVP Shell
+
+Shipping-1F to 1J implement the first local Shipping Assistant MVP shell in Codex2:
+
+- `PHASE_SHIPPING_1F_LOGISTICS_INVENTORY_MAPPING_MOCK_GATE.md`
+- `PHASE_SHIPPING_1G_SHIPPING_ASSISTANT_LOCAL_UI_SHELL.md`
+- `PHASE_SHIPPING_1H_UNSHIPPED_ORDER_LOCAL_LIST_VIEW.md`
+- `PHASE_SHIPPING_1I_MANUAL_LOGISTICS_STOCK_MAINTENANCE_MOCK_GATE.md`
+- `PHASE_SHIPPING_1J_SHIPPING_EXCEL_EXPORT_MOCK_GENERATION_GATE.md`
+
+The new `/shipping` page reads local Naver unshipped candidates, matches them to logistics inventory codes by product name plus option name, lets the operator adjust logistics stock in page state, and generates an Excel export contract preview. Backend data source uses the existing local orders list; mock data source uses clean Shipping mock orders. Technical flags stay folded in `TechnicalDetails`.
+
+These phases do not modify Codex1 runtime code, do not call Naver, do not write orders/products/SyncLog/tested-success/audit rows, do not generate a real Excel file, and do not open formal order sync or platform shipment writeback.
