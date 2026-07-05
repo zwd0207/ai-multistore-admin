@@ -1723,3 +1723,34 @@ Next 5 recommended stages:
 3. `Phase Shipping-8G: Shipment writeback evidence UI runtime walkthrough`
 4. `Phase Naver-Product-Batch-3A: Formal product batch execution gate plan`
 5. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
+
+### Latest update after `Phase Shipping-8E` to `Phase Shipping-8F`
+
+Progress snapshot:
+
+- Project overall planning progress: about `96% - 98%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `94% - 96%`
+- Production version for long-term non-technical use: about `89% - 92%`
+- First landing Shipping Assistant feature progress: about `98% - 99%`
+
+Implemented in this update:
+
+- Added the Shipping-8E approval plan for future Naver shipment writeback dry-run evidence.
+- Added Codex1 readonly route `POST /api/v1/shipping/shipment-writeback/dry-run-gate`.
+- Verified the dry-run gate blocks missing approval and local orders that have not yet been marked dispatched.
+- Verified the dry-run gate becomes ready only after matched tracking evidence and local `DISPATCHED` status are present.
+- Kept platform shipment writeback closed: no Naver call, no logistics-provider API, no database write, no formal order sync.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with tracking import, local order status update evidence, and safe dry-run readiness evidence for future shipment writeback.
+- Not suitable now: actual Naver shipment writeback execution, logistics-provider API integration, unattended shipment automation, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-8G: Shipment writeback evidence UI runtime walkthrough`
+2. `Phase Shipping-9A: Naver shipment writeback execution approval boundary plan`
+3. `Phase Naver-Product-Batch-3A: Formal product batch execution gate plan`
+4. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
+5. `Phase ERP-Batch-4I: Pre-execution refresh runtime walkthrough`
