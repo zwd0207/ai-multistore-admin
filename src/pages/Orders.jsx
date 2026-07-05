@@ -2440,6 +2440,34 @@ function FormalBatchExecutionPreflightRuntimePanel() {
         </article>
         <article className={dryRunReady ? 'business-capability-card success' : 'business-capability-card warning'}>
           <div className="business-capability-head">
+            <strong>商品 dry-run 摘要</strong>
+            <span>{productDryRunSummary?.candidateCount ?? 0} 条</span>
+          </div>
+          <p>
+            {productDryRunSummary
+              ? `商品批量演练范围已生成：${dryRunSummaryActionText(productDryRunSummary)}。`
+              : '商品批量演练摘要尚未生成。'}
+          </p>
+          <small>商品正式批量同步仍未开放；这只是审批前的只读候选摘要。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>商品变化字段</strong>
+            <span>{productDryRunSummary?.changedFields?.length ? '需复核' : '无变化'}</span>
+          </div>
+          <p>{dryRunSummaryChangedFieldText(productDryRunSummary || {})}</p>
+          <small>商品售价、库存、状态等变化必须先进入 dry-run 摘要，再进入人工审批。</small>
+        </article>
+        <article className="business-capability-card warning">
+          <div className="business-capability-head">
+            <strong>商品写入边界</strong>
+            <span>关闭</span>
+          </div>
+          <p>本轮不会更新商品，不会写审计行，不会调用 Naver 商品写接口，也不会开放正式商品批量同步。</p>
+          <small>后续真正执行必须另开批准阶段，并带备份、权限、回读和回滚证据。</small>
+        </article>
+        <article className={dryRunReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
             <strong>订单 dry-run 摘要</strong>
             <span>{orderDryRunSummary?.candidateCount ?? 0} 条</span>
           </div>
@@ -2552,6 +2580,13 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'total_would_refresh_only', value: dryRunResult?.totalWouldRefreshOnly },
           { label: 'total_would_skip', value: dryRunResult?.totalWouldSkip },
           { label: 'dry_run_changed_fields', value: dryRunResult?.changedFields?.join(', ') || '[]' },
+          { label: 'product_dry_run_sync_kind', value: productDryRunSummary?.syncKind || 'naver_product_batch' },
+          { label: 'product_dry_run_candidate_count', value: productDryRunSummary?.candidateCount ?? 0 },
+          { label: 'product_dry_run_would_create', value: productDryRunSummary?.wouldCreate ?? 0 },
+          { label: 'product_dry_run_would_update', value: productDryRunSummary?.wouldUpdate ?? 0 },
+          { label: 'product_dry_run_would_refresh_only', value: productDryRunSummary?.wouldRefreshOnly ?? 0 },
+          { label: 'product_dry_run_would_skip', value: productDryRunSummary?.wouldSkip ?? 0 },
+          { label: 'product_dry_run_changed_fields', value: productDryRunSummary?.changedFields?.join(', ') || '[]' },
           { label: 'order_dry_run_sync_kind', value: orderDryRunSummary?.syncKind || 'naver_order_batch' },
           { label: 'order_dry_run_candidate_count', value: orderDryRunSummary?.candidateCount ?? 0 },
           { label: 'order_dry_run_would_create', value: orderDryRunSummary?.wouldCreate ?? 0 },
