@@ -1833,3 +1833,33 @@ Codex2 Products now shows a Naver product batch execution approval checklist. It
 The invitation audit linkage plan is documented in `PHASE_ERP_MULTISTORE_2M_INVITATION_APPROVAL_AUDIT_LINKAGE_PLAN.md`.
 
 Future real invitation approval must link approval, target user, masked login, store scope, permission, backup, readback, rollback, and audit correlation evidence before any user or membership write.
+
+## Phase ERP-Batch-2R - Approval Decision Audit Linkage Readonly API Mock Gate
+
+The mock gate is documented in `PHASE_ERP_BATCH_2R_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_API_MOCK_GATE.md`.
+
+Codex1 now verifies the future readonly API shape for approval-decision audit linkage while keeping routes, execution, audit writes, and batch sync closed.
+
+## Phase ERP-Batch-2S - Approval Decision Audit Linkage Readonly API Local Implementation Plan
+
+The local implementation plan is documented in `PHASE_ERP_BATCH_2S_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_API_LOCAL_IMPLEMENTATION_PLAN.md`.
+
+The future route remains planned only. No endpoint is exposed in this phase.
+
+## Phase Naver-Product-Batch-2G - Product Batch Execution Approval UI Runtime Walkthrough
+
+The runtime walkthrough is documented in `PHASE_NAVER_PRODUCT_BATCH_2G_PRODUCT_BATCH_EXECUTION_APPROVAL_UI_RUNTIME_WALKTHROUGH.md`.
+
+Products should continue to load in backend and mock modes, show the readonly product batch approval checklist, and keep product execution closed.
+
+## Phase Naver-Product-Batch-2H - Product Batch Execution Approval Readonly API Plan
+
+The readonly API plan is documented in `PHASE_NAVER_PRODUCT_BATCH_2H_PRODUCT_BATCH_EXECUTION_APPROVAL_READONLY_API_PLAN.md`.
+
+The future API may expose review evidence only. It must not call Naver, write products, write audit rows, or open formal product batch sync.
+
+## Phase ERP-Multistore-2N - Invitation Approval Audit Linkage Mock Gate
+
+The mock gate is documented in `PHASE_ERP_MULTISTORE_2N_INVITATION_APPROVAL_AUDIT_LINKAGE_MOCK_GATE.md`.
+
+Codex1 now verifies future invitation approval audit linkage while keeping user creation, invitation sending, auth sessions, role assignment, membership writes, and audit-row writes closed.
