@@ -1693,3 +1693,33 @@ Next 5 recommended stages:
 3. `Phase Shipping-8C: Parsed tracking rows single local record write`
 4. `Phase Shipping-8D: Parsed tracking post-write match verification`
 5. `Phase Shipping-8E: Shipment writeback dry-run approval plan`
+
+### Latest update after `Phase Shipping-8A` to `Phase Shipping-8D`
+
+Progress snapshot:
+
+- Project overall planning progress: about `96% - 98%`
+- Naver basic ERP loop progress: about `96% - 98%`
+- ERP real-user landing progress: about `94% - 96%`
+- Production version for long-term non-technical use: about `89% - 92%`
+- First landing Shipping Assistant feature progress: about `97% - 98%`
+
+Implemented in this update:
+
+- Confirmed the Shipping-8 local order-status update boundary is implemented through Codex1 routes.
+- Confirmed Codex2 `/shipping` includes tracking import history, tracking-to-order match evidence, and local order status update panels.
+- Added the Shipping-8D runtime walkthrough record for local status update verification.
+- Kept the walkthrough local-only: no Naver shipment writeback, no logistics-provider API, no formal order batch sync, and no platform writes.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with unshipped candidates, inventory-code matching, manual stock maintenance, Excel export, export history, tracking import record/history, readonly tracking-to-order evidence, operator checklist, tracking xlsx parser preview, and local-only order status update gate.
+- Not suitable now: Naver shipment writeback execution, logistics-provider API integration, Coupang shipping workflow, unattended order-status automation, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-8E: Shipment writeback dry-run approval plan`
+2. `Phase Shipping-8F: Shipment writeback dry-run mock gate`
+3. `Phase Shipping-8G: Shipment writeback evidence UI runtime walkthrough`
+4. `Phase Naver-Product-Batch-3A: Formal product batch execution gate plan`
+5. `Phase Naver-Order-Batch-4A: Formal order batch execution gate plan`
