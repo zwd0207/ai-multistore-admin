@@ -1458,3 +1458,20 @@ POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
 ```
 
 The route reviews invitation approval audit-linkage evidence only. It keeps `invitation_sent=false`, `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, `operation_audit_rows_written=false`, and `real_database_written=false`.
+
+### Shipping-1A to Shipping-1E: Naver Shipping Assistant First Workflow
+
+The first practical local production feature is now scoped as Naver unshipped order download plus logistics inventory-code matching and logistics-provider export. This is a business workflow layer on top of existing Naver order preview/local order foundations, not formal order batch sync.
+
+Backend implications:
+
+- `store_id` must remain required for order candidates, inventory mappings, logistics stock, export records, and audit records.
+- `platform` must remain explicit and extensible for `naver`, `coupang`, and future platforms.
+- Unshipped candidates should start with safe statuses such as `PAYED`, `PLACE_PRODUCT_ORDER`, `READY`, and `DELIVERY_READY`.
+- Delivered, canceled, and claim rows should not enter the first shipping-download candidate list.
+- The current `orders` table has no standalone `option_name` column; future logistics mapping should preserve explicit product-name and option-name fields instead of relying on raw response parsing.
+- Future export records should capture file type, file format, row counts, file hash, actor hash, and audit correlation id.
+
+Shipping-1D performed local readonly inspection only. It observed one real store 8 Naver `PAYED` row as a possible unshipped candidate and three real `DELIVERED` rows that must be excluded from shipping download. No real Naver API was called, no schema was changed, no local database write was performed, no SyncLog row was written, and no tested-success record was created.
+
+Formal product/order batch sync, Naver shipment writeback, cancel/return/exchange writes, tracking-number writeback, and logistics-provider API integration remain closed.

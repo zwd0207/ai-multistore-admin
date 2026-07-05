@@ -2907,3 +2907,61 @@ platform_writes_enabled=false
 ```
 
 Passing this mock gate does not send invitations, create users, assign roles, write memberships, or write audit rows.
+
+## Shipping Assistant Contract Direction
+
+### Shipping-1A to Shipping-1E
+
+The first local production feature is scoped as a Shipping Assistant workflow:
+
+1. read Naver unshipped-order candidates,
+2. match each row to a logistics-provider inventory code,
+3. review manually maintained logistics current stock,
+4. export a logistics-provider request file,
+5. keep download/export records and audit evidence.
+
+No public API route is added in Shipping-1A through Shipping-1E.
+
+Future API boundaries should keep:
+
+```text
+store_id required
+platform required
+real_api_called explicitly reported
+orders_written explicitly reported
+products_written explicitly reported
+operation_audit_rows_written explicitly reported
+formal_sync_open=false unless separately approved
+```
+
+The first unshipped candidate status set should include:
+
+```text
+PAYED
+PLACE_PRODUCT_ORDER
+READY
+DELIVERY_READY
+```
+
+The first candidate list should exclude:
+
+```text
+DISPATCHED
+DELIVERED
+CANCELED
+CANCEL_REQUEST
+RETURN_REQUEST
+EXCHANGE_REQUEST
+```
+
+Future export APIs should use a generic file contract rather than an Excel-only hardcode:
+
+```text
+file_type=shipping_request
+file_format=xlsx
+future_file_type=tracking_upload|inventory_table|product_table
+```
+
+Receiver privacy fields must not be exported by default. If receiver name, phone, or address is operationally required by the logistics provider, that export must be separately approved, audited, and clearly marked in the export record.
+
+Shipping-1D used local readonly database inspection only. It did not call Naver, write the database, write SyncLog, write tested-success rows, generate files, or open formal order sync.
