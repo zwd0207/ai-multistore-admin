@@ -2946,6 +2946,83 @@ Success response:
 
 The route is readonly review evidence only. It must not write products, orders, SyncLog, capability test results, timeline events, or operation audit rows. It must not call Naver or a logistics provider, must not expose shipment/cancel/return/exchange writes, and must keep formal product/order batch sync closed.
 
+### Formal Batch Execution Write Boundary Approval Plan
+
+Phase ERP-Batch-4A adds a private write-boundary approval plan helper:
+
+```text
+evaluate_formal_batch_execution_write_boundary_approval_plan(...)
+```
+
+No public route is added in this phase.
+
+Input contract:
+
+```json
+{
+  "execution_approval": {
+    "phase": "ERP-Batch-3J",
+    "status": "formal_batch_execution_approval_readonly_api_ready",
+    "final_approval_ready": true,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "write_boundary_context": {
+    "separate_execution_phase_required": true,
+    "fresh_approval_required": true,
+    "fresh_backup_required": true,
+    "dry_run_recheck_required": true,
+    "write_scope_freeze_required": true,
+    "max_batch_size_enforced": true,
+    "store_scope_locked": true,
+    "permission_recheck_required": true,
+    "audit_write_plan_required": true,
+    "readback_required": true,
+    "rollback_required": true,
+    "sensitive_scan_required": true,
+    "partial_failure_policy_required": true,
+    "idempotency_required": true,
+    "operator_confirmation_required": true,
+    "execution_window_limited": true,
+    "formal_sync_remains_closed": true,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+    "max_batch_size": 10
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-4A",
+  "status": "formal_batch_execution_write_boundary_approval_plan_ready",
+  "approval_status": "ready_for_separate_write_execution_phase",
+  "write_boundary_plan_ready": true,
+  "private_helper_only": true,
+  "backend_route_implemented": false,
+  "public_endpoint_enabled": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The helper blocks missing write-boundary flags, sensitive markers, accidental execution approval, local or platform write flags, raw response storage, privacy-boundary failures, mismatched store/sync/action scopes, and candidate counts above the approved max batch size. Passing this gate means only that the write boundary is ready for a separately approved execution phase; it does not approve or perform product/order batch sync.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

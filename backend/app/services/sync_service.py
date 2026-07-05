@@ -7704,6 +7704,267 @@ def evaluate_formal_batch_execution_approval_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_execution_write_boundary_approval_plan(
+    *,
+    execution_approval: dict | None,
+    write_boundary_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Private plan gate for the write boundary before any formal batch execution."""
+
+    required_write_boundary_flags = [
+        "separate_execution_phase_required",
+        "fresh_approval_required",
+        "fresh_backup_required",
+        "dry_run_recheck_required",
+        "write_scope_freeze_required",
+        "max_batch_size_enforced",
+        "store_scope_locked",
+        "permission_recheck_required",
+        "audit_write_plan_required",
+        "readback_required",
+        "rollback_required",
+        "sensitive_scan_required",
+        "partial_failure_policy_required",
+        "idempotency_required",
+        "operator_confirmation_required",
+        "execution_window_limited",
+        "formal_sync_remains_closed",
+    ]
+    result = {
+        "phase": "ERP-Batch-4A",
+        "formal_batch_execution_write_boundary_approval_plan": True,
+        "private_helper_only": True,
+        "status": "blocked",
+        "approval_status": "blocked",
+        "write_boundary_plan_ready": False,
+        "skip_reason": None,
+        "required_write_boundary_flags": required_write_boundary_flags,
+        "missing_write_boundary_flags": [],
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "required_actions": [],
+        "candidate_summary_count": 0,
+        "total_candidate_count": 0,
+        "total_would_create": 0,
+        "total_would_update": 0,
+        "total_would_refresh_only": 0,
+        "total_would_skip": 0,
+        "changed_fields": [],
+        "candidate_summaries": [],
+        "route_path": None,
+        "http_method": None,
+        "backend_route_implemented": False,
+        "public_endpoint_enabled": False,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(execution_approval, dict):
+        result["skip_reason"] = "execution_approval_required"
+        return result
+    if not isinstance(write_boundary_context, dict):
+        result["skip_reason"] = "write_boundary_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "execution_approval": execution_approval,
+        "write_boundary_context": write_boundary_context,
+    }):
+        result["skip_reason"] = "formal_batch_execution_write_boundary_sensitive_field_blocked"
+        return result
+
+    if execution_approval.get("status") != "formal_batch_execution_approval_readonly_api_ready":
+        result["skip_reason"] = "execution_approval_not_ready"
+        return result
+    if execution_approval.get("final_approval_ready") is not True:
+        result["skip_reason"] = "execution_approval_not_ready"
+        return result
+
+    side_effect_flags = [
+        "execution_approved",
+        "batch_execution_enabled",
+        "write_endpoint_enabled",
+        "real_api_called",
+        "real_database_written",
+        "orders_written",
+        "products_written",
+        "sync_log_written",
+        "capability_tested_success_written",
+        "timeline_events_written",
+        "operation_audit_rows_written",
+        "formal_sync_open",
+        "formal_order_sync_open",
+        "formal_product_sync_open",
+        "platform_order_writes_enabled",
+        "platform_product_writes_enabled",
+        "platform_writes_enabled",
+        "shipment_write_enabled",
+        "cancel_write_enabled",
+        "return_write_enabled",
+        "exchange_write_enabled",
+    ]
+    for source_name, payload in (
+        ("execution_approval", execution_approval),
+        ("write_boundary_context", write_boundary_context),
+    ):
+        for flag in side_effect_flags:
+            if payload.get(flag) is True:
+                if flag == "execution_approved":
+                    result["skip_reason"] = "execution_approval_not_allowed_in_write_boundary_plan"
+                else:
+                    result["skip_reason"] = "side_effect_not_allowed_in_write_boundary_plan"
+                result["blocked_source"] = source_name
+                result["blocked_flag"] = flag
+                return result
+        if payload.get("raw_response_saved") is not False and "raw_response_saved" in payload:
+            result["skip_reason"] = "raw_response_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("privacy_fields_redacted") is not True and "privacy_fields_redacted" in payload:
+            result["skip_reason"] = "privacy_redaction_required"
+            result["blocked_source"] = source_name
+            return result
+
+    missing_flags = [
+        flag for flag in required_write_boundary_flags
+        if write_boundary_context.get(flag) is not True
+    ]
+    result["missing_write_boundary_flags"] = missing_flags
+    if missing_flags:
+        result["skip_reason"] = "write_boundary_context_incomplete"
+        return result
+
+    approval_store_ids = set(_normalize_formal_batch_store_ids(execution_approval.get("store_ids")) or [])
+    boundary_store_ids = set(_normalize_formal_batch_store_ids(write_boundary_context.get("store_ids")) or [])
+    if not approval_store_ids:
+        result["skip_reason"] = "execution_approval_store_scope_required"
+        return result
+    if not boundary_store_ids or approval_store_ids != boundary_store_ids:
+        result["skip_reason"] = "write_boundary_store_scope_mismatch"
+        return result
+
+    approval_sync_kinds = set(str(kind) for kind in (execution_approval.get("sync_kinds") or []))
+    boundary_sync_kinds = set(str(kind) for kind in (write_boundary_context.get("sync_kinds") or []))
+    if not approval_sync_kinds:
+        result["skip_reason"] = "execution_approval_sync_kind_scope_required"
+        return result
+    if not boundary_sync_kinds or approval_sync_kinds != boundary_sync_kinds:
+        result["skip_reason"] = "write_boundary_sync_kind_scope_mismatch"
+        return result
+
+    approval_targets = set(str(target) for target in (execution_approval.get("targets") or []))
+    boundary_targets = set(str(target) for target in (write_boundary_context.get("targets") or []))
+    if not approval_targets:
+        result["skip_reason"] = "execution_approval_target_scope_required"
+        return result
+    if not boundary_targets or approval_targets != boundary_targets:
+        result["skip_reason"] = "write_boundary_target_scope_mismatch"
+        return result
+
+    approval_required_actions = set(str(action) for action in (execution_approval.get("required_actions") or []))
+    boundary_required_actions = set(str(action) for action in (write_boundary_context.get("required_actions") or []))
+    expected_required_actions = {
+        str(FORMAL_BATCH_SYNC_GATE_KINDS[sync_kind]["required_action"])
+        for sync_kind in approval_sync_kinds
+        if sync_kind in FORMAL_BATCH_SYNC_GATE_KINDS
+    }
+    if expected_required_actions and not expected_required_actions.issubset(approval_required_actions):
+        result["skip_reason"] = "execution_approval_action_scope_mismatch"
+        return result
+    if expected_required_actions and boundary_required_actions != expected_required_actions:
+        result["skip_reason"] = "write_boundary_action_scope_mismatch"
+        return result
+
+    try:
+        candidate_summary_count = int(execution_approval.get("candidate_summary_count") or 0)
+        total_candidate_count = int(execution_approval.get("total_candidate_count") or 0)
+        total_would_create = int(execution_approval.get("total_would_create") or 0)
+        total_would_update = int(execution_approval.get("total_would_update") or 0)
+        total_would_refresh_only = int(execution_approval.get("total_would_refresh_only") or 0)
+        total_would_skip = int(execution_approval.get("total_would_skip") or 0)
+        max_batch_size = int(write_boundary_context.get("max_batch_size") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "write_boundary_totals_invalid"
+        return result
+    if min(
+        candidate_summary_count,
+        total_candidate_count,
+        total_would_create,
+        total_would_update,
+        total_would_refresh_only,
+        total_would_skip,
+        max_batch_size,
+    ) < 0:
+        result["skip_reason"] = "write_boundary_totals_invalid"
+        return result
+    if total_would_create + total_would_update + total_would_refresh_only + total_would_skip > total_candidate_count:
+        result["skip_reason"] = "execution_approval_totals_exceed_candidates"
+        return result
+    if max_batch_size == 0:
+        result["skip_reason"] = "max_batch_size_required"
+        return result
+    if total_candidate_count > max_batch_size:
+        result["skip_reason"] = "write_boundary_candidate_count_exceeds_limit"
+        result["max_batch_size"] = max_batch_size
+        return result
+    changed_fields = _normalize_safe_changed_fields(execution_approval.get("changed_fields") or [])
+    if changed_fields is None:
+        result["skip_reason"] = "execution_approval_changed_fields_invalid"
+        return result
+
+    result.update({
+        "status": "formal_batch_execution_write_boundary_approval_plan_ready",
+        "approval_status": "ready_for_separate_write_execution_phase",
+        "write_boundary_plan_ready": True,
+        "store_ids": sorted(approval_store_ids),
+        "sync_kinds": sorted(approval_sync_kinds),
+        "targets": sorted(approval_targets),
+        "required_actions": sorted(expected_required_actions),
+        "candidate_summary_count": candidate_summary_count,
+        "total_candidate_count": total_candidate_count,
+        "total_would_create": total_would_create,
+        "total_would_update": total_would_update,
+        "total_would_refresh_only": total_would_refresh_only,
+        "total_would_skip": total_would_skip,
+        "changed_fields": changed_fields,
+        "candidate_summaries": execution_approval.get("candidate_summaries") or [],
+        "max_batch_size": max_batch_size,
+        "business_message": (
+            "Formal batch execution write boundary plan is ready for review only. "
+            "No execution route is exposed, no products or orders are written, no audit rows are created, no platform APIs are called, and formal sync remains closed."
+        ),
+        "next_action": (
+            "A future execution phase must refresh approval, backup, dry-run evidence, permissions, audit write plan, readback, rollback, idempotency, and sensitive scans before any local batch write."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

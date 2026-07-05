@@ -13821,6 +13821,208 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_execution_approval_route_sensitive
         )
 
+        batch_execution_write_boundary_context = {
+            "separate_execution_phase_required": True,
+            "fresh_approval_required": True,
+            "fresh_backup_required": True,
+            "dry_run_recheck_required": True,
+            "write_scope_freeze_required": True,
+            "max_batch_size_enforced": True,
+            "store_scope_locked": True,
+            "permission_recheck_required": True,
+            "audit_write_plan_required": True,
+            "readback_required": True,
+            "rollback_required": True,
+            "sensitive_scan_required": True,
+            "partial_failure_policy_required": True,
+            "idempotency_required": True,
+            "operator_confirmation_required": True,
+            "execution_window_limited": True,
+            "formal_sync_remains_closed": True,
+            "store_ids": [8],
+            "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+            "targets": ["products", "orders"],
+            "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            "max_batch_size": 10,
+            "execution_approved": False,
+            "batch_execution_enabled": False,
+            "write_endpoint_enabled": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "real_api_called": False,
+            "real_database_written": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": True,
+        }
+        batch_execution_write_boundary_ready = (
+            sync_service.evaluate_formal_batch_execution_write_boundary_approval_plan(
+                execution_approval=batch_execution_approval_route,
+                write_boundary_context=batch_execution_write_boundary_context,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_execution_write_boundary_ready["phase"] == "ERP-Batch-4A", (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["status"] == (
+            "formal_batch_execution_write_boundary_approval_plan_ready"
+        ), batch_execution_write_boundary_ready
+        assert batch_execution_write_boundary_ready["write_boundary_plan_ready"] is True, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["private_helper_only"] is True, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["backend_route_implemented"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["public_endpoint_enabled"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["store_ids"] == [8], batch_execution_write_boundary_ready
+        assert batch_execution_write_boundary_ready["sync_kinds"] == [
+            "naver_order_batch",
+            "naver_product_batch",
+        ], batch_execution_write_boundary_ready
+        assert batch_execution_write_boundary_ready["targets"] == ["orders", "products"], (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["required_actions"] == [
+            "orders.batch_sync_write",
+            "products.batch_sync_write",
+        ], batch_execution_write_boundary_ready
+        assert batch_execution_write_boundary_ready["total_candidate_count"] == 7, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["total_would_update"] == 1, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["changed_fields"] == ["order_status"], (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["execution_approved"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["batch_execution_enabled"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["write_endpoint_enabled"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["real_api_called"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["real_database_written"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["orders_written"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["products_written"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["operation_audit_rows_written"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["formal_sync_open"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["platform_writes_enabled"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["raw_response_saved"] is False, (
+            batch_execution_write_boundary_ready
+        )
+        assert batch_execution_write_boundary_ready["privacy_fields_redacted"] is True, (
+            batch_execution_write_boundary_ready
+        )
+
+        batch_execution_write_boundary_missing = (
+            sync_service.evaluate_formal_batch_execution_write_boundary_approval_plan(
+                execution_approval=batch_execution_approval_route,
+                write_boundary_context={
+                    **batch_execution_write_boundary_context,
+                    "rollback_required": False,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_execution_write_boundary_missing["phase"] == "ERP-Batch-4A", (
+            batch_execution_write_boundary_missing
+        )
+        assert batch_execution_write_boundary_missing["skip_reason"] == "write_boundary_context_incomplete", (
+            batch_execution_write_boundary_missing
+        )
+        assert "rollback_required" in batch_execution_write_boundary_missing["missing_write_boundary_flags"], (
+            batch_execution_write_boundary_missing
+        )
+        assert batch_execution_write_boundary_missing["real_database_written"] is False, (
+            batch_execution_write_boundary_missing
+        )
+
+        batch_execution_write_boundary_sensitive = (
+            sync_service.evaluate_formal_batch_execution_write_boundary_approval_plan(
+                execution_approval=batch_execution_approval_route,
+                write_boundary_context={
+                    **batch_execution_write_boundary_context,
+                    "rawResponse": "must-not-leak-write-boundary",
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_execution_write_boundary_sensitive["phase"] == "ERP-Batch-4A", (
+            batch_execution_write_boundary_sensitive
+        )
+        assert batch_execution_write_boundary_sensitive["skip_reason"] == (
+            "formal_batch_execution_write_boundary_sensitive_field_blocked"
+        ), batch_execution_write_boundary_sensitive
+        assert batch_execution_write_boundary_sensitive["real_database_written"] is False, (
+            batch_execution_write_boundary_sensitive
+        )
+
+        batch_execution_write_boundary_write_attempt = (
+            sync_service.evaluate_formal_batch_execution_write_boundary_approval_plan(
+                execution_approval=batch_execution_approval_route,
+                write_boundary_context={
+                    **batch_execution_write_boundary_context,
+                    "write_endpoint_enabled": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_execution_write_boundary_write_attempt["phase"] == "ERP-Batch-4A", (
+            batch_execution_write_boundary_write_attempt
+        )
+        assert batch_execution_write_boundary_write_attempt["skip_reason"] == (
+            "side_effect_not_allowed_in_write_boundary_plan"
+        ), batch_execution_write_boundary_write_attempt
+        assert batch_execution_write_boundary_write_attempt["blocked_flag"] == "write_endpoint_enabled", (
+            batch_execution_write_boundary_write_attempt
+        )
+
+        batch_execution_write_boundary_oversized = (
+            sync_service.evaluate_formal_batch_execution_write_boundary_approval_plan(
+                execution_approval=batch_execution_approval_route,
+                write_boundary_context={
+                    **batch_execution_write_boundary_context,
+                    "max_batch_size": 6,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_execution_write_boundary_oversized["phase"] == "ERP-Batch-4A", (
+            batch_execution_write_boundary_oversized
+        )
+        assert batch_execution_write_boundary_oversized["skip_reason"] == (
+            "write_boundary_candidate_count_exceeds_limit"
+        ), batch_execution_write_boundary_oversized
+        assert batch_execution_write_boundary_oversized["real_database_written"] is False, (
+            batch_execution_write_boundary_oversized
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -14066,6 +14268,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_execution_approval_route": batch_execution_approval_route,
             "batch_execution_approval_route_missing": batch_execution_approval_route_missing,
             "batch_execution_approval_route_sensitive": batch_execution_approval_route_sensitive,
+            "batch_execution_write_boundary_ready": batch_execution_write_boundary_ready,
+            "batch_execution_write_boundary_missing": batch_execution_write_boundary_missing,
+            "batch_execution_write_boundary_sensitive": batch_execution_write_boundary_sensitive,
+            "batch_execution_write_boundary_write_attempt": batch_execution_write_boundary_write_attempt,
+            "batch_execution_write_boundary_oversized": batch_execution_write_boundary_oversized,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
@@ -14095,6 +14302,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-linkage",
         "must-not-leak-linkage-api",
         "must-not-leak-final-route",
+        "must-not-leak-write-boundary",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

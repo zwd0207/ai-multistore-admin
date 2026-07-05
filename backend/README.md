@@ -1491,6 +1491,18 @@ The route wraps the 3G gate for operator and future Codex2 review. A ready respo
 
 This route is not an execution endpoint. It only reports whether the final review package is complete enough to plan a separately approved execution phase.
 
+ERP-Batch-4A adds a private formal batch write-boundary approval plan:
+
+```text
+evaluate_formal_batch_execution_write_boundary_approval_plan(...)
+```
+
+The helper consumes the 3J readonly approval result and a write-boundary context before any future product/order batch execution can be planned. It requires a separate execution phase, fresh approval, fresh backup, dry-run recheck, frozen write scope, enforced max batch size, locked store scope, permission recheck, audit write plan, readback, rollback, sensitive scan, partial-failure policy, idempotency, operator confirmation, limited execution window, and `formal_sync_remains_closed=true`.
+
+Passing 4A returns `status=formal_batch_execution_write_boundary_approval_plan_ready` and `approval_status=ready_for_separate_write_execution_phase`, but it still keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+No public route is added in 4A. It is a planning gate only, not a batch execution approval, not a write endpoint, and not a signal that Naver product/order formal batch sync is open.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text
