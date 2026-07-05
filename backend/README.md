@@ -1398,3 +1398,31 @@ evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(...)
 ```
 
 It verifies the future readonly API shape for invitation approval audit linkage while keeping routes, invitations, user creation, auth sessions, role assignment, membership writes, audit-row writes, and formal sync closed.
+
+ERP-Batch-2V is a Codex2 frontend integration plan for the approval-decision audit-linkage readonly route. Backend behavior is unchanged.
+
+ERP-Batch-2W integrates Codex2 Orders with:
+
+```text
+POST /api/v1/batch/approval-decision/audit-linkage/readonly-check
+```
+
+The UI presents audit-linkage readiness in business wording while keeping route metadata, phase values, missing flags, and write flags folded. The route remains review-only: no execution approval, no audit-row write, no product/order write, no platform call, and no formal batch sync opening.
+
+Naver-Product-Batch-2J is a local route plan only for future product batch execution approval readonly review:
+
+```text
+POST /api/v1/batch/naver/products/execution-approval/readonly-check
+```
+
+No endpoint is added in this phase. A future route may wrap `evaluate_naver_product_batch_execution_approval_readonly_api_mock_gate(...)` for review evidence only, and must keep product writes, audit-row writes, Naver calls, platform product writes, and formal product batch sync closed.
+
+ERP-Multistore-2Q is a local route plan only for future invitation approval audit-linkage readonly review:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
+```
+
+No endpoint is added in this phase. A future route may wrap `evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(...)` for review evidence only, and must keep invitation sending, user creation, auth sessions, role assignment, membership writes, audit-row writes, and formal sync closed.
+
+ERP-Multistore-2R is a Codex2 UI plan only. A future Accounts panel may show invitation approval audit-linkage readiness, but real invitation and membership writes remain closed.

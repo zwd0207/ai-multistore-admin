@@ -973,6 +973,14 @@ Request example:
 
 The route is intentionally not an execution route. Product batch execution, order batch execution, audit-row creation, backup creation, restore, real user invitation, and membership assignment all remain separate approval phases.
 
+Planned future route for Naver product batch execution approval readonly review:
+
+```text
+POST /api/v1/batch/naver/products/execution-approval/readonly-check
+```
+
+This route is not exposed yet. If implemented later, it must review evidence only and keep `execution_approved=false`, `products_written=false`, `operation_audit_rows_written=false`, `platform_product_writes_enabled=false`, `real_api_called=false`, and formal product batch sync closed.
+
 ## Dashboard and AI Context API Capability Summary
 
 `GET /api/v1/dashboard/summary` includes `api_capability_summary` using the same structure as `/api/v1/api-capabilities/summary`. Existing dashboard fields remain unchanged, including `business_timezone`, `business_date`, `business_day_start`, and `business_day_end`.
@@ -2664,6 +2672,14 @@ operation_audit_rows_written=false
 formal_sync_open=false
 platform_writes_enabled=false
 ```
+
+Phase ERP-Multistore-2Q plans a future invitation approval audit-linkage readonly route:
+
+```text
+POST /api/v1/permissions/user-invitation/approval-audit-linkage/readonly-check
+```
+
+This route is not exposed yet. If implemented later, it must review target user hash, masked login identifier, store scope, target role, approval actor, permission evidence, backup evidence, readback plan, rollback plan, and audit correlation evidence only. It must keep `invitation_sent=false`, `users_written=false`, `membership_written=false`, `role_assignment_written=false`, `real_auth_session_created=false`, `operation_audit_rows_written=false`, and `real_database_written=false`.
 
 ### Naver Order Batch Execution Approval Readonly UI
 
