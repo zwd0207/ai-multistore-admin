@@ -1503,6 +1503,18 @@ Passing 4A returns `status=formal_batch_execution_write_boundary_approval_plan_r
 
 No public route is added in 4A. It is a planning gate only, not a batch execution approval, not a write endpoint, and not a signal that Naver product/order formal batch sync is open.
 
+ERP-Batch-4B adds a private readonly API mock gate for the write-boundary review:
+
+```text
+evaluate_formal_batch_execution_write_boundary_readonly_api_mock_gate(...)
+```
+
+The helper wraps 4A and verifies the future readonly API contract before any route is implemented. It requires business wording, folded technical details, no execution button, no write endpoint, product/order write endpoints excluded, audit-row writes excluded, sensitive fields hidden from the main page, a separately implemented route, and `formal_sync_remains_closed=true`.
+
+Passing 4B returns `status=formal_batch_execution_write_boundary_readonly_api_mock_ready` and `approval_status=ready_for_readonly_api_planning`. It keeps `backend_route_implemented=false`, `public_endpoint_enabled=false`, `execution_approved=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+No public route is added in 4B. A later 4C may expose a readonly review route only; real product/order batch execution still requires another explicit phase.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

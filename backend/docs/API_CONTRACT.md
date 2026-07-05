@@ -3023,6 +3023,90 @@ Success response:
 
 The helper blocks missing write-boundary flags, sensitive markers, accidental execution approval, local or platform write flags, raw response storage, privacy-boundary failures, mismatched store/sync/action scopes, and candidate counts above the approved max batch size. Passing this gate means only that the write boundary is ready for a separately approved execution phase; it does not approve or perform product/order batch sync.
 
+### Formal Batch Execution Write Boundary Readonly API Mock Gate
+
+Phase ERP-Batch-4B adds a private readonly API mock gate:
+
+```text
+evaluate_formal_batch_execution_write_boundary_readonly_api_mock_gate(...)
+```
+
+No public route is added in this phase. The planned future route path is:
+
+```text
+POST /api/v1/batch/execution-write-boundary/readonly-check
+```
+
+Input contract:
+
+```json
+{
+  "execution_approval": {
+    "phase": "ERP-Batch-3J",
+    "status": "formal_batch_execution_approval_readonly_api_ready"
+  },
+  "write_boundary_context": {
+    "separate_execution_phase_required": true,
+    "fresh_approval_required": true,
+    "fresh_backup_required": true,
+    "dry_run_recheck_required": true,
+    "write_scope_freeze_required": true,
+    "max_batch_size_enforced": true,
+    "store_scope_locked": true,
+    "permission_recheck_required": true,
+    "audit_write_plan_required": true,
+    "readback_required": true,
+    "rollback_required": true,
+    "sensitive_scan_required": true,
+    "partial_failure_policy_required": true,
+    "idempotency_required": true,
+    "operator_confirmation_required": true,
+    "execution_window_limited": true,
+    "formal_sync_remains_closed": true
+  },
+  "readonly_api_context": {
+    "readonly_api_contract_planned": true,
+    "business_wording_required": true,
+    "technical_details_folded": true,
+    "execution_button_excluded": true,
+    "write_endpoint_excluded": true,
+    "product_write_endpoint_excluded": true,
+    "order_write_endpoint_excluded": true,
+    "audit_row_write_excluded": true,
+    "sensitive_fields_hidden_from_main_page": true,
+    "route_requires_separate_implementation": true,
+    "formal_sync_remains_closed": true
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-4B",
+  "status": "formal_batch_execution_write_boundary_readonly_api_mock_ready",
+  "approval_status": "ready_for_readonly_api_planning",
+  "readonly_api_mock_gate": true,
+  "route_path_planned": "/api/v1/batch/execution-write-boundary/readonly-check",
+  "backend_route_implemented": false,
+  "public_endpoint_enabled": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The mock gate blocks incomplete readonly API context, sensitive markers, accidental public route exposure, accidental backend-route implementation, execution approval, local writes, audit-row writes, platform writes, and formal sync opening. Passing 4B only means a readonly review API can be planned; it still does not expose a route or approve formal batch execution.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text
