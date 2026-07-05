@@ -2886,6 +2886,66 @@ Success response:
 
 The helper must block missing final-approval flags, sensitive markers, accidental execution approval, write flags, platform-write flags, raw response storage, privacy-boundary failures, and mismatched store/sync/action scopes. Passing this gate means only that review material is ready for a separate execution phase; it does not approve or perform product/order batch sync.
 
+### Formal Batch Execution Approval Readonly Route
+
+Phase ERP-Batch-3J exposes the final approval review as a local readonly route:
+
+```text
+POST /api/v1/batch/execution-approval/readonly-check
+```
+
+Request body:
+
+```json
+{
+  "execution_preflight": {},
+  "execution_dry_run": {},
+  "final_approval_context": {
+    "latest_dry_run_referenced": true,
+    "manual_execution_phase_required": true,
+    "backup_manifest_verified": true,
+    "permission_evidence_verified": true,
+    "audit_linkage_verified": true,
+    "readback_plan_verified": true,
+    "rollback_plan_verified": true,
+    "sensitive_scan_passed": true,
+    "operator_identity_verified": true,
+    "store_scope_verified": true,
+    "execution_window_limited": true,
+    "manual_approval_record_planned": true,
+    "formal_sync_remains_closed": true,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  }
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-3J",
+  "status": "formal_batch_execution_approval_readonly_api_ready",
+  "approval_status": "ready_for_local_readonly_review",
+  "backend_route_implemented": true,
+  "public_endpoint_enabled": true,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The route is readonly review evidence only. It must not write products, orders, SyncLog, capability test results, timeline events, or operation audit rows. It must not call Naver or a logistics provider, must not expose shipment/cancel/return/exchange writes, and must keep formal product/order batch sync closed.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

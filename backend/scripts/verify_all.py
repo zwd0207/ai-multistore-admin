@@ -72,7 +72,10 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/approval-decision/readonly-check",
     "/api/v1/batch/approval-decision/audit-linkage/readonly-check",
     "/api/v1/batch/execution-preflight/readonly-check",
+    "/api/v1/batch/execution-dry-run/readonly-check",
+    "/api/v1/batch/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/execution-approval/readonly-check",
+    "/api/v1/batch/naver/orders/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
@@ -1567,6 +1570,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/approval-decision/audit-linkage/readonly-check": {"post"},
         "/api/v1/batch/execution-preflight/readonly-check": {"post"},
         "/api/v1/batch/execution-dry-run/readonly-check": {"post"},
+        "/api/v1/batch/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
@@ -13709,6 +13713,114 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_execution_approval_write_attempt
         )
 
+        batch_execution_approval_route_response = client.post(
+            "/api/v1/batch/execution-approval/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "execution_dry_run": batch_execution_dry_run,
+                "final_approval_context": batch_execution_final_approval_context,
+            },
+        )
+        assert batch_execution_approval_route_response.status_code == 200, (
+            batch_execution_approval_route_response.text
+        )
+        batch_execution_approval_route = batch_execution_approval_route_response.json()["data"]
+        assert batch_execution_approval_route["phase"] == "ERP-Batch-3J", batch_execution_approval_route
+        assert batch_execution_approval_route["status"] == (
+            "formal_batch_execution_approval_readonly_api_ready"
+        ), batch_execution_approval_route
+        assert batch_execution_approval_route["approval_status"] == "ready_for_local_readonly_review", (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["backend_route_implemented"] is True, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["public_endpoint_enabled"] is True, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["route_path"] == (
+            "/api/v1/batch/execution-approval/readonly-check"
+        ), batch_execution_approval_route
+        assert batch_execution_approval_route["execution_approved"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["batch_execution_enabled"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["write_endpoint_enabled"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["real_api_called"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["real_database_written"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["orders_written"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["products_written"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["operation_audit_rows_written"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["formal_sync_open"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["formal_order_sync_open"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["formal_product_sync_open"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["platform_writes_enabled"] is False, (
+            batch_execution_approval_route
+        )
+        assert batch_execution_approval_route["raw_response_saved"] is False, batch_execution_approval_route
+        assert batch_execution_approval_route["privacy_fields_redacted"] is True, batch_execution_approval_route
+
+        batch_execution_approval_route_missing_response = client.post(
+            "/api/v1/batch/execution-approval/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "execution_dry_run": batch_execution_dry_run,
+                "final_approval_context": {
+                    **batch_execution_final_approval_context,
+                    "readback_plan_verified": False,
+                },
+            },
+        )
+        assert batch_execution_approval_route_missing_response.status_code == 200, (
+            batch_execution_approval_route_missing_response.text
+        )
+        batch_execution_approval_route_missing = batch_execution_approval_route_missing_response.json()["data"]
+        assert batch_execution_approval_route_missing["phase"] == "ERP-Batch-3J", (
+            batch_execution_approval_route_missing
+        )
+        assert batch_execution_approval_route_missing["skip_reason"] == (
+            "final_approval_context_incomplete"
+        ), batch_execution_approval_route_missing
+        assert "readback_plan_verified" in batch_execution_approval_route_missing["missing_final_approval_flags"], (
+            batch_execution_approval_route_missing
+        )
+        assert batch_execution_approval_route_missing["real_database_written"] is False, (
+            batch_execution_approval_route_missing
+        )
+
+        batch_execution_approval_route_sensitive_response = client.post(
+            "/api/v1/batch/execution-approval/readonly-check",
+            json={
+                "execution_preflight": batch_execution_preflight,
+                "execution_dry_run": batch_execution_dry_run,
+                "final_approval_context": {
+                    **batch_execution_final_approval_context,
+                    "rawResponse": "must-not-leak-final-route",
+                },
+            },
+        )
+        assert batch_execution_approval_route_sensitive_response.status_code == 200, (
+            batch_execution_approval_route_sensitive_response.text
+        )
+        batch_execution_approval_route_sensitive = batch_execution_approval_route_sensitive_response.json()["data"]
+        assert batch_execution_approval_route_sensitive["phase"] == "ERP-Batch-3J", (
+            batch_execution_approval_route_sensitive
+        )
+        assert batch_execution_approval_route_sensitive["skip_reason"] == (
+            "formal_batch_execution_approval_sensitive_field_blocked"
+        ), batch_execution_approval_route_sensitive
+        assert batch_execution_approval_route_sensitive["real_database_written"] is False, (
+            batch_execution_approval_route_sensitive
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -13951,6 +14063,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_execution_approval_sensitive": batch_execution_approval_sensitive,
             "batch_execution_approval_executed": batch_execution_approval_executed,
             "batch_execution_approval_write_attempt": batch_execution_approval_write_attempt,
+            "batch_execution_approval_route": batch_execution_approval_route,
+            "batch_execution_approval_route_missing": batch_execution_approval_route_missing,
+            "batch_execution_approval_route_sensitive": batch_execution_approval_route_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
@@ -13979,6 +14094,7 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
         "must-not-leak-local-linkage",
         "must-not-leak-linkage",
         "must-not-leak-linkage-api",
+        "must-not-leak-final-route",
         "readonly batch evidence",
     ]:
         assert forbidden not in serialized, serialized

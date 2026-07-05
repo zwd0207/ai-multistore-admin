@@ -7644,6 +7644,66 @@ def evaluate_formal_batch_execution_approval_mock_gate(
     return result
 
 
+def evaluate_formal_batch_execution_approval_readonly_api_local(
+    *,
+    execution_preflight: dict | None,
+    execution_dry_run: dict | None,
+    final_approval_context: dict | None,
+) -> dict:
+    """Public local readonly wrapper for the final formal batch execution approval gate."""
+
+    result = evaluate_formal_batch_execution_approval_mock_gate(
+        execution_preflight=execution_preflight,
+        execution_dry_run=execution_dry_run,
+        final_approval_context=final_approval_context,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "ERP-Batch-3J",
+        "formal_batch_execution_approval_readonly_api_local": True,
+        "private_helper_only": False,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/execution-approval/readonly-check",
+        "http_method": "POST",
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    })
+    if result.get("status") == "formal_batch_execution_approval_mock_ready":
+        result["status"] = "formal_batch_execution_approval_readonly_api_ready"
+        result["approval_status"] = "ready_for_local_readonly_review"
+        result["business_message"] = (
+            "Formal batch execution approval is ready for local readonly review only. "
+            "This does not approve execution, expose a write endpoint, write products or orders, call platform APIs, or open formal sync."
+        )
+        result["next_action"] = (
+            "Use this readonly API as operator evidence before a separately approved execution phase with fresh backup, readback, rollback, audit evidence, and sensitive-field scans."
+        )
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

@@ -1481,6 +1481,16 @@ The helper reviews the 3A preflight result, the 3D dry-run result, and final app
 
 No public route is added in 3G. Product or order batch execution still requires a separate explicit execution phase with fresh backup, readback, rollback, audit evidence, and sensitive-field scans.
 
+ERP-Batch-3J exposes the same final approval check as a local readonly API:
+
+```text
+POST /api/v1/batch/execution-approval/readonly-check
+```
+
+The route wraps the 3G gate for operator and future Codex2 review. A ready response uses `status=formal_batch_execution_approval_readonly_api_ready` and keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed. The route blocks missing approval evidence, scope mismatches, sensitive markers, raw response storage, accidental execution approval, and any write/platform switch.
+
+This route is not an execution endpoint. It only reports whether the final review package is complete enough to plan a separately approved execution phase.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text
