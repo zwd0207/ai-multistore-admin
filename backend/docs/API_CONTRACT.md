@@ -4421,3 +4421,76 @@ Success response fields:
 Repeat behavior: if the matched local order is already `DISPATCHED`, the route returns `tracking_order_status_update_noop` and does not write duplicate timeline or audit rows.
 
 Safety boundary: the route must not insert orders, update products, write SyncLog, add capability test success rows, persist raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. Naver shipment writeback, cancel/return/exchange writes, logistics-provider API calls, and formal order batch sync remain closed.
+
+### Shipping-8E to Shipping-8F
+
+Shipping-8E to 8F add a readonly Naver shipment writeback dry-run gate. It checks whether local tracking import evidence, local order status, and approval evidence are ready for a future shipment writeback dry-run. It still does not call Naver.
+
+#### `POST /api/v1/shipping/shipment-writeback/dry-run-gate`
+
+Purpose: prepare safe dry-run evidence for future Naver shipment writeback without executing platform writes.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "import_batch_id": 1,
+  "tracking_rows": [],
+  "manual_approval": true,
+  "matching_contract_acknowledged": true,
+  "backup_evidence_acknowledged": true,
+  "audit_evidence_acknowledged": true,
+  "local_status_evidence_acknowledged": true,
+  "naver_writeback_boundary_acknowledged": true,
+  "operator_checklist_acknowledged": true,
+  "target_delivery_status": "DISPATCHED",
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  }
+}
+```
+
+Ready response fields:
+
+```json
+{
+  "phase": "Shipping-8F",
+  "status": "shipment_writeback_dry_run_gate_ready",
+  "shipment_writeback_dry_run_gate": true,
+  "shipment_writeback_dry_run_ready": true,
+  "dry_run_candidate_count": 1,
+  "dry_run_candidates": [
+    {
+      "local_order_id": 1,
+      "order_reference_hash": "id-hash-safe",
+      "product_order_reference_hash": "id-hash-safe",
+      "tracking_number_hash": "id-hash-safe",
+      "carrier": "safe-carrier",
+      "shipped_at": "2026-07-05T18:00:00+09:00",
+      "current_order_status": "DISPATCHED",
+      "target_delivery_status": "DISPATCHED",
+      "payload_preview_saved": false,
+      "future_write_allowed": false
+    }
+  ],
+  "shipment_writeback_open": false,
+  "shipment_writeback_called": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "platform_writes_enabled": false,
+  "future_platform_write_requires_separate_approval": true
+}
+```
+
+Blocked examples:
+
+- missing approval: `manual_approval_required`
+- unmatched tracking rows: `unmatched_tracking_rows_present`
+- local order not dispatched: `local_order_not_dispatched`
+- unsupported target status: `target_delivery_status_not_supported`
+- sensitive fields: `shipment_writeback_dry_run_sensitive_field_blocked`
+
+Safety boundary: the route must not call Naver, call a logistics-provider API, write orders, write products, write SyncLog, add capability test success rows, write audit rows, save platform payload previews, persist raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code. Formal order sync and Naver shipment writeback remain closed.

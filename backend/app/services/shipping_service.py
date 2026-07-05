@@ -2254,6 +2254,197 @@ def evaluate_shipment_writeback_approval_boundary(
     return result
 
 
+def evaluate_shipment_writeback_dry_run_gate(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    import_batch_id: int | None = None,
+    tracking_rows: list[dict[str, Any]] | None = None,
+    manual_approval: bool = False,
+    matching_contract_acknowledged: bool = False,
+    backup_evidence_acknowledged: bool = False,
+    audit_evidence_acknowledged: bool = False,
+    local_status_evidence_acknowledged: bool = False,
+    naver_writeback_boundary_acknowledged: bool = False,
+    operator_checklist_acknowledged: bool = False,
+    target_delivery_status: str = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
+    actor_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    normalized_platform = _normalize_platform(platform)
+    target_status = _clean_text(target_delivery_status, max_length=30).upper()
+    result = {
+        **_base_result(phase="Shipping-8F"),
+        "readonly_route": True,
+        "shipment_writeback_dry_run_gate": True,
+        "manual_approval": bool(manual_approval),
+        "matching_contract_acknowledged": bool(matching_contract_acknowledged),
+        "backup_evidence_acknowledged": bool(backup_evidence_acknowledged),
+        "audit_evidence_acknowledged": bool(audit_evidence_acknowledged),
+        "local_status_evidence_acknowledged": bool(local_status_evidence_acknowledged),
+        "naver_writeback_boundary_acknowledged": bool(naver_writeback_boundary_acknowledged),
+        "operator_checklist_acknowledged": bool(operator_checklist_acknowledged),
+        "target_delivery_status": target_status,
+        "target_delivery_status_label_zh": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_LABEL_ZH,
+        "import_batch_id": import_batch_id,
+        "matched_order_count": 0,
+        "unmatched_order_count": 0,
+        "dry_run_candidate_count": 0,
+        "blocked_order_count": 0,
+        "dry_run_candidates": [],
+        "blocked_orders": [],
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "shipment_writeback_dry_run_ready": False,
+        "tracking_number_import_open": False,
+        "orders_updated": False,
+        "order_status_events_written": False,
+        "tracking_import_batch_updated": False,
+        "future_platform_write_requires_separate_approval": True,
+    }
+    if normalized_platform is None:
+        result.update({"status": "blocked", "skip_reason": "platform_not_supported"})
+        return result
+    if normalized_platform != "naver":
+        result.update({"status": "blocked", "skip_reason": "naver_only_gate"})
+        return result
+    if target_status != SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS:
+        result.update({"status": "blocked", "skip_reason": "target_delivery_status_not_supported"})
+        return result
+
+    forbidden_fields = _sensitive_fields({
+        "tracking_rows": tracking_rows or [],
+        "actor_context": actor_context or {},
+    })
+    if forbidden_fields:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "shipment_writeback_dry_run_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    required_flags = [
+        ("manual_approval_required", manual_approval),
+        ("matching_contract_required", matching_contract_acknowledged),
+        ("backup_evidence_required", backup_evidence_acknowledged),
+        ("audit_evidence_required", audit_evidence_acknowledged),
+        ("local_status_evidence_required", local_status_evidence_acknowledged),
+        ("naver_writeback_boundary_required", naver_writeback_boundary_acknowledged),
+        ("operator_checklist_required", operator_checklist_acknowledged),
+    ]
+    for skip_reason, flag in required_flags:
+        if flag is not True:
+            result.update({"status": "blocked", "skip_reason": skip_reason})
+            return result
+
+    match_result = evaluate_tracking_order_match_readonly(
+        db,
+        store_id=store_id,
+        platform=normalized_platform,
+        import_batch_id=import_batch_id,
+        tracking_rows=tracking_rows,
+        matching_contract_acknowledged=matching_contract_acknowledged,
+        actor_context=actor_context,
+    )
+    result["match_status"] = match_result.get("status")
+    result["match_skip_reason"] = match_result.get("skip_reason")
+    if match_result.get("status") != "tracking_order_match_readonly_ready":
+        result.update({
+            "status": "blocked",
+            "skip_reason": match_result.get("skip_reason") or "tracking_match_not_ready",
+        })
+        return result
+
+    match_rows = list(match_result.get("match_rows") or [])
+    matched_count = int(match_result.get("matched_order_count") or 0)
+    unmatched_count = int(match_result.get("unmatched_order_count") or 0)
+    duplicate_count = int(match_result.get("duplicate_tracking_row_count") or 0)
+    result.update({
+        "matched_order_count": matched_count,
+        "unmatched_order_count": unmatched_count,
+        "duplicate_tracking_row_count": duplicate_count,
+        "total_tracking_rows": int(match_result.get("total_tracking_rows") or 0),
+    })
+    if unmatched_count > 0:
+        result.update({"status": "blocked", "skip_reason": "unmatched_tracking_rows_present"})
+        return result
+    if matched_count <= 0:
+        result.update({"status": "blocked", "skip_reason": "matched_order_evidence_required"})
+        return result
+
+    candidates: list[dict[str, Any]] = []
+    blocked_orders: list[dict[str, Any]] = []
+    seen_local_order_ids: set[int] = set()
+    for row in match_rows:
+        if row.get("match_status") != "matched_existing_order":
+            continue
+        if row.get("row_status") != "ready_for_future_review":
+            continue
+        order_summary = row.get("order_summary") or {}
+        local_order_id = int(order_summary.get("local_order_id") or 0)
+        if not local_order_id or local_order_id in seen_local_order_ids:
+            continue
+        seen_local_order_ids.add(local_order_id)
+        current_status = _clean_text(order_summary.get("order_status"), max_length=30).upper()
+        if current_status != SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS:
+            blocked_orders.append({
+                "local_order_id": local_order_id,
+                "current_order_status": current_status,
+                "block_reason": "local_order_not_dispatched",
+            })
+            continue
+        candidates.append({
+            "local_order_id": local_order_id,
+            "order_reference_hash": _safe_hash_identifier(row.get("order_reference")),
+            "product_order_reference_hash": _safe_hash_identifier(row.get("product_order_reference") or row.get("order_reference")),
+            "tracking_number_hash": _safe_hash_identifier(row.get("tracking_number")),
+            "carrier": _clean_text(row.get("carrier"), max_length=80),
+            "shipped_at": row.get("shipped_at"),
+            "current_order_status": current_status,
+            "target_delivery_status": target_status,
+            "payload_preview_saved": False,
+            "raw_response_saved": False,
+            "future_write_allowed": False,
+        })
+
+    result.update({
+        "dry_run_candidates": candidates,
+        "dry_run_candidate_count": len(candidates),
+        "blocked_orders": blocked_orders,
+        "blocked_order_count": len(blocked_orders),
+    })
+    if blocked_orders:
+        result.update({"status": "blocked", "skip_reason": "local_order_not_dispatched"})
+        return result
+    if not candidates:
+        result.update({"status": "blocked", "skip_reason": "no_writeback_candidates"})
+        return result
+
+    result.update({
+        "status": "shipment_writeback_dry_run_gate_ready",
+        "skip_reason": None,
+        "business_message": (
+            "Naver shipment writeback dry-run evidence is ready. "
+            "This does not call Naver and does not open platform shipment writeback."
+        ),
+        "shipment_writeback_dry_run_ready": True,
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
 def _xlsx_column_name(index: int) -> str:
     name = ""
     while index:

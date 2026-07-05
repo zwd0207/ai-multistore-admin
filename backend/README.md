@@ -1770,3 +1770,29 @@ This phase remains closed for platform writes:
 - it does not save raw response, token, Authorization, headers, signature, client secret, buyer privacy, receiver privacy, full address, or zip code.
 
 Repeated execution against an already dispatched local order returns a no-op and does not write duplicate timeline or audit rows. Terminal or claim statuses such as delivered, canceled, cancel request, return request, exchange request, and purchase decided are blocked from this local dispatch update path.
+
+### Shipping-8E to Shipping-8F: Shipment Writeback Dry-Run Gate
+
+Shipping-8E and 8F prepare a future Naver shipment writeback dry-run without opening platform writes.
+
+New local readonly route:
+
+```text
+POST /api/v1/shipping/shipment-writeback/dry-run-gate
+```
+
+The gate requires:
+
+- `manual_approval=true`
+- `matching_contract_acknowledged=true`
+- `backup_evidence_acknowledged=true`
+- `audit_evidence_acknowledged=true`
+- `local_status_evidence_acknowledged=true`
+- `naver_writeback_boundary_acknowledged=true`
+- `operator_checklist_acknowledged=true`
+- matched tracking rows with no unmatched rows
+- local order status already marked as `DISPATCHED`
+
+When ready, the route returns safe dry-run candidates with local order id, hashed order references, hashed tracking number, carrier, shipped time, and target delivery status. It does not call Naver, does not call a logistics-provider API, does not write the database, does not save a platform payload, and does not open formal order batch sync.
+
+The route blocks candidates when local orders are not yet dispatched, when tracking rows are unmatched, when any approval evidence is missing, or when sensitive fields are present. It keeps `shipment_writeback_called=false`, `shipment_writeback_open=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and `future_platform_write_requires_separate_approval=true`.

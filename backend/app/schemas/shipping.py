@@ -148,6 +148,16 @@ class ShippingShipmentWritebackBoundaryRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ShippingShipmentWritebackDryRunGateRequest(ShippingTrackingOrderMatchReadonlyRequest):
+    manual_approval: bool = False
+    backup_evidence_acknowledged: bool = False
+    audit_evidence_acknowledged: bool = False
+    local_status_evidence_acknowledged: bool = False
+    naver_writeback_boundary_acknowledged: bool = False
+    operator_checklist_acknowledged: bool = False
+    target_delivery_status: str = Field(default="DISPATCHED", min_length=1, max_length=30)
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int
