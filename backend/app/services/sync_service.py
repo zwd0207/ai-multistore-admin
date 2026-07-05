@@ -8169,6 +8169,283 @@ def evaluate_formal_batch_execution_write_boundary_readonly_api_local(
     return result
 
 
+def evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+    *,
+    write_boundary_review: dict | None,
+    backup_refresh_evidence: dict | None,
+    audit_refresh_evidence: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Private gate requiring fresh backup and audit evidence before any later batch execution."""
+
+    required_backup_flags = [
+        "fresh_backup_created",
+        "backup_manifest_verified",
+        "backup_sha256_verified",
+        "restore_dry_run_referenced",
+        "backup_created_after_boundary_review",
+        "safe_backup_reference_only",
+    ]
+    required_audit_flags = [
+        "audit_correlation_planned",
+        "append_only_audit_chain_planned",
+        "actor_store_scope_verified",
+        "safe_metadata_only",
+        "backup_evidence_link_planned",
+        "write_attempt_record_planned",
+        "readback_audit_planned",
+        "rollback_audit_planned",
+        "no_audit_rows_written_yet",
+    ]
+    result = {
+        "phase": "ERP-Batch-4E",
+        "formal_batch_pre_execution_backup_audit_refresh_gate": True,
+        "private_helper_only": True,
+        "status": "blocked",
+        "approval_status": "blocked",
+        "pre_execution_backup_audit_refresh_gate_ready": False,
+        "skip_reason": None,
+        "required_backup_flags": required_backup_flags,
+        "missing_backup_flags": [],
+        "required_audit_flags": required_audit_flags,
+        "missing_audit_flags": [],
+        "backup_refresh_verified": False,
+        "audit_refresh_verified": False,
+        "store_ids": [],
+        "sync_kinds": [],
+        "targets": [],
+        "required_actions": [],
+        "candidate_summary_count": 0,
+        "total_candidate_count": 0,
+        "backup_sha256_abbrev": None,
+        "audit_correlation_reference": None,
+        "route_path": None,
+        "http_method": None,
+        "backend_route_implemented": False,
+        "public_endpoint_enabled": False,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    }
+    if verification_scope != "verify_all_temp_db":
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(write_boundary_review, dict):
+        result["skip_reason"] = "write_boundary_review_required"
+        return result
+    if not isinstance(backup_refresh_evidence, dict):
+        result["skip_reason"] = "backup_refresh_evidence_required"
+        return result
+    if not isinstance(audit_refresh_evidence, dict):
+        result["skip_reason"] = "audit_refresh_evidence_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found({
+        "write_boundary_review": write_boundary_review,
+        "backup_refresh_evidence": backup_refresh_evidence,
+        "audit_refresh_evidence": audit_refresh_evidence,
+    }):
+        result["skip_reason"] = "pre_execution_refresh_sensitive_field_blocked"
+        return result
+
+    if write_boundary_review.get("status") != "formal_batch_execution_write_boundary_readonly_api_ready":
+        result["skip_reason"] = "write_boundary_review_not_ready"
+        return result
+    if write_boundary_review.get("write_boundary_plan_ready") is not True:
+        result["skip_reason"] = "write_boundary_review_not_ready"
+        return result
+
+    side_effect_flags = [
+        "execution_approved",
+        "batch_execution_enabled",
+        "write_endpoint_enabled",
+        "real_api_called",
+        "real_database_written",
+        "orders_written",
+        "products_written",
+        "sync_log_written",
+        "capability_tested_success_written",
+        "timeline_events_written",
+        "operation_audit_rows_written",
+        "formal_sync_open",
+        "formal_order_sync_open",
+        "formal_product_sync_open",
+        "platform_order_writes_enabled",
+        "platform_product_writes_enabled",
+        "platform_writes_enabled",
+        "shipment_write_enabled",
+        "cancel_write_enabled",
+        "return_write_enabled",
+        "exchange_write_enabled",
+    ]
+    for source_name, payload in (
+        ("write_boundary_review", write_boundary_review),
+        ("backup_refresh_evidence", backup_refresh_evidence),
+        ("audit_refresh_evidence", audit_refresh_evidence),
+    ):
+        for flag in side_effect_flags:
+            if payload.get(flag) is True:
+                result["skip_reason"] = "side_effect_not_allowed_in_pre_execution_refresh_gate"
+                result["blocked_source"] = source_name
+                result["blocked_flag"] = flag
+                return result
+        if payload.get("raw_response_saved") is not False and "raw_response_saved" in payload:
+            result["skip_reason"] = "raw_response_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("secrets_saved") is not False and "secrets_saved" in payload:
+            result["skip_reason"] = "secrets_saved_not_allowed"
+            result["blocked_source"] = source_name
+            return result
+        if payload.get("privacy_fields_redacted") is not True and "privacy_fields_redacted" in payload:
+            result["skip_reason"] = "privacy_redaction_required"
+            result["blocked_source"] = source_name
+            return result
+
+    review_store_ids = set(_normalize_formal_batch_store_ids(write_boundary_review.get("store_ids")) or [])
+    backup_store_ids = set(_normalize_formal_batch_store_ids(backup_refresh_evidence.get("store_ids")) or [])
+    audit_store_ids = set(_normalize_formal_batch_store_ids(audit_refresh_evidence.get("store_ids")) or [])
+    if not review_store_ids:
+        result["skip_reason"] = "write_boundary_store_scope_required"
+        return result
+    if backup_store_ids != review_store_ids:
+        result["skip_reason"] = "backup_refresh_store_scope_mismatch"
+        return result
+    if audit_store_ids != review_store_ids:
+        result["skip_reason"] = "audit_refresh_store_scope_mismatch"
+        return result
+
+    review_sync_kinds = set(str(kind) for kind in (write_boundary_review.get("sync_kinds") or []))
+    backup_sync_kinds = set(str(kind) for kind in (backup_refresh_evidence.get("sync_kinds") or []))
+    audit_sync_kinds = set(str(kind) for kind in (audit_refresh_evidence.get("sync_kinds") or []))
+    if not review_sync_kinds:
+        result["skip_reason"] = "write_boundary_sync_kind_scope_required"
+        return result
+    if backup_sync_kinds != review_sync_kinds:
+        result["skip_reason"] = "backup_refresh_sync_kind_scope_mismatch"
+        return result
+    if audit_sync_kinds != review_sync_kinds:
+        result["skip_reason"] = "audit_refresh_sync_kind_scope_mismatch"
+        return result
+
+    review_targets = set(str(target) for target in (write_boundary_review.get("targets") or []))
+    backup_targets = set(str(target) for target in (backup_refresh_evidence.get("targets") or []))
+    audit_targets = set(str(target) for target in (audit_refresh_evidence.get("targets") or []))
+    if not review_targets:
+        result["skip_reason"] = "write_boundary_target_scope_required"
+        return result
+    if backup_targets != review_targets:
+        result["skip_reason"] = "backup_refresh_target_scope_mismatch"
+        return result
+    if audit_targets != review_targets:
+        result["skip_reason"] = "audit_refresh_target_scope_mismatch"
+        return result
+
+    review_required_actions = set(str(action) for action in (write_boundary_review.get("required_actions") or []))
+    backup_required_actions = set(str(action) for action in (backup_refresh_evidence.get("required_actions") or []))
+    audit_required_actions = set(str(action) for action in (audit_refresh_evidence.get("required_actions") or []))
+    planned_action_names = set(str(action) for action in (audit_refresh_evidence.get("planned_action_names") or []))
+    if not review_required_actions:
+        result["skip_reason"] = "write_boundary_action_scope_required"
+        return result
+    if backup_required_actions != review_required_actions:
+        result["skip_reason"] = "backup_refresh_action_scope_mismatch"
+        return result
+    if audit_required_actions != review_required_actions:
+        result["skip_reason"] = "audit_refresh_action_scope_mismatch"
+        return result
+    if not review_required_actions.issubset(planned_action_names):
+        result["skip_reason"] = "audit_refresh_planned_actions_incomplete"
+        return result
+
+    missing_backup_flags = [
+        flag for flag in required_backup_flags
+        if backup_refresh_evidence.get(flag) is not True
+    ]
+    result["missing_backup_flags"] = missing_backup_flags
+    if missing_backup_flags:
+        result["skip_reason"] = "backup_refresh_evidence_incomplete"
+        return result
+    if backup_refresh_evidence.get("sqlite_integrity_check") != "ok":
+        result["skip_reason"] = "backup_sqlite_integrity_not_verified"
+        return result
+    backup_sha256 = str(backup_refresh_evidence.get("backup_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", backup_sha256):
+        result["skip_reason"] = "backup_sha256_invalid"
+        return result
+    if backup_refresh_evidence.get("backup_deleted") is True:
+        result["skip_reason"] = "backup_deleted_not_allowed"
+        return result
+    if backup_refresh_evidence.get("production_db_touched") is True:
+        result["skip_reason"] = "production_db_touched_not_allowed"
+        return result
+
+    missing_audit_flags = [
+        flag for flag in required_audit_flags
+        if audit_refresh_evidence.get(flag) is not True
+    ]
+    result["missing_audit_flags"] = missing_audit_flags
+    if missing_audit_flags:
+        result["skip_reason"] = "audit_refresh_evidence_incomplete"
+        return result
+
+    try:
+        candidate_summary_count = int(write_boundary_review.get("candidate_summary_count") or 0)
+        total_candidate_count = int(write_boundary_review.get("total_candidate_count") or 0)
+    except (TypeError, ValueError):
+        result["skip_reason"] = "write_boundary_candidate_counts_invalid"
+        return result
+    if candidate_summary_count < 0 or total_candidate_count < 0:
+        result["skip_reason"] = "write_boundary_candidate_counts_invalid"
+        return result
+
+    result.update({
+        "status": "formal_batch_pre_execution_backup_audit_refresh_gate_ready",
+        "approval_status": "ready_for_separate_execution_phase_after_refresh_review",
+        "pre_execution_backup_audit_refresh_gate_ready": True,
+        "backup_refresh_verified": True,
+        "audit_refresh_verified": True,
+        "store_ids": sorted(review_store_ids),
+        "sync_kinds": sorted(review_sync_kinds),
+        "targets": sorted(review_targets),
+        "required_actions": sorted(review_required_actions),
+        "candidate_summary_count": candidate_summary_count,
+        "total_candidate_count": total_candidate_count,
+        "backup_sha256_abbrev": f"{backup_sha256[:12]}...",
+        "audit_correlation_reference": (
+            str(audit_refresh_evidence.get("audit_correlation_id_hash") or "")[:24] or None
+        ),
+        "business_message": (
+            "Formal batch pre-execution backup and audit refresh gate is ready for review only. "
+            "A fresh backup and append-only audit plan are referenced, but no batch execution, product/order write, audit row write, platform call, or formal sync opening occurs."
+        ),
+        "next_action": (
+            "A later explicit execution phase must use this refreshed evidence, then perform local writes only after backup, readback, rollback, audit, permission, and sensitive scans pass again."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

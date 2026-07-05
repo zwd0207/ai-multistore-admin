@@ -1525,6 +1525,18 @@ The route wraps the 4B mock gate for operator and future Codex2 review. A ready 
 
 This route is not a write endpoint and not a batch execution endpoint. It only lets the UI or operator read whether the formal batch write boundary is complete enough to plan a separate execution phase.
 
+ERP-Batch-4E adds a private pre-execution backup and audit refresh gate:
+
+```text
+evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(...)
+```
+
+The helper consumes the 4C write-boundary readonly review plus fresh backup-refresh and audit-refresh evidence. It requires a fresh backup, verified manifest, verified SHA-256, SQLite integrity `ok`, restore dry-run reference, proof that the backup was created after the write-boundary review, safe backup references only, append-only audit chain planning, actor/store scope verification, planned product/order batch write action names, readback audit planning, rollback audit planning, and `no_audit_rows_written_yet=true`.
+
+Passing 4E returns `status=formal_batch_pre_execution_backup_audit_refresh_gate_ready` and `approval_status=ready_for_separate_execution_phase_after_refresh_review`, but it still keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+No public route is added in 4E. It is a private refresh gate only; it does not create a backup, write audit rows, write products or orders, call Naver, expose execution, or indicate that formal product/order batch sync is open.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

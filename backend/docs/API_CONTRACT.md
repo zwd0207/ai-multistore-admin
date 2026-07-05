@@ -3152,6 +3152,91 @@ Success response:
 
 The route is readonly review evidence only. It must not write products, orders, SyncLog, capability test results, timeline events, or operation audit rows. It must not call Naver or a logistics provider, must not expose shipment/cancel/return/exchange writes, and must keep formal product/order batch sync closed.
 
+### Formal Batch Pre-Execution Backup And Audit Refresh Gate
+
+Phase ERP-Batch-4E adds a private helper only:
+
+```text
+evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(...)
+```
+
+No public route is added in this phase.
+
+Input contract:
+
+```json
+{
+  "write_boundary_review": {
+    "phase": "ERP-Batch-4C",
+    "status": "formal_batch_execution_write_boundary_readonly_api_ready",
+    "write_boundary_plan_ready": true,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "backup_refresh_evidence": {
+    "fresh_backup_created": true,
+    "backup_manifest_verified": true,
+    "backup_sha256_verified": true,
+    "restore_dry_run_referenced": true,
+    "backup_created_after_boundary_review": true,
+    "safe_backup_reference_only": true,
+    "sqlite_integrity_check": "ok",
+    "backup_sha256": "64 lowercase hex chars",
+    "backup_deleted": false,
+    "production_db_touched": false,
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "audit_refresh_evidence": {
+    "audit_correlation_planned": true,
+    "append_only_audit_chain_planned": true,
+    "actor_store_scope_verified": true,
+    "safe_metadata_only": true,
+    "backup_evidence_link_planned": true,
+    "write_attempt_record_planned": true,
+    "readback_audit_planned": true,
+    "rollback_audit_planned": true,
+    "no_audit_rows_written_yet": true,
+    "planned_action_names": ["products.batch_sync_write", "orders.batch_sync_write"],
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+    "targets": ["products", "orders"],
+    "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-4E",
+  "status": "formal_batch_pre_execution_backup_audit_refresh_gate_ready",
+  "approval_status": "ready_for_separate_execution_phase_after_refresh_review",
+  "pre_execution_backup_audit_refresh_gate_ready": true,
+  "backup_refresh_verified": true,
+  "audit_refresh_verified": true,
+  "backup_sha256_abbrev": "abc123abc123...",
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The helper blocks a missing or stale write-boundary review, incomplete backup refresh evidence, invalid SHA-256, failed SQLite integrity, missing restore dry-run reference, incomplete audit refresh evidence, scope mismatches, planned action mismatches, sensitive markers, raw response or secret storage, side-effect flags, audit-row writes, product/order writes, platform calls, and formal sync opening. It returns only safe summaries such as abbreviated backup hashes. Passing 4E still does not approve or perform product/order batch sync.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

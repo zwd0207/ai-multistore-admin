@@ -14291,6 +14291,232 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_execution_write_boundary_route_sensitive
         )
 
+        batch_pre_execution_backup_refresh_evidence = {
+            "fresh_backup_created": True,
+            "backup_manifest_verified": True,
+            "backup_sha256_verified": True,
+            "restore_dry_run_referenced": True,
+            "backup_created_after_boundary_review": True,
+            "safe_backup_reference_only": True,
+            "sqlite_integrity_check": "ok",
+            "backup_sha256": "d" * 64,
+            "backup_deleted": False,
+            "production_db_touched": False,
+            "store_ids": [8],
+            "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+            "targets": ["products", "orders"],
+            "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            "real_api_called": False,
+            "real_database_written": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        }
+        batch_pre_execution_audit_refresh_evidence = {
+            "audit_correlation_planned": True,
+            "append_only_audit_chain_planned": True,
+            "actor_store_scope_verified": True,
+            "safe_metadata_only": True,
+            "backup_evidence_link_planned": True,
+            "write_attempt_record_planned": True,
+            "readback_audit_planned": True,
+            "rollback_audit_planned": True,
+            "no_audit_rows_written_yet": True,
+            "audit_correlation_id_hash": "audit-correlation-hash-4e",
+            "store_ids": [8],
+            "sync_kinds": ["naver_product_batch", "naver_order_batch"],
+            "targets": ["products", "orders"],
+            "required_actions": ["products.batch_sync_write", "orders.batch_sync_write"],
+            "planned_action_names": [
+                "products.batch_sync_write",
+                "orders.batch_sync_write",
+                "batch_pre_execution_backup_refresh",
+                "batch_pre_execution_audit_refresh",
+            ],
+            "real_api_called": False,
+            "real_database_written": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        }
+        batch_pre_execution_refresh_ready = (
+            sync_service.evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_ready["phase"] == "ERP-Batch-4E", (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["status"] == (
+            "formal_batch_pre_execution_backup_audit_refresh_gate_ready"
+        ), batch_pre_execution_refresh_ready
+        assert batch_pre_execution_refresh_ready["pre_execution_backup_audit_refresh_gate_ready"] is True, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["backup_refresh_verified"] is True, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["audit_refresh_verified"] is True, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["store_ids"] == [8], batch_pre_execution_refresh_ready
+        assert batch_pre_execution_refresh_ready["sync_kinds"] == [
+            "naver_order_batch",
+            "naver_product_batch",
+        ], batch_pre_execution_refresh_ready
+        assert batch_pre_execution_refresh_ready["targets"] == ["orders", "products"], (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["required_actions"] == [
+            "orders.batch_sync_write",
+            "products.batch_sync_write",
+        ], batch_pre_execution_refresh_ready
+        assert batch_pre_execution_refresh_ready["candidate_summary_count"] == 2, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["total_candidate_count"] == 7, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["backup_sha256_abbrev"] == "dddddddddddd...", (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["execution_approved"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["batch_execution_enabled"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["write_endpoint_enabled"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["orders_written"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["products_written"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["operation_audit_rows_written"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["real_api_called"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["real_database_written"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["formal_sync_open"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["platform_writes_enabled"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["raw_response_saved"] is False, (
+            batch_pre_execution_refresh_ready
+        )
+        assert batch_pre_execution_refresh_ready["privacy_fields_redacted"] is True, (
+            batch_pre_execution_refresh_ready
+        )
+
+        batch_pre_execution_refresh_missing_backup = (
+            sync_service.evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence={
+                    **batch_pre_execution_backup_refresh_evidence,
+                    "restore_dry_run_referenced": False,
+                },
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_missing_backup["phase"] == "ERP-Batch-4E", (
+            batch_pre_execution_refresh_missing_backup
+        )
+        assert batch_pre_execution_refresh_missing_backup["skip_reason"] == (
+            "backup_refresh_evidence_incomplete"
+        ), batch_pre_execution_refresh_missing_backup
+        assert "restore_dry_run_referenced" in (
+            batch_pre_execution_refresh_missing_backup["missing_backup_flags"]
+        ), batch_pre_execution_refresh_missing_backup
+        assert batch_pre_execution_refresh_missing_backup["real_database_written"] is False, (
+            batch_pre_execution_refresh_missing_backup
+        )
+
+        batch_pre_execution_refresh_sensitive = (
+            sync_service.evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence={
+                    **batch_pre_execution_backup_refresh_evidence,
+                    "rawResponse": "must-not-leak-pre-execution-refresh",
+                },
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_sensitive["phase"] == "ERP-Batch-4E", (
+            batch_pre_execution_refresh_sensitive
+        )
+        assert batch_pre_execution_refresh_sensitive["skip_reason"] == (
+            "pre_execution_refresh_sensitive_field_blocked"
+        ), batch_pre_execution_refresh_sensitive
+        assert batch_pre_execution_refresh_sensitive["orders_written"] is False, (
+            batch_pre_execution_refresh_sensitive
+        )
+
+        batch_pre_execution_refresh_write_attempt = (
+            sync_service.evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence={
+                    **batch_pre_execution_audit_refresh_evidence,
+                    "operation_audit_rows_written": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_write_attempt["phase"] == "ERP-Batch-4E", (
+            batch_pre_execution_refresh_write_attempt
+        )
+        assert batch_pre_execution_refresh_write_attempt["skip_reason"] == (
+            "side_effect_not_allowed_in_pre_execution_refresh_gate"
+        ), batch_pre_execution_refresh_write_attempt
+        assert batch_pre_execution_refresh_write_attempt["blocked_flag"] == "operation_audit_rows_written", (
+            batch_pre_execution_refresh_write_attempt
+        )
+
+        batch_pre_execution_refresh_scope_mismatch = (
+            sync_service.evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence={
+                    **batch_pre_execution_backup_refresh_evidence,
+                    "store_ids": [9],
+                },
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_scope_mismatch["phase"] == "ERP-Batch-4E", (
+            batch_pre_execution_refresh_scope_mismatch
+        )
+        assert batch_pre_execution_refresh_scope_mismatch["skip_reason"] == (
+            "backup_refresh_store_scope_mismatch"
+        ), batch_pre_execution_refresh_scope_mismatch
+        assert batch_pre_execution_refresh_scope_mismatch["formal_sync_open"] is False, (
+            batch_pre_execution_refresh_scope_mismatch
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -14551,6 +14777,11 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_execution_write_boundary_route": batch_execution_write_boundary_route,
             "batch_execution_write_boundary_route_missing": batch_execution_write_boundary_route_missing,
             "batch_execution_write_boundary_route_sensitive": batch_execution_write_boundary_route_sensitive,
+            "batch_pre_execution_refresh_ready": batch_pre_execution_refresh_ready,
+            "batch_pre_execution_refresh_missing_backup": batch_pre_execution_refresh_missing_backup,
+            "batch_pre_execution_refresh_sensitive": batch_pre_execution_refresh_sensitive,
+            "batch_pre_execution_refresh_write_attempt": batch_pre_execution_refresh_write_attempt,
+            "batch_pre_execution_refresh_scope_mismatch": batch_pre_execution_refresh_scope_mismatch,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
