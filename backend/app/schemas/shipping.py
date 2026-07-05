@@ -61,6 +61,31 @@ class ShippingExcelExportRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ShippingTrackingImportRowInput(BaseModel):
+    order_reference: str | None = Field(default=None, max_length=160)
+    product_order_reference: str | None = Field(default=None, max_length=160)
+    logistics_inventory_code: str | None = Field(default=None, max_length=120)
+    carrier: str = Field(..., min_length=1, max_length=120)
+    tracking_number: str = Field(..., min_length=1, max_length=120)
+    shipped_at: str | None = Field(default=None, max_length=80)
+    operator_note: str | None = Field(default=None, max_length=300)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ShippingTrackingImportMockParseRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    file_type: str = Field(default="tracking_upload", max_length=80)
+    file_format: str = Field(default="xlsx", max_length=30)
+    tracking_rows: list[ShippingTrackingImportRowInput] = Field(default_factory=list, max_length=200)
+    manual_approval: bool = False
+    parser_contract_acknowledged: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int

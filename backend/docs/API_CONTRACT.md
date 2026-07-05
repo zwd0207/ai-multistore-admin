@@ -3254,3 +3254,109 @@ The route must not:
 - write `SyncLog`,
 - add `ApiCapabilityTestResult tested_success`,
 - include receiver name, receiver phone, address, zip code, token, Authorization, headers, signature, client secret, or raw response.
+
+### Shipping-4A to Shipping-4E
+
+Shipping-4A to 4E add a tracking-number import mock parser gate and a read-only local export-history route. They do not add a tracking-number persistence table and do not open Naver shipment writeback.
+
+#### `POST /api/v1/shipping/tracking-import/mock-parse`
+
+Purpose: validate a future `tracking_upload / xlsx` file shape using already-parsed row objects. This is a mock parser gate only; it does not parse uploaded binary files and does not write local rows.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "file_type": "tracking_upload",
+  "file_format": "xlsx",
+  "manual_approval": true,
+  "parser_contract_acknowledged": true,
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  },
+  "tracking_rows": [
+    {
+      "order_reference": "safe-local-order-reference",
+      "product_order_reference": "safe-product-order-reference",
+      "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+      "carrier": "Korea carrier",
+      "tracking_number": "TRK202607050001",
+      "shipped_at": "2026-07-05T18:00:00+09:00",
+      "operator_note": "safe operator note"
+    }
+  ]
+}
+```
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-4B",
+  "status": "tracking_import_mock_parse_ready",
+  "file_type": "tracking_upload",
+  "file_format": "xlsx",
+  "row_count": 1,
+  "ready_row_count": 1,
+  "duplicate_row_count": 0,
+  "tracking_number_import_open": false,
+  "tracking_numbers_written": false,
+  "shipment_writeback_called": false,
+  "import_record_written": false,
+  "real_database_written": false,
+  "real_api_called": false
+}
+```
+
+Safety rules:
+
+- `manual_approval=true` is required.
+- `parser_contract_acknowledged=true` is required.
+- At least one of `order_reference` or `product_order_reference` is required.
+- `carrier` and `tracking_number` are required.
+- Duplicate row keys are reported in `duplicate_row_count`; no row is written.
+- Buyer/receiver names, phone numbers, full addresses, tokens, headers, signatures, raw response, and secrets are blocked.
+
+#### `GET /api/v1/shipping/export-history`
+
+Purpose: read local Shipping Assistant Excel export history from existing export tables.
+
+Query params:
+
+- `store_id`
+- `platform=naver`
+- `limit`, capped at 100
+- `offset`
+- `include_rows=false|true`
+
+Response fields:
+
+```json
+{
+  "phase": "Shipping-4D",
+  "status": "shipping_export_history_ready",
+  "export_history_readonly": true,
+  "tracking_number_import_open": false,
+  "shipment_writeback_open": false,
+  "items": [
+    {
+      "id": 1,
+      "store_id": 8,
+      "platform": "naver",
+      "file_type": "shipping_request",
+      "file_format": "xlsx",
+      "file_name": "naver-shipping-request-store-8-YYYYMMDD-HHMMSS.xlsx",
+      "file_sha256": "safe-sha256",
+      "row_count": 1,
+      "audit_correlation_id": "shipping-3d-safe",
+      "export_status": "generated",
+      "privacy_fields_redacted": true
+    }
+  ]
+}
+```
+
+This route is read-only. It does not write orders, products, SyncLog, capability test results, tracking numbers, import records, audit rows, or platform shipment states.

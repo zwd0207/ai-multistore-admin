@@ -8,7 +8,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timezone import get_utc_now
@@ -28,6 +28,8 @@ SHIPPING_EXPORT_MAPPING_VERSION = "shipping_export_mock_v1"
 SHIPPING_EXPORT_LOCAL_MAPPING_VERSION = "shipping_export_v1"
 SHIPPING_EXPORT_FILE_TYPE = "shipping_request"
 SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
+SHIPPING_TRACKING_IMPORT_MAPPING_VERSION = "shipping_tracking_import_mock_v1"
+SHIPPING_TRACKING_UPLOAD_FILE_TYPE = "tracking_upload"
 DEFAULT_SHIPPING_EXPORT_DIR = Path(__file__).resolve().parents[2] / "exports" / "shipping"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
 
@@ -333,6 +335,66 @@ def _validate_shipping_export_rows(export_rows: list[dict[str, Any]]) -> tuple[l
     return normalized_rows, {}
 
 
+def _validate_tracking_import_rows(tracking_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    if not tracking_rows:
+        return None, {"skip_reason": "tracking_import_rows_required"}
+    if len(tracking_rows) > 200:
+        return None, {"skip_reason": "tracking_import_row_limit_exceeded"}
+
+    normalized_rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    duplicate_count = 0
+    for index, item in enumerate(tracking_rows):
+        row = dict(item)
+        order_reference = _clean_text(
+            row.get("order_reference") or row.get("orderReference") or row.get("order_no") or row.get("orderNo"),
+            max_length=160,
+        )
+        product_order_reference = _clean_text(
+            row.get("product_order_reference")
+            or row.get("productOrderReference")
+            or row.get("product_order_no")
+            or row.get("productOrderNo"),
+            max_length=160,
+        )
+        logistics_inventory_code = _clean_text(
+            row.get("logistics_inventory_code") or row.get("logisticsInventoryCode"),
+            max_length=120,
+        )
+        carrier = _clean_text(row.get("carrier"), max_length=120)
+        tracking_number = _clean_text(row.get("tracking_number") or row.get("trackingNumber"), max_length=120)
+        shipped_at = _clean_text(row.get("shipped_at") or row.get("shippedAt"), max_length=80) or None
+        operator_note = _clean_text(row.get("operator_note") or row.get("operatorNote"), max_length=300) or None
+
+        if not order_reference and not product_order_reference:
+            return None, {"skip_reason": "tracking_order_reference_required", "invalid_row_index": index}
+        if not carrier:
+            return None, {"skip_reason": "tracking_carrier_required", "invalid_row_index": index}
+        if not tracking_number:
+            return None, {"skip_reason": "tracking_number_required", "invalid_row_index": index}
+
+        dedupe_key = (order_reference or product_order_reference, tracking_number)
+        duplicate_in_payload = dedupe_key in seen_keys
+        if duplicate_in_payload:
+            duplicate_count += 1
+        seen_keys.add(dedupe_key)
+
+        normalized_rows.append({
+            "row_index": index + 1,
+            "order_reference": order_reference,
+            "product_order_reference": product_order_reference,
+            "logistics_inventory_code": logistics_inventory_code,
+            "carrier": carrier,
+            "tracking_number": tracking_number,
+            "shipped_at": shipped_at,
+            "row_status": "duplicate_in_upload" if duplicate_in_payload else "ready_for_future_review",
+            "operator_note": operator_note,
+            "future_write_allowed": False,
+        })
+
+    return normalized_rows, {"duplicate_count": duplicate_count}
+
+
 def evaluate_real_excel_generation_mock_gate(
     *,
     store_id: int,
@@ -434,6 +496,222 @@ def evaluate_real_excel_generation_mock_gate(
             "真实 Excel 生成 mock 门禁已通过；当前只确认导出字段、导出记录和审计联动边界，"
             "不会创建文件、不会写导出记录，也不会调用平台或物流商接口。"
         ),
+    })
+    return result
+
+
+def evaluate_tracking_number_import_mock_gate(
+    *,
+    store_id: int,
+    platform: str,
+    tracking_rows: list[dict[str, Any]],
+    manual_approval: bool,
+    actor_context: dict[str, Any] | None = None,
+    file_type: str = SHIPPING_TRACKING_UPLOAD_FILE_TYPE,
+    file_format: str = SHIPPING_EXPORT_FILE_FORMAT,
+    parser_contract_acknowledged: bool = False,
+) -> dict[str, Any]:
+    result = {
+        **_base_result(phase="Shipping-4B"),
+        "manual_approval": bool(manual_approval),
+        "file_type": file_type,
+        "file_format": file_format,
+        "parser_contract_acknowledged": bool(parser_contract_acknowledged),
+        "tracking_number_import_open": False,
+        "tracking_numbers_written": False,
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "file_parsed": False,
+        "import_record_written": False,
+        "mapping_version": SHIPPING_TRACKING_IMPORT_MAPPING_VERSION,
+    }
+
+    forbidden_fields = _sensitive_fields({
+        "tracking_rows": tracking_rows,
+        "actor_context": actor_context or {},
+    })
+    if forbidden_fields:
+        result.update({
+            "skip_reason": "tracking_import_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform)
+    if normalized_platform is None:
+        result["skip_reason"] = "platform_not_supported"
+        return result
+    if not isinstance(store_id, int) or store_id <= 0:
+        result["skip_reason"] = "store_id_invalid"
+        return result
+    if file_type != SHIPPING_TRACKING_UPLOAD_FILE_TYPE:
+        result["skip_reason"] = "tracking_file_type_not_supported"
+        return result
+    if str(file_format).lower() != SHIPPING_EXPORT_FILE_FORMAT:
+        result["skip_reason"] = "tracking_file_format_not_supported"
+        return result
+    if manual_approval is not True:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+    if parser_contract_acknowledged is not True:
+        result["skip_reason"] = "tracking_parser_contract_required"
+        return result
+
+    normalized_rows, error = _validate_tracking_import_rows(tracking_rows)
+    if error and error.get("skip_reason"):
+        result.update(error)
+        return result
+
+    duplicate_count = int((error or {}).get("duplicate_count") or 0)
+    result.update({
+        "status": "tracking_import_mock_parse_ready",
+        "skip_reason": None,
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "file_parsed": True,
+        "row_count": len(normalized_rows or []),
+        "ready_row_count": len([row for row in normalized_rows or [] if row["row_status"] == "ready_for_future_review"]),
+        "duplicate_row_count": duplicate_count,
+        "tracking_rows_preview": normalized_rows,
+        "business_message": (
+            "物流单号导入 mock 解析门禁已通过。当前只验证字段、重复行和安全边界；"
+            "不会写订单、不会保存导入记录，也不会回填 Naver 发货。"
+        ),
+    })
+    return result
+
+
+def _serialize_export_batch(row: ShippingExportBatch, *, rows: list[ShippingExportBatchRow] | None = None) -> dict[str, Any]:
+    payload = {
+        "id": row.id,
+        "store_id": row.store_id,
+        "platform": row.platform,
+        "file_type": row.file_type,
+        "file_format": row.file_format,
+        "file_name": row.file_name,
+        "file_path": row.file_path,
+        "file_sha256": row.file_sha256,
+        "row_count": row.row_count,
+        "matched_row_count": row.matched_row_count,
+        "unmatched_row_count": row.unmatched_row_count,
+        "audit_correlation_id": row.audit_correlation_id,
+        "export_status": row.export_status,
+        "include_receiver_privacy": row.include_receiver_privacy,
+        "file_generated": row.file_generated,
+        "file_persisted": row.file_persisted,
+        "raw_response_saved": row.raw_response_saved,
+        "secrets_saved": row.secrets_saved,
+        "privacy_fields_redacted": row.privacy_fields_redacted,
+        "mapping_version": row.mapping_version,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+    if rows is not None:
+        payload["rows"] = [
+            {
+                "id": item.id,
+                "export_batch_id": item.export_batch_id,
+                "store_id": item.store_id,
+                "platform": item.platform,
+                "order_reference": item.order_reference,
+                "product_name": item.product_name,
+                "option_name": item.option_name,
+                "quantity": item.quantity,
+                "logistics_inventory_code": item.logistics_inventory_code,
+                "logistics_provider_name": item.logistics_provider_name,
+                "internal_sku": item.internal_sku,
+                "platform_product_id_hash": item.platform_product_id_hash,
+                "platform_option_id_hash": item.platform_option_id_hash,
+                "row_status": item.row_status,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in rows
+        ]
+    return payload
+
+
+def list_shipping_export_history(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    limit: int = 20,
+    offset: int = 0,
+    include_rows: bool = False,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    normalized_platform = _normalize_platform(platform)
+    result = {
+        **_base_result(phase="Shipping-4D"),
+        "readonly_route": True,
+        "export_history_readonly": True,
+        "tracking_number_import_open": False,
+        "shipment_writeback_open": False,
+        "import_record_written": False,
+    }
+    if normalized_platform is None:
+        result.update({"status": "blocked", "skip_reason": "platform_not_supported"})
+        return result
+
+    bounded_limit = min(max(int(limit or 20), 1), 100)
+    bounded_offset = max(int(offset or 0), 0)
+    total = db.scalar(
+        select(func.count(ShippingExportBatch.id)).where(
+            ShippingExportBatch.store_id == store_id,
+            ShippingExportBatch.platform == normalized_platform,
+        )
+    ) or 0
+    batches = db.scalars(
+        select(ShippingExportBatch)
+        .where(
+            ShippingExportBatch.store_id == store_id,
+            ShippingExportBatch.platform == normalized_platform,
+        )
+        .order_by(ShippingExportBatch.created_at.desc(), ShippingExportBatch.id.desc())
+        .offset(bounded_offset)
+        .limit(bounded_limit)
+    ).all()
+    rows_by_batch: dict[int, list[ShippingExportBatchRow]] = {}
+    if include_rows and batches:
+        batch_ids = [item.id for item in batches]
+        row_items = db.scalars(
+            select(ShippingExportBatchRow)
+            .where(ShippingExportBatchRow.export_batch_id.in_(batch_ids))
+            .order_by(ShippingExportBatchRow.export_batch_id.desc(), ShippingExportBatchRow.id.asc())
+        ).all()
+        for item in row_items:
+            rows_by_batch.setdefault(item.export_batch_id, []).append(item)
+
+    items = [
+        _serialize_export_batch(batch, rows=rows_by_batch.get(batch.id) if include_rows else None)
+        for batch in batches
+    ]
+    result.update({
+        "status": "shipping_export_history_ready",
+        "skip_reason": None,
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "total": int(total),
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+        "include_rows": bool(include_rows),
+        "items": items,
+        "business_message": (
+            "已读取本地发货 Excel 导出历史。"
+            if items
+            else "当前还没有本地发货 Excel 导出记录。"
+        ),
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
     })
     return result
 

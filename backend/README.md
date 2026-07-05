@@ -1530,3 +1530,19 @@ The route requires `manual_approval=true`, export-ready rows, `file_type=shippin
 The real local `codex1.db` was backed up before the schema migration. After migration, `shipping_export_batches=0` and `shipping_export_batch_rows=0`; no fake logistics export was generated from production rows.
 
 This phase does not call Naver, call a logistics-provider API, import tracking numbers, include receiver privacy by default, write `orders`, write `products`, write `SyncLog`, add `ApiCapabilityTestResult tested_success`, or execute shipment/cancel/return/exchange writes.
+
+### Shipping-4A to Shipping-4E: Tracking Import Gate and Export History
+
+Shipping-4A through 4E keep the Shipping Assistant focused on the local first landing workflow while preparing the next tracking-number step safely.
+
+- Shipping-4A approves only the future tracking-import schema direction. No database schema is migrated in this phase.
+- Shipping-4B adds `POST /api/v1/shipping/tracking-import/mock-parse` as a mock parser gate for `file_type=tracking_upload`.
+- Shipping-4C plans a read-only export-history API over the existing local export tables.
+- Shipping-4D adds `GET /api/v1/shipping/export-history`.
+- Shipping-4E connects Codex2 Shipping Assistant to the export-history read-only API.
+
+The tracking import mock gate validates safe rows, required order or product-order references, carrier, tracking number, duplicate rows, parser acknowledgement, manual approval, and sensitive-field blocking. It returns `tracking_number_import_open=false`, `tracking_numbers_written=false`, `shipment_writeback_called=false`, `import_record_written=false`, and `real_database_written=false`.
+
+The export-history route reads only `shipping_export_batches` and `shipping_export_batch_rows`. It does not write orders, products, SyncLog, capability test results, tracking numbers, import records, or shipment writeback records.
+
+Naver shipment writeback, logistics-provider API integration, tracking-number persistence, import-history persistence, receiver-privacy exports, cancel/return/exchange writes, and formal order batch sync remain closed.
