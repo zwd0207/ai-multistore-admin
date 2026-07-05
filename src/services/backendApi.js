@@ -72,6 +72,7 @@ export const backendApi = {
     sendData('post', '/shipping/tracking-order-status/local-update', payload)
   ),
   checkShippingShipmentWritebackBoundary: (payload) => sendData('post', '/shipping/shipment-writeback/approval-boundary', payload),
+  checkShippingShipmentWritebackDryRunGate: (payload) => sendData('post', '/shipping/shipment-writeback/dry-run-gate', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),
   getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),

@@ -911,6 +911,107 @@ function ShipmentWritebackBoundaryPanel({ boundary }) {
   );
 }
 
+function ShipmentWritebackDryRunPanel({
+  dryRun,
+  loading = false,
+  error = '',
+  onCheck,
+  latestImportBatchId = null,
+}) {
+  const ready = dryRun?.status === 'shipment_writeback_dry_run_gate_ready';
+  const candidates = dryRun?.dryRunCandidates || [];
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>Naver 发货回填 dry-run 证据</h2>
+          <p>{dryRun?.businessMessage || '检查本地已发货订单是否具备未来 Naver 回填 dry-run 证据；当前不会调用 Naver。'}</p>
+        </div>
+        <span className={statusToneClass(ready ? 'success' : 'neutral')}><i />{ready ? 'dry-run 就绪' : '未就绪'}</span>
+      </div>
+
+      <div className="summary-grid shipping-summary-grid">
+        <SummaryCard title="可 dry-run" value={dryRun?.dryRunCandidateCount ?? 0} note="安全候选" tone={ready ? 'success' : 'default'} />
+        <SummaryCard title="阻断订单" value={dryRun?.blockedOrderCount ?? 0} note="需先处理" tone={dryRun?.blockedOrderCount ? 'warning' : 'success'} />
+        <SummaryCard title="Naver 回填" value={dryRun?.shipmentWritebackCalled ? '已调用' : '未调用'} note="当前保持关闭" tone="default" />
+        <SummaryCard title="平台写入" value={dryRun?.platformWritesEnabled ? '已开放' : '未开放'} note="需单独批准" tone="default" />
+      </div>
+
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {dryRun?.skipReason && dryRun.status === 'blocked' ? (
+        <div className="mock-sync-error">dry-run 证据未就绪：{dryRun.skipReason}</div>
+      ) : null}
+      {ready ? (
+        <div className="mock-sync-success">dry-run 证据已就绪；真正 Naver 回填仍需要单独阶段批准。</div>
+      ) : null}
+
+      {candidates.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>本地订单</th>
+                <th>物流</th>
+                <th>目标状态</th>
+                <th>后续写入</th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((item) => (
+                <tr key={`${item.localOrderId}-${item.trackingNumberHash}`}>
+                  <td>
+                    <strong>{displayText(item.localOrderId)}</strong>
+                    <span className="cell-subtitle">{displayText(item.orderReferenceHash)}</span>
+                  </td>
+                  <td>
+                    <strong>{displayText(item.carrier)}</strong>
+                    <span className="cell-subtitle">{formatDateTime(item.shippedAt)}</span>
+                  </td>
+                  <td>{displayText(item.targetDeliveryStatus)}</td>
+                  <td>{item.futureWriteAllowed ? '允许' : '仍需单独批准'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <div className="table-toolbar">
+        <button className="button ghost" type="button" onClick={onCheck} disabled={!latestImportBatchId || loading}>
+          {loading ? '检查中...' : '检查 dry-run 证据'}
+        </button>
+      </div>
+
+      <TechnicalDetails
+        title="查看 dry-run 技术边界"
+        description="这里只展示未来平台回填前的候选证据；不会保存平台 payload，不会调用 Naver。"
+        items={[
+          { label: 'phase', value: dryRun?.phase || 'Shipping-8F' },
+          { label: 'status', value: dryRun?.status || 'not_checked' },
+          { label: 'import_batch_id', value: latestImportBatchId || dryRun?.importBatchId || 'not_available' },
+          { label: 'matched_order_count', value: dryRun?.matchedOrderCount ?? 0 },
+          { label: 'unmatched_order_count', value: dryRun?.unmatchedOrderCount ?? 0 },
+          { label: 'dry_run_candidate_count', value: dryRun?.dryRunCandidateCount ?? 0 },
+          { label: 'shipment_writeback_dry_run_ready', value: dryRun?.shipmentWritebackDryRunReady ?? false },
+          { label: 'shipment_writeback_called', value: dryRun?.shipmentWritebackCalled ?? false },
+          { label: 'shipment_writeback_open', value: dryRun?.shipmentWritebackOpen ?? false },
+          { label: 'future_platform_write_requires_separate_approval', value: dryRun?.futurePlatformWriteRequiresSeparateApproval ?? true },
+          { label: 'real_api_called', value: dryRun?.realApiCalled ?? false },
+          { label: 'real_database_written', value: dryRun?.realDatabaseWritten ?? false },
+          { label: 'orders_updated', value: dryRun?.ordersUpdated ?? false },
+          { label: 'orders_written', value: dryRun?.ordersWritten ?? false },
+          { label: 'products_written', value: dryRun?.productsWritten ?? false },
+          { label: 'sync_log_written', value: dryRun?.syncLogWritten ?? false },
+          { label: 'tested_success_written', value: dryRun?.capabilityTestedSuccessWritten ?? false },
+          { label: 'raw_response_saved', value: dryRun?.rawResponseSaved ?? false },
+          { label: 'privacy_fields_redacted', value: dryRun?.privacyFieldsRedacted ?? true },
+          { label: 'platform_writes_enabled', value: dryRun?.platformWritesEnabled ?? false },
+        ]}
+      />
+    </section>
+  );
+}
+
 function ShippingOperatorRunbookPanel() {
   const steps = [
     ['1', '下载未发货订单', '确认订单仍处于待发货状态。'],
@@ -998,6 +1099,9 @@ export default function ShippingAssistant() {
     operatorChecklistAcknowledged: false,
   });
   const [shipmentBoundary, setShipmentBoundary] = useState(null);
+  const [shipmentDryRun, setShipmentDryRun] = useState(null);
+  const [shipmentDryRunError, setShipmentDryRunError] = useState('');
+  const [shipmentDryRunLoading, setShipmentDryRunLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveResult, setSaveResult] = useState(null);
@@ -1041,6 +1145,9 @@ export default function ShippingAssistant() {
         operatorChecklistAcknowledged: false,
       });
       setShipmentBoundary(null);
+      setShipmentDryRun(null);
+      setShipmentDryRunError('');
+      setShipmentDryRunLoading(false);
       setLoadError('');
       return () => { cancelled = true; };
     }
@@ -1072,6 +1179,9 @@ export default function ShippingAssistant() {
         operatorChecklistAcknowledged: false,
       });
       setShipmentBoundary(null);
+      setShipmentDryRun(null);
+      setShipmentDryRunError('');
+      setShipmentDryRunLoading(true);
       setSaveError('');
       setSaveResult(null);
       try {
@@ -1157,6 +1267,36 @@ export default function ShippingAssistant() {
         });
         if (cancelled) return;
         setShipmentBoundary(boundaryResult);
+        if (latestTrackingBatch?.id) {
+          try {
+            const dryRunResult = await dataProvider.checkShippingShipmentWritebackDryRunGate({
+              storeId: selectedStoreId,
+              platform: 'naver',
+              importBatchId: latestTrackingBatch.id,
+              manualApproval: true,
+              matchingContractAcknowledged: true,
+              backupEvidenceAcknowledged: true,
+              auditEvidenceAcknowledged: true,
+              localStatusEvidenceAcknowledged: true,
+              naverWritebackBoundaryAcknowledged: true,
+              operatorChecklistAcknowledged: true,
+              targetDeliveryStatus: 'DISPATCHED',
+              actorContext: {
+                role: 'admin',
+                actor_id: 'shipping-local-operator',
+              },
+            });
+            if (cancelled) return;
+            setShipmentDryRun(dryRunResult);
+            setShipmentDryRunError('');
+          } catch (dryRunError) {
+            if (cancelled) return;
+            setShipmentDryRun(null);
+            setShipmentDryRunError(dryRunError.message || 'Naver 发货回填 dry-run 证据检查失败。');
+          }
+        } else {
+          setShipmentDryRun(null);
+        }
       } catch (error) {
         if (!cancelled) {
           setOrders([]);
@@ -1171,6 +1311,8 @@ export default function ShippingAssistant() {
           setStatusUpdateGate(null);
           setStatusUpdateResult(null);
           setShipmentBoundary(null);
+          setShipmentDryRun(null);
+          setShipmentDryRunError(error.message || 'Naver 发货回填 dry-run 证据检查失败。');
           setTrackingMatchError(error.message || 'Tracking order match check failed.');
           setLoadError(error.message || '发货候选加载失败。');
         }
@@ -1180,6 +1322,7 @@ export default function ShippingAssistant() {
           setHistoryLoading(false);
           setTrackingImportHistoryLoading(false);
           setTrackingMatchLoading(false);
+          setShipmentDryRunLoading(false);
         }
       }
     }
@@ -1343,6 +1486,8 @@ export default function ShippingAssistant() {
     setStatusUpdateGate(null);
     setStatusUpdateResult(null);
     setStatusUpdateError('');
+    setShipmentDryRun(null);
+    setShipmentDryRunError('');
     setTrackingParserFile(file);
     setTrackingParserContentBase64('');
     if (!file) return;
@@ -1405,6 +1550,8 @@ export default function ShippingAssistant() {
     setStatusUpdateGate(null);
     setStatusUpdateResult(null);
     setStatusUpdateError('');
+    setShipmentDryRun(null);
+    setShipmentDryRunError('');
     try {
       const payload = {
         storeId: selectedStoreId,
@@ -1473,6 +1620,8 @@ export default function ShippingAssistant() {
     setStatusUpdateGate(null);
     setStatusUpdateResult(null);
     setStatusUpdateError('');
+    setShipmentDryRun(null);
+    setShipmentDryRunError('');
   };
 
   const buildStatusUpdatePayload = () => ({
@@ -1490,6 +1639,44 @@ export default function ShippingAssistant() {
       actor_id: 'shipping-local-operator',
     },
   });
+
+  const buildShipmentWritebackDryRunPayload = () => ({
+    storeId: selectedStoreId,
+    platform: 'naver',
+    importBatchId: latestTrackingImportBatchId,
+    manualApproval: true,
+    matchingContractAcknowledged: true,
+    backupEvidenceAcknowledged: true,
+    auditEvidenceAcknowledged: true,
+    localStatusEvidenceAcknowledged: true,
+    naverWritebackBoundaryAcknowledged: true,
+    operatorChecklistAcknowledged: true,
+    targetDeliveryStatus: 'DISPATCHED',
+    actorContext: {
+      role: 'admin',
+      actor_id: 'shipping-local-operator',
+    },
+  });
+
+  const checkShipmentWritebackDryRun = async () => {
+    if (!latestTrackingImportBatchId) {
+      setShipmentDryRunError('请先导入物流单号并生成本地导入记录。');
+      return null;
+    }
+    setShipmentDryRunLoading(true);
+    setShipmentDryRunError('');
+    try {
+      const result = await dataProvider.checkShippingShipmentWritebackDryRunGate(buildShipmentWritebackDryRunPayload());
+      setShipmentDryRun(result);
+      return result;
+    } catch (error) {
+      setShipmentDryRun(null);
+      setShipmentDryRunError(error.message || 'Naver 发货回填 dry-run 证据检查失败。');
+      return null;
+    } finally {
+      setShipmentDryRunLoading(false);
+    }
+  };
 
   const checkStatusUpdateGate = async () => {
     if (!latestTrackingImportBatchId) {
@@ -1548,6 +1735,14 @@ export default function ShippingAssistant() {
         });
         setTrackingImportHistory(trackingHistoryResult.data || []);
         setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
+      }
+      try {
+        const dryRunResult = await dataProvider.checkShippingShipmentWritebackDryRunGate(buildShipmentWritebackDryRunPayload());
+        setShipmentDryRun(dryRunResult);
+        setShipmentDryRunError('');
+      } catch (dryRunError) {
+        setShipmentDryRun(null);
+        setShipmentDryRunError(dryRunError.message || 'Naver 发货回填 dry-run 证据检查失败。');
       }
     } catch (error) {
       setStatusUpdateResult(null);
@@ -1706,6 +1901,13 @@ export default function ShippingAssistant() {
         backendMode={isBackendSource}
       />
       <ShipmentWritebackBoundaryPanel boundary={shipmentBoundary} />
+      <ShipmentWritebackDryRunPanel
+        dryRun={shipmentDryRun}
+        loading={shipmentDryRunLoading}
+        error={shipmentDryRunError}
+        onCheck={checkShipmentWritebackDryRun}
+        latestImportBatchId={latestTrackingImportBatchId}
+      />
       <ShippingOperatorRunbookPanel />
 
       <TechnicalDetails

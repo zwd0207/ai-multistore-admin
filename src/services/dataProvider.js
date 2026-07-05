@@ -1588,6 +1588,94 @@ function toBackendShippingShipmentWritebackBoundaryPayload(payload = {}) {
   };
 }
 
+function adaptShippingShipmentWritebackDryRunGateResult(data = {}) {
+  const candidates = Array.isArray(data.dry_run_candidates)
+    ? data.dry_run_candidates
+    : (Array.isArray(data.dryRunCandidates) ? data.dryRunCandidates : []);
+  const blockedOrders = Array.isArray(data.blocked_orders)
+    ? data.blocked_orders
+    : (Array.isArray(data.blockedOrders) ? data.blockedOrders : []);
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-8F',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyRoute: Boolean(data.readonly_route ?? data.readonlyRoute ?? true),
+    shipmentWritebackDryRunGate: Boolean(data.shipment_writeback_dry_run_gate ?? data.shipmentWritebackDryRunGate ?? true),
+    shipmentWritebackDryRunReady: Boolean(data.shipment_writeback_dry_run_ready ?? data.shipmentWritebackDryRunReady),
+    futurePlatformWriteRequiresSeparateApproval: (
+      data.future_platform_write_requires_separate_approval !== false
+      && data.futurePlatformWriteRequiresSeparateApproval !== false
+    ),
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    matchingContractAcknowledged: Boolean(data.matching_contract_acknowledged ?? data.matchingContractAcknowledged),
+    backupEvidenceAcknowledged: Boolean(data.backup_evidence_acknowledged ?? data.backupEvidenceAcknowledged),
+    auditEvidenceAcknowledged: Boolean(data.audit_evidence_acknowledged ?? data.auditEvidenceAcknowledged),
+    localStatusEvidenceAcknowledged: Boolean(data.local_status_evidence_acknowledged ?? data.localStatusEvidenceAcknowledged),
+    naverWritebackBoundaryAcknowledged: Boolean(data.naver_writeback_boundary_acknowledged ?? data.naverWritebackBoundaryAcknowledged),
+    operatorChecklistAcknowledged: Boolean(data.operator_checklist_acknowledged ?? data.operatorChecklistAcknowledged),
+    targetDeliveryStatus: data.target_delivery_status ?? data.targetDeliveryStatus ?? 'DISPATCHED',
+    targetDeliveryStatusLabelZh: data.target_delivery_status_label_zh ?? data.targetDeliveryStatusLabelZh ?? '已发货 / 配送中',
+    importBatchId: data.import_batch_id ?? data.importBatchId ?? null,
+    totalTrackingRows: Number(data.total_tracking_rows ?? data.totalTrackingRows ?? 0),
+    matchedOrderCount: Number(data.matched_order_count ?? data.matchedOrderCount ?? 0),
+    unmatchedOrderCount: Number(data.unmatched_order_count ?? data.unmatchedOrderCount ?? 0),
+    duplicateTrackingRowCount: Number(data.duplicate_tracking_row_count ?? data.duplicateTrackingRowCount ?? 0),
+    dryRunCandidateCount: Number(data.dry_run_candidate_count ?? data.dryRunCandidateCount ?? candidates.length),
+    blockedOrderCount: Number(data.blocked_order_count ?? data.blockedOrderCount ?? blockedOrders.length),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    ordersUpdated: Boolean(data.orders_updated ?? data.ordersUpdated),
+    orderStatusEventsWritten: Boolean(data.order_status_events_written ?? data.orderStatusEventsWritten),
+    trackingImportBatchUpdated: Boolean(data.tracking_import_batch_updated ?? data.trackingImportBatchUpdated),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    dryRunCandidates: candidates.map((item) => ({
+      localOrderId: item.local_order_id ?? item.localOrderId ?? null,
+      orderReferenceHash: item.order_reference_hash ?? item.orderReferenceHash ?? '',
+      productOrderReferenceHash: item.product_order_reference_hash ?? item.productOrderReferenceHash ?? '',
+      trackingNumberHash: item.tracking_number_hash ?? item.trackingNumberHash ?? '',
+      carrier: item.carrier || '',
+      shippedAt: item.shipped_at ?? item.shippedAt ?? null,
+      currentOrderStatus: item.current_order_status ?? item.currentOrderStatus ?? '',
+      targetDeliveryStatus: item.target_delivery_status ?? item.targetDeliveryStatus ?? 'DISPATCHED',
+      payloadPreviewSaved: Boolean(item.payload_preview_saved ?? item.payloadPreviewSaved),
+      rawResponseSaved: Boolean(item.raw_response_saved ?? item.rawResponseSaved),
+      futureWriteAllowed: Boolean(item.future_write_allowed ?? item.futureWriteAllowed),
+    })),
+    blockedOrders: blockedOrders.map((item) => ({
+      localOrderId: item.local_order_id ?? item.localOrderId ?? null,
+      currentOrderStatus: item.current_order_status ?? item.currentOrderStatus ?? '',
+      blockReason: item.block_reason ?? item.blockReason ?? '',
+    })),
+  };
+}
+
+function toBackendShippingShipmentWritebackDryRunGatePayload(payload = {}) {
+  const request = toBackendShippingTrackingOrderMatchPayload(payload);
+  return {
+    ...request,
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    backup_evidence_acknowledged: Boolean(payload.backupEvidenceAcknowledged ?? payload.backup_evidence_acknowledged),
+    audit_evidence_acknowledged: Boolean(payload.auditEvidenceAcknowledged ?? payload.audit_evidence_acknowledged),
+    local_status_evidence_acknowledged: Boolean(payload.localStatusEvidenceAcknowledged ?? payload.local_status_evidence_acknowledged),
+    naver_writeback_boundary_acknowledged: Boolean(payload.naverWritebackBoundaryAcknowledged ?? payload.naver_writeback_boundary_acknowledged),
+    operator_checklist_acknowledged: Boolean(payload.operatorChecklistAcknowledged ?? payload.operator_checklist_acknowledged),
+    target_delivery_status: payload.targetDeliveryStatus || payload.target_delivery_status || 'DISPATCHED',
+  };
+}
+
 function adaptStoreMembershipReadonlyResult(data = {}) {
   return {
     ...data,
@@ -4717,6 +4805,87 @@ const sourceMethods = {
       ...request,
       store_id: Number(store.id),
     }));
+  },
+  checkShippingShipmentWritebackDryRunGate: async (payload = {}) => {
+    const request = toBackendShippingShipmentWritebackDryRunGatePayload(payload);
+    if (!isBackendSource) {
+      const missingReason = !request.manual_approval
+        ? 'manual_approval_required'
+        : (!request.backup_evidence_acknowledged
+          ? 'backup_evidence_required'
+          : (!request.audit_evidence_acknowledged
+            ? 'audit_evidence_required'
+            : (!request.local_status_evidence_acknowledged
+              ? 'local_status_evidence_required'
+              : (!request.naver_writeback_boundary_acknowledged
+                ? 'naver_writeback_boundary_required'
+                : (!request.operator_checklist_acknowledged ? 'operator_checklist_required' : null)))));
+      return adaptShippingShipmentWritebackDryRunGateResult({
+        phase: 'Shipping-8F',
+        status: missingReason ? 'blocked' : 'shipment_writeback_dry_run_gate_ready',
+        skip_reason: missingReason,
+        business_message: missingReason
+          ? 'Mock shipment writeback dry-run is waiting for approval evidence.'
+          : 'Mock shipment writeback dry-run evidence is ready. No Naver API is called.',
+        readonly_route: true,
+        shipment_writeback_dry_run_gate: true,
+        shipment_writeback_dry_run_ready: !missingReason,
+        future_platform_write_requires_separate_approval: true,
+        manual_approval: request.manual_approval,
+        matching_contract_acknowledged: request.matching_contract_acknowledged,
+        backup_evidence_acknowledged: request.backup_evidence_acknowledged,
+        audit_evidence_acknowledged: request.audit_evidence_acknowledged,
+        local_status_evidence_acknowledged: request.local_status_evidence_acknowledged,
+        naver_writeback_boundary_acknowledged: request.naver_writeback_boundary_acknowledged,
+        operator_checklist_acknowledged: request.operator_checklist_acknowledged,
+        target_delivery_status: request.target_delivery_status,
+        target_delivery_status_label_zh: '已发货 / 配送中',
+        import_batch_id: request.import_batch_id,
+        total_tracking_rows: 1,
+        matched_order_count: 1,
+        unmatched_order_count: 0,
+        duplicate_tracking_row_count: 0,
+        dry_run_candidate_count: missingReason ? 0 : 1,
+        blocked_order_count: 0,
+        tracking_number_import_open: false,
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        orders_updated: false,
+        order_status_events_written: false,
+        tracking_import_batch_updated: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        real_database_written: false,
+        real_api_called: false,
+        dry_run_candidates: missingReason ? [] : [{
+          local_order_id: 'mock-order-1',
+          order_reference_hash: 'id-hash-mockshippingorder',
+          product_order_reference_hash: 'id-hash-mockproductorder',
+          tracking_number_hash: 'id-hash-mocktracking001',
+          carrier: 'Mock carrier',
+          shipped_at: '2026-07-05T18:10:00+09:00',
+          current_order_status: 'DISPATCHED',
+          target_delivery_status: 'DISPATCHED',
+          payload_preview_saved: false,
+          raw_response_saved: false,
+          future_write_allowed: false,
+        }],
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingShipmentWritebackDryRunGateResult(
+      await backendApi.checkShippingShipmentWritebackDryRunGate({
+        ...request,
+        store_id: Number(store.id),
+      }),
+    );
   },
   getRolePermissionInventory: async () => {
     if (!isBackendSource) {

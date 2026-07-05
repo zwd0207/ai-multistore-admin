@@ -2073,3 +2073,15 @@ Codex1 exposes `POST /api/v1/shipping/tracking-import/parse-xlsx-mock`. The rout
 Codex2 `/shipping` now includes a "Tracking xlsx preview" upload shell. Operators can select an `.xlsx` file, preview tracking rows, duplicate counts, and row status, then continue to a future separately approved local import-record phase.
 
 This stage does not call Naver, does not call a logistics-provider API, does not write orders/products/SyncLog/tested-success rows, does not write tracking import records from the parser, and does not open shipment writeback or formal product/order batch sync.
+
+## Phase Shipping-8A to Shipping-8G - Local Status Update and Writeback Dry-Run Evidence
+
+Shipping-8A to 8G connect imported tracking rows to local order status updates and future Naver shipment writeback evidence:
+
+- Codex1 exposes local order-status update gate/write routes.
+- Codex1 exposes `POST /api/v1/shipping/shipment-writeback/dry-run-gate` as a read-only dry-run evidence gate.
+- Codex2 `/shipping` shows the local order status update panel and the Naver shipment writeback dry-run evidence panel.
+- The dry-run panel shows candidate count, blocked order count, whether Naver was called, and whether platform writes are open.
+- Technical route status, hashes, write flags, and safety flags stay in `TechnicalDetails`.
+
+This stage may update local order status only through the separately approved local status update route. The dry-run evidence panel itself does not write local data. Naver shipment writeback, logistics-provider API calls, formal order batch sync, formal product batch sync, platform payload persistence, SyncLog writes, and tested-success writes remain closed.
