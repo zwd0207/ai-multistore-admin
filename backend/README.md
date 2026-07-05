@@ -1495,3 +1495,17 @@ The local routes are:
 The write route requires explicit `manual_approval=true`, writes only logistics mapping and logistics inventory rows, and writes one safe operation audit row for the local maintenance action. It does not write `orders`, `products`, `SyncLog`, or `ApiCapabilityTestResult tested_success`, and it does not call Naver or any logistics-provider API.
 
 Shipping-2E is an approval plan only for future real Excel generation. Real `.xlsx` file creation, export records, download records, tracking-number writeback, shipment writeback, cancel/return/exchange writes, and formal product/order batch sync remain closed.
+
+### Shipping-2F to Shipping-2J: Export Mock Gate and Tracking Contract
+
+Shipping-2F through 2J add verification and planning for the next Shipping Assistant export boundary:
+
+- Shipping-2F confirms the mapping runtime walkthrough remains local and safe.
+- Shipping-2G proposes future export batch and export row records.
+- Shipping-2H adds the private service helper `evaluate_real_excel_generation_mock_gate(...)`.
+- Shipping-2I plans export-record and operation-audit linkage.
+- Shipping-2J plans a future tracking-number import contract.
+
+`evaluate_real_excel_generation_mock_gate(...)` is not a public route. It checks manual approval, safe export rows, file type `shipping_request`, file format `xlsx`, export-record plan acknowledgement, audit-linkage acknowledgement, receiver privacy exclusion, and sensitive-field blocking. When ready, it still returns `file_generated=false`, `file_persisted=false`, `export_record_written=false`, `download_record_written=false`, `operation_audit_rows_written=false`, `real_database_written=false`, `real_api_called=false`, and `tracking_number_import_open=false`.
+
+These phases do not modify database schema, create real Excel files, write export records, write audit rows, write `orders`, write `products`, write `SyncLog`, add `ApiCapabilityTestResult tested_success`, call Naver, call a logistics-provider API, import tracking numbers, or execute shipment/cancel/return/exchange writes.

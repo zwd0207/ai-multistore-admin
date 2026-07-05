@@ -16,6 +16,9 @@ from app.services.store_service import ensure_store_exists
 
 SHIPPING_WRITE_SCOPE = "shipping_mapping_stock_local"
 SHIPPING_MAPPING_VERSION = "shipping_mapping_v1"
+SHIPPING_EXPORT_MAPPING_VERSION = "shipping_export_mock_v1"
+SHIPPING_EXPORT_FILE_TYPE = "shipping_request"
+SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
 
 SENSITIVE_KEY_MARKERS = {
@@ -258,6 +261,171 @@ def _validate_payload(
         })
 
     return normalized_rows, {}
+
+
+def _validate_shipping_export_rows(export_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    if not export_rows:
+        return None, {"skip_reason": "shipping_export_rows_required"}
+    if len(export_rows) > 100:
+        return None, {"skip_reason": "shipping_export_row_limit_exceeded"}
+
+    normalized_rows: list[dict[str, Any]] = []
+    for index, item in enumerate(export_rows):
+        row = dict(item)
+        product_name = _clean_text(row.get("product_name") or row.get("productName"), max_length=300)
+        option_name = _clean_text(row.get("option_name") or row.get("optionName"), max_length=300)
+        logistics_inventory_code = _clean_text(
+            row.get("logistics_inventory_code") or row.get("logisticsInventoryCode"),
+            max_length=120,
+        )
+        logistics_provider_name = _clean_text(
+            row.get("logistics_provider_name") or row.get("logisticsProviderName"),
+            max_length=160,
+        ) or None
+        order_reference = _clean_text(row.get("order_reference") or row.get("orderNo") or row.get("order_no"), max_length=120)
+        if not product_name:
+            return None, {"skip_reason": "export_product_name_required", "invalid_row_index": index}
+        if not logistics_inventory_code:
+            return None, {"skip_reason": "export_logistics_inventory_code_required", "invalid_row_index": index}
+        try:
+            quantity = max(1, int(row.get("quantity") or 0))
+        except (TypeError, ValueError):
+            return None, {"skip_reason": "export_quantity_invalid", "invalid_row_index": index}
+        try:
+            logistics_current_stock = max(
+                0,
+                int(row.get("logistics_current_stock") or row.get("logisticsCurrentStock") or 0),
+            )
+        except (TypeError, ValueError):
+            return None, {"skip_reason": "export_logistics_stock_invalid", "invalid_row_index": index}
+
+        platform_product_id_hash = _safe_optional_hash(row.get("platform_product_id_hash") or row.get("platformProductIdHash"))
+        platform_option_id_hash = _safe_optional_hash(row.get("platform_option_id_hash") or row.get("platformOptionIdHash"))
+        if (row.get("platform_product_id_hash") or row.get("platformProductIdHash")) and platform_product_id_hash is None:
+            return None, {"skip_reason": "export_platform_product_id_hash_invalid", "invalid_row_index": index}
+        if (row.get("platform_option_id_hash") or row.get("platformOptionIdHash")) and platform_option_id_hash is None:
+            return None, {"skip_reason": "export_platform_option_id_hash_invalid", "invalid_row_index": index}
+
+        normalized_rows.append({
+            "row_index": index + 1,
+            "order_reference": order_reference or f"local-order-row-{index + 1}",
+            "product_name": product_name,
+            "option_name": option_name,
+            "quantity": quantity,
+            "logistics_inventory_code": logistics_inventory_code,
+            "logistics_provider_name": logistics_provider_name,
+            "logistics_current_stock": logistics_current_stock,
+            "platform_product_id_hash": platform_product_id_hash,
+            "platform_option_id_hash": platform_option_id_hash,
+            "internal_sku": _clean_text(row.get("internal_sku") or row.get("internalSku"), max_length=120) or None,
+            "match_status": "matched",
+        })
+    return normalized_rows, {}
+
+
+def evaluate_real_excel_generation_mock_gate(
+    *,
+    store_id: int,
+    platform: str,
+    export_rows: list[dict[str, Any]],
+    manual_approval: bool,
+    actor_context: dict[str, Any] | None = None,
+    file_type: str = SHIPPING_EXPORT_FILE_TYPE,
+    file_format: str = SHIPPING_EXPORT_FILE_FORMAT,
+    include_receiver_privacy: bool = False,
+    export_record_schema_acknowledged: bool = False,
+    audit_linkage_acknowledged: bool = False,
+    tracking_import_contract_acknowledged: bool = False,
+) -> dict[str, Any]:
+    result = {
+        **_base_result(phase="Shipping-2H"),
+        "manual_approval": bool(manual_approval),
+        "file_type": file_type,
+        "file_format": file_format,
+        "file_generated": False,
+        "file_persisted": False,
+        "export_record_written": False,
+        "download_record_written": False,
+        "tracking_number_import_open": False,
+        "receiver_privacy_included": False,
+        "export_record_schema_planned": bool(export_record_schema_acknowledged),
+        "audit_linkage_planned": bool(audit_linkage_acknowledged),
+        "tracking_import_contract_planned": bool(tracking_import_contract_acknowledged),
+        "mapping_version": SHIPPING_EXPORT_MAPPING_VERSION,
+    }
+
+    forbidden_fields = _sensitive_fields({
+        "export_rows": export_rows,
+        "actor_context": actor_context or {},
+    })
+    if forbidden_fields:
+        result.update({
+            "skip_reason": "shipping_export_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform)
+    if normalized_platform is None:
+        result["skip_reason"] = "platform_not_supported"
+        return result
+    if not isinstance(store_id, int) or store_id <= 0:
+        result["skip_reason"] = "store_id_invalid"
+        return result
+    if file_type != SHIPPING_EXPORT_FILE_TYPE:
+        result["skip_reason"] = "shipping_export_file_type_not_supported"
+        return result
+    if str(file_format).lower() != SHIPPING_EXPORT_FILE_FORMAT:
+        result["skip_reason"] = "shipping_export_file_format_not_supported"
+        return result
+    if include_receiver_privacy:
+        result["skip_reason"] = "receiver_privacy_separate_approval_required"
+        return result
+    if manual_approval is not True:
+        result["skip_reason"] = "manual_approval_required"
+        return result
+    if export_record_schema_acknowledged is not True:
+        result["skip_reason"] = "export_record_schema_plan_required"
+        return result
+    if audit_linkage_acknowledged is not True:
+        result["skip_reason"] = "audit_linkage_plan_required"
+        return result
+
+    normalized_rows, error = _validate_shipping_export_rows(export_rows)
+    if error:
+        result.update(error)
+        return result
+
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "store_id": store_id,
+                "platform": normalized_platform,
+                "rows": normalized_rows,
+                "file_type": file_type,
+                "file_format": SHIPPING_EXPORT_FILE_FORMAT,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    result.update({
+        "status": "real_excel_generation_mock_ready",
+        "skip_reason": None,
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "row_count": len(normalized_rows or []),
+        "matched_row_count": len(normalized_rows or []),
+        "unmatched_row_count": 0,
+        "file_name_preview": f"{normalized_platform}-shipping-request-store-{store_id}-mock.xlsx",
+        "file_hash_planned": f"sha256-planned-{fingerprint}",
+        "export_rows_preview": normalized_rows,
+        "business_message": (
+            "真实 Excel 生成 mock 门禁已通过；当前只确认导出字段、导出记录和审计联动边界，"
+            "不会创建文件、不会写导出记录，也不会调用平台或物流商接口。"
+        ),
+    })
+    return result
 
 
 def _serialize_mapping(row: LogisticsInventoryMapping, item: LogisticsInventoryItem | None) -> dict[str, Any]:

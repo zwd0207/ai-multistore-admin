@@ -15580,6 +15580,7 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
     from fastapi.testclient import TestClient
 
     from app.main import app
+    from app.services.shipping_service import evaluate_real_excel_generation_mock_gate
 
     def table_count(table_name: str, where_clause: str = "", params: tuple = ()) -> int:
         with sqlite3.connect(VERIFY_DB_PATH) as connection:
@@ -15806,6 +15807,115 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         ]:
             assert forbidden not in serialized, serialized
 
+        excel_gate_before_counts = shipping_counts(store_id)
+        safe_export_row = {
+            "order_reference": "shipping-order-safe-001",
+            "product_name": "PXG Wheel Bag",
+            "option_name": "Black / OS",
+            "quantity": 1,
+            "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+            "logistics_provider_name": "Korea warehouse A",
+            "logistics_current_stock": 7,
+            "platform_product_id_hash": "id-hash-shippingproduct001",
+            "platform_option_id_hash": "id-hash-shippingoption001",
+            "internal_sku": "SKU-PXG-WHEEL-BAG-BK",
+        }
+        excel_manual_gate = evaluate_real_excel_generation_mock_gate(
+            store_id=store_id,
+            platform="naver",
+            export_rows=[safe_export_row],
+            manual_approval=False,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+            export_record_schema_acknowledged=True,
+            audit_linkage_acknowledged=True,
+            tracking_import_contract_acknowledged=True,
+        )
+        assert excel_manual_gate["phase"] == "Shipping-2H", excel_manual_gate
+        assert excel_manual_gate["status"] == "blocked", excel_manual_gate
+        assert excel_manual_gate["skip_reason"] == "manual_approval_required", excel_manual_gate
+        assert excel_manual_gate["file_generated"] is False, excel_manual_gate
+        assert excel_manual_gate["export_record_written"] is False, excel_manual_gate
+        assert excel_manual_gate["operation_audit_rows_written"] is False, excel_manual_gate
+        assert shipping_counts(store_id) == excel_gate_before_counts, shipping_counts(store_id)
+
+        excel_privacy_gate = evaluate_real_excel_generation_mock_gate(
+            store_id=store_id,
+            platform="naver",
+            export_rows=[{
+                **safe_export_row,
+                "receiverPhone": "010-1111-2222",
+                "address": "seoul full address must not leak",
+            }],
+            manual_approval=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+            export_record_schema_acknowledged=True,
+            audit_linkage_acknowledged=True,
+            tracking_import_contract_acknowledged=True,
+        )
+        assert excel_privacy_gate["status"] == "blocked", excel_privacy_gate
+        assert excel_privacy_gate["skip_reason"] == "shipping_export_sensitive_field_blocked", excel_privacy_gate
+        assert excel_privacy_gate["file_generated"] is False, excel_privacy_gate
+        assert excel_privacy_gate["export_record_written"] is False, excel_privacy_gate
+        assert excel_privacy_gate["operation_audit_rows_written"] is False, excel_privacy_gate
+        assert shipping_counts(store_id) == excel_gate_before_counts, shipping_counts(store_id)
+
+        excel_approved_gate = evaluate_real_excel_generation_mock_gate(
+            store_id=store_id,
+            platform="naver",
+            export_rows=[safe_export_row],
+            manual_approval=True,
+            actor_context={"role": "admin", "actor_id": "shipping-operator"},
+            export_record_schema_acknowledged=True,
+            audit_linkage_acknowledged=True,
+            tracking_import_contract_acknowledged=True,
+        )
+        assert excel_approved_gate["status"] == "real_excel_generation_mock_ready", excel_approved_gate
+        assert excel_approved_gate["row_count"] == 1, excel_approved_gate
+        assert excel_approved_gate["matched_row_count"] == 1, excel_approved_gate
+        assert excel_approved_gate["file_type"] == "shipping_request", excel_approved_gate
+        assert excel_approved_gate["file_format"] == "xlsx", excel_approved_gate
+        assert excel_approved_gate["file_generated"] is False, excel_approved_gate
+        assert excel_approved_gate["file_persisted"] is False, excel_approved_gate
+        assert excel_approved_gate["export_record_written"] is False, excel_approved_gate
+        assert excel_approved_gate["download_record_written"] is False, excel_approved_gate
+        assert excel_approved_gate["operation_audit_rows_written"] is False, excel_approved_gate
+        assert excel_approved_gate["real_database_written"] is False, excel_approved_gate
+        assert excel_approved_gate["real_api_called"] is False, excel_approved_gate
+        assert excel_approved_gate["orders_written"] is False, excel_approved_gate
+        assert excel_approved_gate["products_written"] is False, excel_approved_gate
+        assert excel_approved_gate["sync_log_written"] is False, excel_approved_gate
+        assert excel_approved_gate["capability_tested_success_written"] is False, excel_approved_gate
+        assert excel_approved_gate["raw_response_saved"] is False, excel_approved_gate
+        assert excel_approved_gate["secrets_saved"] is False, excel_approved_gate
+        assert excel_approved_gate["privacy_fields_redacted"] is True, excel_approved_gate
+        assert excel_approved_gate["platform_writes_enabled"] is False, excel_approved_gate
+        assert excel_approved_gate["tracking_number_import_open"] is False, excel_approved_gate
+        assert excel_approved_gate["export_record_schema_planned"] is True, excel_approved_gate
+        assert excel_approved_gate["audit_linkage_planned"] is True, excel_approved_gate
+        assert excel_approved_gate["tracking_import_contract_planned"] is True, excel_approved_gate
+        assert shipping_counts(store_id) == excel_gate_before_counts, shipping_counts(store_id)
+
+        excel_serialized = json.dumps({
+            "manual": excel_manual_gate,
+            "privacy": excel_privacy_gate,
+            "approved": excel_approved_gate,
+        }, ensure_ascii=False, default=str).lower()
+        for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
+            assert marker not in excel_serialized, excel_serialized
+        for forbidden in [
+            "authorization",
+            "client_secret",
+            "headers",
+            "signature",
+            "bcrypt",
+            "raw response",
+            "buyer-real-name",
+            "receiver-real-name",
+            "seoul full address",
+            "010-1111-2222",
+        ]:
+            assert forbidden not in excel_serialized, excel_serialized
+
     print("shipping mapping schema and local write: ok")
 
 
@@ -15874,6 +15984,7 @@ def verify_git_tracking() -> None:
         "A  backend/app/services/operation_audit_service.py",
         "A  backend/app/services/permission_service.py",
         "A  backend/app/services/invitation_audit_linkage_service.py",
+        " M backend/app/services/shipping_service.py",
         "A  backend/app/services/shipping_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/sync_service.py",

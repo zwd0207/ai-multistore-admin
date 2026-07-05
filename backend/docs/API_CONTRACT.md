@@ -3084,3 +3084,78 @@ The endpoint must not:
 - generate a real Excel file.
 
 Shipping-2E only plans real Excel generation approval. Actual file creation and export records require a later phase with backup, audit, file hash, row counts, and explicit operator approval.
+
+### Shipping-2F to Shipping-2J
+
+Shipping-2F to 2J do not add a public API route. They add a private service-level mock gate and document future contracts for export records, audit linkage, and tracking-number import.
+
+Private helper:
+
+```text
+evaluate_real_excel_generation_mock_gate(...)
+```
+
+Required safe input:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "file_type": "shipping_request",
+  "file_format": "xlsx",
+  "manual_approval": true,
+  "export_record_schema_acknowledged": true,
+  "audit_linkage_acknowledged": true,
+  "tracking_import_contract_acknowledged": true,
+  "export_rows": [
+    {
+      "order_reference": "safe order reference",
+      "product_name": "safe product text",
+      "option_name": "safe option text",
+      "quantity": 1,
+      "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+      "logistics_provider_name": "Korea warehouse A",
+      "logistics_current_stock": 7,
+      "platform_product_id_hash": "id-hash-safe",
+      "platform_option_id_hash": "id-hash-safe",
+      "internal_sku": "SKU-SAFE"
+    }
+  ]
+}
+```
+
+Ready output must still include:
+
+```json
+{
+  "phase": "Shipping-2H",
+  "status": "real_excel_generation_mock_ready",
+  "file_generated": false,
+  "file_persisted": false,
+  "export_record_written": false,
+  "download_record_written": false,
+  "operation_audit_rows_written": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "tracking_number_import_open": false,
+  "platform_writes_enabled": false
+}
+```
+
+Forbidden payload material remains:
+
+- token,
+- Authorization,
+- headers,
+- signature,
+- client secret,
+- raw response,
+- full platform sensitive ids that are not explicitly approved for display,
+- receiver name,
+- receiver phone,
+- address,
+- zip code.
+
+Future export records should use `shipping_export_batches` and `shipping_export_batch_rows` or equivalent names, always scoped by `store_id` and `platform`, with file hash, row counts, actor hash, and audit correlation id. Future tracking-number import should use `file_type=tracking_upload`, but parsing files and writing tracking numbers remain closed.
+
+No real Excel file, export record, audit row, order row, product row, SyncLog row, tested-success row, Naver request, logistics-provider request, tracking-number import, or shipment writeback is added in Shipping-2F to 2J.
