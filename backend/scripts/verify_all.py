@@ -14517,6 +14517,165 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_pre_execution_refresh_scope_mismatch
         )
 
+        batch_pre_execution_refresh_api_context = {
+            "readonly_api_contract_planned": True,
+            "business_wording_required": True,
+            "technical_details_folded": True,
+            "execution_button_excluded": True,
+            "write_endpoint_excluded": True,
+            "backup_creation_button_excluded": True,
+            "audit_row_write_excluded": True,
+            "product_write_endpoint_excluded": True,
+            "order_write_endpoint_excluded": True,
+            "sensitive_fields_hidden_from_main_page": True,
+            "route_requires_separate_implementation": True,
+            "formal_sync_remains_closed": True,
+            "public_endpoint_enabled": False,
+            "backend_route_implemented": False,
+            "execution_approved": False,
+            "write_endpoint_enabled": False,
+            "orders_written": False,
+            "products_written": False,
+            "operation_audit_rows_written": False,
+            "backup_created": False,
+            "restore_executed": False,
+            "formal_sync_open": False,
+            "platform_writes_enabled": False,
+        }
+        batch_pre_execution_refresh_api_ready = (
+            sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                readonly_api_context=batch_pre_execution_refresh_api_context,
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_api_ready["phase"] == "ERP-Batch-4F", (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["status"] == (
+            "formal_batch_pre_execution_refresh_readonly_api_mock_ready"
+        ), batch_pre_execution_refresh_api_ready
+        assert batch_pre_execution_refresh_api_ready["readonly_api_mock_gate"] is True, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["route_path_planned"] == (
+            "/api/v1/batch/pre-execution-refresh/readonly-check"
+        ), batch_pre_execution_refresh_api_ready
+        assert batch_pre_execution_refresh_api_ready["backend_route_implemented"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["public_endpoint_enabled"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["execution_approved"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["write_endpoint_enabled"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["orders_written"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["products_written"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["operation_audit_rows_written"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["real_api_called"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["real_database_written"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+        assert batch_pre_execution_refresh_api_ready["formal_sync_open"] is False, (
+            batch_pre_execution_refresh_api_ready
+        )
+
+        batch_pre_execution_refresh_api_missing_fold = (
+            sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                readonly_api_context={
+                    **batch_pre_execution_refresh_api_context,
+                    "technical_details_folded": False,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_api_missing_fold["phase"] == "ERP-Batch-4F", (
+            batch_pre_execution_refresh_api_missing_fold
+        )
+        assert batch_pre_execution_refresh_api_missing_fold["skip_reason"] == (
+            "readonly_api_context_incomplete"
+        ), batch_pre_execution_refresh_api_missing_fold
+        assert "technical_details_folded" in batch_pre_execution_refresh_api_missing_fold["missing_api_flags"], (
+            batch_pre_execution_refresh_api_missing_fold
+        )
+        assert batch_pre_execution_refresh_api_missing_fold["real_database_written"] is False, (
+            batch_pre_execution_refresh_api_missing_fold
+        )
+
+        batch_pre_execution_refresh_api_public_endpoint = (
+            sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                readonly_api_context={
+                    **batch_pre_execution_refresh_api_context,
+                    "public_endpoint_enabled": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_api_public_endpoint["skip_reason"] == (
+            "public_endpoint_not_allowed_in_mock_gate"
+        ), batch_pre_execution_refresh_api_public_endpoint
+        assert batch_pre_execution_refresh_api_public_endpoint["public_endpoint_enabled"] is False, (
+            batch_pre_execution_refresh_api_public_endpoint
+        )
+
+        batch_pre_execution_refresh_api_sensitive = (
+            sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                readonly_api_context={
+                    **batch_pre_execution_refresh_api_context,
+                    "productOrderId": "must-not-leak-pre-execution-refresh-api",
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_api_sensitive["skip_reason"] == (
+            "pre_execution_refresh_readonly_api_sensitive_field_blocked"
+        ), batch_pre_execution_refresh_api_sensitive
+        assert batch_pre_execution_refresh_api_sensitive["orders_written"] is False, (
+            batch_pre_execution_refresh_api_sensitive
+        )
+
+        batch_pre_execution_refresh_api_write_attempt = (
+            sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+                write_boundary_review=batch_execution_write_boundary_route,
+                backup_refresh_evidence=batch_pre_execution_backup_refresh_evidence,
+                audit_refresh_evidence=batch_pre_execution_audit_refresh_evidence,
+                readonly_api_context={
+                    **batch_pre_execution_refresh_api_context,
+                    "backup_created": True,
+                },
+                verification_scope=VERIFICATION_SCOPE,
+            )
+        )
+        assert batch_pre_execution_refresh_api_write_attempt["skip_reason"] == (
+            "write_not_allowed_in_pre_execution_refresh_readonly_api_mock_gate"
+        ), batch_pre_execution_refresh_api_write_attempt
+        assert batch_pre_execution_refresh_api_write_attempt["operation_audit_rows_written"] is False, (
+            batch_pre_execution_refresh_api_write_attempt
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -14782,6 +14941,13 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             "batch_pre_execution_refresh_sensitive": batch_pre_execution_refresh_sensitive,
             "batch_pre_execution_refresh_write_attempt": batch_pre_execution_refresh_write_attempt,
             "batch_pre_execution_refresh_scope_mismatch": batch_pre_execution_refresh_scope_mismatch,
+            "batch_pre_execution_refresh_api_ready": batch_pre_execution_refresh_api_ready,
+            "batch_pre_execution_refresh_api_missing_fold": batch_pre_execution_refresh_api_missing_fold,
+            "batch_pre_execution_refresh_api_public_endpoint": (
+                batch_pre_execution_refresh_api_public_endpoint
+            ),
+            "batch_pre_execution_refresh_api_sensitive": batch_pre_execution_refresh_api_sensitive,
+            "batch_pre_execution_refresh_api_write_attempt": batch_pre_execution_refresh_api_write_attempt,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,

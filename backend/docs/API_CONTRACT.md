@@ -3237,6 +3237,84 @@ Success response:
 
 The helper blocks a missing or stale write-boundary review, incomplete backup refresh evidence, invalid SHA-256, failed SQLite integrity, missing restore dry-run reference, incomplete audit refresh evidence, scope mismatches, planned action mismatches, sensitive markers, raw response or secret storage, side-effect flags, audit-row writes, product/order writes, platform calls, and formal sync opening. It returns only safe summaries such as abbreviated backup hashes. Passing 4E still does not approve or perform product/order batch sync.
 
+### Formal Batch Pre-Execution Refresh Readonly API Mock Gate
+
+Phase ERP-Batch-4F adds a private readonly API mock gate:
+
+```text
+evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(...)
+```
+
+No public route is added in this phase. The planned future route path is:
+
+```text
+POST /api/v1/batch/pre-execution-refresh/readonly-check
+```
+
+Input contract:
+
+```json
+{
+  "write_boundary_review": {
+    "phase": "ERP-Batch-4C",
+    "status": "formal_batch_execution_write_boundary_readonly_api_ready"
+  },
+  "backup_refresh_evidence": {
+    "fresh_backup_created": true,
+    "backup_manifest_verified": true,
+    "backup_sha256_verified": true,
+    "restore_dry_run_referenced": true
+  },
+  "audit_refresh_evidence": {
+    "audit_correlation_planned": true,
+    "append_only_audit_chain_planned": true,
+    "actor_store_scope_verified": true,
+    "planned_action_names": ["products.batch_sync_write", "orders.batch_sync_write"]
+  },
+  "readonly_api_context": {
+    "readonly_api_contract_planned": true,
+    "business_wording_required": true,
+    "technical_details_folded": true,
+    "execution_button_excluded": true,
+    "write_endpoint_excluded": true,
+    "backup_creation_button_excluded": true,
+    "audit_row_write_excluded": true,
+    "product_write_endpoint_excluded": true,
+    "order_write_endpoint_excluded": true,
+    "sensitive_fields_hidden_from_main_page": true,
+    "route_requires_separate_implementation": true,
+    "formal_sync_remains_closed": true
+  },
+  "verification_scope": "verify_all_temp_db"
+}
+```
+
+Success response:
+
+```json
+{
+  "phase": "ERP-Batch-4F",
+  "status": "formal_batch_pre_execution_refresh_readonly_api_mock_ready",
+  "approval_status": "ready_for_readonly_api_planning",
+  "readonly_api_mock_gate": true,
+  "route_path_planned": "/api/v1/batch/pre-execution-refresh/readonly-check",
+  "backend_route_implemented": false,
+  "public_endpoint_enabled": false,
+  "execution_approved": false,
+  "batch_execution_enabled": false,
+  "write_endpoint_enabled": false,
+  "products_written": false,
+  "orders_written": false,
+  "operation_audit_rows_written": false,
+  "real_api_called": false,
+  "real_database_written": false,
+  "platform_writes_enabled": false,
+  "formal_sync_open": false
+}
+```
+
+The mock gate blocks incomplete readonly API context, sensitive markers, accidental public route exposure, accidental backend-route implementation, execution approval, backup creation, restore execution, local product/order writes, audit-row writes, platform writes, and formal sync opening. Passing 4F only means a readonly review API can be planned; it still does not expose a route or approve formal batch execution.
+
 Phase ERP-Multistore-2T now exposes the invitation approval audit-linkage readonly route:
 
 ```text

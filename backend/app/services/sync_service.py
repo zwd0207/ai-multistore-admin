@@ -8446,6 +8446,156 @@ def evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
     return result
 
 
+def evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+    *,
+    write_boundary_review: dict | None,
+    backup_refresh_evidence: dict | None,
+    audit_refresh_evidence: dict | None,
+    readonly_api_context: dict | None,
+    verification_scope: str | None,
+) -> dict:
+    """Mock gate for a future readonly API around the pre-execution refresh review."""
+
+    result = evaluate_formal_batch_pre_execution_backup_audit_refresh_gate(
+        write_boundary_review=write_boundary_review,
+        backup_refresh_evidence=backup_refresh_evidence,
+        audit_refresh_evidence=audit_refresh_evidence,
+        verification_scope=verification_scope,
+    )
+    required_api_flags = [
+        "readonly_api_contract_planned",
+        "business_wording_required",
+        "technical_details_folded",
+        "execution_button_excluded",
+        "write_endpoint_excluded",
+        "backup_creation_button_excluded",
+        "audit_row_write_excluded",
+        "product_write_endpoint_excluded",
+        "order_write_endpoint_excluded",
+        "sensitive_fields_hidden_from_main_page",
+        "route_requires_separate_implementation",
+        "formal_sync_remains_closed",
+    ]
+    result.update({
+        "phase": "ERP-Batch-4F",
+        "formal_batch_pre_execution_refresh_readonly_api_mock_gate": True,
+        "readonly_api_mock_gate": True,
+        "required_api_flags": required_api_flags,
+        "missing_api_flags": [],
+        "route_path_planned": "/api/v1/batch/pre-execution-refresh/readonly-check",
+        "http_method_planned": "POST",
+        "public_endpoint_enabled": False,
+        "backend_route_implemented": False,
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    })
+    if result.get("status") != "formal_batch_pre_execution_backup_audit_refresh_gate_ready":
+        return result
+    if verification_scope != "verify_all_temp_db":
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "verification_scope_required"
+        return result
+    if not isinstance(readonly_api_context, dict):
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "readonly_api_context_required"
+        return result
+    if _formal_batch_sync_sensitive_marker_found(readonly_api_context):
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "pre_execution_refresh_readonly_api_sensitive_field_blocked"
+        return result
+
+    missing_api_flags = [
+        flag for flag in required_api_flags
+        if readonly_api_context.get(flag) is not True
+    ]
+    result["missing_api_flags"] = missing_api_flags
+    if missing_api_flags:
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "readonly_api_context_incomplete"
+        return result
+    if readonly_api_context.get("public_endpoint_enabled") is True:
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "public_endpoint_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("backend_route_implemented") is True:
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "backend_route_not_allowed_in_mock_gate"
+        return result
+    if readonly_api_context.get("execution_approved") is True:
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "execution_approval_not_allowed_in_mock_gate"
+        return result
+    if (
+        readonly_api_context.get("orders_written") is True
+        or readonly_api_context.get("products_written") is True
+        or readonly_api_context.get("operation_audit_rows_written") is True
+        or readonly_api_context.get("write_endpoint_enabled") is True
+        or readonly_api_context.get("backup_created") is True
+        or readonly_api_context.get("restore_executed") is True
+    ):
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "write_not_allowed_in_pre_execution_refresh_readonly_api_mock_gate"
+        return result
+    if readonly_api_context.get("formal_sync_open") is True or readonly_api_context.get("platform_writes_enabled") is True:
+        result["status"] = "blocked"
+        result["approval_status"] = "blocked"
+        result["pre_execution_backup_audit_refresh_gate_ready"] = False
+        result["skip_reason"] = "formal_sync_already_open_not_allowed"
+        return result
+
+    result.update({
+        "status": "formal_batch_pre_execution_refresh_readonly_api_mock_ready",
+        "approval_status": "ready_for_readonly_api_planning",
+        "pre_execution_backup_audit_refresh_gate_ready": True,
+        "business_message": (
+            "Formal batch pre-execution refresh readonly API mock gate passed. "
+            "It plans review-only display for refreshed backup and audit evidence; no route is exposed, no backup is created, no audit rows are written, no products or orders are written, no platform APIs are called, and formal sync remains closed."
+        ),
+        "next_action": (
+            "Plan a local readonly route separately. Product/order batch execution still requires a later explicit execution phase with fresh evidence, readback, rollback, permissions, and sensitive scans."
+        ),
+    })
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

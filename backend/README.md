@@ -1537,6 +1537,18 @@ Passing 4E returns `status=formal_batch_pre_execution_backup_audit_refresh_gate_
 
 No public route is added in 4E. It is a private refresh gate only; it does not create a backup, write audit rows, write products or orders, call Naver, expose execution, or indicate that formal product/order batch sync is open.
 
+ERP-Batch-4F adds a private readonly API mock gate for the pre-execution refresh review:
+
+```text
+evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(...)
+```
+
+The helper wraps 4E and verifies the future readonly API contract before any route is implemented. It requires business wording, folded technical details, no execution button, no write endpoint, no backup-creation button, audit-row writes excluded, product/order write endpoints excluded, sensitive fields hidden from the main page, a separately implemented route, and `formal_sync_remains_closed=true`.
+
+Passing 4F returns `status=formal_batch_pre_execution_refresh_readonly_api_mock_ready` and `approval_status=ready_for_readonly_api_planning`. It keeps `backend_route_implemented=false`, `public_endpoint_enabled=false`, `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+No public route is added in 4F. A later 4G may expose a readonly review route only; real product/order batch execution still requires another explicit execution phase.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text
