@@ -2057,3 +2057,19 @@ Shipping-6A to 6E add readonly evidence for matching logistics tracking numbers 
 Codex1 exposes readonly routes for tracking-to-order match evidence and shipment writeback boundary review. Codex2 `/shipping` now shows match evidence, writeback boundary state, and an operator checklist. These panels are informational only.
 
 This stage does not call Naver, does not call a logistics-provider API, does not update orders, does not write products/SyncLog/tested-success rows, and does not open Naver shipment writeback or formal order batch sync.
+
+## Phase Shipping-7A to Shipping-7E - Tracking XLSX Parser Preview
+
+Shipping-7A to 7E add a preview-only upload parser for logistics tracking return `.xlsx` files:
+
+- `PHASE_SHIPPING_7A_TRACKING_IMPORT_FILE_PARSER_CONTRACT_APPROVAL.md`
+- `PHASE_SHIPPING_7B_TRACKING_IMPORT_XLSX_PARSER_MOCK_IMPLEMENTATION.md`
+- `PHASE_SHIPPING_7C_TRACKING_IMPORT_PARSER_UI_UPLOAD_SHELL.md`
+- `PHASE_SHIPPING_7D_TRACKING_IMPORT_PARSER_LOCAL_RECORD_INTEGRATION_PLAN.md`
+- `PHASE_SHIPPING_7E_TRACKING_IMPORT_PARSER_RUNTIME_WALKTHROUGH.md`
+
+Codex1 exposes `POST /api/v1/shipping/tracking-import/parse-xlsx-mock`. The route accepts base64 `.xlsx` content, parses sheet1, validates safe tracking columns, and returns normalized preview rows. It does not persist the uploaded file, does not write tracking import records, does not update orders, and does not call Naver.
+
+Codex2 `/shipping` now includes a "Tracking xlsx preview" upload shell. Operators can select an `.xlsx` file, preview tracking rows, duplicate counts, and row status, then continue to a future separately approved local import-record phase.
+
+This stage does not call Naver, does not call a logistics-provider API, does not write orders/products/SyncLog/tested-success rows, does not write tracking import records from the parser, and does not open shipment writeback or formal product/order batch sync.

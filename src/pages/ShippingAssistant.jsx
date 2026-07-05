@@ -9,6 +9,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
   SHIPPING_EXPORT_MOCK_PHASE,
   SHIPPING_SHIPMENT_WRITEBACK_BOUNDARY_PHASE,
+  SHIPPING_TRACKING_IMPORT_XLSX_PARSER_PHASE,
   SHIPPING_TRACKING_IMPORT_MOCK_PHASE,
   SHIPPING_TRACKING_IMPORT_RECORD_PHASE,
   SHIPPING_TRACKING_ORDER_MATCH_PHASE,
@@ -47,6 +48,18 @@ function formatDateTime(value) {
   } catch {
     return String(value);
   }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',').pop() : result);
+    };
+    reader.onerror = () => reject(new Error('File read failed.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function statusToneClass(tone) {
@@ -513,6 +526,125 @@ function TrackingImportHistoryPanel({
   );
 }
 
+function TrackingImportParserUploadPanel({
+  fileName = '',
+  fileSize = 0,
+  preview,
+  loading = false,
+  error = '',
+  onFileChange,
+  onParse,
+}) {
+  const rows = preview?.rows || [];
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>Tracking xlsx preview</h2>
+          <p>{preview?.businessMessage || 'Upload the logistics tracking return file for preview only. The file is not saved, rows are not written, and Naver is not called.'}</p>
+        </div>
+        <span className={statusToneClass(preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'success' : 'neutral')}><i />{preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'Preview ready' : 'Preview only'}</span>
+      </div>
+      <div className="upload-shell">
+        <input
+          type="file"
+          accept=".xlsx"
+          onChange={onFileChange}
+          disabled={loading}
+        />
+        <div>
+          <strong>{fileName || 'No xlsx selected'}</strong>
+          <span className="cell-subtitle">
+            {fileSize ? `${fileSize.toLocaleString()} bytes selected` : 'Expected columns: order reference, product order reference, carrier, tracking number.'}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="button primary"
+          onClick={onParse}
+          disabled={loading || !fileName}
+        >
+          {loading ? 'Parsing...' : 'Preview xlsx'}
+        </button>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {preview?.status === 'tracking_xlsx_parser_mock_ready' ? (
+        <div className="mock-sync-success">Parser preview passed. Review rows before a separate local import-record phase.</div>
+      ) : null}
+      {rows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Tracking</th>
+                <th>Carrier</th>
+                <th>Row status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${row.rowIndex}-${row.orderNo}-${row.trackingNumber}`}>
+                  <td>
+                    <strong>{displayText(row.orderNo)}</strong>
+                    <span className="cell-subtitle">{displayText(row.productOrderNo)}</span>
+                  </td>
+                  <td>
+                    <strong>{displayText(row.trackingNumber)}</strong>
+                    <span className="cell-subtitle">{formatDateTime(row.shippedAt)}</span>
+                  </td>
+                  <td>{displayText(row.carrier)}</td>
+                  <td><span className={statusToneClass(row.rowStatus === 'ready_for_future_review' ? 'success' : 'warning')}><i />{displayText(row.rowStatus)}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TechnicalDetails
+        title="Tracking xlsx parser boundary"
+        description="Parser preview keeps file content out of storage and does not update orders or call Naver."
+        items={[
+          { label: 'phase', value: preview?.phase || SHIPPING_TRACKING_IMPORT_XLSX_PARSER_PHASE },
+          { label: 'status', value: preview?.status || 'not_checked' },
+          { label: 'source_file_name', value: preview?.sourceFileName || fileName || 'not_selected' },
+          { label: 'parser_version', value: preview?.parserVersion || 'shipping_tracking_import_xlsx_parser_v1' },
+          { label: 'file_received', value: preview?.fileReceived ?? false },
+          { label: 'file_size_bytes', value: preview?.fileSizeBytes || fileSize || 0 },
+          { label: 'row_count', value: preview?.rowCount ?? 0 },
+          { label: 'ready_row_count', value: preview?.readyRowCount ?? 0 },
+          { label: 'duplicate_row_count', value: preview?.duplicateRowCount ?? 0 },
+          { label: 'file_content_saved', value: preview?.fileContentSaved ?? false },
+          { label: 'parsed_rows_written', value: preview?.parsedRowsWritten ?? false },
+          { label: 'import_record_written', value: preview?.importRecordWritten ?? false },
+          { label: 'tracking_number_import_open', value: preview?.trackingNumberImportOpen ?? false },
+          { label: 'shipment_writeback_called', value: preview?.shipmentWritebackCalled ?? false },
+          { label: 'orders_updated', value: preview?.ordersUpdated ?? false },
+          { label: 'real_api_called', value: preview?.realApiCalled ?? false },
+          { label: 'real_database_written', value: preview?.realDatabaseWritten ?? false },
+          { label: 'raw_response_saved', value: preview?.rawResponseSaved ?? false },
+          { label: 'privacy_fields_redacted', value: preview?.privacyFieldsRedacted ?? true },
+          { label: 'next_action', value: preview?.nextAction || 'not_ready' },
+        ]}
+      >
+        {preview ? (
+          <pre>{JSON.stringify({
+            mapped_columns: preview.mappedColumns,
+            unknown_columns: preview.unknownColumns,
+            integration_plan_ready: preview.integrationPlanReady,
+            tracking_number_import_open: preview.trackingNumberImportOpen,
+            shipment_writeback_called: preview.shipmentWritebackCalled,
+            orders_updated: preview.ordersUpdated,
+            file_content_saved: preview.fileContentSaved,
+            parsed_rows_written: preview.parsedRowsWritten,
+            raw_response_saved: preview.rawResponseSaved,
+          }, null, 2)}</pre>
+        ) : null}
+      </TechnicalDetails>
+    </section>
+  );
+}
+
 function TrackingOrderMatchEvidencePanel({
   evidence,
   loading = false,
@@ -695,6 +827,11 @@ export default function ShippingAssistant() {
   const [trackingImportHistoryMessage, setTrackingImportHistoryMessage] = useState('');
   const [trackingImportHistoryError, setTrackingImportHistoryError] = useState('');
   const [trackingImportHistoryLoading, setTrackingImportHistoryLoading] = useState(false);
+  const [trackingParserFile, setTrackingParserFile] = useState(null);
+  const [trackingParserContentBase64, setTrackingParserContentBase64] = useState('');
+  const [trackingParserPreview, setTrackingParserPreview] = useState(null);
+  const [trackingParserError, setTrackingParserError] = useState('');
+  const [trackingParserLoading, setTrackingParserLoading] = useState(false);
   const [trackingMatchEvidence, setTrackingMatchEvidence] = useState(null);
   const [trackingMatchError, setTrackingMatchError] = useState('');
   const [trackingMatchLoading, setTrackingMatchLoading] = useState(false);
@@ -721,6 +858,10 @@ export default function ShippingAssistant() {
       setTrackingImportHistory([]);
       setTrackingImportHistoryMessage('');
       setTrackingImportHistoryError('');
+      setTrackingParserFile(null);
+      setTrackingParserContentBase64('');
+      setTrackingParserPreview(null);
+      setTrackingParserError('');
       setTrackingMatchEvidence(null);
       setTrackingMatchError('');
       setShipmentBoundary(null);
@@ -737,6 +878,8 @@ export default function ShippingAssistant() {
       setTrackingImportHistoryLoading(true);
       setTrackingImportHistoryError('');
       setTrackingImportHistoryMessage('');
+      setTrackingParserPreview(null);
+      setTrackingParserError('');
       setTrackingMatchLoading(true);
       setTrackingMatchError('');
       setTrackingMatchEvidence(null);
@@ -832,6 +975,7 @@ export default function ShippingAssistant() {
           setDraftMappings([]);
           setExportHistory([]);
           setTrackingImportHistory([]);
+          setTrackingParserPreview(null);
           setTrackingMatchEvidence(null);
           setShipmentBoundary(null);
           setTrackingMatchError(error.message || 'Tracking order match check failed.');
@@ -996,6 +1140,57 @@ export default function ShippingAssistant() {
     }
   };
 
+  const selectTrackingParserFile = async (event) => {
+    const file = event.target.files?.[0] || null;
+    setTrackingParserPreview(null);
+    setTrackingParserError('');
+    setTrackingParserFile(file);
+    setTrackingParserContentBase64('');
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      setTrackingParserError('Please select an xlsx file.');
+      return;
+    }
+    try {
+      const content = await readFileAsBase64(file);
+      setTrackingParserContentBase64(content);
+    } catch (error) {
+      setTrackingParserError(error.message || 'File read failed.');
+    }
+  };
+
+  const previewTrackingParserFile = async () => {
+    if (!trackingParserFile || !trackingParserContentBase64) {
+      setTrackingParserError('Please select an xlsx file first.');
+      return;
+    }
+    setTrackingParserLoading(true);
+    setTrackingParserError('');
+    try {
+      const result = await dataProvider.checkShippingTrackingImportXlsxParserMock({
+        storeId: selectedStoreId,
+        platform: 'naver',
+        sourceFileName: trackingParserFile.name,
+        fileContentBase64: trackingParserContentBase64,
+        manualApproval: true,
+        parserContractAcknowledged: true,
+        actorContext: {
+          role: 'admin',
+          actor_id: 'shipping-local-operator',
+        },
+      });
+      if (result.status !== 'tracking_xlsx_parser_mock_ready') {
+        throw new Error(result.businessMessage || result.skipReason || 'Tracking xlsx preview failed.');
+      }
+      setTrackingParserPreview(result);
+    } catch (error) {
+      setTrackingParserPreview(null);
+      setTrackingParserError(error.message || 'Tracking xlsx preview failed.');
+    } finally {
+      setTrackingParserLoading(false);
+    }
+  };
+
   if (storeLoading) {
     return (
       <>
@@ -1106,6 +1301,15 @@ export default function ShippingAssistant() {
         loading={historyLoading}
         error={historyError}
         businessMessage={historyMessage}
+      />
+      <TrackingImportParserUploadPanel
+        fileName={trackingParserFile?.name || ''}
+        fileSize={trackingParserFile?.size || 0}
+        preview={trackingParserPreview}
+        loading={trackingParserLoading}
+        error={trackingParserError}
+        onFileChange={selectTrackingParserFile}
+        onParse={previewTrackingParserFile}
       />
       <TrackingImportHistoryPanel
         history={trackingImportHistory}

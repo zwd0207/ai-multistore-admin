@@ -60,6 +60,7 @@ export const backendApi = {
   generateShippingExcelExport: (payload) => sendData('post', '/shipping/export-excel', payload),
   getShippingExportHistory: (params) => getData('/shipping/export-history', params),
   checkShippingTrackingImportMockParse: (payload) => sendData('post', '/shipping/tracking-import/mock-parse', payload),
+  checkShippingTrackingImportXlsxParserMock: (payload) => sendData('post', '/shipping/tracking-import/parse-xlsx-mock', payload),
   checkShippingTrackingImportWriteGate: (payload) => sendData('post', '/shipping/tracking-import/write-gate', payload),
   writeShippingTrackingImport: (payload) => sendData('post', '/shipping/tracking-import', payload),
   getShippingTrackingImportHistory: (params) => getData('/shipping/tracking-import-history', params),

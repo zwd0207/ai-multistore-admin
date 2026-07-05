@@ -1660,3 +1660,36 @@ Next 5 recommended stages:
 3. `Phase Shipping-7C: Tracking import parser UI upload shell`
 4. `Phase Shipping-7D: Tracking import parser local record integration plan`
 5. `Phase Shipping-7E: Tracking import parser runtime walkthrough`
+
+### Latest update after `Phase Shipping-7A` to `Phase Shipping-7E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `96% - 98%`
+- ERP real-user landing progress: about `90% - 94%`
+- Production version for long-term non-technical use: about `78% - 85%`
+
+Implemented in this update:
+
+- Approved the tracking return file parser contract for `.xlsx`.
+- Added Codex1 parser route: `POST /api/v1/shipping/tracking-import/parse-xlsx-mock`.
+- Verified parser requires manual approval, parser contract acknowledgement, safe columns, carrier, tracking number, and order reference.
+- Verified parser handles invalid base64, invalid xlsx, missing required columns, duplicate rows, and sensitive source file names.
+- Verified parser does not save file content, write parsed rows, write tracking import records, update orders, call Naver, or call a logistics-provider API.
+- Updated Codex2 `/shipping` with a preview-only tracking xlsx upload shell.
+- Added Shipping-7A to Shipping-7E phase documents.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with unshipped candidates, inventory-code matching, manual stock maintenance, Excel export, export history, tracking import record/history, readonly tracking-to-order evidence, operator checklist, and tracking xlsx parser preview.
+- Not suitable now: Naver shipment writeback execution, automatic tracking-number-to-order status update, parser-to-local-import auto write, real logistics-provider API integration, Coupang shipping workflow, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-8A: Tracking parser to local import record approval plan`
+2. `Phase Shipping-8B: Parsed tracking rows local write gate`
+3. `Phase Shipping-8C: Parsed tracking rows single local record write`
+4. `Phase Shipping-8D: Parsed tracking post-write match verification`
+5. `Phase Shipping-8E: Shipment writeback dry-run approval plan`

@@ -1234,6 +1234,20 @@ function toBackendShippingTrackingImportPayload(payload = {}) {
   };
 }
 
+function toBackendShippingTrackingImportXlsxParsePayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    file_type: payload.fileType || payload.file_type || 'tracking_upload',
+    file_format: payload.fileFormat || payload.file_format || 'xlsx',
+    source_file_name: payload.sourceFileName || payload.source_file_name || '',
+    file_content_base64: payload.fileContentBase64 || payload.file_content_base64 || '',
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    parser_contract_acknowledged: Boolean(payload.parserContractAcknowledged ?? payload.parser_contract_acknowledged),
+    actor_context: payload.actorContext || payload.actor_context || {},
+  };
+}
+
 function adaptShippingTrackingImportMockParseResult(data = {}) {
   const rows = data.tracking_rows_preview || data.rows || [];
   return {
@@ -1244,6 +1258,16 @@ function adaptShippingTrackingImportMockParseResult(data = {}) {
     businessMessage: data.business_message ?? data.businessMessage ?? '',
     fileType: data.file_type ?? data.fileType ?? 'tracking_upload',
     fileFormat: data.file_format ?? data.fileFormat ?? 'xlsx',
+    sourceFileName: data.source_file_name ?? data.sourceFileName ?? '',
+    parserVersion: data.parser_version ?? data.parserVersion ?? '',
+    fileReceived: Boolean(data.file_received ?? data.fileReceived),
+    fileContentSaved: Boolean(data.file_content_saved ?? data.fileContentSaved),
+    parsedRowsWritten: Boolean(data.parsed_rows_written ?? data.parsedRowsWritten),
+    integrationPlanReady: Boolean(data.integration_plan_ready ?? data.integrationPlanReady),
+    nextAction: data.next_action ?? data.nextAction ?? '',
+    fileSizeBytes: Number(data.file_size_bytes ?? data.fileSizeBytes ?? 0),
+    mappedColumns: Array.isArray(data.mapped_columns) ? data.mapped_columns : (Array.isArray(data.mappedColumns) ? data.mappedColumns : []),
+    unknownColumns: Array.isArray(data.unknown_columns) ? data.unknown_columns : (Array.isArray(data.unknownColumns) ? data.unknownColumns : []),
     rowCount: Number(data.row_count ?? data.rowCount ?? rows.length),
     readyRowCount: Number(data.ready_row_count ?? data.readyRowCount ?? 0),
     duplicateRowCount: Number(data.duplicate_row_count ?? data.duplicateRowCount ?? 0),
@@ -2621,6 +2645,77 @@ const sourceMethods = {
     }
     const { store } = await resolveBackendStore({ storeId: request.store_id });
     return adaptShippingTrackingImportMockParseResult(await backendApi.checkShippingTrackingImportMockParse({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  checkShippingTrackingImportXlsxParserMock: async (payload = {}) => {
+    const request = toBackendShippingTrackingImportXlsxParsePayload(payload);
+    if (!isBackendSource) {
+      const approved = request.manual_approval && request.parser_contract_acknowledged && request.file_content_base64;
+      const skipReason = !request.manual_approval
+        ? 'manual_approval_required'
+        : (!request.parser_contract_acknowledged ? 'tracking_parser_contract_required' : 'tracking_xlsx_file_required');
+      return adaptShippingTrackingImportMockParseResult({
+        phase: 'Shipping-7B',
+        status: approved ? 'tracking_xlsx_parser_mock_ready' : 'blocked',
+        skip_reason: approved ? null : skipReason,
+        business_message: approved
+          ? 'Mock xlsx parser preview is ready. The file is not saved, rows are not written, and Naver is not called.'
+          : 'Please confirm parser approval before previewing the uploaded xlsx.',
+        file_type: request.file_type,
+        file_format: request.file_format,
+        source_file_name: request.source_file_name,
+        parser_version: 'shipping_tracking_import_xlsx_parser_v1',
+        file_received: Boolean(request.file_content_base64),
+        file_parsed: Boolean(approved),
+        file_size_bytes: Math.round((request.file_content_base64.length * 3) / 4),
+        file_content_saved: false,
+        parsed_rows_written: false,
+        import_record_written: false,
+        tracking_number_import_open: false,
+        tracking_numbers_written: false,
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        orders_updated: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        integration_plan_ready: Boolean(approved),
+        next_action: 'review_parsed_rows_then_use_existing_tracking_import_write_gate',
+        mapped_columns: [
+          'order_reference',
+          'product_order_reference',
+          'logistics_inventory_code',
+          'carrier',
+          'tracking_number',
+        ],
+        unknown_columns: [],
+        row_count: approved ? 1 : 0,
+        ready_row_count: approved ? 1 : 0,
+        duplicate_row_count: 0,
+        tracking_rows_preview: approved ? [{
+          row_index: 1,
+          order_reference: 'mock-shipping-order-001',
+          product_order_reference: 'mock-product-order-001',
+          logistics_inventory_code: 'PXG-AUTO-MATCH-001',
+          carrier: 'Mock carrier',
+          tracking_number: 'MOCKTRACK001',
+          shipped_at: '2026-07-05T18:10:00+09:00',
+          row_status: 'ready_for_future_review',
+          operator_note: 'mock xlsx parser preview only',
+          future_write_allowed: false,
+        }] : [],
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingTrackingImportMockParseResult(await backendApi.checkShippingTrackingImportXlsxParserMock({
       ...request,
       store_id: Number(store.id),
     }));

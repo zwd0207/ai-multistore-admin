@@ -1,8 +1,9 @@
 import { getNaverOrderStatusPresentation, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 
-export const SHIPPING_PHASE = 'Shipping-6A-to-6E';
+export const SHIPPING_PHASE = 'Shipping-7A-to-7E';
 export const SHIPPING_EXPORT_MOCK_PHASE = 'Shipping-4D';
 export const SHIPPING_TRACKING_IMPORT_MOCK_PHASE = 'Shipping-4B';
+export const SHIPPING_TRACKING_IMPORT_XLSX_PARSER_PHASE = 'Shipping-7B';
 export const SHIPPING_TRACKING_IMPORT_RECORD_PHASE = 'Shipping-5E';
 export const SHIPPING_TRACKING_ORDER_MATCH_PHASE = 'Shipping-6B';
 export const SHIPPING_SHIPMENT_WRITEBACK_BOUNDARY_PHASE = 'Shipping-6C';
