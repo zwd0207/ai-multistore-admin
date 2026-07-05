@@ -915,6 +915,64 @@ Binding rules:
 
 Common errors: `API_CAPABILITY_NOT_FOUND`, `API_CAPABILITY_RESULT_NOT_FOUND`, `STORE_NOT_FOUND`, `CREDENTIAL_NOT_FOUND`, `CREDENTIAL_STORE_MISMATCH`, `CREDENTIAL_PLATFORM_MISMATCH`, `INVALID_API_CAPABILITY_FILTER`, `VALIDATION_ERROR`.
 
+## Batch Approval Review APIs
+
+These local endpoints normalize approval evidence for operator review only. They do not call Naver or any platform, do not write business rows, do not write audit rows, and do not approve formal execution.
+
+| Method | Path | Body | Sensitive Fields |
+|---|---|---|---|
+| POST | `/api/v1/batch/readonly-evidence` | `evidence_items`, `max_items` | No raw platform payloads or secrets |
+| POST | `/api/v1/batch/approval-audit-evidence` | `readonly_evidence`, `approval_context`, `audit_evidence_plan` | No raw platform payloads or secrets |
+| POST | `/api/v1/batch/approval-decision/readonly-check` | `readonly_evidence`, `approval_audit_evidence`, `decision_context`, `readonly_api_context` | No raw platform payloads or secrets |
+| POST | `/api/v1/batch/approval-decision/audit-linkage/readonly-check` | `approval_decision`, `audit_linkage_context`, `readonly_api_context` | No raw platform payloads or secrets |
+
+`POST /api/v1/batch/approval-decision/audit-linkage/readonly-check` was added for ERP-Batch-2U. It returns `approval_decision_audit_linkage_readonly_api_local=true`, `backend_route_implemented=true`, `public_endpoint_enabled=true`, and safety flags showing `execution_approved=false`, `orders_written=false`, `products_written=false`, `operation_audit_rows_written=false`, `real_database_written=false`, `formal_sync_open=false`, and `platform_writes_enabled=false`.
+
+Request example:
+
+```json
+{
+  "approval_decision": {
+    "status": "formal_batch_approval_decision_readonly_api_ready",
+    "store_ids": [8],
+    "sync_kinds": ["naver_product_batch"],
+    "required_actions": ["products.batch_sync_write"],
+    "execution_approved": false,
+    "privacy_fields_redacted": true,
+    "formal_sync_open": false
+  },
+  "audit_linkage_context": {
+    "store_ids": [8],
+    "required_actions": ["products.batch_sync_write"],
+    "approval_decision_id_planned": true,
+    "readonly_evidence_hash_planned": true,
+    "backup_manifest_reference_planned": true,
+    "permission_evidence_reference_planned": true,
+    "sensitive_scan_reference_planned": true,
+    "readback_result_reference_planned": true,
+    "rollback_report_reference_planned": true,
+    "operator_identity_hash_planned": true,
+    "store_scope_planned": true,
+    "audit_correlation_id_planned": true,
+    "append_only_audit_rows_planned": true,
+    "formal_sync_remains_closed": true
+  },
+  "readonly_api_context": {
+    "readonly_api_contract_planned": true,
+    "business_wording_required": true,
+    "technical_details_folded": true,
+    "execution_button_excluded": true,
+    "write_endpoint_excluded": true,
+    "sensitive_fields_hidden_from_main_page": true,
+    "audit_row_write_excluded": true,
+    "route_requires_separate_implementation": true,
+    "formal_sync_remains_closed": true
+  }
+}
+```
+
+The route is intentionally not an execution route. Product batch execution, order batch execution, audit-row creation, backup creation, restore, real user invitation, and membership assignment all remain separate approval phases.
+
 ## Dashboard and AI Context API Capability Summary
 
 `GET /api/v1/dashboard/summary` includes `api_capability_summary` using the same structure as `/api/v1/api-capabilities/summary`. Existing dashboard fields remain unchanged, including `business_timezone`, `business_date`, `business_day_start`, and `business_day_end`.

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.core.responses import success_response
 from app.schemas.batch import (
     BatchApprovalAuditEvidenceRequest,
+    BatchApprovalDecisionAuditLinkageReadonlyCheckRequest,
     BatchApprovalDecisionReadonlyCheckRequest,
     BatchReadonlyEvidenceRequest,
     NaverProductRollbackReadonlyReportRequest,
@@ -49,6 +50,21 @@ def check_batch_approval_decision_readonly(payload: BatchApprovalDecisionReadonl
     return success_response(
         data=result,
         message="batch approval decision readonly check completed",
+    )
+
+
+@router.post("/approval-decision/audit-linkage/readonly-check")
+def check_batch_approval_decision_audit_linkage_readonly(
+    payload: BatchApprovalDecisionAuditLinkageReadonlyCheckRequest,
+) -> dict:
+    result = sync_service.evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_local(
+        approval_decision=payload.approval_decision,
+        audit_linkage_context=payload.audit_linkage_context,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="batch approval decision audit linkage readonly check completed",
     )
 
 

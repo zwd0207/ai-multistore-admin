@@ -1364,3 +1364,37 @@ evaluate_real_user_invitation_approval_audit_linkage_mock_gate(...)
 ```
 
 It verifies that a future real invitation approval can link to sanitized audit evidence references before any user, session, role, invitation, membership, or audit-row write.
+
+ERP-Batch-2T adds a service-level local-route mock gate:
+
+```text
+evaluate_formal_batch_approval_decision_audit_linkage_readonly_api_local_route_mock_gate(...)
+```
+
+It verifies the route boundary for approval-decision audit linkage review while keeping the route unexposed in the mock gate. It does not approve execution, write audit rows, write products, write orders, write SyncLog, write tested-success rows, or open formal product/order batch execution.
+
+ERP-Batch-2U exposes a local readonly route:
+
+```text
+POST /api/v1/batch/approval-decision/audit-linkage/readonly-check
+```
+
+The route reviews whether a formal batch approval decision can be linked to sanitized audit-evidence references. It is read-only evidence for operator review only: no execution approval, no audit-row write, no product/order write, no platform call, and no formal product/order batch sync opening.
+
+Naver-Product-Batch-2I adds a service-level mock gate:
+
+```text
+evaluate_naver_product_batch_execution_approval_readonly_api_mock_gate(...)
+```
+
+It verifies a future readonly API contract for Naver product batch execution approval evidence. It keeps `public_endpoint_enabled=false`, `backend_route_implemented=false`, `execution_approved=false`, `products_written=false`, `operation_audit_rows_written=false`, `platform_product_writes_enabled=false`, and formal product batch sync closed.
+
+ERP-Multistore-2O documents the readonly API plan for invitation approval audit linkage. The future API may review target user hash, masked login identifier, store scope, target role, permission evidence, backup evidence, expiry policy, readback plan, rollback plan, and audit correlation evidence only. It must not send invitations, create users, create sessions, assign roles, write memberships, or write audit rows.
+
+ERP-Multistore-2P adds a service-level mock gate:
+
+```text
+evaluate_real_user_invitation_approval_audit_linkage_readonly_api_mock_gate(...)
+```
+
+It verifies the future readonly API shape for invitation approval audit linkage while keeping routes, invitations, user creation, auth sessions, role assignment, membership writes, audit-row writes, and formal sync closed.

@@ -21,5 +21,11 @@ class BatchApprovalDecisionReadonlyCheckRequest(BaseModel):
     readonly_api_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class BatchApprovalDecisionAuditLinkageReadonlyCheckRequest(BaseModel):
+    approval_decision: dict[str, Any] = Field(default_factory=dict)
+    audit_linkage_context: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class NaverProductRollbackReadonlyReportRequest(BaseModel):
     rollback_drill_gate: dict[str, Any] = Field(default_factory=dict)
