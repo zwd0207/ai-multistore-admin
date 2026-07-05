@@ -62,6 +62,9 @@ export const backendApi = {
   normalizeBatchReadonlyEvidence: (payload) => sendData('post', '/batch/readonly-evidence', payload),
   checkBatchApprovalAuditEvidence: (payload) => sendData('post', '/batch/approval-audit-evidence', payload),
   checkBatchApprovalDecisionReadonly: (payload) => sendData('post', '/batch/approval-decision/readonly-check', payload),
+  checkBatchApprovalDecisionAuditLinkageReadonly: (payload) => (
+    sendData('post', '/batch/approval-decision/audit-linkage/readonly-check', payload)
+  ),
   getNaverProductRollbackReadonlyReport: (payload) => sendData('post', '/batch/naver/products/rollback-readonly-report', payload),
   getRolePermissionInventory: () => getData('/permissions/role-inventory'),
   checkPermissionMock: (payload) => sendData('post', '/permissions/mock-check', payload),

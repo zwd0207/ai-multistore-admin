@@ -1893,3 +1893,33 @@ Future invitation approval audit linkage APIs may review sanitized evidence only
 The mock gate is documented in `PHASE_ERP_MULTISTORE_2P_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_API_MOCK_GATE.md`.
 
 Codex1 now verifies the future invitation approval audit-linkage readonly API shape while keeping routes, invitations, user creation, memberships, and audit-row writes closed.
+
+## Phase ERP-Batch-2V - Approval Decision Audit Linkage Frontend Integration Plan
+
+The frontend integration plan is documented in `PHASE_ERP_BATCH_2V_APPROVAL_DECISION_AUDIT_LINKAGE_FRONTEND_INTEGRATION_PLAN.md`.
+
+Orders should consume the approval-decision audit-linkage readonly API as review evidence only. It must not add an execution button or imply that formal product/order batch sync is open.
+
+## Phase ERP-Batch-2W - Approval Decision Audit Linkage Readonly UI Integration
+
+The readonly UI integration is documented in `PHASE_ERP_BATCH_2W_APPROVAL_DECISION_AUDIT_LINKAGE_READONLY_UI_INTEGRATION.md`.
+
+Codex2 Orders now calls the route-backed approval-decision audit-linkage readonly check through `dataProvider`, with a mock fallback. The panel shows business review readiness while keeping execution closed and technical flags folded.
+
+## Phase Naver-Product-Batch-2J - Product Batch Execution Approval Readonly API Local Route Plan
+
+The local route plan is documented in `PHASE_NAVER_PRODUCT_BATCH_2J_PRODUCT_BATCH_EXECUTION_APPROVAL_READONLY_API_LOCAL_ROUTE_PLAN.md`.
+
+The future route remains planned only. No product execution approval endpoint is exposed in this phase.
+
+## Phase ERP-Multistore-2Q - Invitation Approval Audit Linkage Readonly API Local Route Plan
+
+The local route plan is documented in `PHASE_ERP_MULTISTORE_2Q_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_API_LOCAL_ROUTE_PLAN.md`.
+
+The future route remains planned only. Real invitation, user creation, membership writes, and audit-row writes remain closed.
+
+## Phase ERP-Multistore-2R - Invitation Approval Audit Linkage Readonly UI Plan
+
+The UI plan is documented in `PHASE_ERP_MULTISTORE_2R_INVITATION_APPROVAL_AUDIT_LINKAGE_READONLY_UI_PLAN.md`.
+
+Future Accounts UI may show invitation approval audit-linkage review evidence only. It must not send invitations or create users/memberships.

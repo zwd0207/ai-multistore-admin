@@ -1122,6 +1122,59 @@ function buildBatchApprovalDecisionPayload({ readonlyEvidence, approvalAuditEvid
   };
 }
 
+function buildBatchApprovalDecisionAuditLinkageContext({ approvalDecision, storeId }) {
+  return {
+    store_ids: approvalDecision?.storeIds?.length ? approvalDecision.storeIds : [Number(storeId)],
+    required_actions: approvalDecision?.requiredActions?.length
+      ? approvalDecision.requiredActions
+      : ['products.batch_sync_write', 'orders.batch_sync_write'],
+    approval_decision_id_planned: true,
+    readonly_evidence_hash_planned: true,
+    backup_manifest_reference_planned: true,
+    permission_evidence_reference_planned: true,
+    sensitive_scan_reference_planned: true,
+    readback_result_reference_planned: true,
+    rollback_report_reference_planned: true,
+    operator_identity_hash_planned: true,
+    store_scope_planned: true,
+    audit_correlation_id_planned: true,
+    append_only_audit_rows_planned: true,
+    formal_sync_remains_closed: true,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    operation_audit_rows_written: false,
+  };
+}
+
+function buildBatchApprovalDecisionAuditLinkageReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    execution_button_excluded: true,
+    write_endpoint_excluded: true,
+    sensitive_fields_hidden_from_main_page: true,
+    audit_row_write_excluded: true,
+    route_requires_separate_implementation: true,
+    formal_sync_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    execution_approved: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
+function buildBatchApprovalDecisionAuditLinkagePayload({ approvalDecision, storeId }) {
+  return {
+    approvalDecision,
+    auditLinkageContext: buildBatchApprovalDecisionAuditLinkageContext({ approvalDecision, storeId }),
+    readonlyApiContext: buildBatchApprovalDecisionAuditLinkageReadonlyApiContext(),
+  };
+}
+
 function batchAuditStatusMessage(auditResult) {
   if (!auditResult) return '正在整理批量审批审计证据，只读检查不会写入审计记录。';
   if (auditResult.status === 'batch_approval_audit_evidence_ready') {
@@ -1470,6 +1523,15 @@ function batchDecisionStatusMessage(result) {
   return result.businessMessage || '批量同步审批决策材料已返回，执行开关保持关闭。';
 }
 
+function batchDecisionAuditLinkageStatusMessage(result) {
+  if (!result) return '正在整理批量审批决策与审计证据链路，本次只做只读检查，不会写入审计记录。';
+  if (result.status === 'approval_decision_audit_linkage_readonly_api_ready') {
+    return result.businessMessage || '批量审批决策与审计证据链路已可只读复核；当前不会批准执行，也不会写入审计记录或业务数据。';
+  }
+  if (result.skipReason) return '批量审批决策与审计证据链路暂未通过，请管理员查看折叠详情并补齐证据。';
+  return result.businessMessage || '批量审批决策与审计证据链路已返回，执行和写入开关保持关闭。';
+}
+
 function FormalBatchApprovalDecisionPanel() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
@@ -1713,6 +1775,185 @@ function FormalBatchApprovalDecisionRuntimePanel() {
             label: `decision_check.${item.key}`,
             value: item.status,
           })),
+        ]}
+      />
+    </section>
+  );
+}
+
+function FormalBatchApprovalDecisionAuditLinkageRuntimePanel() {
+  const { selectedStore, selectedStoreId } = useStoreContext();
+  const [state, setState] = useState({
+    loading: false,
+    result: null,
+    decisionResult: null,
+    auditResult: null,
+    error: '',
+    localOrderCount: 0,
+  });
+  const isNaverStore = normalizePlatform(selectedStore?.platform || selectedStore?.rawPlatform) === 'naver';
+
+  useEffect(() => {
+    if (!isNaverStore || !selectedStoreId) {
+      setState({ loading: false, result: null, decisionResult: null, auditResult: null, error: '', localOrderCount: 0 });
+      return undefined;
+    }
+    let cancelled = false;
+    const loadAuditLinkage = async () => {
+      setState((current) => ({ ...current, loading: true, error: '' }));
+      try {
+        const orderResponse = await dataProvider.getOrders({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          page: 1,
+          pageSize: 100,
+        });
+        const naverOrders = filterNaverOrdersForStore(
+          orderResponse.data || orderResponse.items || [],
+          selectedStore,
+          selectedStoreId,
+        );
+        const readonlyEvidence = await dataProvider.normalizeBatchReadonlyEvidence(buildNaverBatchEvidencePayload({
+          storeId: selectedStoreId,
+          localOrderCount: naverOrders.length,
+        }));
+        const auditResult = await dataProvider.checkBatchApprovalAuditEvidence(buildBatchApprovalAuditPayload({
+          readonlyEvidence,
+          storeId: selectedStoreId,
+        }));
+        const decisionResult = await dataProvider.checkBatchApprovalDecisionReadonly(buildBatchApprovalDecisionPayload({
+          readonlyEvidence,
+          approvalAuditEvidence: auditResult,
+          storeId: selectedStoreId,
+        }));
+        const result = await dataProvider.checkBatchApprovalDecisionAuditLinkageReadonly(
+          buildBatchApprovalDecisionAuditLinkagePayload({
+            approvalDecision: decisionResult,
+            storeId: selectedStoreId,
+          }),
+        );
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result,
+            decisionResult,
+            auditResult,
+            error: '',
+            localOrderCount: naverOrders.length,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setState({
+            loading: false,
+            result: null,
+            decisionResult: null,
+            auditResult: null,
+            error: error?.message || '批量审批决策审计链路暂时无法加载；批量执行仍保持关闭。',
+            localOrderCount: 0,
+          });
+        }
+      }
+    };
+    loadAuditLinkage();
+    return () => { cancelled = true; };
+  }, [isNaverStore, selectedStore, selectedStoreId]);
+
+  if (!isNaverStore) return null;
+
+  const {
+    loading, result, decisionResult, auditResult, error, localOrderCount,
+  } = state;
+  const linkageReady = result?.status === 'approval_decision_audit_linkage_readonly_api_ready';
+
+  return (
+    <section className="content-card">
+      <div className="panel-heading-row">
+        <div>
+          <h2>批量审批审计链路只读复核</h2>
+          <p>这里确认“审批决策”和“审计证据”是否已经能对应起来。当前只用于人工复核，不批准执行，不写审计记录，也不写商品或订单。</p>
+        </div>
+        <span className="period-chip">{loading ? '整理中' : '只读复核'}</span>
+      </div>
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={linkageReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>审计链路</strong>
+            <span>{linkageReady ? '可复核' : '待确认'}</span>
+          </div>
+          <p>{batchDecisionAuditLinkageStatusMessage(result)}</p>
+          <small>这只是复核材料，不是执行批准；正式批量写入仍需要单独阶段。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>关联材料</strong>
+            <span>已整理</span>
+          </div>
+          <p>审批决策、备份清单、权限证据、敏感扫描、回读结果、回滚报告和操作人标识都需要能互相关联。</p>
+          <small>审计记录未来只能追加写入，当前不会写入 operation audit rows。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>执行状态</strong>
+            <span>关闭</span>
+          </div>
+          <p>没有执行按钮，不调用 Naver，不执行 real_sync，不写商品、订单、SyncLog、tested_success 或审计记录。</p>
+          <small>这一步只降低后续人工审批看不懂证据链的风险。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>本地订单范围</strong>
+            <span>{localOrderCount} 条</span>
+          </div>
+          <p>这里仅基于当前本地 Naver 订单和只读审批材料做链路复核，不代表平台有新的待写入候选。</p>
+          <small>真实候选仍必须来自单独的只读 preview。</small>
+        </article>
+      </div>
+      <TechnicalDetails
+        title="查看批量审批审计链路技术详情"
+        description="route、phase、missing flags 和写入开关只给管理员排查使用；主页面只展示业务结论。"
+        items={[
+          { label: 'phase', value: result?.phase || 'ERP-Batch-2U' },
+          { label: 'status', value: result?.status },
+          { label: 'skip_reason', value: result?.skipReason },
+          { label: 'route_path', value: result?.routePath },
+          { label: 'selected_store_id', value: selectedStoreId },
+          { label: 'local_order_count', value: localOrderCount },
+          { label: 'decision_phase', value: decisionResult?.phase },
+          { label: 'decision_status', value: decisionResult?.status },
+          { label: 'audit_phase', value: auditResult?.phase },
+          { label: 'audit_status', value: auditResult?.status },
+          { label: 'audit_linkage_ready', value: result?.auditLinkageReady },
+          { label: 'missing_linkage_flags', value: result?.missingLinkageFlags?.join(', ') || '[]' },
+          { label: 'missing_api_flags', value: result?.missingApiFlags?.join(', ') || '[]' },
+          { label: 'required_actions', value: result?.requiredActions?.join(', ') || '-' },
+          { label: 'approval_decision_id_planned', value: result?.approvalDecisionIdPlanned },
+          { label: 'readonly_evidence_hash_planned', value: result?.readonlyEvidenceHashPlanned },
+          { label: 'backup_manifest_reference_planned', value: result?.backupManifestReferencePlanned },
+          { label: 'permission_evidence_reference_planned', value: result?.permissionEvidenceReferencePlanned },
+          { label: 'sensitive_scan_reference_planned', value: result?.sensitiveScanReferencePlanned },
+          { label: 'readback_result_reference_planned', value: result?.readbackResultReferencePlanned },
+          { label: 'rollback_report_reference_planned', value: result?.rollbackReportReferencePlanned },
+          { label: 'operator_identity_hash_planned', value: result?.operatorIdentityHashPlanned },
+          { label: 'store_scope_planned', value: result?.storeScopePlanned },
+          { label: 'audit_correlation_id_planned', value: result?.auditCorrelationIdPlanned },
+          { label: 'append_only_audit_rows_planned', value: result?.appendOnlyAuditRowsPlanned },
+          { label: 'backend_route_implemented', value: result?.backendRouteImplemented },
+          { label: 'public_endpoint_enabled', value: result?.publicEndpointEnabled },
+          { label: 'execution_approved', value: result?.executionApproved },
+          { label: 'real_api_called', value: result?.realApiCalled },
+          { label: 'real_database_written', value: result?.realDatabaseWritten },
+          { label: 'orders_written', value: result?.ordersWritten },
+          { label: 'products_written', value: result?.productsWritten },
+          { label: 'sync_log_written', value: result?.syncLogWritten },
+          { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
+          { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
+          { label: 'formal_product_sync_open', value: result?.formalProductSyncOpen },
+          { label: 'formal_order_sync_open', value: result?.formalOrderSyncOpen },
+          { label: 'platform_writes_enabled', value: result?.platformWritesEnabled },
+          { label: 'raw_response_saved', value: result?.rawResponseSaved },
+          { label: 'privacy_fields_redacted', value: result?.privacyFieldsRedacted },
         ]}
       />
     </section>
@@ -2315,6 +2556,7 @@ export default function Orders() {
       <FormalBatchOperatorChecklistPanel />
       <NaverBatchApprovalEvidencePanel />
       <FormalBatchApprovalDecisionRuntimePanel />
+      <FormalBatchApprovalDecisionAuditLinkageRuntimePanel />
       <NaverOrderBatchAuditReadinessPanel />
       <NaverOrderBatchExecutionApprovalPanel />
       <NaverOrderCompleteDetailPanel />
