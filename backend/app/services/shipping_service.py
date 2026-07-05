@@ -20,6 +20,7 @@ from app.models.shipping import (
     ShippingTrackingImportBatch,
     ShippingTrackingImportRow,
 )
+from app.models.order import Order
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.store_service import ensure_store_exists
 
@@ -1133,6 +1134,289 @@ def list_shipping_tracking_import_history(
             "已读取本地物流单号导入记录。"
             if items
             else "当前还没有本地物流单号导入记录。"
+        ),
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
+def _tracking_rows_from_import_batch(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str,
+    import_batch_id: int,
+) -> list[dict[str, Any]]:
+    rows = db.scalars(
+        select(ShippingTrackingImportRow)
+        .where(
+            ShippingTrackingImportRow.import_batch_id == import_batch_id,
+            ShippingTrackingImportRow.store_id == store_id,
+            ShippingTrackingImportRow.platform == platform,
+        )
+        .order_by(ShippingTrackingImportRow.id.asc())
+    ).all()
+    return [
+        {
+            "order_reference": item.order_reference,
+            "product_order_reference": item.product_order_reference,
+            "logistics_inventory_code": item.logistics_inventory_code,
+            "carrier": item.carrier,
+            "tracking_number": item.tracking_number,
+            "shipped_at": item.shipped_at,
+            "operator_note": item.operator_note,
+        }
+        for item in rows
+    ]
+
+
+def evaluate_tracking_order_match_readonly(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    import_batch_id: int | None = None,
+    tracking_rows: list[dict[str, Any]] | None = None,
+    matching_contract_acknowledged: bool = False,
+    actor_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    normalized_platform = _normalize_platform(platform)
+    result = {
+        **_base_result(phase="Shipping-6B"),
+        "readonly_route": True,
+        "matching_contract_acknowledged": bool(matching_contract_acknowledged),
+        "tracking_order_match_readonly": True,
+        "tracking_number_import_open": False,
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "orders_updated": False,
+        "tracking_rows_written": False,
+        "import_batch_id": import_batch_id,
+        "match_rows": [],
+        "total_tracking_rows": 0,
+        "matched_order_count": 0,
+        "unmatched_order_count": 0,
+        "duplicate_tracking_row_count": 0,
+    }
+    if normalized_platform is None:
+        result.update({"status": "blocked", "skip_reason": "platform_not_supported"})
+        return result
+    if matching_contract_acknowledged is not True:
+        result.update({"status": "blocked", "skip_reason": "matching_contract_required"})
+        return result
+
+    source_rows = list(tracking_rows or [])
+    if import_batch_id:
+        source_rows = _tracking_rows_from_import_batch(
+            db,
+            store_id=store_id,
+            platform=normalized_platform,
+            import_batch_id=import_batch_id,
+        )
+
+    forbidden_fields = _sensitive_fields({
+        "tracking_rows": source_rows,
+        "actor_context": actor_context or {},
+    })
+    if forbidden_fields:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "tracking_order_match_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    if not source_rows:
+        result.update({
+            "status": "tracking_order_match_empty",
+            "skip_reason": None,
+            "store_id": store_id,
+            "platform": normalized_platform,
+            "business_message": "No local tracking import rows are available for order matching.",
+        })
+        return result
+
+    normalized_rows, error = _validate_tracking_import_rows(source_rows)
+    if error and error.get("skip_reason"):
+        result.update(error)
+        return result
+
+    duplicate_count = int((error or {}).get("duplicate_count") or 0)
+    orders = db.scalars(
+        select(Order).where(
+            Order.store_id == store_id,
+            Order.platform == normalized_platform,
+        )
+    ).all()
+    orders_by_external_reference = {
+        str(order.external_order_id or "").strip(): order
+        for order in orders
+        if str(order.external_order_id or "").strip()
+    }
+    orders_by_local_reference = {
+        f"local-order-{order.id}": order
+        for order in orders
+    }
+    match_rows: list[dict[str, Any]] = []
+    matched_count = 0
+    for row in normalized_rows or []:
+        order_reference = row["order_reference"]
+        order = orders_by_external_reference.get(order_reference) or orders_by_local_reference.get(order_reference)
+        if order:
+            matched_count += 1
+            match_status = "matched_existing_order"
+            match_method = "order_reference"
+            order_summary = {
+                "local_order_id": order.id,
+                "order_reference": order.external_order_id,
+                "order_status": order.order_status,
+                "product_name": order.product_name,
+                "quantity": order.quantity,
+                "source_type": order.source_type,
+            }
+        else:
+            match_status = "no_local_order_match"
+            match_method = None
+            order_summary = None
+        match_rows.append({
+            "row_index": row["row_index"],
+            "order_reference": order_reference,
+            "product_order_reference": row["product_order_reference"],
+            "logistics_inventory_code": row["logistics_inventory_code"],
+            "carrier": row["carrier"],
+            "tracking_number": row["tracking_number"],
+            "shipped_at": row["shipped_at"],
+            "row_status": row["row_status"],
+            "match_status": match_status,
+            "match_method": match_method,
+            "order_summary": order_summary,
+            "future_write_allowed": False,
+        })
+
+    total_count = len(normalized_rows or [])
+    result.update({
+        "status": "tracking_order_match_readonly_ready",
+        "skip_reason": None,
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "total_tracking_rows": total_count,
+        "matched_order_count": matched_count,
+        "unmatched_order_count": max(total_count - matched_count, 0),
+        "duplicate_tracking_row_count": duplicate_count,
+        "match_rows": match_rows,
+        "business_message": (
+            "Tracking rows have been compared with local orders. This is readonly evidence only; "
+            "orders are not updated and Naver shipment writeback remains closed."
+        ),
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
+def evaluate_shipment_writeback_approval_boundary(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    manual_approval: bool = False,
+    matched_order_count: int = 0,
+    total_tracking_rows: int = 0,
+    matching_evidence_acknowledged: bool = False,
+    backup_evidence_acknowledged: bool = False,
+    audit_evidence_acknowledged: bool = False,
+    naver_writeback_boundary_acknowledged: bool = False,
+    operator_checklist_acknowledged: bool = False,
+    actor_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    normalized_platform = _normalize_platform(platform)
+    result = {
+        **_base_result(phase="Shipping-6C"),
+        "readonly_route": True,
+        "shipment_writeback_boundary_review": True,
+        "manual_approval": bool(manual_approval),
+        "matched_order_count": max(int(matched_order_count or 0), 0),
+        "total_tracking_rows": max(int(total_tracking_rows or 0), 0),
+        "matching_evidence_acknowledged": bool(matching_evidence_acknowledged),
+        "backup_evidence_acknowledged": bool(backup_evidence_acknowledged),
+        "audit_evidence_acknowledged": bool(audit_evidence_acknowledged),
+        "naver_writeback_boundary_acknowledged": bool(naver_writeback_boundary_acknowledged),
+        "operator_checklist_acknowledged": bool(operator_checklist_acknowledged),
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "tracking_number_import_open": False,
+        "orders_updated": False,
+        "required_actions": [
+            "manual_approval",
+            "matched_order_evidence",
+            "matching_evidence_acknowledged",
+            "backup_evidence_acknowledged",
+            "audit_evidence_acknowledged",
+            "naver_writeback_boundary_acknowledged",
+            "operator_checklist_acknowledged",
+        ],
+        "missing_actions": [],
+    }
+    if normalized_platform is None:
+        result.update({"status": "blocked", "skip_reason": "platform_not_supported"})
+        return result
+    forbidden_fields = _sensitive_fields({"actor_context": actor_context or {}})
+    if forbidden_fields:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "shipment_writeback_boundary_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_fields,
+        })
+        return result
+
+    missing_actions = []
+    if manual_approval is not True:
+        missing_actions.append("manual_approval")
+    if int(matched_order_count or 0) <= 0 or int(total_tracking_rows or 0) <= 0:
+        missing_actions.append("matched_order_evidence")
+    if matching_evidence_acknowledged is not True:
+        missing_actions.append("matching_evidence_acknowledged")
+    if backup_evidence_acknowledged is not True:
+        missing_actions.append("backup_evidence_acknowledged")
+    if audit_evidence_acknowledged is not True:
+        missing_actions.append("audit_evidence_acknowledged")
+    if naver_writeback_boundary_acknowledged is not True:
+        missing_actions.append("naver_writeback_boundary_acknowledged")
+    if operator_checklist_acknowledged is not True:
+        missing_actions.append("operator_checklist_acknowledged")
+
+    result.update({
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "missing_actions": missing_actions,
+        "status": "shipment_writeback_boundary_ready" if not missing_actions else "blocked",
+        "skip_reason": None if not missing_actions else missing_actions[0],
+        "business_message": (
+            "Shipment writeback boundary evidence is ready for a future separately approved phase. "
+            "This route still does not call Naver."
+            if not missing_actions
+            else "Shipment writeback remains closed until every approval, backup, audit, and operator checklist item is ready."
         ),
         "real_database_written": False,
         "real_api_called": False,

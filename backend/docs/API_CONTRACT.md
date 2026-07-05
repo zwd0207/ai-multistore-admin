@@ -3487,3 +3487,97 @@ Response fields:
 ```
 
 The history route is read-only. It does not write orders, products, SyncLog, capability test results, tracking numbers, audit rows, or platform shipment states.
+
+### Shipping-6A to Shipping-6E
+
+Shipping-6A to 6E add readonly tracking-to-order match evidence and a future Naver shipment writeback approval boundary.
+
+#### `POST /api/v1/shipping/tracking-order-match/readonly-check`
+
+Purpose: compare parsed or locally recorded tracking rows with local orders.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "import_batch_id": 1,
+  "matching_contract_acknowledged": true,
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  },
+  "tracking_rows": []
+}
+```
+
+If `import_batch_id` is present, rows are read from `shipping_tracking_import_rows`. If it is absent, `tracking_rows` from the request are checked. The route is read-only.
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-6B",
+  "status": "tracking_order_match_readonly_ready",
+  "tracking_order_match_readonly": true,
+  "total_tracking_rows": 1,
+  "matched_order_count": 1,
+  "unmatched_order_count": 0,
+  "duplicate_tracking_row_count": 0,
+  "shipment_writeback_called": false,
+  "orders_updated": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "match_rows": [
+    {
+      "order_reference": "safe-local-order-reference",
+      "tracking_number": "TRK202607050001",
+      "match_status": "matched_existing_order",
+      "future_write_allowed": false
+    }
+  ]
+}
+```
+
+This route must not update orders, products, SyncLog, capability test results, tracking rows, audit rows, or platform shipment states.
+
+#### `POST /api/v1/shipping/shipment-writeback/approval-boundary`
+
+Purpose: review future shipment writeback gate evidence without calling Naver.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "manual_approval": true,
+  "matched_order_count": 1,
+  "total_tracking_rows": 1,
+  "matching_evidence_acknowledged": true,
+  "backup_evidence_acknowledged": true,
+  "audit_evidence_acknowledged": true,
+  "naver_writeback_boundary_acknowledged": true,
+  "operator_checklist_acknowledged": true
+}
+```
+
+Response fields:
+
+```json
+{
+  "phase": "Shipping-6C",
+  "status": "shipment_writeback_boundary_ready",
+  "shipment_writeback_boundary_review": true,
+  "shipment_writeback_open": false,
+  "shipment_writeback_called": false,
+  "orders_updated": false,
+  "real_database_written": false,
+  "real_api_called": false,
+  "platform_writes_enabled": false,
+  "missing_actions": []
+}
+```
+
+This route is approval-boundary evidence only. It does not open Naver shipment writeback. A future real writeback phase must be separately approved, backed up, audited, and verified.

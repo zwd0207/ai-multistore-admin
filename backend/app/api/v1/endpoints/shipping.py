@@ -7,9 +7,11 @@ from app.schemas.shipping import (
     ShippingExcelExportRequest,
     ShippingMappingWriteGateRequest,
     ShippingMappingWriteRequest,
+    ShippingShipmentWritebackBoundaryRequest,
     ShippingTrackingImportMockParseRequest,
     ShippingTrackingImportWriteGateRequest,
     ShippingTrackingImportWriteRequest,
+    ShippingTrackingOrderMatchReadonlyRequest,
 )
 from app.services import shipping_service
 
@@ -69,6 +71,45 @@ def list_shipping_tracking_import_history(
         include_rows=include_rows,
     )
     return success_response(data=result, message="shipping tracking import history listed")
+
+
+@router.post("/tracking-order-match/readonly-check")
+def check_tracking_order_match_readonly(
+    payload: ShippingTrackingOrderMatchReadonlyRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = shipping_service.evaluate_tracking_order_match_readonly(
+        db,
+        store_id=payload.store_id,
+        platform=payload.platform,
+        import_batch_id=payload.import_batch_id,
+        tracking_rows=[item.model_dump() for item in payload.tracking_rows],
+        matching_contract_acknowledged=payload.matching_contract_acknowledged,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="shipping tracking order match readonly checked")
+
+
+@router.post("/shipment-writeback/approval-boundary")
+def check_shipment_writeback_approval_boundary(
+    payload: ShippingShipmentWritebackBoundaryRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = shipping_service.evaluate_shipment_writeback_approval_boundary(
+        db,
+        store_id=payload.store_id,
+        platform=payload.platform,
+        manual_approval=payload.manual_approval,
+        matched_order_count=payload.matched_order_count,
+        total_tracking_rows=payload.total_tracking_rows,
+        matching_evidence_acknowledged=payload.matching_evidence_acknowledged,
+        backup_evidence_acknowledged=payload.backup_evidence_acknowledged,
+        audit_evidence_acknowledged=payload.audit_evidence_acknowledged,
+        naver_writeback_boundary_acknowledged=payload.naver_writeback_boundary_acknowledged,
+        operator_checklist_acknowledged=payload.operator_checklist_acknowledged,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="shipping shipment writeback boundary checked")
 
 
 @router.post("/logistics-mappings/write-gate")

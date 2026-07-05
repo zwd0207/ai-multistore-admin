@@ -95,6 +95,33 @@ class ShippingTrackingImportWriteRequest(ShippingTrackingImportMockParseRequest)
     pass
 
 
+class ShippingTrackingOrderMatchReadonlyRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    import_batch_id: int | None = Field(default=None, ge=1)
+    tracking_rows: list[ShippingTrackingImportRowInput] = Field(default_factory=list, max_length=200)
+    matching_contract_acknowledged: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ShippingShipmentWritebackBoundaryRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    manual_approval: bool = False
+    matched_order_count: int = Field(default=0, ge=0, le=10_000)
+    total_tracking_rows: int = Field(default=0, ge=0, le=10_000)
+    matching_evidence_acknowledged: bool = False
+    backup_evidence_acknowledged: bool = False
+    audit_evidence_acknowledged: bool = False
+    naver_writeback_boundary_acknowledged: bool = False
+    operator_checklist_acknowledged: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int

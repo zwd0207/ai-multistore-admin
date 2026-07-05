@@ -1574,6 +1574,8 @@ def verify_openapi() -> None:
         "/api/v1/shipping/tracking-import/write-gate": {"post"},
         "/api/v1/shipping/tracking-import": {"post"},
         "/api/v1/shipping/tracking-import-history": {"get"},
+        "/api/v1/shipping/tracking-order-match/readonly-check": {"post"},
+        "/api/v1/shipping/shipment-writeback/approval-boundary": {"post"},
     }
     for shipping_path, expected_methods in shipping_methods.items():
         methods = set(openapi_json["paths"][shipping_path].keys())
@@ -15753,6 +15755,8 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
 
     from app.main import app
     from app.database import SessionLocal
+    from app.core.timezone import get_utc_now
+    from app.models.order import Order
     from app.services.shipping_service import (
         evaluate_real_excel_generation_mock_gate,
         evaluate_tracking_number_import_mock_gate,
@@ -16423,6 +16427,159 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert tracking_history_payload["privacy_fields_redacted"] is True, tracking_history_payload
         assert shipping_counts(store_id) == tracking_history_before_counts, shipping_counts(store_id)
 
+        now = get_utc_now()
+        with SessionLocal() as seed_db:
+            seed_db.add(Order(
+                store_id=store_id,
+                platform="naver",
+                external_order_id="shipping-order-safe-001",
+                buyer_name=None,
+                buyer_masked_phone=None,
+                product_name="PXG Wheel Bag",
+                quantity=1,
+                order_amount=499000,
+                currency="KRW",
+                order_status="PAYED",
+                paid_at=now,
+                ordered_at=now,
+                source_type="verify_shipping_match_local_order",
+                last_synced_at=now,
+                raw_data={"shipping_verify": True},
+            ))
+            seed_db.commit()
+
+        tracking_match_before_counts = shipping_counts(store_id)
+        assert tracking_match_before_counts["orders"] == tracking_history_before_counts["orders"] + 1, tracking_match_before_counts
+        match_missing_ack = client.post("/api/v1/shipping/tracking-order-match/readonly-check", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "matching_contract_acknowledged": False,
+            "tracking_rows": [safe_tracking_row],
+        })
+        assert match_missing_ack.status_code == 200, match_missing_ack.text
+        match_missing_ack_payload = match_missing_ack.json()["data"]
+        assert match_missing_ack_payload["phase"] == "Shipping-6B", match_missing_ack_payload
+        assert match_missing_ack_payload["status"] == "blocked", match_missing_ack_payload
+        assert match_missing_ack_payload["skip_reason"] == "matching_contract_required", match_missing_ack_payload
+        assert match_missing_ack_payload["orders_updated"] is False, match_missing_ack_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
+        match_sensitive = client.post("/api/v1/shipping/tracking-order-match/readonly-check", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "matching_contract_acknowledged": True,
+            "tracking_rows": [{
+                **safe_tracking_row,
+                "receiverPhone": "010-1111-2222",
+            }],
+        })
+        assert match_sensitive.status_code == 200, match_sensitive.text
+        match_sensitive_payload = match_sensitive.json()["data"]
+        assert match_sensitive_payload["phase"] == "Shipping-6B", match_sensitive_payload
+        assert match_sensitive_payload["status"] == "blocked", match_sensitive_payload
+        assert match_sensitive_payload["skip_reason"] == "tracking_order_match_sensitive_field_blocked", match_sensitive_payload
+        assert match_sensitive_payload["orders_updated"] is False, match_sensitive_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
+        match_response = client.post("/api/v1/shipping/tracking-order-match/readonly-check", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "import_batch_id": tracking_write_payload["import_batch_id"],
+            "matching_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert match_response.status_code == 200, match_response.text
+        match_payload = match_response.json()["data"]
+        assert match_payload["phase"] == "Shipping-6B", match_payload
+        assert match_payload["status"] == "tracking_order_match_readonly_ready", match_payload
+        assert match_payload["tracking_order_match_readonly"] is True, match_payload
+        assert match_payload["total_tracking_rows"] == 2, match_payload
+        assert match_payload["matched_order_count"] == 2, match_payload
+        assert match_payload["duplicate_tracking_row_count"] == 1, match_payload
+        assert match_payload["match_rows"][0]["match_status"] == "matched_existing_order", match_payload
+        assert match_payload["match_rows"][0]["order_summary"]["order_status"] == "PAYED", match_payload
+        assert match_payload["match_rows"][0]["future_write_allowed"] is False, match_payload
+        assert match_payload["shipment_writeback_called"] is False, match_payload
+        assert match_payload["orders_updated"] is False, match_payload
+        assert match_payload["real_database_written"] is False, match_payload
+        assert match_payload["real_api_called"] is False, match_payload
+        assert match_payload["orders_written"] is False, match_payload
+        assert match_payload["products_written"] is False, match_payload
+        assert match_payload["sync_log_written"] is False, match_payload
+        assert match_payload["capability_tested_success_written"] is False, match_payload
+        assert match_payload["raw_response_saved"] is False, match_payload
+        assert match_payload["privacy_fields_redacted"] is True, match_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
+        unmatched_response = client.post("/api/v1/shipping/tracking-order-match/readonly-check", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "matching_contract_acknowledged": True,
+            "tracking_rows": [{**safe_tracking_row, "order_reference": "shipping-order-safe-no-match"}],
+        })
+        assert unmatched_response.status_code == 200, unmatched_response.text
+        unmatched_payload = unmatched_response.json()["data"]
+        assert unmatched_payload["status"] == "tracking_order_match_readonly_ready", unmatched_payload
+        assert unmatched_payload["matched_order_count"] == 0, unmatched_payload
+        assert unmatched_payload["unmatched_order_count"] == 1, unmatched_payload
+        assert unmatched_payload["match_rows"][0]["match_status"] == "no_local_order_match", unmatched_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
+        boundary_blocked = client.post("/api/v1/shipping/shipment-writeback/approval-boundary", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": False,
+            "matched_order_count": match_payload["matched_order_count"],
+            "total_tracking_rows": match_payload["total_tracking_rows"],
+            "matching_evidence_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "naver_writeback_boundary_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+        })
+        assert boundary_blocked.status_code == 200, boundary_blocked.text
+        boundary_blocked_payload = boundary_blocked.json()["data"]
+        assert boundary_blocked_payload["phase"] == "Shipping-6C", boundary_blocked_payload
+        assert boundary_blocked_payload["status"] == "blocked", boundary_blocked_payload
+        assert boundary_blocked_payload["skip_reason"] == "manual_approval", boundary_blocked_payload
+        assert boundary_blocked_payload["shipment_writeback_open"] is False, boundary_blocked_payload
+        assert boundary_blocked_payload["shipment_writeback_called"] is False, boundary_blocked_payload
+        assert boundary_blocked_payload["orders_updated"] is False, boundary_blocked_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
+        boundary_ready = client.post("/api/v1/shipping/shipment-writeback/approval-boundary", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "manual_approval": True,
+            "matched_order_count": match_payload["matched_order_count"],
+            "total_tracking_rows": match_payload["total_tracking_rows"],
+            "matching_evidence_acknowledged": True,
+            "backup_evidence_acknowledged": True,
+            "audit_evidence_acknowledged": True,
+            "naver_writeback_boundary_acknowledged": True,
+            "operator_checklist_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+        })
+        assert boundary_ready.status_code == 200, boundary_ready.text
+        boundary_ready_payload = boundary_ready.json()["data"]
+        assert boundary_ready_payload["phase"] == "Shipping-6C", boundary_ready_payload
+        assert boundary_ready_payload["status"] == "shipment_writeback_boundary_ready", boundary_ready_payload
+        assert boundary_ready_payload["shipment_writeback_boundary_review"] is True, boundary_ready_payload
+        assert boundary_ready_payload["missing_actions"] == [], boundary_ready_payload
+        assert boundary_ready_payload["shipment_writeback_open"] is False, boundary_ready_payload
+        assert boundary_ready_payload["shipment_writeback_called"] is False, boundary_ready_payload
+        assert boundary_ready_payload["tracking_number_import_open"] is False, boundary_ready_payload
+        assert boundary_ready_payload["orders_updated"] is False, boundary_ready_payload
+        assert boundary_ready_payload["real_database_written"] is False, boundary_ready_payload
+        assert boundary_ready_payload["real_api_called"] is False, boundary_ready_payload
+        assert boundary_ready_payload["orders_written"] is False, boundary_ready_payload
+        assert boundary_ready_payload["products_written"] is False, boundary_ready_payload
+        assert boundary_ready_payload["sync_log_written"] is False, boundary_ready_payload
+        assert boundary_ready_payload["capability_tested_success_written"] is False, boundary_ready_payload
+        assert boundary_ready_payload["raw_response_saved"] is False, boundary_ready_payload
+        assert boundary_ready_payload["privacy_fields_redacted"] is True, boundary_ready_payload
+        assert shipping_counts(store_id) == tracking_match_before_counts, shipping_counts(store_id)
+
         excel_serialized = json.dumps({
             "manual": excel_manual_gate,
             "privacy": excel_privacy_gate,
@@ -16438,6 +16595,12 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "tracking_write_ready": tracking_write_ready_payload,
             "tracking_write": tracking_write_payload,
             "tracking_history": tracking_history_payload,
+            "match_missing_ack": match_missing_ack_payload,
+            "match_sensitive": match_sensitive_payload,
+            "match": match_payload,
+            "unmatched": unmatched_payload,
+            "boundary_blocked": boundary_blocked_payload,
+            "boundary_ready": boundary_ready_payload,
         }, ensure_ascii=False, default=str).lower()
         for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
             assert marker not in excel_serialized, excel_serialized

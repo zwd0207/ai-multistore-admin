@@ -1571,3 +1571,20 @@ The local write route writes one import batch, import rows, and one safe `operat
 The tracking import history route is read-only. It returns local import batch metadata and optional rows for operator review. It keeps `tracking_number_import_open=false`, `shipment_writeback_called=false`, `orders_updated=false`, `raw_response_saved=false`, `secrets_saved=false`, and `privacy_fields_redacted=true`.
 
 Naver shipment writeback, tracking-number-to-order status updates, logistics-provider API integration, tracking upload file binary parsing, cancel/return/exchange writes, and formal order batch sync remain closed.
+
+### Shipping-6A to Shipping-6E: Tracking-to-Order Match Evidence and Writeback Boundary
+
+Shipping-6A through 6E add readonly matching evidence and a future shipment writeback boundary for the Shipping Assistant.
+
+New local readonly routes:
+
+```text
+POST /api/v1/shipping/tracking-order-match/readonly-check
+POST /api/v1/shipping/shipment-writeback/approval-boundary
+```
+
+`tracking-order-match/readonly-check` compares safe tracking import rows with local orders by `order_reference`. It can read rows from a local tracking import batch or from request rows. It returns match counts and row-level match evidence only. It does not update `orders`, does not write tracking rows, does not write audit rows, does not call Naver, and does not call a logistics-provider API.
+
+`shipment-writeback/approval-boundary` reviews whether future Naver shipment writeback evidence is complete. Even when all checklist items are present, it keeps `shipment_writeback_open=false`, `shipment_writeback_called=false`, `orders_updated=false`, `real_api_called=false`, and `platform_writes_enabled=false`. Real Naver shipment writeback must be a separately approved future phase.
+
+Shipping-6E adds an operator checklist direction for the frontend: download unshipped orders, maintain logistics inventory codes, export Excel, import tracking numbers, readonly-match orders, then perform a separate human-approved writeback phase later.
