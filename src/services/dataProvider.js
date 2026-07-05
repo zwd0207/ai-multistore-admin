@@ -1197,7 +1197,14 @@ function adaptShippingExportHistoryResult(data = {}) {
     exportHistoryReadonly: Boolean(data.export_history_readonly ?? data.exportHistoryReadonly ?? true),
     trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
     shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
-    importRecordWritten: Boolean(data.import_record_written ?? data.importRecordWritten),
+    importRecordWritten: Boolean(
+      data.import_record_written
+      ?? data.importRecordWritten
+      ?? data.tracking_import_records_written
+      ?? data.trackingImportRecordsWritten
+    ),
+    trackingImportBatchWritten: Boolean(data.tracking_import_batch_written ?? data.trackingImportBatchWritten),
+    trackingImportRowsWritten: Boolean(data.tracking_import_rows_written ?? data.trackingImportRowsWritten),
     realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
     realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
     ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
@@ -1271,6 +1278,9 @@ function adaptShippingTrackingImportMockParseResult(data = {}) {
     rowCount: Number(data.row_count ?? data.rowCount ?? rows.length),
     readyRowCount: Number(data.ready_row_count ?? data.readyRowCount ?? 0),
     duplicateRowCount: Number(data.duplicate_row_count ?? data.duplicateRowCount ?? 0),
+    importBatchId: data.import_batch_id ?? data.importBatchId ?? null,
+    auditCorrelationId: data.audit_correlation_id ?? data.auditCorrelationId ?? null,
+    operationAuditLogId: data.operation_audit_log_id ?? data.operationAuditLogId ?? null,
     fileParsed: Boolean(data.file_parsed ?? data.fileParsed),
     parserContractAcknowledged: Boolean(data.parser_contract_acknowledged ?? data.parserContractAcknowledged),
     trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),

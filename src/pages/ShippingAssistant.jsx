@@ -531,27 +531,33 @@ function TrackingImportParserUploadPanel({
   fileName = '',
   fileSize = 0,
   preview,
+  importResult,
   loading = false,
+  saving = false,
   error = '',
+  saveError = '',
   onFileChange,
   onParse,
+  onSaveImport,
 }) {
   const rows = preview?.rows || [];
+  const canSave = preview?.status === 'tracking_xlsx_parser_mock_ready' && rows.length > 0 && !loading && !saving;
+  const saved = ['tracking_import_local_write_succeeded', 'mock_tracking_import_local_record_ready'].includes(importResult?.status);
   return (
     <section className="content-card">
       <div className="section-heading">
         <div>
-          <h2>Tracking xlsx preview</h2>
-          <p>{preview?.businessMessage || 'Upload the logistics tracking return file for preview only. The file is not saved, rows are not written, and Naver is not called.'}</p>
+          <h2>物流单号表导入</h2>
+          <p>{importResult?.businessMessage || preview?.businessMessage || '先预览物流商回传 xlsx，确认后保存为本地导入记录；不会回填 Naver。'}</p>
         </div>
-        <span className={statusToneClass(preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'success' : 'neutral')}><i />{preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'Preview ready' : 'Preview only'}</span>
+        <span className={statusToneClass(saved || preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'success' : 'neutral')}><i />{saved ? '已保存记录' : preview?.status === 'tracking_xlsx_parser_mock_ready' ? '预览通过' : '等待上传'}</span>
       </div>
       <div className="upload-shell">
         <input
           type="file"
           accept=".xlsx"
           onChange={onFileChange}
-          disabled={loading}
+          disabled={loading || saving}
         />
         <div>
           <strong>{fileName || 'No xlsx selected'}</strong>
@@ -563,14 +569,26 @@ function TrackingImportParserUploadPanel({
           type="button"
           className="button primary"
           onClick={onParse}
-          disabled={loading || !fileName}
+          disabled={loading || saving || !fileName}
         >
-          {loading ? 'Parsing...' : 'Preview xlsx'}
+          {loading ? '解析中...' : '预览 xlsx'}
+        </button>
+        <button
+          type="button"
+          className="button ghost"
+          onClick={onSaveImport}
+          disabled={!canSave}
+        >
+          {saving ? '保存中...' : '保存本地导入记录'}
         </button>
       </div>
       {error ? <div className="mock-sync-error">{error}</div> : null}
+      {saveError ? <div className="mock-sync-error">{saveError}</div> : null}
       {preview?.status === 'tracking_xlsx_parser_mock_ready' ? (
-        <div className="mock-sync-success">Parser preview passed. Review rows before a separate local import-record phase.</div>
+        <div className="mock-sync-success">预览通过。确认行内容后，可保存为本地物流单号导入记录。</div>
+      ) : null}
+      {saved ? (
+        <div className="mock-sync-success">本地导入记录已生成；下一步可匹配订单并更新本地订单状态。</div>
       ) : null}
       {rows.length ? (
         <div className="table-wrap">
@@ -615,17 +633,19 @@ function TrackingImportParserUploadPanel({
           { label: 'row_count', value: preview?.rowCount ?? 0 },
           { label: 'ready_row_count', value: preview?.readyRowCount ?? 0 },
           { label: 'duplicate_row_count', value: preview?.duplicateRowCount ?? 0 },
+          { label: 'import_batch_id', value: importResult?.importBatchId || 'not_created' },
+          { label: 'operation_audit_log_id', value: importResult?.operationAuditLogId || 'not_created' },
           { label: 'file_content_saved', value: preview?.fileContentSaved ?? false },
           { label: 'parsed_rows_written', value: preview?.parsedRowsWritten ?? false },
-          { label: 'import_record_written', value: preview?.importRecordWritten ?? false },
+          { label: 'import_record_written', value: importResult?.importRecordWritten ?? preview?.importRecordWritten ?? false },
           { label: 'tracking_number_import_open', value: preview?.trackingNumberImportOpen ?? false },
-          { label: 'shipment_writeback_called', value: preview?.shipmentWritebackCalled ?? false },
-          { label: 'orders_updated', value: preview?.ordersUpdated ?? false },
-          { label: 'real_api_called', value: preview?.realApiCalled ?? false },
-          { label: 'real_database_written', value: preview?.realDatabaseWritten ?? false },
-          { label: 'raw_response_saved', value: preview?.rawResponseSaved ?? false },
-          { label: 'privacy_fields_redacted', value: preview?.privacyFieldsRedacted ?? true },
-          { label: 'next_action', value: preview?.nextAction || 'not_ready' },
+          { label: 'shipment_writeback_called', value: importResult?.shipmentWritebackCalled ?? preview?.shipmentWritebackCalled ?? false },
+          { label: 'orders_updated', value: importResult?.ordersUpdated ?? preview?.ordersUpdated ?? false },
+          { label: 'real_api_called', value: importResult?.realApiCalled ?? preview?.realApiCalled ?? false },
+          { label: 'real_database_written', value: importResult?.realDatabaseWritten ?? preview?.realDatabaseWritten ?? false },
+          { label: 'raw_response_saved', value: importResult?.rawResponseSaved ?? preview?.rawResponseSaved ?? false },
+          { label: 'privacy_fields_redacted', value: importResult?.privacyFieldsRedacted ?? preview?.privacyFieldsRedacted ?? true },
+          { label: 'next_action', value: importResult ? 'match_orders_then_local_status_update' : preview?.nextAction || 'not_ready' },
         ]}
       >
         {preview ? (
@@ -639,6 +659,8 @@ function TrackingImportParserUploadPanel({
             file_content_saved: preview.fileContentSaved,
             parsed_rows_written: preview.parsedRowsWritten,
             raw_response_saved: preview.rawResponseSaved,
+            import_batch_id: importResult?.importBatchId,
+            operation_audit_log_id: importResult?.operationAuditLogId,
           }, null, 2)}</pre>
         ) : null}
       </TechnicalDetails>
@@ -958,6 +980,9 @@ export default function ShippingAssistant() {
   const [trackingParserPreview, setTrackingParserPreview] = useState(null);
   const [trackingParserError, setTrackingParserError] = useState('');
   const [trackingParserLoading, setTrackingParserLoading] = useState(false);
+  const [trackingImportSaveResult, setTrackingImportSaveResult] = useState(null);
+  const [trackingImportSaveError, setTrackingImportSaveError] = useState('');
+  const [trackingImportSaving, setTrackingImportSaving] = useState(false);
   const [trackingMatchEvidence, setTrackingMatchEvidence] = useState(null);
   const [trackingMatchError, setTrackingMatchError] = useState('');
   const [trackingMatchLoading, setTrackingMatchLoading] = useState(false);
@@ -999,6 +1024,9 @@ export default function ShippingAssistant() {
       setTrackingParserContentBase64('');
       setTrackingParserPreview(null);
       setTrackingParserError('');
+      setTrackingImportSaveResult(null);
+      setTrackingImportSaveError('');
+      setTrackingImportSaving(false);
       setTrackingMatchEvidence(null);
       setTrackingMatchError('');
       setLatestTrackingImportBatchId(null);
@@ -1028,6 +1056,8 @@ export default function ShippingAssistant() {
       setTrackingImportHistoryMessage('');
       setTrackingParserPreview(null);
       setTrackingParserError('');
+      setTrackingImportSaveResult(null);
+      setTrackingImportSaveError('');
       setTrackingMatchLoading(true);
       setTrackingMatchError('');
       setTrackingMatchEvidence(null);
@@ -1135,6 +1165,7 @@ export default function ShippingAssistant() {
           setExportHistory([]);
           setTrackingImportHistory([]);
           setTrackingParserPreview(null);
+          setTrackingImportSaveResult(null);
           setTrackingMatchEvidence(null);
           setLatestTrackingImportBatchId(null);
           setStatusUpdateGate(null);
@@ -1306,6 +1337,12 @@ export default function ShippingAssistant() {
     const file = event.target.files?.[0] || null;
     setTrackingParserPreview(null);
     setTrackingParserError('');
+    setTrackingImportSaveResult(null);
+    setTrackingImportSaveError('');
+    setLatestTrackingImportBatchId(null);
+    setStatusUpdateGate(null);
+    setStatusUpdateResult(null);
+    setStatusUpdateError('');
     setTrackingParserFile(file);
     setTrackingParserContentBase64('');
     if (!file) return;
@@ -1345,11 +1382,89 @@ export default function ShippingAssistant() {
         throw new Error(result.businessMessage || result.skipReason || 'Tracking xlsx preview failed.');
       }
       setTrackingParserPreview(result);
+      setTrackingImportSaveResult(null);
+      setTrackingImportSaveError('');
     } catch (error) {
       setTrackingParserPreview(null);
       setTrackingParserError(error.message || 'Tracking xlsx preview failed.');
     } finally {
       setTrackingParserLoading(false);
+    }
+  };
+
+  const saveTrackingImportRecord = async () => {
+    const rows = trackingParserPreview?.rows || [];
+    if (trackingParserPreview?.status !== 'tracking_xlsx_parser_mock_ready' || !rows.length) {
+      setTrackingImportSaveError('请先预览通过物流单号 xlsx。');
+      return;
+    }
+    setTrackingImportSaving(true);
+    setTrackingImportSaveError('');
+    setTrackingImportSaveResult(null);
+    setTrackingMatchError('');
+    setStatusUpdateGate(null);
+    setStatusUpdateResult(null);
+    setStatusUpdateError('');
+    try {
+      const payload = {
+        storeId: selectedStoreId,
+        platform: 'naver',
+        fileType: 'tracking_upload',
+        fileFormat: 'xlsx',
+        sourceFileName: trackingParserPreview.sourceFileName || trackingParserFile?.name || 'tracking-upload.xlsx',
+        manualApproval: true,
+        parserContractAcknowledged: true,
+        actorContext: {
+          role: 'admin',
+          actor_id: 'shipping-local-operator',
+        },
+        rows: rows.map((row) => ({
+          orderReference: row.orderNo,
+          productOrderReference: row.productOrderNo,
+          logisticsInventoryCode: row.logisticsInventoryCode,
+          carrier: row.carrier,
+          trackingNumber: row.trackingNumber,
+          shippedAt: row.shippedAt,
+          operatorNote: row.operatorNote,
+        })),
+      };
+      const gateResult = await dataProvider.checkShippingTrackingImportWriteGate(payload);
+      if (!['tracking_import_local_write_gate_ready', 'mock_tracking_import_local_record_ready'].includes(gateResult.status)) {
+        throw new Error(gateResult.businessMessage || gateResult.skipReason || '物流单号导入记录门禁未通过。');
+      }
+      const writeResult = await dataProvider.writeShippingTrackingImport(payload);
+      if (!['tracking_import_local_write_succeeded', 'mock_tracking_import_local_record_ready'].includes(writeResult.status)) {
+        throw new Error(writeResult.businessMessage || writeResult.skipReason || '物流单号导入记录保存失败。');
+      }
+      setTrackingImportSaveResult(writeResult);
+
+      const historyResult = await dataProvider.getShippingTrackingImportHistory({
+        storeId: selectedStoreId,
+        platform: 'naver',
+        limit: 10,
+        includeRows: false,
+      });
+      setTrackingImportHistory(historyResult.data || []);
+      setTrackingImportHistoryMessage(historyResult.businessMessage || '');
+      const nextBatchId = writeResult.importBatchId || (historyResult.data || [])[0]?.id || null;
+      setLatestTrackingImportBatchId(nextBatchId);
+
+      const matchResult = await dataProvider.checkShippingTrackingOrderMatchReadonly({
+        storeId: selectedStoreId,
+        platform: 'naver',
+        importBatchId: nextBatchId,
+        matchingContractAcknowledged: true,
+        actorContext: {
+          role: 'admin',
+          actor_id: 'shipping-local-operator',
+        },
+      });
+      setTrackingMatchEvidence(matchResult);
+    } catch (error) {
+      setTrackingImportSaveResult(null);
+      setTrackingImportSaveError(error.message || '物流单号导入记录保存失败。');
+    } finally {
+      setTrackingImportSaving(false);
     }
   };
 
@@ -1557,10 +1672,14 @@ export default function ShippingAssistant() {
         fileName={trackingParserFile?.name || ''}
         fileSize={trackingParserFile?.size || 0}
         preview={trackingParserPreview}
+        importResult={trackingImportSaveResult}
         loading={trackingParserLoading}
+        saving={trackingImportSaving}
         error={trackingParserError}
+        saveError={trackingImportSaveError}
         onFileChange={selectTrackingParserFile}
         onParse={previewTrackingParserFile}
+        onSaveImport={saveTrackingImportRecord}
       />
       <TrackingImportHistoryPanel
         history={trackingImportHistory}
