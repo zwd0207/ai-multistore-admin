@@ -1553,6 +1553,92 @@ function buildFormalBatchExecutionPreflightContext() {
   };
 }
 
+function buildFormalBatchExecutionDryRunContext() {
+  return {
+    preflight_referenced: true,
+    readonly_candidates_referenced: true,
+    backup_manifest_referenced: true,
+    permission_evidence_referenced: true,
+    audit_linkage_referenced: true,
+    readback_plan_referenced: true,
+    rollback_plan_referenced: true,
+    sensitive_scan_passed: true,
+    execution_window_limited: true,
+    dry_run_only: true,
+    formal_sync_remains_closed: true,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    operation_audit_rows_written: false,
+  };
+}
+
+function buildFormalBatchExecutionDryRunPlan({ selectedStoreId }) {
+  return {
+    mode: 'readonly_dry_run',
+    store_ids: [Number(selectedStoreId)],
+    targets: ['products', 'orders'],
+    sync_kinds: ['naver_product_batch', 'naver_order_batch'],
+    batch_size_limit: 5,
+    execution_approved: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    operation_audit_rows_written: false,
+  };
+}
+
+function buildFormalBatchExecutionDryRunCandidateSummaries({
+  selectedStoreId,
+  localOrderCount,
+  localProductCount,
+}) {
+  const storeIds = [Number(selectedStoreId)];
+  const productCandidateCount = Math.min(Number(localProductCount || 0), 5);
+  const orderCandidateCount = Math.min(Number(localOrderCount || 0), 5);
+  return [
+    {
+      syncKind: 'naver_product_batch',
+      target: 'products',
+      storeIds,
+      candidateCount: productCandidateCount,
+      wouldCreate: 0,
+      wouldUpdate: 0,
+      wouldRefreshOnly: productCandidateCount,
+      wouldSkip: 0,
+      changedFields: [],
+      executionApproved: false,
+      realApiCalled: false,
+      realDatabaseWritten: false,
+      productsWritten: false,
+      rawResponseSaved: false,
+      privacyFieldsRedacted: true,
+    },
+    {
+      syncKind: 'naver_order_batch',
+      target: 'orders',
+      storeIds,
+      candidateCount: orderCandidateCount,
+      wouldCreate: 0,
+      wouldUpdate: 0,
+      wouldRefreshOnly: orderCandidateCount,
+      wouldSkip: 0,
+      changedFields: [],
+      executionApproved: false,
+      realApiCalled: false,
+      realDatabaseWritten: false,
+      ordersWritten: false,
+      rawResponseSaved: false,
+      privacyFieldsRedacted: true,
+    },
+  ];
+}
+
 function buildBatchExecutionActorContext(storeId) {
   return {
     actor_id: 'orders-batch-readonly-ui',
@@ -1681,6 +1767,19 @@ function batchExecutionPreflightStatusMessage(result) {
     return '\u6b63\u5f0f\u6279\u91cf\u6267\u884c\u524d\u7f6e\u68c0\u67e5\u6682\u672a\u901a\u8fc7\uff0c\u8bf7\u7ba1\u7406\u5458\u67e5\u770b\u6298\u53e0\u8be6\u60c5\u5e76\u8865\u9f50\u8bc1\u636e\u3002';
   }
   return result.businessMessage || '\u524d\u7f6e\u68c0\u67e5\u5df2\u8fd4\u56de\uff0c\u6267\u884c\u548c\u5199\u5165\u5f00\u5173\u4fdd\u6301\u5173\u95ed\u3002';
+}
+
+function batchExecutionDryRunStatusMessage(result) {
+  if (!result) {
+    return '正在整理正式批量 dry-run 证据，本次只汇总候选数量和预计动作，不写入任何数据。';
+  }
+  if (result.status === 'formal_batch_execution_dry_run_readonly_ready') {
+    return result.businessMessage || '正式批量 dry-run 证据已可复核；当前仍不调用平台接口，也不写商品或订单。';
+  }
+  if (result.skipReason) {
+    return '正式批量 dry-run 证据暂未通过，请管理员查看折叠详情并补齐前置材料。';
+  }
+  return result.businessMessage || '正式批量 dry-run 已返回，执行和写入开关保持关闭。';
 }
 
 function FormalBatchApprovalDecisionPanel() {
@@ -2116,6 +2215,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   const [state, setState] = useState({
     loading: false,
     result: null,
+    dryRunResult: null,
     decisionResult: null,
     auditLinkageResult: null,
     error: '',
@@ -2129,6 +2229,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
       setState({
         loading: false,
         result: null,
+        dryRunResult: null,
         decisionResult: null,
         auditLinkageResult: null,
         error: '',
@@ -2225,10 +2326,21 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           ],
           preflightContext: buildFormalBatchExecutionPreflightContext(),
         });
+        const dryRunResult = await dataProvider.checkFormalBatchExecutionDryRunReadonly({
+          executionPreflight: result,
+          dryRunContext: buildFormalBatchExecutionDryRunContext(),
+          executionPlan: buildFormalBatchExecutionDryRunPlan({ selectedStoreId }),
+          candidateSummaries: buildFormalBatchExecutionDryRunCandidateSummaries({
+            selectedStoreId,
+            localOrderCount,
+            localProductCount,
+          }),
+        });
         if (!cancelled) {
           setState({
             loading: false,
             result,
+            dryRunResult,
             decisionResult,
             auditLinkageResult,
             error: '',
@@ -2241,6 +2353,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           setState({
             loading: false,
             result: null,
+            dryRunResult: null,
             decisionResult: null,
             auditLinkageResult: null,
             error: error?.message || '\u6b63\u5f0f\u6279\u91cf\u6267\u884c\u524d\u7f6e\u68c0\u67e5\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
@@ -2257,9 +2370,10 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   if (!isNaverStore) return null;
 
   const {
-    loading, result, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
+    loading, result, dryRunResult, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
   } = state;
   const preflightReady = result?.status === 'formal_batch_execution_preflight_readonly_ready';
+  const dryRunReady = dryRunResult?.status === 'formal_batch_execution_dry_run_readonly_ready';
   const decisionReady = decisionResult?.status === 'formal_batch_approval_decision_readonly_api_ready';
   const linkageReady = auditLinkageResult?.status === 'approval_decision_audit_linkage_readonly_api_ready';
 
@@ -2281,6 +2395,39 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           </div>
           <p>{batchExecutionPreflightStatusMessage(result)}</p>
           <small>{'\u8fd9\u4e0d\u662f\u6267\u884c\u6279\u51c6\uff1b\u771f\u6b63\u6279\u91cf\u5199\u5165\u4ecd\u5fc5\u987b\u53e6\u5f00\u9636\u6bb5\u3002'}</small>
+        </article>
+        <article className={dryRunReady ? 'business-capability-card success' : 'business-capability-card warning'}>
+          <div className="business-capability-head">
+            <strong>dry-run 演练</strong>
+            <span>{dryRunReady ? '可复核' : '待补齐'}</span>
+          </div>
+          <p>{batchExecutionDryRunStatusMessage(dryRunResult)}</p>
+          <small>只汇总候选与动作模拟；没有批量执行入口，也不会写入本地业务数据。</small>
+        </article>
+        <article className="business-capability-card info">
+          <div className="business-capability-head">
+            <strong>候选总数</strong>
+            <span>{dryRunResult?.totalCandidateCount ?? 0} 条</span>
+          </div>
+          <p>
+            商品 {dryRunResult?.candidateSummaries?.find((item) => item.target === 'products')?.candidateCount ?? 0}
+            {' '}条，订单 {dryRunResult?.candidateSummaries?.find((item) => item.target === 'orders')?.candidateCount ?? 0}
+            {' '}条，均来自当前店铺本地只读复核范围。
+          </p>
+          <small>每类最多纳入 5 条 dry-run 摘要，防止误当成正式大批量执行窗口。</small>
+        </article>
+        <article className="business-capability-card muted">
+          <div className="business-capability-head">
+            <strong>动作模拟</strong>
+            <span>{dryRunReady ? '已生成' : '未生成'}</span>
+          </div>
+          <p>
+            新增模拟 {dryRunResult?.totalWouldCreate ?? 0}，
+            更新模拟 {dryRunResult?.totalWouldUpdate ?? 0}，
+            刷新模拟 {dryRunResult?.totalWouldRefreshOnly ?? 0}，
+            跳过模拟 {dryRunResult?.totalWouldSkip ?? 0}。
+          </p>
+          <small>这些数字只代表演练摘要，不代表正式商品或订单批量同步已开放。</small>
         </article>
         <article className={decisionReady ? 'business-capability-card success' : 'business-capability-card warning'}>
           <div className="business-capability-head">
@@ -2338,11 +2485,23 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'phase', value: result?.phase || 'ERP-Batch-3A' },
           { label: 'status', value: result?.status },
           { label: 'preflight_status', value: result?.preflightStatus },
+          { label: 'dry_run_phase', value: dryRunResult?.phase || 'ERP-Batch-3D' },
+          { label: 'dry_run_status', value: dryRunResult?.dryRunStatus },
+          { label: 'dry_run_ready', value: dryRunResult?.dryRunReady },
+          { label: 'dry_run_route_path', value: dryRunResult?.routePath },
+          { label: 'dry_run_skip_reason', value: dryRunResult?.skipReason },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'route_path', value: result?.routePath },
           { label: 'selected_store_id', value: selectedStoreId },
           { label: 'local_order_count', value: localOrderCount },
           { label: 'local_product_count', value: localProductCount },
+          { label: 'dry_run_candidate_summary_count', value: dryRunResult?.candidateSummaryCount },
+          { label: 'total_candidate_count', value: dryRunResult?.totalCandidateCount },
+          { label: 'total_would_create', value: dryRunResult?.totalWouldCreate },
+          { label: 'total_would_update', value: dryRunResult?.totalWouldUpdate },
+          { label: 'total_would_refresh_only', value: dryRunResult?.totalWouldRefreshOnly },
+          { label: 'total_would_skip', value: dryRunResult?.totalWouldSkip },
+          { label: 'dry_run_changed_fields', value: dryRunResult?.changedFields?.join(', ') || '[]' },
           { label: 'decision_phase', value: decisionResult?.phase },
           { label: 'decision_status', value: decisionResult?.status },
           { label: 'audit_linkage_phase', value: auditLinkageResult?.phase },
@@ -2366,9 +2525,18 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'tested_success_written', value: result?.capabilityTestedSuccessWritten },
           { label: 'timeline_events_written', value: result?.timelineEventsWritten },
           { label: 'operation_audit_rows_written', value: result?.operationAuditRowsWritten },
+          { label: 'dry_run_real_api_called', value: dryRunResult?.realApiCalled },
+          { label: 'dry_run_real_database_written', value: dryRunResult?.realDatabaseWritten },
+          { label: 'dry_run_orders_written', value: dryRunResult?.ordersWritten },
+          { label: 'dry_run_products_written', value: dryRunResult?.productsWritten },
+          { label: 'dry_run_operation_audit_rows_written', value: dryRunResult?.operationAuditRowsWritten },
           { label: 'formal_sync_open', value: result?.formalSyncOpen },
           { label: 'formal_product_sync_open', value: result?.formalProductSyncOpen },
           { label: 'formal_order_sync_open', value: result?.formalOrderSyncOpen },
+          { label: 'dry_run_formal_sync_open', value: dryRunResult?.formalSyncOpen },
+          { label: 'dry_run_formal_product_sync_open', value: dryRunResult?.formalProductSyncOpen },
+          { label: 'dry_run_formal_order_sync_open', value: dryRunResult?.formalOrderSyncOpen },
+          { label: 'dry_run_platform_writes_enabled', value: dryRunResult?.platformWritesEnabled },
           { label: 'platform_writes_enabled', value: result?.platformWritesEnabled },
           { label: 'platform_product_writes_enabled', value: result?.platformProductWritesEnabled },
           { label: 'platform_order_writes_enabled', value: result?.platformOrderWritesEnabled },
