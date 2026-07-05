@@ -1546,3 +1546,28 @@ The tracking import mock gate validates safe rows, required order or product-ord
 The export-history route reads only `shipping_export_batches` and `shipping_export_batch_rows`. It does not write orders, products, SyncLog, capability test results, tracking numbers, import records, or shipment writeback records.
 
 Naver shipment writeback, logistics-provider API integration, tracking-number persistence, import-history persistence, receiver-privacy exports, cancel/return/exchange writes, and formal order batch sync remain closed.
+
+### Shipping-5A to Shipping-5E: Tracking Import Records and History
+
+Shipping-5A through 5E add a controlled local record layer for future logistics tracking-number uploads.
+
+New local tables:
+
+- `shipping_tracking_import_batches`
+- `shipping_tracking_import_rows`
+
+New local routes:
+
+```text
+POST /api/v1/shipping/tracking-import/write-gate
+POST /api/v1/shipping/tracking-import
+GET /api/v1/shipping/tracking-import-history
+```
+
+The write gate requires `manual_approval=true`, `parser_contract_acknowledged=true`, `file_type=tracking_upload`, `file_format=xlsx`, safe row references, carrier, tracking number, and a safe optional source file name. It does not write the database.
+
+The local write route writes one import batch, import rows, and one safe `operation_audit_logs` row for `operation_phase='Shipping-5D'`. It does not update `orders`, does not write `products`, does not write `SyncLog`, does not add `ApiCapabilityTestResult tested_success`, does not call Naver, does not call a logistics-provider API, and does not execute shipment/cancel/return/exchange writes.
+
+The tracking import history route is read-only. It returns local import batch metadata and optional rows for operator review. It keeps `tracking_number_import_open=false`, `shipment_writeback_called=false`, `orders_updated=false`, `raw_response_saved=false`, `secrets_saved=false`, and `privacy_fields_redacted=true`.
+
+Naver shipment writeback, tracking-number-to-order status updates, logistics-provider API integration, tracking upload file binary parsing, cancel/return/exchange writes, and formal order batch sync remain closed.

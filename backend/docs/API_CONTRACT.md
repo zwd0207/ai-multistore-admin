@@ -3360,3 +3360,130 @@ Response fields:
 ```
 
 This route is read-only. It does not write orders, products, SyncLog, capability test results, tracking numbers, import records, audit rows, or platform shipment states.
+
+### Shipping-5A to Shipping-5E
+
+Shipping-5A to 5E add local tracking-number import records and a read-only import-history route. These routes record local upload metadata only; they do not update order shipment state and do not call Naver.
+
+#### `POST /api/v1/shipping/tracking-import/write-gate`
+
+Purpose: validate whether a parsed tracking upload can be recorded locally.
+
+Request:
+
+```json
+{
+  "store_id": 8,
+  "platform": "naver",
+  "file_type": "tracking_upload",
+  "file_format": "xlsx",
+  "source_file_name": "tracking-upload-safe.xlsx",
+  "manual_approval": true,
+  "parser_contract_acknowledged": true,
+  "actor_context": {
+    "role": "admin",
+    "actor_id": "shipping-local-operator"
+  },
+  "tracking_rows": [
+    {
+      "order_reference": "safe-local-order-reference",
+      "product_order_reference": "safe-product-order-reference",
+      "logistics_inventory_code": "PXG-WHEEL-BAG-BK-OS",
+      "carrier": "Korea carrier",
+      "tracking_number": "TRK202607050001",
+      "shipped_at": "2026-07-05T18:00:00+09:00",
+      "operator_note": "safe operator note"
+    }
+  ]
+}
+```
+
+Success response fields:
+
+```json
+{
+  "phase": "Shipping-5C",
+  "status": "tracking_import_local_write_gate_ready",
+  "row_count": 1,
+  "ready_row_count": 1,
+  "duplicate_row_count": 0,
+  "tracking_import_records_written": false,
+  "tracking_import_batch_written": false,
+  "tracking_import_rows_written": false,
+  "operation_audit_rows_written": false,
+  "real_database_written": false,
+  "tracking_number_import_open": false,
+  "shipment_writeback_called": false,
+  "orders_written": false,
+  "products_written": false,
+  "sync_log_written": false,
+  "capability_tested_success_written": false,
+  "raw_response_saved": false,
+  "privacy_fields_redacted": true
+}
+```
+
+#### `POST /api/v1/shipping/tracking-import`
+
+Purpose: record an approved tracking upload locally for audit and operator history.
+
+This route may write:
+
+- one `shipping_tracking_import_batches` row,
+- one or more `shipping_tracking_import_rows`,
+- one safe `operation_audit_logs` row with `operation_phase='Shipping-5D'`.
+
+This route must not:
+
+- call Naver,
+- call a logistics-provider API,
+- update `orders`,
+- write `products`,
+- write `SyncLog`,
+- add `ApiCapabilityTestResult tested_success`,
+- execute shipment/cancel/return/exchange writes,
+- save token, Authorization, headers, signature, client secret, raw response, buyer/receiver privacy, full address, or zip code.
+
+#### `GET /api/v1/shipping/tracking-import-history`
+
+Purpose: read local tracking import history for the Shipping Assistant.
+
+Query params:
+
+- `store_id`
+- `platform=naver`
+- `limit`, capped at 100
+- `offset`
+- `include_rows=false|true`
+
+Response fields:
+
+```json
+{
+  "phase": "Shipping-5E",
+  "status": "tracking_import_history_ready",
+  "tracking_import_history_readonly": true,
+  "tracking_number_import_open": false,
+  "shipment_writeback_open": false,
+  "orders_updated": false,
+  "items": [
+    {
+      "id": 1,
+      "store_id": 8,
+      "platform": "naver",
+      "file_type": "tracking_upload",
+      "file_format": "xlsx",
+      "source_file_name": "tracking-upload-safe.xlsx",
+      "row_count": 1,
+      "ready_row_count": 1,
+      "duplicate_row_count": 0,
+      "audit_correlation_id": "shipping-5d-safe",
+      "import_status": "recorded",
+      "raw_response_saved": false,
+      "privacy_fields_redacted": true
+    }
+  ]
+}
+```
+
+The history route is read-only. It does not write orders, products, SyncLog, capability test results, tracking numbers, audit rows, or platform shipment states.

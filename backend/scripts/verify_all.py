@@ -76,6 +76,9 @@ EXPECTED_API_PATHS = {
     "/api/v1/shipping/export-excel",
     "/api/v1/shipping/export-history",
     "/api/v1/shipping/tracking-import/mock-parse",
+    "/api/v1/shipping/tracking-import/write-gate",
+    "/api/v1/shipping/tracking-import",
+    "/api/v1/shipping/tracking-import-history",
     "/api/v1/customer-inquiries",
     "/api/v1/sync/products/mock",
     "/api/v1/sync/products/coupang/preview",
@@ -494,6 +497,47 @@ EXPECTED_SHIPPING_TABLE_COLUMNS = {
         "row_status",
         "created_at",
     },
+    "shipping_tracking_import_batches": {
+        "id",
+        "store_id",
+        "platform",
+        "file_type",
+        "file_format",
+        "source_file_name",
+        "row_count",
+        "ready_row_count",
+        "duplicate_row_count",
+        "blocked_row_count",
+        "actor_id_hash",
+        "audit_correlation_id",
+        "import_status",
+        "parser_contract_acknowledged",
+        "tracking_number_import_open",
+        "shipment_writeback_called",
+        "orders_updated",
+        "raw_response_saved",
+        "secrets_saved",
+        "privacy_fields_redacted",
+        "mapping_version",
+        "created_at",
+        "updated_at",
+    },
+    "shipping_tracking_import_rows": {
+        "id",
+        "import_batch_id",
+        "store_id",
+        "platform",
+        "order_reference",
+        "product_order_reference",
+        "logistics_inventory_code",
+        "carrier",
+        "tracking_number",
+        "shipped_at",
+        "row_status",
+        "operator_note",
+        "future_write_allowed",
+        "created_at",
+    },
 }
 
 EXPECTED_SHIPPING_INDEXES = {
@@ -570,6 +614,41 @@ EXPECTED_SHIPPING_INDEXES = {
     "ix_shipping_export_rows_inventory_code": (
         "shipping_export_batch_rows",
         ["logistics_inventory_code"],
+        False,
+    ),
+    "ix_shipping_tracking_batches_store_platform_created": (
+        "shipping_tracking_import_batches",
+        ["store_id", "platform", "created_at"],
+        False,
+    ),
+    "ix_shipping_tracking_batches_status": (
+        "shipping_tracking_import_batches",
+        ["store_id", "platform", "import_status"],
+        False,
+    ),
+    "ix_shipping_tracking_batches_audit_correlation": (
+        "shipping_tracking_import_batches",
+        ["audit_correlation_id"],
+        False,
+    ),
+    "ix_shipping_tracking_rows_batch": (
+        "shipping_tracking_import_rows",
+        ["import_batch_id"],
+        False,
+    ),
+    "ix_shipping_tracking_rows_store_platform": (
+        "shipping_tracking_import_rows",
+        ["store_id", "platform"],
+        False,
+    ),
+    "ix_shipping_tracking_rows_order_reference": (
+        "shipping_tracking_import_rows",
+        ["order_reference"],
+        False,
+    ),
+    "ix_shipping_tracking_rows_tracking_number": (
+        "shipping_tracking_import_rows",
+        ["tracking_number"],
         False,
     ),
 }
@@ -1492,6 +1571,9 @@ def verify_openapi() -> None:
         "/api/v1/shipping/export-excel": {"post"},
         "/api/v1/shipping/export-history": {"get"},
         "/api/v1/shipping/tracking-import/mock-parse": {"post"},
+        "/api/v1/shipping/tracking-import/write-gate": {"post"},
+        "/api/v1/shipping/tracking-import": {"post"},
+        "/api/v1/shipping/tracking-import-history": {"get"},
     }
     for shipping_path, expected_methods in shipping_methods.items():
         methods = set(openapi_json["paths"][shipping_path].keys())
@@ -15708,6 +15790,21 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
                 "WHERE store_id=? AND operation_phase='Shipping-3D'",
                 (store_id,),
             ),
+            "tracking_import_batches": table_count(
+                "shipping_tracking_import_batches",
+                "WHERE store_id=?",
+                (store_id,),
+            ),
+            "tracking_import_rows": table_count(
+                "shipping_tracking_import_rows",
+                "WHERE store_id=?",
+                (store_id,),
+            ),
+            "tracking_import_audit_logs": table_count(
+                "operation_audit_logs",
+                "WHERE store_id=? AND operation_phase='Shipping-5D'",
+                (store_id,),
+            ),
         }
 
     with sqlite3.connect(VERIFY_DB_PATH) as connection:
@@ -15754,6 +15851,9 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert before_counts["export_batches"] == 0, before_counts
         assert before_counts["export_rows"] == 0, before_counts
         assert before_counts["export_audit_logs"] == 0, before_counts
+        assert before_counts["tracking_import_batches"] == 0, before_counts
+        assert before_counts["tracking_import_rows"] == 0, before_counts
+        assert before_counts["tracking_import_audit_logs"] == 0, before_counts
 
         empty_response = client.get(
             "/api/v1/shipping/logistics-mappings",
@@ -16170,6 +16270,159 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
         assert tracking_route_payload["real_database_written"] is False, tracking_route_payload
         assert shipping_counts(store_id) == history_before_counts, shipping_counts(store_id)
 
+        tracking_write_gate_before_counts = shipping_counts(store_id)
+        tracking_write_manual_gate = client.post("/api/v1/shipping/tracking-import/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "file_type": "tracking_upload",
+            "file_format": "xlsx",
+            "source_file_name": "tracking-upload-safe.xlsx",
+            "manual_approval": False,
+            "parser_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "tracking_rows": [safe_tracking_row],
+        })
+        assert tracking_write_manual_gate.status_code == 200, tracking_write_manual_gate.text
+        tracking_write_manual_payload = tracking_write_manual_gate.json()["data"]
+        assert tracking_write_manual_payload["phase"] == "Shipping-5C", tracking_write_manual_payload
+        assert tracking_write_manual_payload["status"] == "blocked", tracking_write_manual_payload
+        assert tracking_write_manual_payload["skip_reason"] == "manual_approval_required", tracking_write_manual_payload
+        assert tracking_write_manual_payload["tracking_import_records_written"] is False, tracking_write_manual_payload
+        assert tracking_write_manual_payload["tracking_import_batch_written"] is False, tracking_write_manual_payload
+        assert tracking_write_manual_payload["tracking_import_rows_written"] is False, tracking_write_manual_payload
+        assert tracking_write_manual_payload["operation_audit_rows_written"] is False, tracking_write_manual_payload
+        assert shipping_counts(store_id) == tracking_write_gate_before_counts, shipping_counts(store_id)
+
+        tracking_write_sensitive_gate = client.post("/api/v1/shipping/tracking-import/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "file_type": "tracking_upload",
+            "file_format": "xlsx",
+            "source_file_name": "shipping-token-must-not-leak.xlsx",
+            "manual_approval": True,
+            "parser_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "tracking_rows": [safe_tracking_row],
+        })
+        assert tracking_write_sensitive_gate.status_code == 200, tracking_write_sensitive_gate.text
+        tracking_write_sensitive_payload = tracking_write_sensitive_gate.json()["data"]
+        assert tracking_write_sensitive_payload["phase"] == "Shipping-5C", tracking_write_sensitive_payload
+        assert tracking_write_sensitive_payload["status"] == "blocked", tracking_write_sensitive_payload
+        assert tracking_write_sensitive_payload["skip_reason"] == "tracking_import_sensitive_field_blocked", tracking_write_sensitive_payload
+        assert tracking_write_sensitive_payload["tracking_import_records_written"] is False, tracking_write_sensitive_payload
+        assert shipping_counts(store_id) == tracking_write_gate_before_counts, shipping_counts(store_id)
+
+        tracking_write_ready_gate = client.post("/api/v1/shipping/tracking-import/write-gate", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "file_type": "tracking_upload",
+            "file_format": "xlsx",
+            "source_file_name": "tracking-upload-safe.xlsx",
+            "manual_approval": True,
+            "parser_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "tracking_rows": [safe_tracking_row, safe_tracking_row],
+        })
+        assert tracking_write_ready_gate.status_code == 200, tracking_write_ready_gate.text
+        tracking_write_ready_payload = tracking_write_ready_gate.json()["data"]
+        assert tracking_write_ready_payload["phase"] == "Shipping-5C", tracking_write_ready_payload
+        assert tracking_write_ready_payload["status"] == "tracking_import_local_write_gate_ready", tracking_write_ready_payload
+        assert tracking_write_ready_payload["row_count"] == 2, tracking_write_ready_payload
+        assert tracking_write_ready_payload["ready_row_count"] == 1, tracking_write_ready_payload
+        assert tracking_write_ready_payload["duplicate_row_count"] == 1, tracking_write_ready_payload
+        assert tracking_write_ready_payload["tracking_import_records_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["tracking_import_batch_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["tracking_import_rows_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["operation_audit_rows_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["real_database_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["tracking_number_import_open"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["shipment_writeback_called"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["orders_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["products_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["sync_log_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["capability_tested_success_written"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["raw_response_saved"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["secrets_saved"] is False, tracking_write_ready_payload
+        assert tracking_write_ready_payload["privacy_fields_redacted"] is True, tracking_write_ready_payload
+        assert shipping_counts(store_id) == tracking_write_gate_before_counts, shipping_counts(store_id)
+
+        tracking_write_response = client.post("/api/v1/shipping/tracking-import", json={
+            "store_id": store_id,
+            "platform": "naver",
+            "file_type": "tracking_upload",
+            "file_format": "xlsx",
+            "source_file_name": "tracking-upload-safe.xlsx",
+            "manual_approval": True,
+            "parser_contract_acknowledged": True,
+            "actor_context": {"role": "admin", "actor_id": "shipping-operator"},
+            "tracking_rows": [safe_tracking_row, safe_tracking_row],
+        })
+        assert tracking_write_response.status_code == 200, tracking_write_response.text
+        tracking_write_payload = tracking_write_response.json()["data"]
+        assert tracking_write_payload["phase"] == "Shipping-5D", tracking_write_payload
+        assert tracking_write_payload["status"] == "tracking_import_local_write_succeeded", tracking_write_payload
+        assert tracking_write_payload["tracking_import_records_written"] is True, tracking_write_payload
+        assert tracking_write_payload["tracking_import_batch_written"] is True, tracking_write_payload
+        assert tracking_write_payload["tracking_import_rows_written"] is True, tracking_write_payload
+        assert tracking_write_payload["operation_audit_rows_written"] is True, tracking_write_payload
+        assert tracking_write_payload["row_count"] == 2, tracking_write_payload
+        assert tracking_write_payload["ready_row_count"] == 1, tracking_write_payload
+        assert tracking_write_payload["duplicate_row_count"] == 1, tracking_write_payload
+        assert tracking_write_payload["real_database_written"] is True, tracking_write_payload
+        assert tracking_write_payload["real_api_called"] is False, tracking_write_payload
+        assert tracking_write_payload["tracking_number_import_open"] is False, tracking_write_payload
+        assert tracking_write_payload["tracking_numbers_written"] is False, tracking_write_payload
+        assert tracking_write_payload["shipment_writeback_called"] is False, tracking_write_payload
+        assert tracking_write_payload["orders_written"] is False, tracking_write_payload
+        assert tracking_write_payload["orders_updated"] is False, tracking_write_payload
+        assert tracking_write_payload["products_written"] is False, tracking_write_payload
+        assert tracking_write_payload["sync_log_written"] is False, tracking_write_payload
+        assert tracking_write_payload["capability_tested_success_written"] is False, tracking_write_payload
+        assert tracking_write_payload["raw_response_saved"] is False, tracking_write_payload
+        assert tracking_write_payload["secrets_saved"] is False, tracking_write_payload
+        assert tracking_write_payload["privacy_fields_redacted"] is True, tracking_write_payload
+
+        after_tracking_write_counts = shipping_counts(store_id)
+        assert after_tracking_write_counts["tracking_import_batches"] == tracking_write_gate_before_counts["tracking_import_batches"] + 1, after_tracking_write_counts
+        assert after_tracking_write_counts["tracking_import_rows"] == tracking_write_gate_before_counts["tracking_import_rows"] + 2, after_tracking_write_counts
+        assert after_tracking_write_counts["tracking_import_audit_logs"] == tracking_write_gate_before_counts["tracking_import_audit_logs"] + 1, after_tracking_write_counts
+        assert after_tracking_write_counts["orders"] == tracking_write_gate_before_counts["orders"], after_tracking_write_counts
+        assert after_tracking_write_counts["products"] == tracking_write_gate_before_counts["products"], after_tracking_write_counts
+        assert after_tracking_write_counts["sync_logs"] == tracking_write_gate_before_counts["sync_logs"], after_tracking_write_counts
+        assert after_tracking_write_counts["tested_success"] == tracking_write_gate_before_counts["tested_success"], after_tracking_write_counts
+
+        tracking_history_before_counts = shipping_counts(store_id)
+        tracking_history_response = client.get(
+            "/api/v1/shipping/tracking-import-history",
+            params={"store_id": store_id, "platform": "naver", "limit": 10, "include_rows": True},
+        )
+        assert tracking_history_response.status_code == 200, tracking_history_response.text
+        tracking_history_payload = tracking_history_response.json()["data"]
+        assert tracking_history_payload["phase"] == "Shipping-5E", tracking_history_payload
+        assert tracking_history_payload["status"] == "tracking_import_history_ready", tracking_history_payload
+        assert tracking_history_payload["tracking_import_history_readonly"] is True, tracking_history_payload
+        assert tracking_history_payload["total"] == 1, tracking_history_payload
+        assert tracking_history_payload["items"][0]["row_count"] == 2, tracking_history_payload
+        assert tracking_history_payload["items"][0]["ready_row_count"] == 1, tracking_history_payload
+        assert tracking_history_payload["items"][0]["duplicate_row_count"] == 1, tracking_history_payload
+        assert tracking_history_payload["items"][0]["tracking_number_import_open"] is False, tracking_history_payload
+        assert tracking_history_payload["items"][0]["shipment_writeback_called"] is False, tracking_history_payload
+        assert tracking_history_payload["items"][0]["orders_updated"] is False, tracking_history_payload
+        assert tracking_history_payload["items"][0]["raw_response_saved"] is False, tracking_history_payload
+        assert tracking_history_payload["items"][0]["privacy_fields_redacted"] is True, tracking_history_payload
+        assert tracking_history_payload["items"][0]["rows"][0]["tracking_number"] == "TRK202607050001", tracking_history_payload
+        assert tracking_history_payload["items"][0]["rows"][1]["row_status"] == "duplicate_in_upload", tracking_history_payload
+        assert tracking_history_payload["real_database_written"] is False, tracking_history_payload
+        assert tracking_history_payload["real_api_called"] is False, tracking_history_payload
+        assert tracking_history_payload["orders_written"] is False, tracking_history_payload
+        assert tracking_history_payload["products_written"] is False, tracking_history_payload
+        assert tracking_history_payload["sync_log_written"] is False, tracking_history_payload
+        assert tracking_history_payload["capability_tested_success_written"] is False, tracking_history_payload
+        assert tracking_history_payload["raw_response_saved"] is False, tracking_history_payload
+        assert tracking_history_payload["secrets_saved"] is False, tracking_history_payload
+        assert tracking_history_payload["privacy_fields_redacted"] is True, tracking_history_payload
+        assert shipping_counts(store_id) == tracking_history_before_counts, shipping_counts(store_id)
+
         excel_serialized = json.dumps({
             "manual": excel_manual_gate,
             "privacy": excel_privacy_gate,
@@ -16180,6 +16433,11 @@ def verify_shipping_mapping_schema_and_local_write() -> None:
             "tracking_privacy": tracking_sensitive_gate,
             "tracking_ready": tracking_ready_gate,
             "tracking_route": tracking_route_payload,
+            "tracking_write_manual": tracking_write_manual_payload,
+            "tracking_write_sensitive": tracking_write_sensitive_payload,
+            "tracking_write_ready": tracking_write_ready_payload,
+            "tracking_write": tracking_write_payload,
+            "tracking_history": tracking_history_payload,
         }, ensure_ascii=False, default=str).lower()
         for marker in FORBIDDEN_SHIPPING_SENSITIVE_MARKERS:
             assert marker not in excel_serialized, excel_serialized

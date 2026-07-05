@@ -17,6 +17,8 @@ from app.models.shipping import (
     LogisticsInventoryMapping,
     ShippingExportBatch,
     ShippingExportBatchRow,
+    ShippingTrackingImportBatch,
+    ShippingTrackingImportRow,
 )
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.store_service import ensure_store_exists
@@ -29,6 +31,7 @@ SHIPPING_EXPORT_LOCAL_MAPPING_VERSION = "shipping_export_v1"
 SHIPPING_EXPORT_FILE_TYPE = "shipping_request"
 SHIPPING_EXPORT_FILE_FORMAT = "xlsx"
 SHIPPING_TRACKING_IMPORT_MAPPING_VERSION = "shipping_tracking_import_mock_v1"
+SHIPPING_TRACKING_IMPORT_LOCAL_MAPPING_VERSION = "shipping_tracking_import_v1"
 SHIPPING_TRACKING_UPLOAD_FILE_TYPE = "tracking_upload"
 DEFAULT_SHIPPING_EXPORT_DIR = Path(__file__).resolve().parents[2] / "exports" / "shipping"
 ALLOWED_SHIPPING_PLATFORMS = {"naver", "coupang", "future_platform"}
@@ -700,6 +703,436 @@ def list_shipping_export_history(
             "已读取本地发货 Excel 导出历史。"
             if items
             else "当前还没有本地发货 Excel 导出记录。"
+        ),
+        "real_database_written": False,
+        "real_api_called": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+    })
+    return result
+
+
+def evaluate_tracking_import_local_write_gate(
+    *,
+    store_id: int,
+    platform: str,
+    tracking_rows: list[dict[str, Any]],
+    manual_approval: bool,
+    actor_context: dict[str, Any] | None = None,
+    file_type: str = SHIPPING_TRACKING_UPLOAD_FILE_TYPE,
+    file_format: str = SHIPPING_EXPORT_FILE_FORMAT,
+    parser_contract_acknowledged: bool = False,
+    source_file_name: str | None = None,
+) -> dict[str, Any]:
+    gate = evaluate_tracking_number_import_mock_gate(
+        store_id=store_id,
+        platform=platform,
+        tracking_rows=tracking_rows,
+        manual_approval=manual_approval,
+        actor_context=actor_context,
+        file_type=file_type,
+        file_format=file_format,
+        parser_contract_acknowledged=parser_contract_acknowledged,
+    )
+    result = {
+        **gate,
+        "phase": "Shipping-5C",
+        "tracking_import_records_written": False,
+        "tracking_import_batch_written": False,
+        "tracking_import_rows_written": False,
+        "operation_audit_rows_written": False,
+        "source_file_name": _clean_text(source_file_name, max_length=255) or None,
+    }
+    forbidden_file_fields = _sensitive_fields({"source_file_name": source_file_name or ""})
+    if forbidden_file_fields:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "tracking_import_sensitive_field_blocked",
+            "forbidden_field_names": forbidden_file_fields,
+            "source_file_name": None,
+        })
+        return result
+    if gate.get("status") != "tracking_import_mock_parse_ready":
+        return result
+
+    result.update({
+        "status": "tracking_import_local_write_gate_ready",
+        "business_message": (
+            "物流单号导入本地写入门禁已通过。下一步只会记录导入批次和行，"
+            "不会更新订单状态，也不会回填 Naver。"
+        ),
+    })
+    return result
+
+
+def _audit_row_for_tracking_import(
+    *,
+    store_id: int,
+    platform: str,
+    actor_context: dict[str, Any] | None,
+    import_batch_id: int,
+    row_count: int,
+    ready_row_count: int,
+    duplicate_row_count: int,
+    correlation_id: str,
+) -> dict[str, Any]:
+    now = get_utc_now()
+    return {
+        "created_at": now,
+        "updated_at": now,
+        "store_id": store_id,
+        "platform": platform,
+        "environment": "local",
+        "actor_type": "human",
+        "actor_id": _actor_hash(actor_context) or "actor-hash-shipping-tracking-import-local",
+        "actor_label": "Local operator",
+        "actor_role": str((actor_context or {}).get("role") or "admin")[:80],
+        "action": "local_write_succeeded",
+        "operation_phase": "Shipping-5D",
+        "correlation_id": correlation_id,
+        "request_id": f"shipping-5d-tracking-import-{import_batch_id}",
+        "status": "success",
+        "reason_code": "shipping_tracking_import_local_write",
+        "target_type": "settings",
+        "target_id": str(import_batch_id),
+        "target_hash": f"id-hash-{hashlib.sha256(correlation_id.encode('utf-8')).hexdigest()[:16]}",
+        "target_label": "Shipping tracking import record",
+        "changed_field_names": ["shipping_tracking_import_batches", "shipping_tracking_import_rows"],
+        "before_summary": {"manual_approval": True, "tracking_records_written": False},
+        "after_summary": {
+            "row_count": row_count,
+            "ready_row_count": ready_row_count,
+            "duplicate_row_count": duplicate_row_count,
+        },
+        "counts_summary": {
+            "shipping_tracking_import_batches_written": 1,
+            "shipping_tracking_import_rows_written": row_count,
+            "orders_written": 0,
+            "products_written": 0,
+            "sync_logs_written": 0,
+            "capability_results_written": 0,
+        },
+        "safety_flags": {
+            "shipping_tracking_import_local_write": True,
+            "real_api_called": False,
+            "platform_writes_enabled": False,
+            "shipment_writeback_called": False,
+            "formal_sync_open": False,
+            "orders_written": False,
+            "orders_updated": False,
+            "products_written": False,
+            "sync_log_written": False,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        "sensitive_scan_passed": True,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "notes": "Approved local tracking import record write. No Naver shipment writeback or logistics-provider API was called.",
+    }
+
+
+def write_tracking_import_local(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str,
+    tracking_rows: list[dict[str, Any]],
+    manual_approval: bool,
+    actor_context: dict[str, Any] | None = None,
+    file_type: str = SHIPPING_TRACKING_UPLOAD_FILE_TYPE,
+    file_format: str = SHIPPING_EXPORT_FILE_FORMAT,
+    parser_contract_acknowledged: bool = False,
+    source_file_name: str | None = None,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    gate = evaluate_tracking_import_local_write_gate(
+        store_id=store_id,
+        platform=platform,
+        tracking_rows=tracking_rows,
+        manual_approval=manual_approval,
+        actor_context=actor_context,
+        file_type=file_type,
+        file_format=file_format,
+        parser_contract_acknowledged=parser_contract_acknowledged,
+        source_file_name=source_file_name,
+    )
+    result = {**gate, "phase": "Shipping-5D"}
+    if gate.get("status") != "tracking_import_local_write_gate_ready":
+        result.update({
+            "tracking_import_records_written": False,
+            "tracking_import_batch_written": False,
+            "tracking_import_rows_written": False,
+            "operation_audit_rows_written": False,
+            "real_database_written": False,
+        })
+        return result
+
+    normalized_platform = _normalize_platform(platform) or "naver"
+    normalized_rows = list(gate.get("tracking_rows_preview") or [])
+    now = get_utc_now()
+    actor_hash = _actor_hash(actor_context)
+    ready_row_count = len([row for row in normalized_rows if row["row_status"] == "ready_for_future_review"])
+    duplicate_row_count = len([row for row in normalized_rows if row["row_status"] == "duplicate_in_upload"])
+    blocked_row_count = len([row for row in normalized_rows if row["row_status"] == "blocked"])
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "store_id": store_id,
+                "platform": normalized_platform,
+                "rows": normalized_rows,
+                "created_at": now.isoformat(),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    correlation_id = f"shipping-5d-{fingerprint}"
+
+    try:
+        import_batch = ShippingTrackingImportBatch(
+            store_id=store_id,
+            platform=normalized_platform,
+            file_type=SHIPPING_TRACKING_UPLOAD_FILE_TYPE,
+            file_format=SHIPPING_EXPORT_FILE_FORMAT,
+            source_file_name=_clean_text(source_file_name, max_length=255) or None,
+            row_count=len(normalized_rows),
+            ready_row_count=ready_row_count,
+            duplicate_row_count=duplicate_row_count,
+            blocked_row_count=blocked_row_count,
+            actor_id_hash=actor_hash,
+            audit_correlation_id=correlation_id,
+            import_status="recorded",
+            parser_contract_acknowledged=True,
+            tracking_number_import_open=False,
+            shipment_writeback_called=False,
+            orders_updated=False,
+            raw_response_saved=False,
+            secrets_saved=False,
+            privacy_fields_redacted=True,
+            mapping_version=SHIPPING_TRACKING_IMPORT_LOCAL_MAPPING_VERSION,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(import_batch)
+        db.flush()
+        for row in normalized_rows:
+            db.add(ShippingTrackingImportRow(
+                import_batch_id=import_batch.id,
+                store_id=store_id,
+                platform=normalized_platform,
+                order_reference=row["order_reference"],
+                product_order_reference=row["product_order_reference"],
+                logistics_inventory_code=row["logistics_inventory_code"] or None,
+                carrier=row["carrier"],
+                tracking_number=row["tracking_number"],
+                shipped_at=row["shipped_at"],
+                row_status=row["row_status"],
+                operator_note=row["operator_note"],
+                future_write_allowed=False,
+                created_at=now,
+            ))
+
+        audit_result = write_operation_audit_log_local(
+            db,
+            _audit_row_for_tracking_import(
+                store_id=store_id,
+                platform=normalized_platform,
+                actor_context=actor_context,
+                import_batch_id=import_batch.id,
+                row_count=len(normalized_rows),
+                ready_row_count=ready_row_count,
+                duplicate_row_count=duplicate_row_count,
+                correlation_id=correlation_id,
+            ),
+            write_enabled=True,
+            manual_approval=True,
+            local_write_scope=LOCAL_WRITER_SCOPE,
+        )
+        if audit_result.get("status") != "audit_row_written":
+            db.rollback()
+            result.update({
+                "status": "tracking_import_local_write_blocked",
+                "skip_reason": audit_result.get("skip_reason") or "audit_write_failed",
+                "tracking_import_records_written": False,
+                "tracking_import_batch_written": False,
+                "tracking_import_rows_written": False,
+                "operation_audit_rows_written": False,
+                "real_database_written": False,
+            })
+            return result
+    except Exception:
+        db.rollback()
+        raise
+
+    result.update({
+        "status": "tracking_import_local_write_succeeded",
+        "skip_reason": None,
+        "business_message": "物流单号导入记录已保存到本地。当前不会更新订单，也不会回填 Naver 发货。",
+        "import_batch_id": import_batch.id,
+        "row_count": len(normalized_rows),
+        "ready_row_count": ready_row_count,
+        "duplicate_row_count": duplicate_row_count,
+        "blocked_row_count": blocked_row_count,
+        "audit_correlation_id": correlation_id,
+        "operation_audit_log_id": audit_result.get("audit_log_id"),
+        "tracking_import_records_written": True,
+        "tracking_import_batch_written": True,
+        "tracking_import_rows_written": True,
+        "operation_audit_rows_written": True,
+        "real_database_written": True,
+        "real_api_called": False,
+        "tracking_number_import_open": False,
+        "tracking_numbers_written": False,
+        "shipment_writeback_called": False,
+        "shipment_writeback_open": False,
+        "orders_written": False,
+        "orders_updated": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_order_sync_open": False,
+        "platform_writes_enabled": False,
+        "tracking_rows_preview": normalized_rows,
+    })
+    return result
+
+
+def _serialize_tracking_import_batch(
+    row: ShippingTrackingImportBatch,
+    *,
+    rows: list[ShippingTrackingImportRow] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "id": row.id,
+        "store_id": row.store_id,
+        "platform": row.platform,
+        "file_type": row.file_type,
+        "file_format": row.file_format,
+        "source_file_name": row.source_file_name,
+        "row_count": row.row_count,
+        "ready_row_count": row.ready_row_count,
+        "duplicate_row_count": row.duplicate_row_count,
+        "blocked_row_count": row.blocked_row_count,
+        "audit_correlation_id": row.audit_correlation_id,
+        "import_status": row.import_status,
+        "parser_contract_acknowledged": row.parser_contract_acknowledged,
+        "tracking_number_import_open": row.tracking_number_import_open,
+        "shipment_writeback_called": row.shipment_writeback_called,
+        "orders_updated": row.orders_updated,
+        "raw_response_saved": row.raw_response_saved,
+        "secrets_saved": row.secrets_saved,
+        "privacy_fields_redacted": row.privacy_fields_redacted,
+        "mapping_version": row.mapping_version,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+    if rows is not None:
+        payload["rows"] = [
+            {
+                "id": item.id,
+                "import_batch_id": item.import_batch_id,
+                "store_id": item.store_id,
+                "platform": item.platform,
+                "order_reference": item.order_reference,
+                "product_order_reference": item.product_order_reference,
+                "logistics_inventory_code": item.logistics_inventory_code,
+                "carrier": item.carrier,
+                "tracking_number": item.tracking_number,
+                "shipped_at": item.shipped_at,
+                "row_status": item.row_status,
+                "operator_note": item.operator_note,
+                "future_write_allowed": item.future_write_allowed,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in rows
+        ]
+    return payload
+
+
+def list_shipping_tracking_import_history(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str = "naver",
+    limit: int = 20,
+    offset: int = 0,
+    include_rows: bool = False,
+) -> dict[str, Any]:
+    ensure_store_exists(db, store_id)
+    normalized_platform = _normalize_platform(platform)
+    result = {
+        **_base_result(phase="Shipping-5E"),
+        "readonly_route": True,
+        "tracking_import_history_readonly": True,
+        "tracking_number_import_open": False,
+        "shipment_writeback_open": False,
+        "shipment_writeback_called": False,
+        "orders_updated": False,
+    }
+    if normalized_platform is None:
+        result.update({"status": "blocked", "skip_reason": "platform_not_supported"})
+        return result
+
+    bounded_limit = min(max(int(limit or 20), 1), 100)
+    bounded_offset = max(int(offset or 0), 0)
+    total = db.scalar(
+        select(func.count(ShippingTrackingImportBatch.id)).where(
+            ShippingTrackingImportBatch.store_id == store_id,
+            ShippingTrackingImportBatch.platform == normalized_platform,
+        )
+    ) or 0
+    batches = db.scalars(
+        select(ShippingTrackingImportBatch)
+        .where(
+            ShippingTrackingImportBatch.store_id == store_id,
+            ShippingTrackingImportBatch.platform == normalized_platform,
+        )
+        .order_by(ShippingTrackingImportBatch.created_at.desc(), ShippingTrackingImportBatch.id.desc())
+        .offset(bounded_offset)
+        .limit(bounded_limit)
+    ).all()
+    rows_by_batch: dict[int, list[ShippingTrackingImportRow]] = {}
+    if include_rows and batches:
+        batch_ids = [item.id for item in batches]
+        row_items = db.scalars(
+            select(ShippingTrackingImportRow)
+            .where(ShippingTrackingImportRow.import_batch_id.in_(batch_ids))
+            .order_by(ShippingTrackingImportRow.import_batch_id.desc(), ShippingTrackingImportRow.id.asc())
+        ).all()
+        for item in row_items:
+            rows_by_batch.setdefault(item.import_batch_id, []).append(item)
+
+    items = [
+        _serialize_tracking_import_batch(batch, rows=rows_by_batch.get(batch.id) if include_rows else None)
+        for batch in batches
+    ]
+    result.update({
+        "status": "tracking_import_history_ready",
+        "skip_reason": None,
+        "store_id": store_id,
+        "platform": normalized_platform,
+        "total": int(total),
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+        "include_rows": bool(include_rows),
+        "items": items,
+        "business_message": (
+            "已读取本地物流单号导入记录。"
+            if items
+            else "当前还没有本地物流单号导入记录。"
         ),
         "real_database_written": False,
         "real_api_called": False,

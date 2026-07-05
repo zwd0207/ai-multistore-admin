@@ -78,12 +78,21 @@ class ShippingTrackingImportMockParseRequest(BaseModel):
     platform: str = Field(default="naver", min_length=1, max_length=50)
     file_type: str = Field(default="tracking_upload", max_length=80)
     file_format: str = Field(default="xlsx", max_length=30)
+    source_file_name: str | None = Field(default=None, max_length=255)
     tracking_rows: list[ShippingTrackingImportRowInput] = Field(default_factory=list, max_length=200)
     manual_approval: bool = False
     parser_contract_acknowledged: bool = False
     actor_context: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="allow")
+
+
+class ShippingTrackingImportWriteGateRequest(ShippingTrackingImportMockParseRequest):
+    pass
+
+
+class ShippingTrackingImportWriteRequest(ShippingTrackingImportMockParseRequest):
+    pass
 
 
 class LogisticsInventoryMappingRead(BaseModel):
