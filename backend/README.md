@@ -1549,6 +1549,16 @@ Passing 4F returns `status=formal_batch_pre_execution_refresh_readonly_api_mock_
 
 No public route is added in 4F. A later 4G may expose a readonly review route only; real product/order batch execution still requires another explicit execution phase.
 
+ERP-Batch-4G exposes the pre-execution refresh review as a local readonly API:
+
+```text
+POST /api/v1/batch/pre-execution-refresh/readonly-check
+```
+
+The route wraps the 4F mock gate for operator and future Codex2 review. A ready response uses `status=formal_batch_pre_execution_refresh_readonly_api_ready` and `approval_status=ready_for_local_readonly_review`. It keeps `execution_approved=false`, `batch_execution_enabled=false`, `write_endpoint_enabled=false`, `products_written=false`, `orders_written=false`, `operation_audit_rows_written=false`, `real_api_called=false`, `real_database_written=false`, `platform_writes_enabled=false`, and formal product/order sync closed.
+
+This route is not a backup endpoint, audit-write endpoint, product/order write endpoint, or batch execution endpoint. It only lets the UI or operator read whether the final pre-execution backup and audit refresh evidence is complete enough to plan a separate execution phase.
+
 ERP-Multistore-2S adds a local-route mock gate:
 
 ```text

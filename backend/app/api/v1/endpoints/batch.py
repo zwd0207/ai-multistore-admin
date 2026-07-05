@@ -10,6 +10,7 @@ from app.schemas.batch import (
     FormalBatchExecutionDryRunReadonlyCheckRequest,
     FormalBatchExecutionPreflightReadonlyCheckRequest,
     FormalBatchExecutionWriteBoundaryReadonlyCheckRequest,
+    FormalBatchPreExecutionRefreshReadonlyCheckRequest,
     NaverOrderBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductBatchExecutionApprovalReadonlyCheckRequest,
     NaverProductRollbackReadonlyReportRequest,
@@ -133,6 +134,22 @@ def check_formal_batch_execution_write_boundary_readonly(
     return success_response(
         data=result,
         message="formal batch execution write boundary readonly check completed",
+    )
+
+
+@router.post("/pre-execution-refresh/readonly-check")
+def check_formal_batch_pre_execution_refresh_readonly(
+    payload: FormalBatchPreExecutionRefreshReadonlyCheckRequest,
+) -> dict:
+    result = sync_service.evaluate_formal_batch_pre_execution_refresh_readonly_api_local(
+        write_boundary_review=payload.write_boundary_review,
+        backup_refresh_evidence=payload.backup_refresh_evidence,
+        audit_refresh_evidence=payload.audit_refresh_evidence,
+        readonly_api_context=payload.readonly_api_context,
+    )
+    return success_response(
+        data=result,
+        message="formal batch pre-execution refresh readonly check completed",
     )
 
 

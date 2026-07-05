@@ -53,6 +53,13 @@ class FormalBatchExecutionWriteBoundaryReadonlyCheckRequest(BaseModel):
     readonly_api_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class FormalBatchPreExecutionRefreshReadonlyCheckRequest(BaseModel):
+    write_boundary_review: dict[str, Any] = Field(default_factory=dict)
+    backup_refresh_evidence: dict[str, Any] = Field(default_factory=dict)
+    audit_refresh_evidence: dict[str, Any] = Field(default_factory=dict)
+    readonly_api_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class NaverProductBatchExecutionApprovalReadonlyCheckRequest(BaseModel):
     actor_context: dict[str, Any] = Field(default_factory=dict)
     store_ids: list[int] = Field(default_factory=list, max_length=10)

@@ -8596,6 +8596,67 @@ def evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
     return result
 
 
+def evaluate_formal_batch_pre_execution_refresh_readonly_api_local(
+    *,
+    write_boundary_review: dict | None,
+    backup_refresh_evidence: dict | None,
+    audit_refresh_evidence: dict | None,
+    readonly_api_context: dict | None,
+) -> dict:
+    """Public local readonly helper for the pre-execution backup/audit refresh review."""
+
+    result = evaluate_formal_batch_pre_execution_refresh_readonly_api_mock_gate(
+        write_boundary_review=write_boundary_review,
+        backup_refresh_evidence=backup_refresh_evidence,
+        audit_refresh_evidence=audit_refresh_evidence,
+        readonly_api_context=readonly_api_context,
+        verification_scope="verify_all_temp_db",
+    )
+    result.update({
+        "phase": "ERP-Batch-4G",
+        "formal_batch_pre_execution_refresh_readonly_api_local": True,
+        "backend_route_implemented": True,
+        "public_endpoint_enabled": True,
+        "route_path": "/api/v1/batch/pre-execution-refresh/readonly-check",
+        "http_method": "POST",
+        "execution_approved": False,
+        "batch_execution_enabled": False,
+        "write_endpoint_enabled": False,
+        "real_api_called": False,
+        "real_database_written": False,
+        "orders_written": False,
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "timeline_events_written": False,
+        "operation_audit_rows_written": False,
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "privacy_fields_redacted": True,
+        "formal_sync_open": False,
+        "formal_order_sync_open": False,
+        "formal_product_sync_open": False,
+        "platform_order_writes_enabled": False,
+        "platform_product_writes_enabled": False,
+        "platform_writes_enabled": False,
+        "shipment_write_enabled": False,
+        "cancel_write_enabled": False,
+        "return_write_enabled": False,
+        "exchange_write_enabled": False,
+    })
+    if result.get("status") == "formal_batch_pre_execution_refresh_readonly_api_mock_ready":
+        result["status"] = "formal_batch_pre_execution_refresh_readonly_api_ready"
+        result["approval_status"] = "ready_for_local_readonly_review"
+        result["business_message"] = (
+            "Formal batch pre-execution refresh readonly API is ready for local review only. "
+            "It does not approve execution, create backups, write audit rows, write products or orders, call platform APIs, or open formal sync."
+        )
+        result["next_action"] = (
+            "Use this readonly route as operator evidence before a separately approved execution phase with refreshed backup, audit, readback, rollback, permission, and sensitive-scan evidence."
+        )
+    return result
+
+
 def evaluate_naver_order_batch_execution_approval_mock_gate(
     *,
     actor_context: dict | None,

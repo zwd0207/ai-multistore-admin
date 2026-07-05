@@ -75,6 +75,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/execution-dry-run/readonly-check",
     "/api/v1/batch/execution-approval/readonly-check",
     "/api/v1/batch/execution-write-boundary/readonly-check",
+    "/api/v1/batch/pre-execution-refresh/readonly-check",
     "/api/v1/batch/naver/products/execution-approval/readonly-check",
     "/api/v1/batch/naver/orders/execution-approval/readonly-check",
     "/api/v1/batch/naver/products/rollback-readonly-report",
@@ -1573,6 +1574,7 @@ def verify_openapi() -> None:
         "/api/v1/batch/execution-dry-run/readonly-check": {"post"},
         "/api/v1/batch/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/execution-write-boundary/readonly-check": {"post"},
+        "/api/v1/batch/pre-execution-refresh/readonly-check": {"post"},
         "/api/v1/batch/naver/products/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/orders/execution-approval/readonly-check": {"post"},
         "/api/v1/batch/naver/products/rollback-readonly-report": {"post"},
@@ -14676,6 +14678,133 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             batch_pre_execution_refresh_api_write_attempt
         )
 
+        batch_pre_execution_refresh_route_response = client.post(
+            "/api/v1/batch/pre-execution-refresh/readonly-check",
+            json={
+                "write_boundary_review": batch_execution_write_boundary_route,
+                "backup_refresh_evidence": batch_pre_execution_backup_refresh_evidence,
+                "audit_refresh_evidence": batch_pre_execution_audit_refresh_evidence,
+                "readonly_api_context": batch_pre_execution_refresh_api_context,
+            },
+        )
+        assert batch_pre_execution_refresh_route_response.status_code == 200, (
+            batch_pre_execution_refresh_route_response.text
+        )
+        batch_pre_execution_refresh_route = batch_pre_execution_refresh_route_response.json()["data"]
+        assert batch_pre_execution_refresh_route["phase"] == "ERP-Batch-4G", (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["status"] == (
+            "formal_batch_pre_execution_refresh_readonly_api_ready"
+        ), batch_pre_execution_refresh_route
+        assert batch_pre_execution_refresh_route["approval_status"] == "ready_for_local_readonly_review", (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["backend_route_implemented"] is True, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["public_endpoint_enabled"] is True, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["route_path"] == (
+            "/api/v1/batch/pre-execution-refresh/readonly-check"
+        ), batch_pre_execution_refresh_route
+        assert batch_pre_execution_refresh_route["execution_approved"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["batch_execution_enabled"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["write_endpoint_enabled"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["orders_written"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["products_written"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["operation_audit_rows_written"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["real_api_called"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["real_database_written"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["formal_sync_open"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["platform_writes_enabled"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["raw_response_saved"] is False, (
+            batch_pre_execution_refresh_route
+        )
+        assert batch_pre_execution_refresh_route["privacy_fields_redacted"] is True, (
+            batch_pre_execution_refresh_route
+        )
+
+        batch_pre_execution_refresh_route_missing_response = client.post(
+            "/api/v1/batch/pre-execution-refresh/readonly-check",
+            json={
+                "write_boundary_review": batch_execution_write_boundary_route,
+                "backup_refresh_evidence": batch_pre_execution_backup_refresh_evidence,
+                "audit_refresh_evidence": batch_pre_execution_audit_refresh_evidence,
+                "readonly_api_context": {
+                    **batch_pre_execution_refresh_api_context,
+                    "business_wording_required": False,
+                },
+            },
+        )
+        assert batch_pre_execution_refresh_route_missing_response.status_code == 200, (
+            batch_pre_execution_refresh_route_missing_response.text
+        )
+        batch_pre_execution_refresh_route_missing = (
+            batch_pre_execution_refresh_route_missing_response.json()["data"]
+        )
+        assert batch_pre_execution_refresh_route_missing["phase"] == "ERP-Batch-4G", (
+            batch_pre_execution_refresh_route_missing
+        )
+        assert batch_pre_execution_refresh_route_missing["skip_reason"] == (
+            "readonly_api_context_incomplete"
+        ), batch_pre_execution_refresh_route_missing
+        assert "business_wording_required" in batch_pre_execution_refresh_route_missing["missing_api_flags"], (
+            batch_pre_execution_refresh_route_missing
+        )
+        assert batch_pre_execution_refresh_route_missing["real_database_written"] is False, (
+            batch_pre_execution_refresh_route_missing
+        )
+
+        batch_pre_execution_refresh_route_sensitive_response = client.post(
+            "/api/v1/batch/pre-execution-refresh/readonly-check",
+            json={
+                "write_boundary_review": batch_execution_write_boundary_route,
+                "backup_refresh_evidence": batch_pre_execution_backup_refresh_evidence,
+                "audit_refresh_evidence": batch_pre_execution_audit_refresh_evidence,
+                "readonly_api_context": {
+                    **batch_pre_execution_refresh_api_context,
+                    "rawResponse": "must-not-leak-pre-execution-refresh-route",
+                },
+            },
+        )
+        assert batch_pre_execution_refresh_route_sensitive_response.status_code == 200, (
+            batch_pre_execution_refresh_route_sensitive_response.text
+        )
+        batch_pre_execution_refresh_route_sensitive = (
+            batch_pre_execution_refresh_route_sensitive_response.json()["data"]
+        )
+        assert batch_pre_execution_refresh_route_sensitive["phase"] == "ERP-Batch-4G", (
+            batch_pre_execution_refresh_route_sensitive
+        )
+        assert batch_pre_execution_refresh_route_sensitive["skip_reason"] == (
+            "pre_execution_refresh_readonly_api_sensitive_field_blocked"
+        ), batch_pre_execution_refresh_route_sensitive
+        assert batch_pre_execution_refresh_route_sensitive["orders_written"] is False, (
+            batch_pre_execution_refresh_route_sensitive
+        )
+
         batch_execution_dry_run_missing_response = client.post(
             "/api/v1/batch/execution-dry-run/readonly-check",
             json={
@@ -14948,6 +15077,9 @@ def verify_product_stock_change_and_readonly_evidence_gates() -> None:
             ),
             "batch_pre_execution_refresh_api_sensitive": batch_pre_execution_refresh_api_sensitive,
             "batch_pre_execution_refresh_api_write_attempt": batch_pre_execution_refresh_api_write_attempt,
+            "batch_pre_execution_refresh_route": batch_pre_execution_refresh_route,
+            "batch_pre_execution_refresh_route_missing": batch_pre_execution_refresh_route_missing,
+            "batch_pre_execution_refresh_route_sensitive": batch_pre_execution_refresh_route_sensitive,
             "no_approval": no_approval,
             "operator_blocked": operator_blocked,
             "local_sensitive": local_sensitive,
