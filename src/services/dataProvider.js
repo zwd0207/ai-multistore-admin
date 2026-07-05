@@ -1057,6 +1057,87 @@ function toBackendShippingMappingPayload(payload = {}) {
   };
 }
 
+function adaptShippingExcelExportResult(data = {}) {
+  const rows = data.export_rows_preview || data.rows || [];
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-3D',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    exportBatchId: data.export_batch_id ?? data.exportBatchId ?? null,
+    exportBatchRowCount: Number(data.export_batch_row_count ?? data.exportBatchRowCount ?? rows.length),
+    fileName: data.file_name ?? data.fileName ?? data.file_name_preview ?? data.fileNamePreview ?? '',
+    filePath: data.file_path ?? data.filePath ?? '',
+    fileHash: data.file_sha256 ?? data.fileHash ?? data.file_hash_planned ?? data.fileHashPlanned ?? '',
+    fileSha256: data.file_sha256 ?? data.fileSha256 ?? '',
+    fileSizeBytes: Number(data.file_size_bytes ?? data.fileSizeBytes ?? 0),
+    fileType: data.file_type ?? data.fileType ?? 'shipping_request',
+    fileFormat: data.file_format ?? data.fileFormat ?? 'xlsx',
+    rowCount: Number(data.row_count ?? data.rowCount ?? rows.length),
+    matchedRowCount: Number(data.matched_row_count ?? data.matchedRowCount ?? rows.length),
+    unmatchedRowCount: Number(data.unmatched_row_count ?? data.unmatchedRowCount ?? 0),
+    fileGenerated: Boolean(data.file_generated ?? data.fileGenerated),
+    filePersisted: Boolean(data.file_persisted ?? data.filePersisted),
+    exportRecordWritten: Boolean(data.export_record_written ?? data.exportRecordWritten),
+    downloadRecordWritten: Boolean(data.download_record_written ?? data.downloadRecordWritten),
+    operationAuditRowsWritten: Boolean(data.operation_audit_rows_written ?? data.operationAuditRowsWritten),
+    operationAuditLogId: data.operation_audit_log_id ?? data.operationAuditLogId ?? null,
+    auditCorrelationId: data.audit_correlation_id ?? data.auditCorrelationId ?? null,
+    exportRecordSchemaPlanned: Boolean(data.export_record_schema_planned ?? data.exportRecordSchemaPlanned ?? true),
+    auditLinkagePlanned: Boolean(data.audit_linkage_planned ?? data.auditLinkagePlanned ?? true),
+    trackingImportContractPlanned: Boolean(data.tracking_import_contract_planned ?? data.trackingImportContractPlanned ?? true),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    includeReceiverPrivacy: Boolean(data.include_receiver_privacy ?? data.includeReceiverPrivacy),
+    receiverPrivacyIncluded: Boolean(data.receiver_privacy_included ?? data.receiverPrivacyIncluded),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: Boolean(data.privacy_fields_redacted ?? data.privacyFieldsRedacted ?? true),
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    rows: rows.map((row) => ({
+      platform: row.platform || 'naver',
+      orderNo: row.order_reference ?? row.orderNo ?? '',
+      productName: row.product_name ?? row.productName ?? '',
+      optionName: row.option_name ?? row.optionName ?? '',
+      quantity: Number(row.quantity ?? 0),
+      logisticsInventoryCode: row.logistics_inventory_code ?? row.logisticsInventoryCode ?? '',
+      logisticsProviderName: row.logistics_provider_name ?? row.logisticsProviderName ?? '',
+      logisticsCurrentStock: Number(row.logistics_current_stock ?? row.logisticsCurrentStock ?? 0),
+      matchStatus: row.match_status ?? row.matchStatus ?? 'matched',
+      note: row.note || '本地 Excel 已生成。',
+    })),
+  };
+}
+
+function toBackendShippingExcelExportPayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    include_receiver_privacy: Boolean(payload.includeReceiverPrivacy ?? payload.include_receiver_privacy),
+    actor_context: payload.actorContext || payload.actor_context || {},
+    export_rows: (payload.rows || payload.exportRows || payload.export_rows || []).map((item) => ({
+      order_reference: item.orderReference || item.orderNo || item.order_reference || '',
+      product_name: item.productName || item.product_name || '',
+      option_name: item.optionName || item.option_name || '',
+      quantity: Number(item.quantity || 0),
+      logistics_inventory_code: item.logisticsInventoryCode || item.logistics_inventory_code || '',
+      logistics_provider_name: item.logisticsProviderName || item.logistics_provider_name || '',
+      logistics_current_stock: Number(item.logisticsCurrentStock ?? item.currentStockQuantity ?? item.logistics_current_stock ?? 0),
+      platform_product_id_hash: item.platformProductIdHash || item.platform_product_id_hash || null,
+      platform_option_id_hash: item.platformOptionIdHash || item.platform_option_id_hash || null,
+      internal_sku: item.internalSku || item.internal_sku || '',
+    })),
+  };
+}
+
 function adaptStoreMembershipReadonlyResult(data = {}) {
   return {
     ...data,
@@ -2059,6 +2140,47 @@ const sourceMethods = {
     }
     const { store } = await resolveBackendStore({ storeId: request.store_id });
     return adaptShippingMappingResult(await backendApi.writeShippingLogisticsMappings({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  generateShippingExcelExport: async (payload = {}) => {
+    const request = toBackendShippingExcelExportPayload(payload);
+    if (!isBackendSource) {
+      return adaptShippingExcelExportResult({
+        phase: 'Shipping-3D',
+        status: request.manual_approval ? 'mock_excel_export_preview_ready' : 'blocked',
+        skip_reason: request.manual_approval ? null : 'manual_approval_required',
+        business_message: request.manual_approval
+          ? 'mock 模式只生成页面预览，不创建真实 Excel 文件。'
+          : '请先确认本地导出操作。',
+        file_type: 'shipping_request',
+        file_format: 'xlsx',
+        row_count: request.export_rows.length,
+        matched_row_count: request.export_rows.length,
+        unmatched_row_count: 0,
+        file_generated: false,
+        file_persisted: false,
+        export_record_written: false,
+        download_record_written: false,
+        operation_audit_rows_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        tracking_number_import_open: false,
+        export_rows_preview: request.export_rows,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingExcelExportResult(await backendApi.generateShippingExcelExport({
       ...request,
       store_id: Number(store.id),
     }));

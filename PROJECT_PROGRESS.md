@@ -1529,3 +1529,37 @@ Next 5 recommended stages:
 3. `Phase Shipping-3C: Real Excel generation approval plan`
 4. `Phase Shipping-3D: Real Excel generation local implementation`
 5. `Phase Shipping-3E: Export record and audit post-generation verification`
+
+### Latest update after `Phase Shipping-3A` to `Phase Shipping-3E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `86% - 92%`
+- ERP real-user landing progress: about `85% - 90%`
+- Production version for long-term non-technical use: about `73% - 80%`
+
+Implemented in this update:
+
+- Approved and migrated local export-record schema.
+- Added `shipping_export_batches` and `shipping_export_batch_rows`.
+- Added Codex1 `POST /api/v1/shipping/export-excel`.
+- Implemented local `.xlsx` generation using Python standard library ZIP/XML writing.
+- Wrote export batch, export rows, and one operation audit row for approved local export.
+- Updated Codex2 `/shipping` so backend mode can generate a local Excel file from export-ready rows.
+- Kept mock mode preview-only.
+- Verified workbook structure, file hash, export records, audit row, and unchanged orders/products/SyncLog/tested-success counts in `verify_all.py`.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant trial with unshipped candidates, logistics inventory-code matching, manual logistics stock maintenance, local mapping persistence, and local Excel file generation with export/audit evidence.
+- Not suitable now: tracking-number import, Naver shipment writeback, logistics-provider API integration, receiver-privacy export, Coupang shipping workflow, or formal order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-4A: Tracking-number import schema approval plan`
+2. `Phase Shipping-4B: Tracking-number import mock parser gate`
+3. `Phase Shipping-4C: Export history readonly API plan`
+4. `Phase Shipping-4D: Export history readonly API implementation`
+5. `Phase Shipping-4E: Shipping Assistant export history UI`

@@ -56,6 +56,7 @@ export const backendApi = {
   getShippingLogisticsMappings: (params) => getData('/shipping/logistics-mappings', params),
   checkShippingLogisticsMappingWriteGate: (payload) => sendData('post', '/shipping/logistics-mappings/write-gate', payload),
   writeShippingLogisticsMappings: (payload) => sendData('post', '/shipping/logistics-mappings', payload),
+  generateShippingExcelExport: (payload) => sendData('post', '/shipping/export-excel', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   getSyncLogs: (params) => getData('/sync-logs', params),
   getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),

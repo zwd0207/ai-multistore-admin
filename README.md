@@ -2001,3 +2001,19 @@ Codex1 now has a private `evaluate_real_excel_generation_mock_gate(...)` service
 Codex2 `/shipping` now labels the export preview as the Shipping-2H mock gate and shows that real file generation, export records, audit rows, tracking-number import, platform writes, and formal order sync remain closed.
 
 This phase still does not create a real `.xlsx` file, write export/download records, write orders/products/SyncLog/tested-success rows, call Naver, call a logistics-provider API, import tracking numbers, or execute shipment writeback.
+
+## Phase Shipping-3A to Shipping-3E - Local Excel Export Records
+
+Shipping-3A to 3E implement the first real local Shipping Assistant export path:
+
+- `PHASE_SHIPPING_3A_SHIPPING_EXPORT_RECORD_SCHEMA_APPROVAL_PLAN.md`
+- `PHASE_SHIPPING_3B_SHIPPING_EXPORT_RECORD_SCHEMA_MIGRATION.md`
+- `PHASE_SHIPPING_3C_REAL_EXCEL_GENERATION_APPROVAL_PLAN.md`
+- `PHASE_SHIPPING_3D_REAL_EXCEL_GENERATION_LOCAL_IMPLEMENTATION.md`
+- `PHASE_SHIPPING_3E_EXPORT_RECORD_AND_AUDIT_POST_GENERATION_VERIFICATION.md`
+
+Codex1 now has local export-record tables and `POST /api/v1/shipping/export-excel`. Backend mode can generate a local `.xlsx` file, write one export batch, write export rows, and write one operation audit row. Codex2 `/shipping` calls that route only when the operator clicks the export button. Mock mode remains preview-only.
+
+The real database schema was migrated after a local backup. The new export tables started with zero rows; no fake logistics export was generated from production data.
+
+This phase still does not call Naver, call a logistics-provider API, include receiver privacy by default, import tracking numbers, write orders/products/SyncLog/tested-success rows, or execute shipment/cancel/return/exchange writes.

@@ -1,7 +1,7 @@
 import { getNaverOrderStatusPresentation, normalizeNaverOrderStatus } from './naverOrderFulfillment';
 
-export const SHIPPING_PHASE = 'Shipping-2F-to-2J';
-export const SHIPPING_EXPORT_MOCK_PHASE = 'Shipping-2H';
+export const SHIPPING_PHASE = 'Shipping-3A-to-3E';
+export const SHIPPING_EXPORT_MOCK_PHASE = 'Shipping-3D';
 export const SHIPPING_FILE_TYPE = 'shipping_request';
 export const SHIPPING_FILE_FORMAT = 'xlsx';
 
@@ -301,7 +301,7 @@ export function buildShippingExcelExportMock({
     realDatabaseWritten: false,
     formalOrderSyncOpen: false,
     platformWritesEnabled: false,
-    businessMessage: '真实 Excel 生成 mock 门禁已通过；当前仍不创建真实文件、不写导出记录、不回传物流单号。',
+    businessMessage: 'mock 模式只生成页面预览；backend 模式可生成本地 Excel 文件并写入导出记录。',
     rows: exportRows.map((row) => ({
       platform: 'naver',
       storeName: selectedStore?.name || `store-${selectedStoreId || row.storeId || 'local'}`,

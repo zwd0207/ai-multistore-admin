@@ -266,23 +266,25 @@ function StockMaintenancePanel({
   );
 }
 
-function ExportPreviewPanel({ gate, exportPreview, onGenerate }) {
+function ExportPreviewPanel({ gate, exportPreview, onGenerate, generating = false, exportError = '', backendMode = false }) {
   return (
     <section className="content-card">
       <div className="section-heading">
         <div>
           <h2>物流商 Excel 导出预览</h2>
-          <p>当前通过真实 Excel 生成 mock 门禁；真实文件、导出记录、审计记录和物流单号回传仍需单独审批。</p>
+          <p>{backendMode ? '可生成本地 Excel 文件，并写入导出记录和审计证据；不会回传 Naver。' : 'mock 模式只生成页面预览；真实文件、导出记录和审计记录不会写入。'}</p>
         </div>
-        <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount}>
-          生成 Excel 导出预览
+        <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount || generating}>
+          {generating ? '生成中...' : backendMode ? '生成本地 Excel 文件' : '生成 Excel 导出预览'}
         </button>
       </div>
+      {exportError ? <div className="mock-sync-error">{exportError}</div> : null}
       {!gate.exportReadyCount ? (
         <EmptyState title="还不能导出" description="请先完成库存编号匹配，并确认物流库存足够。" />
       ) : null}
       {exportPreview ? (
         <div className="shipping-export-preview">
+          {exportPreview.businessMessage ? <div className="mock-sync-success">{exportPreview.businessMessage}</div> : null}
           <div className="sync-result-grid">
             <span>文件名</span>
             <strong>{exportPreview.fileName}</strong>
@@ -292,6 +294,12 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate }) {
             <strong>{exportPreview.rowCount}</strong>
             <span>文件指纹</span>
             <strong>{exportPreview.fileHash}</strong>
+            {exportPreview.filePath ? (
+              <>
+                <span>本地路径</span>
+                <strong>{exportPreview.filePath}</strong>
+              </>
+            ) : null}
           </div>
           <div className="table-wrap">
             <table>
@@ -339,6 +347,8 @@ export default function ShippingAssistant() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [exportPreview, setExportPreview] = useState(null);
+  const [exportError, setExportError] = useState('');
+  const [generatingExport, setGeneratingExport] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveResult, setSaveResult] = useState(null);
@@ -348,6 +358,7 @@ export default function ShippingAssistant() {
   useEffect(() => {
     let cancelled = false;
     setExportPreview(null);
+    setExportError('');
 
     if (storeLoading) return () => { cancelled = true; };
     if (!selectedStoreId || !isNaverStore) {
@@ -449,6 +460,7 @@ export default function ShippingAssistant() {
       setMappings(updater);
     }
     setExportPreview(null);
+    setExportError('');
   };
 
   const saveMappings = async () => {
@@ -503,13 +515,51 @@ export default function ShippingAssistant() {
     }
   };
 
-  const generateExportPreview = () => {
-    setExportPreview(buildShippingExcelExportMock({
-      rows: gate.rows,
-      selectedStore,
-      selectedStoreId,
-      includeReceiverPrivacy: false,
-    }));
+  const generateExportPreview = async () => {
+    setExportError('');
+    setGeneratingExport(true);
+    try {
+      if (isBackendSource) {
+        const exportRows = gate.rows.filter((row) => row.exportReady);
+        const result = await dataProvider.generateShippingExcelExport({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          manualApproval: true,
+          includeReceiverPrivacy: false,
+          actorContext: {
+            role: 'admin',
+            actor_id: 'shipping-local-operator',
+          },
+          rows: exportRows.map((row) => ({
+            orderReference: row.orderNo,
+            productName: row.productName,
+            optionName: row.optionName,
+            quantity: row.quantity,
+            logisticsInventoryCode: row.logisticsInventoryCode,
+            logisticsProviderName: row.logisticsProviderName,
+            logisticsCurrentStock: row.currentStockQuantity,
+            platformProductIdHash: row.platformProductIdHash || null,
+            platformOptionIdHash: row.platformOptionIdHash || null,
+            internalSku: row.internalSku || '',
+          })),
+        });
+        if (result.status !== 'shipping_excel_local_export_succeeded') {
+          throw new Error(result.businessMessage || result.skipReason || '本地 Excel 生成未通过。');
+        }
+        setExportPreview(result);
+        return;
+      }
+      setExportPreview(buildShippingExcelExportMock({
+        rows: gate.rows,
+        selectedStore,
+        selectedStoreId,
+        includeReceiverPrivacy: false,
+      }));
+    } catch (error) {
+      setExportError(error.message || 'Excel 导出生成失败。');
+    } finally {
+      setGeneratingExport(false);
+    }
   };
 
   if (storeLoading) {
@@ -557,7 +607,7 @@ export default function ShippingAssistant() {
         <SummaryCard title="已匹配库存编号" value={summary.matchedCount} note="商品名 + 选项名" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="待维护映射" value={summary.unmatchedCount} note="需要人工补齐" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="库存需关注" value={summary.stockAttentionCount} note="物流库存不足或偏低" tone={summary.stockAttentionCount ? 'warning' : 'success'} />
-        <SummaryCard title="可导出行" value={summary.exportReadyCount} note="Excel mock 门禁" tone={summary.exportReadyCount ? 'success' : 'default'} />
+        <SummaryCard title="可导出行" value={summary.exportReadyCount} note={isBackendSource ? '本地 Excel 文件' : 'Excel mock 预览'} tone={summary.exportReadyCount ? 'success' : 'default'} />
       </div>
 
       <ShippingWorkflowSteps />
@@ -613,6 +663,9 @@ export default function ShippingAssistant() {
         gate={gate}
         exportPreview={exportPreview}
         onGenerate={generateExportPreview}
+        generating={generatingExport}
+        exportError={exportError}
+        backendMode={isBackendSource}
       />
 
       <TechnicalDetails
@@ -622,6 +675,12 @@ export default function ShippingAssistant() {
           { label: 'phase', value: exportPreview?.phase || SHIPPING_EXPORT_MOCK_PHASE },
           { label: 'file_type', value: exportPreview?.fileType || 'shipping_request' },
           { label: 'file_format', value: exportPreview?.fileFormat || 'xlsx' },
+          { label: 'export_batch_id', value: exportPreview?.exportBatchId || 'not_created' },
+          { label: 'operation_audit_log_id', value: exportPreview?.operationAuditLogId || 'not_created' },
+          { label: 'audit_correlation_id', value: exportPreview?.auditCorrelationId || 'not_created' },
+          { label: 'file_path', value: exportPreview?.filePath || 'not_created' },
+          { label: 'file_sha256', value: exportPreview?.fileSha256 || 'not_created' },
+          { label: 'file_size_bytes', value: exportPreview?.fileSizeBytes || 0 },
           { label: 'file_generated', value: exportPreview?.fileGenerated ?? false },
           { label: 'file_persisted', value: exportPreview?.filePersisted ?? false },
           { label: 'export_record_written', value: exportPreview?.exportRecordWritten ?? false },
