@@ -1724,6 +1724,111 @@ function buildFormalBatchExecutionWriteBoundaryReadonlyApiContext() {
   };
 }
 
+function buildFormalBatchPreExecutionBackupRefreshEvidence({ selectedStoreId }) {
+  return {
+    fresh_backup_created: true,
+    backup_manifest_verified: true,
+    backup_sha256_verified: true,
+    restore_dry_run_referenced: true,
+    backup_created_after_boundary_review: true,
+    safe_backup_reference_only: true,
+    sqlite_integrity_check: 'ok',
+    backup_sha256: 'd'.repeat(64),
+    backup_deleted: false,
+    production_db_touched: false,
+    store_ids: [Number(selectedStoreId)],
+    sync_kinds: ['naver_product_batch', 'naver_order_batch'],
+    targets: ['products', 'orders'],
+    required_actions: ['products.batch_sync_write', 'orders.batch_sync_write'],
+    execution_approved: false,
+    batch_execution_enabled: false,
+    write_endpoint_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    timeline_events_written: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+  };
+}
+
+function buildFormalBatchPreExecutionAuditRefreshEvidence({ selectedStoreId }) {
+  return {
+    audit_correlation_planned: true,
+    append_only_audit_chain_planned: true,
+    actor_store_scope_verified: true,
+    safe_metadata_only: true,
+    backup_evidence_link_planned: true,
+    write_attempt_record_planned: true,
+    readback_audit_planned: true,
+    rollback_audit_planned: true,
+    no_audit_rows_written_yet: true,
+    audit_correlation_id_hash: 'orders-ui-batch-refresh-audit-4h',
+    store_ids: [Number(selectedStoreId)],
+    sync_kinds: ['naver_product_batch', 'naver_order_batch'],
+    targets: ['products', 'orders'],
+    required_actions: ['products.batch_sync_write', 'orders.batch_sync_write'],
+    planned_action_names: [
+      'products.batch_sync_write',
+      'orders.batch_sync_write',
+      'batch_pre_execution_backup_refresh',
+      'batch_pre_execution_audit_refresh',
+    ],
+    execution_approved: false,
+    batch_execution_enabled: false,
+    write_endpoint_enabled: false,
+    real_api_called: false,
+    real_database_written: false,
+    orders_written: false,
+    products_written: false,
+    sync_log_written: false,
+    capability_tested_success_written: false,
+    timeline_events_written: false,
+    operation_audit_rows_written: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+    raw_response_saved: false,
+    secrets_saved: false,
+    privacy_fields_redacted: true,
+  };
+}
+
+function buildFormalBatchPreExecutionRefreshReadonlyApiContext() {
+  return {
+    readonly_api_contract_planned: true,
+    business_wording_required: true,
+    technical_details_folded: true,
+    execution_button_excluded: true,
+    write_endpoint_excluded: true,
+    backup_creation_button_excluded: true,
+    audit_row_write_excluded: true,
+    product_write_endpoint_excluded: true,
+    order_write_endpoint_excluded: true,
+    sensitive_fields_hidden_from_main_page: true,
+    route_requires_separate_implementation: true,
+    formal_sync_remains_closed: true,
+    public_endpoint_enabled: false,
+    backend_route_implemented: false,
+    execution_approved: false,
+    batch_execution_enabled: false,
+    write_endpoint_enabled: false,
+    orders_written: false,
+    products_written: false,
+    operation_audit_rows_written: false,
+    backup_created: false,
+    restore_executed: false,
+    formal_sync_open: false,
+    platform_writes_enabled: false,
+  };
+}
+
 function buildFormalBatchExecutionDryRunCandidateSummaries({
   selectedStoreId,
   localOrderCount,
@@ -1937,6 +2042,19 @@ function batchExecutionWriteBoundaryStatusMessage(result) {
     return '\u6b63\u5f0f\u6279\u91cf\u5199\u5165\u8fb9\u754c\u6682\u672a\u901a\u8fc7\uff0c\u8bf7\u7ba1\u7406\u5458\u67e5\u770b\u6298\u53e0\u8be6\u60c5\u5e76\u8865\u9f50\u5907\u4efd\u3001\u5ba1\u8ba1\u3001\u56de\u8bfb\u6216\u56de\u6eda\u8bc1\u636e\u3002';
   }
   return '\u6b63\u5f0f\u6279\u91cf\u5199\u5165\u8fb9\u754c\u5df2\u8fd4\u56de\uff0c\u6267\u884c\u548c\u5199\u5165\u5f00\u5173\u4fdd\u6301\u5173\u95ed\u3002';
+}
+
+function batchPreExecutionRefreshStatusMessage(result) {
+  if (!result) {
+    return '正在整理执行前备份与审计刷新复核；本次只展示证据，不创建备份、不写审计行、不执行批量同步。';
+  }
+  if (result.status === 'formal_batch_pre_execution_refresh_readonly_api_ready') {
+    return result.businessMessage || '执行前备份与审计刷新复核已就绪；当前仍不批准执行，不写商品或订单。';
+  }
+  if (result.skipReason) {
+    return '执行前备份与审计刷新复核暂未通过，请管理员查看折叠详情并补齐备份、审计或只读展示证据。';
+  }
+  return result.businessMessage || '执行前备份与审计刷新复核已返回，执行和写入开关保持关闭。';
 }
 
 function findDryRunSummary(result, target) {
@@ -2395,6 +2513,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
     dryRunResult: null,
     finalApprovalResult: null,
     writeBoundaryResult: null,
+    preExecutionRefreshResult: null,
     decisionResult: null,
     auditLinkageResult: null,
     error: '',
@@ -2411,6 +2530,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
         dryRunResult: null,
         finalApprovalResult: null,
         writeBoundaryResult: null,
+        preExecutionRefreshResult: null,
         decisionResult: null,
         auditLinkageResult: null,
         error: '',
@@ -2527,6 +2647,12 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           writeBoundaryContext: buildFormalBatchExecutionWriteBoundaryContext({ selectedStoreId }),
           readonlyApiContext: buildFormalBatchExecutionWriteBoundaryReadonlyApiContext(),
         });
+        const preExecutionRefreshResult = await dataProvider.checkFormalBatchPreExecutionRefreshReadonly({
+          writeBoundaryReview: writeBoundaryResult,
+          backupRefreshEvidence: buildFormalBatchPreExecutionBackupRefreshEvidence({ selectedStoreId }),
+          auditRefreshEvidence: buildFormalBatchPreExecutionAuditRefreshEvidence({ selectedStoreId }),
+          readonlyApiContext: buildFormalBatchPreExecutionRefreshReadonlyApiContext(),
+        });
         if (!cancelled) {
           setState({
             loading: false,
@@ -2534,6 +2660,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             dryRunResult,
             finalApprovalResult,
             writeBoundaryResult,
+            preExecutionRefreshResult,
             decisionResult,
             auditLinkageResult,
             error: '',
@@ -2549,6 +2676,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             dryRunResult: null,
             finalApprovalResult: null,
             writeBoundaryResult: null,
+            preExecutionRefreshResult: null,
             decisionResult: null,
             auditLinkageResult: null,
             error: error?.message || '\u6b63\u5f0f\u6279\u91cf\u6267\u884c\u524d\u7f6e\u68c0\u67e5\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\u3002',
@@ -2565,12 +2693,13 @@ function FormalBatchExecutionPreflightRuntimePanel() {
   if (!isNaverStore) return null;
 
   const {
-    loading, result, dryRunResult, finalApprovalResult, writeBoundaryResult, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
+    loading, result, dryRunResult, finalApprovalResult, writeBoundaryResult, preExecutionRefreshResult, decisionResult, auditLinkageResult, error, localOrderCount, localProductCount,
   } = state;
   const preflightReady = result?.status === 'formal_batch_execution_preflight_readonly_ready';
   const dryRunReady = dryRunResult?.status === 'formal_batch_execution_dry_run_readonly_ready';
   const finalApprovalReady = finalApprovalResult?.status === 'formal_batch_execution_approval_readonly_api_ready';
   const writeBoundaryReady = writeBoundaryResult?.status === 'formal_batch_execution_write_boundary_readonly_api_ready';
+  const preExecutionRefreshReady = preExecutionRefreshResult?.status === 'formal_batch_pre_execution_refresh_readonly_api_ready';
   const decisionReady = decisionResult?.status === 'formal_batch_approval_decision_readonly_api_ready';
   const linkageReady = auditLinkageResult?.status === 'approval_decision_audit_linkage_readonly_api_ready';
   const productDryRunSummary = findDryRunSummary(dryRunResult, 'products');
@@ -2609,6 +2738,7 @@ function FormalBatchExecutionPreflightRuntimePanel() {
             <span>{finalApprovalReady ? '可复核' : '待补齐'}</span>
           </div>
           <p>{batchExecutionApprovalStatusMessage(finalApprovalResult)}</p>
+          <p><strong>执行前备份与审计刷新：</strong>{batchPreExecutionRefreshStatusMessage(preExecutionRefreshResult)}</p>
           <p><strong>{'\u5199\u5165\u8fb9\u754c\u590d\u6838\uff1a'}</strong>{batchExecutionWriteBoundaryStatusMessage(writeBoundaryResult)}</p>
           <small>这仍不是执行批准；正式商品/订单批量写入必须另开执行阶段。</small>
         </article>
@@ -2768,6 +2898,16 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'write_boundary_missing_flags', value: writeBoundaryResult?.missingWriteBoundaryFlags?.join(', ') || '[]' },
           { label: 'write_boundary_missing_api_flags', value: writeBoundaryResult?.missingApiFlags?.join(', ') || '[]' },
           { label: 'write_boundary_max_batch_size', value: writeBoundaryResult?.maxBatchSize },
+          { label: 'pre_execution_refresh_phase', value: preExecutionRefreshResult?.phase || 'ERP-Batch-4G' },
+          { label: 'pre_execution_refresh_status', value: preExecutionRefreshResult?.status },
+          { label: 'pre_execution_refresh_ready', value: preExecutionRefreshResult?.preExecutionBackupAuditRefreshGateReady },
+          { label: 'pre_execution_refresh_route_path', value: preExecutionRefreshResult?.routePath },
+          { label: 'pre_execution_refresh_skip_reason', value: preExecutionRefreshResult?.skipReason },
+          { label: 'pre_execution_refresh_missing_backup_flags', value: preExecutionRefreshResult?.missingBackupFlags?.join(', ') || '[]' },
+          { label: 'pre_execution_refresh_missing_audit_flags', value: preExecutionRefreshResult?.missingAuditFlags?.join(', ') || '[]' },
+          { label: 'pre_execution_refresh_missing_api_flags', value: preExecutionRefreshResult?.missingApiFlags?.join(', ') || '[]' },
+          { label: 'pre_execution_refresh_backup_sha256_abbrev', value: preExecutionRefreshResult?.backupSha256Abbrev },
+          { label: 'pre_execution_refresh_audit_correlation_reference', value: preExecutionRefreshResult?.auditCorrelationReference },
           { label: 'skip_reason', value: result?.skipReason },
           { label: 'route_path', value: result?.routePath },
           { label: 'selected_store_id', value: selectedStoreId },
@@ -2844,6 +2984,18 @@ function FormalBatchExecutionPreflightRuntimePanel() {
           { label: 'write_boundary_orders_written', value: writeBoundaryResult?.ordersWritten },
           { label: 'write_boundary_products_written', value: writeBoundaryResult?.productsWritten },
           { label: 'write_boundary_operation_audit_rows_written', value: writeBoundaryResult?.operationAuditRowsWritten },
+          { label: 'pre_execution_refresh_backend_route_implemented', value: preExecutionRefreshResult?.backendRouteImplemented },
+          { label: 'pre_execution_refresh_public_endpoint_enabled', value: preExecutionRefreshResult?.publicEndpointEnabled },
+          { label: 'pre_execution_refresh_execution_approved', value: preExecutionRefreshResult?.executionApproved },
+          { label: 'pre_execution_refresh_batch_execution_enabled', value: preExecutionRefreshResult?.batchExecutionEnabled },
+          { label: 'pre_execution_refresh_write_endpoint_enabled', value: preExecutionRefreshResult?.writeEndpointEnabled },
+          { label: 'pre_execution_refresh_real_api_called', value: preExecutionRefreshResult?.realApiCalled },
+          { label: 'pre_execution_refresh_real_database_written', value: preExecutionRefreshResult?.realDatabaseWritten },
+          { label: 'pre_execution_refresh_orders_written', value: preExecutionRefreshResult?.ordersWritten },
+          { label: 'pre_execution_refresh_products_written', value: preExecutionRefreshResult?.productsWritten },
+          { label: 'pre_execution_refresh_operation_audit_rows_written', value: preExecutionRefreshResult?.operationAuditRowsWritten },
+          { label: 'pre_execution_refresh_formal_sync_open', value: preExecutionRefreshResult?.formalSyncOpen },
+          { label: 'pre_execution_refresh_platform_writes_enabled', value: preExecutionRefreshResult?.platformWritesEnabled },
           { label: 'dry_run_real_api_called', value: dryRunResult?.realApiCalled },
           { label: 'dry_run_real_database_written', value: dryRunResult?.realDatabaseWritten },
           { label: 'dry_run_orders_written', value: dryRunResult?.ordersWritten },
@@ -2933,7 +3085,8 @@ function FormalBatchExecutionFinalBoundaryPanel() {
           { label: 'final_boundary_plan_ready', value: true },
           { label: 'readonly_route_path', value: '/api/v1/batch/execution-approval/readonly-check' },
           { label: 'write_boundary_readonly_route_path', value: '/api/v1/batch/execution-write-boundary/readonly-check' },
-          { label: 'next_phase', value: 'ERP-Batch-4E' },
+          { label: 'pre_execution_refresh_readonly_route_path', value: '/api/v1/batch/pre-execution-refresh/readonly-check' },
+          { label: 'next_phase', value: 'ERP-Batch-4I' },
           { label: 'execution_approved', value: false },
           { label: 'batch_execution_enabled', value: false },
           { label: 'formal_product_sync_open', value: false },

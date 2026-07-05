@@ -96,6 +96,9 @@ export const backendApi = {
   checkFormalBatchExecutionWriteBoundaryReadonly: (payload) => (
     sendData('post', '/batch/execution-write-boundary/readonly-check', payload)
   ),
+  checkFormalBatchPreExecutionRefreshReadonly: (payload) => (
+    sendData('post', '/batch/pre-execution-refresh/readonly-check', payload)
+  ),
   checkNaverProductBatchExecutionApprovalReadonly: (payload) => (
     sendData('post', '/batch/naver/products/execution-approval/readonly-check', payload)
   ),
