@@ -1356,6 +1356,119 @@ function adaptShippingTrackingImportHistoryResult(data = {}) {
   };
 }
 
+function adaptShippingTrackingOrderMatchResult(data = {}) {
+  const rows = Array.isArray(data.match_rows) ? data.match_rows : (Array.isArray(data.matchRows) ? data.matchRows : []);
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-6B',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyRoute: Boolean(data.readonly_route ?? data.readonlyRoute ?? true),
+    trackingOrderMatchReadonly: Boolean(data.tracking_order_match_readonly ?? data.trackingOrderMatchReadonly ?? true),
+    matchingContractAcknowledged: Boolean(data.matching_contract_acknowledged ?? data.matchingContractAcknowledged),
+    importBatchId: data.import_batch_id ?? data.importBatchId ?? null,
+    totalTrackingRows: Number(data.total_tracking_rows ?? data.totalTrackingRows ?? rows.length),
+    matchedOrderCount: Number(data.matched_order_count ?? data.matchedOrderCount ?? 0),
+    unmatchedOrderCount: Number(data.unmatched_order_count ?? data.unmatchedOrderCount ?? 0),
+    duplicateTrackingRowCount: Number(data.duplicate_tracking_row_count ?? data.duplicateTrackingRowCount ?? 0),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    ordersUpdated: Boolean(data.orders_updated ?? data.ordersUpdated),
+    trackingRowsWritten: Boolean(data.tracking_rows_written ?? data.trackingRowsWritten),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    rows: rows.map((row) => ({
+      rowIndex: row.row_index ?? row.rowIndex,
+      orderNo: row.order_reference ?? row.orderNo ?? '',
+      productOrderNo: row.product_order_reference ?? row.productOrderNo ?? '',
+      logisticsInventoryCode: row.logistics_inventory_code ?? row.logisticsInventoryCode ?? '',
+      carrier: row.carrier || '',
+      trackingNumber: row.tracking_number ?? row.trackingNumber ?? '',
+      shippedAt: row.shipped_at ?? row.shippedAt ?? null,
+      rowStatus: row.row_status ?? row.rowStatus ?? '',
+      matchStatus: row.match_status ?? row.matchStatus ?? '',
+      matchMethod: row.match_method ?? row.matchMethod ?? '',
+      futureWriteAllowed: Boolean(row.future_write_allowed ?? row.futureWriteAllowed),
+      orderSummary: row.order_summary || row.orderSummary || null,
+    })),
+  };
+}
+
+function toBackendShippingTrackingOrderMatchPayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    import_batch_id: payload.importBatchId || payload.import_batch_id || null,
+    matching_contract_acknowledged: Boolean(payload.matchingContractAcknowledged ?? payload.matching_contract_acknowledged),
+    actor_context: payload.actorContext || payload.actor_context || {},
+    tracking_rows: toBackendShippingTrackingImportPayload(payload).tracking_rows,
+  };
+}
+
+function adaptShippingShipmentWritebackBoundaryResult(data = {}) {
+  return {
+    ...data,
+    phase: data.phase || 'Shipping-6C',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    readonlyRoute: Boolean(data.readonly_route ?? data.readonlyRoute ?? true),
+    shipmentWritebackBoundaryReview: Boolean(data.shipment_writeback_boundary_review ?? data.shipmentWritebackBoundaryReview ?? true),
+    manualApproval: Boolean(data.manual_approval ?? data.manualApproval),
+    matchedOrderCount: Number(data.matched_order_count ?? data.matchedOrderCount ?? 0),
+    totalTrackingRows: Number(data.total_tracking_rows ?? data.totalTrackingRows ?? 0),
+    matchingEvidenceAcknowledged: Boolean(data.matching_evidence_acknowledged ?? data.matchingEvidenceAcknowledged),
+    backupEvidenceAcknowledged: Boolean(data.backup_evidence_acknowledged ?? data.backupEvidenceAcknowledged),
+    auditEvidenceAcknowledged: Boolean(data.audit_evidence_acknowledged ?? data.auditEvidenceAcknowledged),
+    naverWritebackBoundaryAcknowledged: Boolean(data.naver_writeback_boundary_acknowledged ?? data.naverWritebackBoundaryAcknowledged),
+    operatorChecklistAcknowledged: Boolean(data.operator_checklist_acknowledged ?? data.operatorChecklistAcknowledged),
+    requiredActions: Array.isArray(data.required_actions) ? data.required_actions : (Array.isArray(data.requiredActions) ? data.requiredActions : []),
+    missingActions: Array.isArray(data.missing_actions) ? data.missing_actions : (Array.isArray(data.missingActions) ? data.missingActions : []),
+    trackingNumberImportOpen: Boolean(data.tracking_number_import_open ?? data.trackingNumberImportOpen),
+    shipmentWritebackOpen: Boolean(data.shipment_writeback_open ?? data.shipmentWritebackOpen),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
+    ordersUpdated: Boolean(data.orders_updated ?? data.ordersUpdated),
+    realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    ordersWritten: Boolean(data.orders_written ?? data.ordersWritten),
+    productsWritten: Boolean(data.products_written ?? data.productsWritten),
+    syncLogWritten: Boolean(data.sync_log_written ?? data.syncLogWritten),
+    capabilityTestedSuccessWritten: Boolean(data.capability_tested_success_written ?? data.capabilityTestedSuccessWritten),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    privacyFieldsRedacted: data.privacy_fields_redacted !== false && data.privacyFieldsRedacted !== false,
+    formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+  };
+}
+
+function toBackendShippingShipmentWritebackBoundaryPayload(payload = {}) {
+  return {
+    store_id: Number(payload.storeId || payload.store_id),
+    platform: payload.platform || 'naver',
+    manual_approval: Boolean(payload.manualApproval ?? payload.manual_approval),
+    matched_order_count: Number(payload.matchedOrderCount ?? payload.matched_order_count ?? 0),
+    total_tracking_rows: Number(payload.totalTrackingRows ?? payload.total_tracking_rows ?? 0),
+    matching_evidence_acknowledged: Boolean(payload.matchingEvidenceAcknowledged ?? payload.matching_evidence_acknowledged),
+    backup_evidence_acknowledged: Boolean(payload.backupEvidenceAcknowledged ?? payload.backup_evidence_acknowledged),
+    audit_evidence_acknowledged: Boolean(payload.auditEvidenceAcknowledged ?? payload.audit_evidence_acknowledged),
+    naver_writeback_boundary_acknowledged: Boolean(payload.naverWritebackBoundaryAcknowledged ?? payload.naver_writeback_boundary_acknowledged),
+    operator_checklist_acknowledged: Boolean(payload.operatorChecklistAcknowledged ?? payload.operator_checklist_acknowledged),
+    actor_context: payload.actorContext || payload.actor_context || {},
+  };
+}
+
 function adaptStoreMembershipReadonlyResult(data = {}) {
   return {
     ...data,
@@ -2653,6 +2766,122 @@ const sourceMethods = {
       limit: params?.limit || 20,
       offset: params?.offset || 0,
       includeRows: params?.includeRows || false,
+    }));
+  },
+  checkShippingTrackingOrderMatchReadonly: async (payload = {}) => {
+    const request = toBackendShippingTrackingOrderMatchPayload(payload);
+    if (!isBackendSource) {
+      return adaptShippingTrackingOrderMatchResult({
+        phase: 'Shipping-6B',
+        status: 'tracking_order_match_readonly_ready',
+        business_message: 'Mock tracking rows have been compared with local orders. No order is updated.',
+        readonly_route: true,
+        tracking_order_match_readonly: true,
+        matching_contract_acknowledged: true,
+        import_batch_id: request.import_batch_id,
+        total_tracking_rows: 1,
+        matched_order_count: 1,
+        unmatched_order_count: 0,
+        duplicate_tracking_row_count: 0,
+        tracking_number_import_open: false,
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        orders_updated: false,
+        tracking_rows_written: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+        match_rows: [{
+          row_index: 1,
+          order_reference: 'mock-shipping-order-001',
+          product_order_reference: 'mock-product-order-001',
+          logistics_inventory_code: 'PXG-AUTO-MATCH-001',
+          carrier: 'Mock carrier',
+          tracking_number: 'MOCKTRACK001',
+          shipped_at: '2026-07-05T18:10:00+09:00',
+          row_status: 'ready_for_future_review',
+          match_status: 'matched_existing_order',
+          match_method: 'order_reference',
+          future_write_allowed: false,
+          order_summary: {
+            local_order_id: 'mock-order-1',
+            order_reference: 'mock-shipping-order-001',
+            order_status: 'PAYED',
+            product_name: 'PXG Wheel Bag',
+            quantity: 1,
+            source_type: 'mock_shipping_order',
+          },
+        }],
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingTrackingOrderMatchResult(await backendApi.checkShippingTrackingOrderMatchReadonly({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  checkShippingShipmentWritebackBoundary: async (payload = {}) => {
+    const request = toBackendShippingShipmentWritebackBoundaryPayload(payload);
+    if (!isBackendSource) {
+      const missingActions = request.manual_approval
+        ? []
+        : ['manual_approval'];
+      return adaptShippingShipmentWritebackBoundaryResult({
+        phase: 'Shipping-6C',
+        status: missingActions.length ? 'blocked' : 'shipment_writeback_boundary_ready',
+        skip_reason: missingActions[0] || null,
+        business_message: missingActions.length
+          ? 'Mock shipment writeback remains closed until approval is complete.'
+          : 'Mock shipment writeback boundary is ready for review only. No Naver API is called.',
+        readonly_route: true,
+        shipment_writeback_boundary_review: true,
+        manual_approval: request.manual_approval,
+        matched_order_count: request.matched_order_count,
+        total_tracking_rows: request.total_tracking_rows,
+        matching_evidence_acknowledged: request.matching_evidence_acknowledged,
+        backup_evidence_acknowledged: request.backup_evidence_acknowledged,
+        audit_evidence_acknowledged: request.audit_evidence_acknowledged,
+        naver_writeback_boundary_acknowledged: request.naver_writeback_boundary_acknowledged,
+        operator_checklist_acknowledged: request.operator_checklist_acknowledged,
+        required_actions: [
+          'manual_approval',
+          'matched_order_evidence',
+          'matching_evidence_acknowledged',
+          'backup_evidence_acknowledged',
+          'audit_evidence_acknowledged',
+          'naver_writeback_boundary_acknowledged',
+          'operator_checklist_acknowledged',
+        ],
+        missing_actions: missingActions,
+        tracking_number_import_open: false,
+        shipment_writeback_open: false,
+        shipment_writeback_called: false,
+        orders_updated: false,
+        real_database_written: false,
+        real_api_called: false,
+        orders_written: false,
+        products_written: false,
+        sync_log_written: false,
+        capability_tested_success_written: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_order_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingShipmentWritebackBoundaryResult(await backendApi.checkShippingShipmentWritebackBoundary({
+      ...request,
+      store_id: Number(store.id),
     }));
   },
   getRolePermissionInventory: async () => {

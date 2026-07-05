@@ -8,8 +8,10 @@ import { shippingMockInventoryMappings, shippingMockOrders } from '../data/shipp
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import {
   SHIPPING_EXPORT_MOCK_PHASE,
+  SHIPPING_SHIPMENT_WRITEBACK_BOUNDARY_PHASE,
   SHIPPING_TRACKING_IMPORT_MOCK_PHASE,
   SHIPPING_TRACKING_IMPORT_RECORD_PHASE,
+  SHIPPING_TRACKING_ORDER_MATCH_PHASE,
   buildLogisticsInventoryMappingMockGate,
   buildShippingAssistantSummary,
   buildShippingExcelExportMock,
@@ -511,6 +513,165 @@ function TrackingImportHistoryPanel({
   );
 }
 
+function TrackingOrderMatchEvidencePanel({
+  evidence,
+  loading = false,
+  error = '',
+}) {
+  const rows = evidence?.rows || [];
+  const statusLabel = evidence?.status === 'tracking_order_match_empty'
+    ? '暂无可匹配单号'
+    : evidence?.matchedOrderCount
+      ? '已有匹配证据'
+      : '待匹配';
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>单号匹配订单证据</h2>
+          <p>{evidence?.businessMessage || '只读检查物流单号导入记录是否能匹配本地订单；当前不会更新订单状态。'}</p>
+        </div>
+        <span className={statusToneClass(evidence?.matchedOrderCount ? 'success' : 'neutral')}><i />{statusLabel}</span>
+      </div>
+      {loading ? <LoadingPanel /> : null}
+      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {!loading && !error && !rows.length ? (
+        <EmptyState
+          title="暂无匹配证据"
+          description="导入物流商回传表后，系统会先只读匹配本地订单，再进入人工审核。"
+        />
+      ) : null}
+      {!loading && !error && rows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单</th>
+                <th>物流单号</th>
+                <th>本地匹配</th>
+                <th>后续写入</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${row.rowIndex}-${row.orderNo}-${row.trackingNumber}`}>
+                  <td>
+                    <strong>{displayText(row.orderNo)}</strong>
+                    <span className="cell-subtitle">{displayText(row.orderSummary?.product_name || row.orderSummary?.productName || row.productOrderNo)}</span>
+                  </td>
+                  <td>
+                    <strong>{displayText(row.trackingNumber)}</strong>
+                    <span className="cell-subtitle">{displayText(row.carrier)} / {formatDateTime(row.shippedAt)}</span>
+                  </td>
+                  <td><span className={statusToneClass(row.matchStatus === 'matched_existing_order' ? 'success' : 'warning')}><i />{row.matchStatus === 'matched_existing_order' ? '已匹配' : '未匹配'}</span></td>
+                  <td>{row.futureWriteAllowed ? '允许后续审核' : '只读证据'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TechnicalDetails
+        title="查看单号匹配技术边界"
+        description="匹配证据只读生成，不更新订单，不调用 Naver。"
+        items={[
+          { label: 'phase', value: evidence?.phase || SHIPPING_TRACKING_ORDER_MATCH_PHASE },
+          { label: 'status', value: evidence?.status || 'not_checked' },
+          { label: 'total_tracking_rows', value: evidence?.totalTrackingRows ?? 0 },
+          { label: 'matched_order_count', value: evidence?.matchedOrderCount ?? 0 },
+          { label: 'unmatched_order_count', value: evidence?.unmatchedOrderCount ?? 0 },
+          { label: 'duplicate_tracking_row_count', value: evidence?.duplicateTrackingRowCount ?? 0 },
+          { label: 'shipment_writeback_called', value: evidence?.shipmentWritebackCalled ?? false },
+          { label: 'orders_updated', value: evidence?.ordersUpdated ?? false },
+          { label: 'real_api_called', value: evidence?.realApiCalled ?? false },
+          { label: 'real_database_written', value: evidence?.realDatabaseWritten ?? false },
+        ]}
+      />
+    </section>
+  );
+}
+
+function ShipmentWritebackBoundaryPanel({ boundary }) {
+  const missing = boundary?.missingActions || [];
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>Naver 发货回填边界</h2>
+          <p>{boundary?.businessMessage || '当前仅展示未来回填前必须满足的审批、备份、审计和人工清单，不会调用 Naver。'}</p>
+        </div>
+        <span className={statusToneClass(boundary?.shipmentWritebackOpen ? 'warning' : 'neutral')}><i />{boundary?.shipmentWritebackOpen ? '已开放' : '未开放'}</span>
+      </div>
+      <div className="summary-grid shipping-summary-grid">
+        <SummaryCard title="匹配订单" value={boundary?.matchedOrderCount ?? 0} note="只读证据" tone={boundary?.matchedOrderCount ? 'success' : 'default'} />
+        <SummaryCard title="待补门禁" value={missing.length} note="回填前检查项" tone={missing.length ? 'warning' : 'success'} />
+        <SummaryCard title="Naver 回填" value={boundary?.shipmentWritebackCalled ? '已调用' : '未调用'} note="本阶段保持关闭" tone="default" />
+      </div>
+      {missing.length ? (
+        <div className="mock-sync-error">仍缺少：{missing.join(', ')}</div>
+      ) : (
+        <div className="mock-sync-success">边界材料可供后续阶段审核；当前仍不执行平台写入。</div>
+      )}
+      <TechnicalDetails
+        title="查看回填边界技术状态"
+        description="这里确认平台写入仍关闭；真正回填必须单独阶段批准。"
+        items={[
+          { label: 'phase', value: boundary?.phase || SHIPPING_SHIPMENT_WRITEBACK_BOUNDARY_PHASE },
+          { label: 'status', value: boundary?.status || 'not_checked' },
+          { label: 'manual_approval', value: boundary?.manualApproval ?? false },
+          { label: 'shipment_writeback_open', value: boundary?.shipmentWritebackOpen ?? false },
+          { label: 'shipment_writeback_called', value: boundary?.shipmentWritebackCalled ?? false },
+          { label: 'orders_updated', value: boundary?.ordersUpdated ?? false },
+          { label: 'platform_writes_enabled', value: boundary?.platformWritesEnabled ?? false },
+          { label: 'real_api_called', value: boundary?.realApiCalled ?? false },
+          { label: 'real_database_written', value: boundary?.realDatabaseWritten ?? false },
+        ]}
+      />
+    </section>
+  );
+}
+
+function ShippingOperatorRunbookPanel() {
+  const steps = [
+    ['1', '下载未发货订单', '确认订单仍处于待发货状态。'],
+    ['2', '维护库存编号', '商品名和选项名必须能匹配物流商库存编号。'],
+    ['3', '导出 Excel', '把本地生成的发货请求表发给物流商。'],
+    ['4', '导入物流单号', '先保存本地导入记录，不更新订单。'],
+    ['5', '只读匹配订单', '确认单号和本地订单一一对应。'],
+    ['6', '人工审核回填', '备份、审计、权限和清单齐全后，后续阶段再考虑 Naver 回填。'],
+  ];
+  return (
+    <section className="content-card">
+      <div className="section-heading">
+        <div>
+          <h2>发货操作清单</h2>
+          <p>给普通运营使用的最小流程；管理员仍可在高级详情里核对技术边界。</p>
+        </div>
+      </div>
+      <div className="shipping-step-grid">
+        {steps.map(([index, title, description]) => (
+          <article key={index} className="shipping-step">
+            <span>{index}</span>
+            <strong>{title}</strong>
+            <p>{description}</p>
+          </article>
+        ))}
+      </div>
+      <TechnicalDetails
+        title="查看操作清单边界"
+        description="Shipping-6E 只展示清单，不创建任务、不回填平台。"
+        items={[
+          { label: 'phase', value: 'Shipping-6E' },
+          { label: 'runbook_ui_only', value: true },
+          { label: 'shipment_writeback_called', value: false },
+          { label: 'orders_updated', value: false },
+          { label: 'real_api_called', value: false },
+        ]}
+      />
+    </section>
+  );
+}
+
 export default function ShippingAssistant() {
   const {
     selectedStore,
@@ -534,6 +695,10 @@ export default function ShippingAssistant() {
   const [trackingImportHistoryMessage, setTrackingImportHistoryMessage] = useState('');
   const [trackingImportHistoryError, setTrackingImportHistoryError] = useState('');
   const [trackingImportHistoryLoading, setTrackingImportHistoryLoading] = useState(false);
+  const [trackingMatchEvidence, setTrackingMatchEvidence] = useState(null);
+  const [trackingMatchError, setTrackingMatchError] = useState('');
+  const [trackingMatchLoading, setTrackingMatchLoading] = useState(false);
+  const [shipmentBoundary, setShipmentBoundary] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveResult, setSaveResult] = useState(null);
@@ -556,6 +721,9 @@ export default function ShippingAssistant() {
       setTrackingImportHistory([]);
       setTrackingImportHistoryMessage('');
       setTrackingImportHistoryError('');
+      setTrackingMatchEvidence(null);
+      setTrackingMatchError('');
+      setShipmentBoundary(null);
       setLoadError('');
       return () => { cancelled = true; };
     }
@@ -569,6 +737,10 @@ export default function ShippingAssistant() {
       setTrackingImportHistoryLoading(true);
       setTrackingImportHistoryError('');
       setTrackingImportHistoryMessage('');
+      setTrackingMatchLoading(true);
+      setTrackingMatchError('');
+      setTrackingMatchEvidence(null);
+      setShipmentBoundary(null);
       setSaveError('');
       setSaveResult(null);
       try {
@@ -622,6 +794,37 @@ export default function ShippingAssistant() {
         setHistoryMessage(historyResult.businessMessage || '');
         setTrackingImportHistory(trackingHistoryResult.data || []);
         setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
+        const latestTrackingBatch = (trackingHistoryResult.data || [])[0];
+        const matchResult = await dataProvider.checkShippingTrackingOrderMatchReadonly({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          importBatchId: latestTrackingBatch?.id || null,
+          matchingContractAcknowledged: true,
+          actorContext: {
+            role: 'admin',
+            actor_id: 'shipping-local-operator',
+          },
+        });
+        if (cancelled) return;
+        setTrackingMatchEvidence(matchResult);
+        const boundaryResult = await dataProvider.checkShippingShipmentWritebackBoundary({
+          storeId: selectedStoreId,
+          platform: 'naver',
+          manualApproval: false,
+          matchedOrderCount: matchResult.matchedOrderCount || 0,
+          totalTrackingRows: matchResult.totalTrackingRows || 0,
+          matchingEvidenceAcknowledged: Boolean(matchResult.matchedOrderCount),
+          backupEvidenceAcknowledged: false,
+          auditEvidenceAcknowledged: false,
+          naverWritebackBoundaryAcknowledged: true,
+          operatorChecklistAcknowledged: false,
+          actorContext: {
+            role: 'admin',
+            actor_id: 'shipping-local-operator',
+          },
+        });
+        if (cancelled) return;
+        setShipmentBoundary(boundaryResult);
       } catch (error) {
         if (!cancelled) {
           setOrders([]);
@@ -629,6 +832,9 @@ export default function ShippingAssistant() {
           setDraftMappings([]);
           setExportHistory([]);
           setTrackingImportHistory([]);
+          setTrackingMatchEvidence(null);
+          setShipmentBoundary(null);
+          setTrackingMatchError(error.message || 'Tracking order match check failed.');
           setLoadError(error.message || '发货候选加载失败。');
         }
       } finally {
@@ -636,6 +842,7 @@ export default function ShippingAssistant() {
           setLoading(false);
           setHistoryLoading(false);
           setTrackingImportHistoryLoading(false);
+          setTrackingMatchLoading(false);
         }
       }
     }
@@ -906,6 +1113,13 @@ export default function ShippingAssistant() {
         error={trackingImportHistoryError}
         businessMessage={trackingImportHistoryMessage}
       />
+      <TrackingOrderMatchEvidencePanel
+        evidence={trackingMatchEvidence}
+        loading={trackingMatchLoading}
+        error={trackingMatchError}
+      />
+      <ShipmentWritebackBoundaryPanel boundary={shipmentBoundary} />
+      <ShippingOperatorRunbookPanel />
 
       <TechnicalDetails
         title="查看 Excel 生成 mock 门禁"

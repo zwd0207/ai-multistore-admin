@@ -2043,3 +2043,17 @@ Shipping-5A to 5E add local tracking-number import records and a read-only histo
 Codex1 now has `shipping_tracking_import_batches` and `shipping_tracking_import_rows`, plus local routes for write-gate validation, approved local import-record writes, and read-only tracking import history. Codex2 `/shipping` shows a simple read-only "Tracking import history" panel after export history.
 
 This stage may write local tracking import batch/row records and one safe operation audit row only when the backend local write route is called with explicit approval. It does not call Naver, does not call a logistics-provider API, does not update orders, does not write products/SyncLog/tested-success rows, and does not open Naver shipment writeback or formal order batch sync.
+
+## Phase Shipping-6A to Shipping-6E - Tracking Match Evidence and Operator Runbook
+
+Shipping-6A to 6E add readonly evidence for matching logistics tracking numbers to local orders and a future Naver shipment writeback boundary:
+
+- `PHASE_SHIPPING_6A_TRACKING_NUMBER_TO_ORDER_MATCHING_READONLY_PLAN.md`
+- `PHASE_SHIPPING_6B_TRACKING_NUMBER_TO_LOCAL_ORDER_MATCHING_MOCK_GATE.md`
+- `PHASE_SHIPPING_6C_NAVER_SHIPMENT_WRITEBACK_APPROVAL_BOUNDARY_PLAN.md`
+- `PHASE_SHIPPING_6D_SHIPMENT_WRITEBACK_READONLY_EVIDENCE_UI_PLAN.md`
+- `PHASE_SHIPPING_6E_SHIPPING_OPERATOR_RUNBOOK_AND_CHECKLIST_UI.md`
+
+Codex1 exposes readonly routes for tracking-to-order match evidence and shipment writeback boundary review. Codex2 `/shipping` now shows match evidence, writeback boundary state, and an operator checklist. These panels are informational only.
+
+This stage does not call Naver, does not call a logistics-provider API, does not update orders, does not write products/SyncLog/tested-success rows, and does not open Naver shipment writeback or formal order batch sync.

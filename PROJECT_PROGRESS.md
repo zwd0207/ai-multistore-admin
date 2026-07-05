@@ -1629,3 +1629,34 @@ Next 5 recommended stages:
 3. `Phase Shipping-6C: Naver shipment writeback approval boundary plan`
 4. `Phase Shipping-6D: Shipment writeback readonly evidence UI plan`
 5. `Phase Shipping-6E: Shipping operator runbook and checklist UI`
+
+### Latest update after `Phase Shipping-6A` to `Phase Shipping-6E`
+
+Progress snapshot:
+
+- Project overall planning progress: about `98% - 99%`
+- Naver basic ERP loop progress: about `98% - 99%`
+- First landing Shipping Assistant feature progress: about `95% - 97%`
+- ERP real-user landing progress: about `89% - 93%`
+- Production version for long-term non-technical use: about `77% - 84%`
+
+Implemented in this update:
+
+- Added Codex1 readonly tracking-to-order match evidence route.
+- Added Codex1 shipment writeback approval-boundary route.
+- Verified matching evidence does not update orders or call Naver.
+- Verified writeback boundary keeps shipment writeback closed even when evidence is complete.
+- Updated Codex2 `/shipping` with match evidence, writeback boundary, and operator checklist panels.
+
+Current positioning:
+
+- Suitable now: local Naver Shipping Assistant with unshipped candidates, inventory-code matching, manual stock maintenance, Excel export, export history, tracking import record/history, readonly tracking-to-order evidence, and operator checklist.
+- Not suitable now: Naver shipment writeback execution, automatic tracking-number-to-order status update, real logistics-provider API integration, Coupang shipping workflow, or formal product/order batch sync.
+
+Next 5 recommended stages:
+
+1. `Phase Shipping-7A: Tracking import file parser contract approval`
+2. `Phase Shipping-7B: Tracking import xlsx parser mock implementation`
+3. `Phase Shipping-7C: Tracking import parser UI upload shell`
+4. `Phase Shipping-7D: Tracking import parser local record integration plan`
+5. `Phase Shipping-7E: Tracking import parser runtime walkthrough`
