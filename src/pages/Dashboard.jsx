@@ -1056,7 +1056,7 @@ export default function Dashboard() {
   if (error) {
     return (
       <>
-        <PageHeader title="运营工作台" description="查看店铺状态、待办事项和业务提醒。" />
+        <PageHeader title="首页工作台" description="查看今天要处理的订单、库存、消息、申诉和店铺异常。" />
         <article className="content-card empty-state">
           <h2>工作台加载失败</h2>
           <p>{error}</p>
@@ -1073,8 +1073,8 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        title="运营工作台"
-        description="用卖家能看懂的方式汇总订单、客服、商品、库存、销售额、设备和平台连接状态。"
+        title="首页工作台"
+        description="用卖家能看懂的方式汇总今天的订单、发货、库存、平台消息、申诉资料和店铺连接状态。"
         actions={(
           <>
             {!isBackendSource && <MockSyncPanel />}

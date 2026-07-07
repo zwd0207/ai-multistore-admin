@@ -20,7 +20,8 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route element={<AdminLayout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<Navigate to="/workbench" replace />} />
+        <Route path="workbench" element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="stores" element={<Stores />} />
         <Route path="products" element={<Products />} />
@@ -37,7 +38,7 @@ export default function AppRoutes() {
         <Route path="settings" element={<Settings />} />
         <Route path="logs" element={<Logs />} />
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/workbench" replace />} />
     </Routes>
   );
 }

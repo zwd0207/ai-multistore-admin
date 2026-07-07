@@ -5,6 +5,19 @@ const shouldUseLocalDevProxy = import.meta.env?.DEV
 const API_BASE_URL = shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl;
 const SENSITIVE_KEY_PATTERN = /(?:access[_-]?key|secret[_-]?key|password|token|credential|proxy[_-]?password|remote[_-]?desktop[_-]?password)/i;
 
+function businessHttpMessage(status) {
+  if (status === 401 || status === 403) {
+    return '当前店铺连接或访问权限需要检查，请联系管理员确认平台连接资料。';
+  }
+  if (status === 404) {
+    return '当前功能暂时不可用，请稍后再试或联系管理员确认系统配置。';
+  }
+  if (status >= 500) {
+    return '本地服务暂时不可用，请确认系统服务已启动后再刷新页面。';
+  }
+  return '请求暂时没有成功，请稍后重试。';
+}
+
 function sanitizeForError(value) {
   if (Array.isArray(value)) return value.map(sanitizeForError);
   if (!value || typeof value !== 'object') return value;
@@ -63,7 +76,7 @@ async function request(path, options = {}) {
     }
 
     if (!response.ok) {
-      const error = new Error(result?.message || `请求失败（${response.status}）`);
+      const error = new Error(result?.message || businessHttpMessage(response.status));
       error.name = 'HttpError';
       error.status = response.status;
       error.errorCode = result?.error_code || 'HTTP_ERROR';
@@ -74,7 +87,7 @@ async function request(path, options = {}) {
     return result;
   } catch (error) {
     if (error.name === 'AbortError') {
-      const timeoutError = new Error('请求超时，请确认 Codex1 后端是否已启动');
+      const timeoutError = new Error('系统服务响应较慢，请稍后刷新，或确认本地服务已经启动。');
       timeoutError.name = 'HttpError';
       timeoutError.status = 0;
       timeoutError.errorCode = 'REQUEST_TIMEOUT';
@@ -82,7 +95,7 @@ async function request(path, options = {}) {
     }
     if (error.name === 'HttpError') throw error;
 
-    const networkError = new Error('无法连接 Codex1 后端，请检查服务地址和运行状态');
+    const networkError = new Error('本地服务暂时连接不上，请确认系统服务已启动后再刷新页面。');
     networkError.name = 'HttpError';
     networkError.status = 0;
     networkError.errorCode = 'NETWORK_ERROR';

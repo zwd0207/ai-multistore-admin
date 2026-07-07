@@ -4,21 +4,16 @@ import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 
 const menuItems = [
+  ['首', '首页工作台', '/workbench'],
   ['发', '发货辅助', '/shipping'],
-  ['总', '总览', '/dashboard'],
-  ['店', '店铺管理', '/stores'],
-  ['品', '商品管理', '/products'],
   ['单', '订单管理', '/orders'],
-  ['客', '客服管理', '/customer-service'],
-  ['销', '销售数据', '/sales'],
-  ['设', '设备管理', '/devices'],
-  ['邮', '邮箱管理', '/emails'],
-  ['诉', '申诉管理', '/appeals'],
-  ['境', '环境管理', '/environment'],
-  ['账', '账号管理', '/accounts'],
-  ['API', 'API 能力确认', '/api-capabilities'],
-  ['配', '系统设置', '/settings'],
-  ['记', '操作日志', '/logs'],
+  ['品', '商品与库存', '/products'],
+  ['店', '店铺管理', '/stores'],
+  ['消', '平台消息', '/customer-service'],
+  ['诉', '申诉中心', '/appeals'],
+  ['邮', '邮箱中心', '/emails'],
+  ['报', '数据报表', '/sales'],
+  ['设', '系统设置', '/settings'],
 ];
 
 export default function AdminLayout() {
@@ -29,12 +24,18 @@ export default function AdminLayout() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">AI</span>
-          {!collapsed && <span><strong>StorePilot</strong><small>智能运营中心</small></span>}
+          {!collapsed && (
+            <span>
+              <strong>StorePilot</strong>
+              <small>多店铺运营工作台</small>
+            </span>
+          )}
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
           {menuItems.map(([icon, label, path]) => (
             <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')} title={label}>
-              <span className="menu-icon">{icon}</span>{!collapsed && <span>{label}</span>}
+              <span className="menu-icon">{icon}</span>
+              {!collapsed && <span>{label}</span>}
             </NavLink>
           ))}
         </nav>
@@ -45,15 +46,18 @@ export default function AdminLayout() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <strong>AI 多店铺运营与环境管理系统</strong>
-            <span className="environment-chip">演示环境</span>
+            <strong>多平台电商运营工作台</strong>
+            <span className="environment-chip">内部使用</span>
             <span className="environment-chip">时间显示：{BUSINESS_TIME_LABEL}</span>
             <StoreSelector />
           </div>
           <div className="topbar-actions">
             <span className="notification">3</span>
             <span className="avatar">管</span>
-            <span><strong>管理员</strong><small>系统管理员</small></span>
+            <span>
+              <strong>管理员</strong>
+              <small>内部运营</small>
+            </span>
           </div>
         </header>
         <main className="main-content"><Outlet /></main>
