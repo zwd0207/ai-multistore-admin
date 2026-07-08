@@ -90,6 +90,63 @@ function mockSyncResult(type, payload = {}) {
   };
 }
 
+function mockManualBatchSyncResult(payload = {}) {
+  const platforms = (payload.platforms || ['naver'])
+    .map(normalizeSyncPlatform)
+    .filter(Boolean);
+  const items = [];
+  for (const platform of platforms.length ? platforms : ['naver']) {
+    if (payload.include_products !== false) {
+      items.push({
+        status: 'skipped',
+        platform,
+        resource: 'products',
+        message: '演示模式不调用真实平台',
+        error_code: 'mock_mode',
+        platform_write: false,
+      });
+    }
+    if (payload.include_orders !== false) {
+      items.push({
+        status: 'skipped',
+        platform,
+        resource: 'orders',
+        message: '演示模式不调用真实平台',
+        error_code: 'mock_mode',
+        platform_write: false,
+      });
+    }
+    if (payload.include_customer_inquiries !== false) {
+      items.push({
+        status: 'skipped',
+        platform,
+        resource: 'customer_inquiries',
+        message: '客服消息暂未接入真实平台',
+        error_code: 'not_open',
+        platform_write: false,
+      });
+    }
+  }
+  return {
+    status: 'skipped',
+    store_id: payload.store_id || payload.storeId,
+    store_platform: platforms[0] || 'naver',
+    requested_platforms: platforms,
+    replace_policy: payload.replace_policy || 'delete_absent_when_full_snapshot',
+    delete_policy: 'delete_absent_only_when_full_snapshot_confirmed',
+    platform_write: false,
+    items,
+    summary: {
+      success_count: 0,
+      failed_count: 0,
+      skipped_count: items.length,
+      created_count: 0,
+      updated_count: 0,
+      deleted_count: 0,
+    },
+  };
+}
+
 const NAVER_ORDER_PREVIEW_WINDOWS = {
   '24h': { key: '24h', label: '最近 24 小时', hours: 24 },
   '3d': { key: '3d', label: '最近 3 天', hours: 72 },
@@ -5331,6 +5388,25 @@ const sourceMethods = {
     if (!isBackendSource) return mockSyncResult('customerInquiries', payload);
     const { store } = await resolveBackendStore(payload);
     return backendApi.syncCustomerInquiriesMock({ storeId: store.id, platform: normalizeSyncPlatform(payload.platform) });
+  },
+  runManualStoreSync: async (payload = {}) => {
+    const platforms = (payload.platforms || (payload.platform ? [payload.platform] : []))
+      .map(normalizeSyncPlatform)
+      .filter(Boolean);
+    const request = {
+      store_id: Number(payload.storeId || payload.store_id),
+      platforms: platforms.length ? platforms : ['naver', 'coupang'],
+      include_products: payload.includeProducts ?? payload.include_products ?? true,
+      include_orders: payload.includeOrders ?? payload.include_orders ?? true,
+      include_customer_inquiries: payload.includeCustomerInquiries ?? payload.include_customer_inquiries ?? true,
+      replace_policy: payload.replacePolicy || payload.replace_policy || 'delete_absent_when_full_snapshot',
+    };
+    if (!isBackendSource) return adapters.manualBatchSyncResult(mockManualBatchSyncResult(request));
+    const { store } = await resolveBackendStore(payload);
+    return adapters.manualBatchSyncResult(await backendApi.runManualStoreSync({
+      ...request,
+      store_id: Number(store.id),
+    }));
   },
   previewCoupangOrders: async (payload) => {
     if (!isBackendSource) {

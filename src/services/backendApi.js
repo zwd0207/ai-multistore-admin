@@ -122,6 +122,7 @@ export const backendApi = {
   syncProductsMock: (params) => sendData('post', '/sync/products/mock', undefined, params),
   syncOrdersMock: (params) => sendData('post', '/sync/orders/mock', undefined, params),
   syncCustomerInquiriesMock: (params) => sendData('post', '/sync/customer-inquiries/mock', undefined, params),
+  runManualStoreSync: (payload) => sendData('post', '/sync/manual-batch', payload),
   previewCoupangOrders: (payload) => sendData('post', '/sync/orders/coupang/preview', payload),
   syncCoupangOrders: (payload) => sendData('post', '/sync/orders/coupang', payload),
   previewNaverOrders: (payload) => sendData('post', '/sync/orders/naver/preview', payload),

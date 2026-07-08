@@ -1396,6 +1396,84 @@ export function adaptBackupLocalReportSummary(data = {}) {
   };
 }
 
+const manualSyncResourceLabels = {
+  products: '商品',
+  orders: '订单',
+  customer_inquiries: '客服消息',
+};
+
+function manualSyncStatusLabel(status, items = []) {
+  const ipBlocked = items.find((item) => item.errorCode === 'ip_not_allowed' || String(item.message || '').includes('IP 白名单未通过'));
+  if (ipBlocked) return ipBlocked.message || `${ipBlocked.platform}：IP 白名单未通过`;
+
+  const permissionBlocked = items.find((item) => String(item.message || '').includes('API 权限未开通'));
+  if (permissionBlocked) return permissionBlocked.message;
+
+  if (status === 'success') return '本地同步完成';
+  if (status === 'partial_success') return '部分同步完成';
+
+  const failed = items.find((item) => item.status === 'failed');
+  if (failed) return failed.message || '同步失败';
+
+  const customerNotOpen = items.find((item) => item.resource === 'customer_inquiries' && item.errorCode === 'not_open');
+  if (customerNotOpen && items.length === 1) return '客服消息暂未接入';
+
+  const skipped = items.find((item) => item.status === 'skipped');
+  if (skipped) return skipped.message || '待同步';
+
+  return '待同步';
+}
+
+function adaptManualBatchSyncItem(item = {}) {
+  return {
+    status: item.status || 'skipped',
+    platform: adaptPlatform(item.platform),
+    rawPlatform: item.platform,
+    resource: item.resource,
+    resourceLabel: manualSyncResourceLabels[item.resource] || item.resource || '-',
+    message: item.message || '',
+    errorCode: item.error_code || null,
+    createdCount: numberValue(item.created_count),
+    updatedCount: numberValue(item.updated_count),
+    skippedCount: numberValue(item.skipped_count),
+    deletedCount: numberValue(item.deleted_count),
+    fullSnapshot: Boolean(item.full_snapshot),
+    deleteExecuted: Boolean(item.delete_executed),
+    platformWrite: Boolean(item.platform_write),
+    sourceType: item.source_type || '',
+    rawStatus: item.raw_status || '',
+  };
+}
+
+export function manualBatchSyncResult(data = {}) {
+  const items = (data.items || []).map(adaptManualBatchSyncItem);
+  const summary = data.summary || {};
+  return {
+    status: data.status || 'skipped',
+    statusLabel: manualSyncStatusLabel(data.status, items),
+    storeId: data.store_id,
+    storePlatform: data.store_platform,
+    requestedPlatforms: data.requested_platforms || [],
+    replacePolicy: data.replace_policy || '',
+    deletePolicy: data.delete_policy || '',
+    platformWrite: Boolean(data.platform_write),
+    items,
+    summary: {
+      successCount: numberValue(summary.success_count),
+      failedCount: numberValue(summary.failed_count),
+      skippedCount: numberValue(summary.skipped_count),
+      createdCount: numberValue(summary.created_count),
+      updatedCount: numberValue(summary.updated_count),
+      deletedCount: numberValue(summary.deleted_count),
+    },
+    syncLog: data.sync_log ? {
+      id: data.sync_log.id,
+      status: data.sync_log.status,
+      message: data.sync_log.message,
+    } : null,
+  };
+}
+
 export function adaptList(data, adapter) {
   const source = Array.isArray(data) ? { items: data, total: data.length } : (data || {});
   const items = (source.items || []).map(adapter);
@@ -1433,6 +1511,7 @@ export const adapters = {
   backupReportItem: adaptBackupReportItem,
   backupLocalReport: adaptBackupLocalReport,
   backupLocalReportSummary: adaptBackupLocalReportSummary,
+  manualBatchSyncResult,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
   coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,

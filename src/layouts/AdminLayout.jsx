@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 
@@ -50,6 +51,7 @@ export default function AdminLayout() {
             <span className="environment-chip">内部试用</span>
             <span className="environment-chip">时间 {BUSINESS_TIME_LABEL}</span>
             <StoreSelector />
+            <ManualStoreSyncButton />
           </div>
           <div className="topbar-actions">
             <span className="notification">3</span>

@@ -17,6 +17,7 @@ const refreshMap = {
   products: ['products', 'syncLogs', 'dashboard'],
   orders: ['orders', 'syncLogs', 'dashboard', 'aiDailyContext'],
   customerInquiries: ['customerInquiries', 'syncLogs', 'dashboard', 'aiDailyContext'],
+  manualSync: ['products', 'orders', 'customerInquiries', 'syncLogs', 'dashboard', 'aiDailyContext'],
 };
 
 export function SyncRefreshProvider({ children }) {

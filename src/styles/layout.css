@@ -9,6 +9,14 @@
 .menu-icon { width: 20px; flex: 0 0 20px; text-align: center; font-size: 12px; font-weight: 700; }.collapse-button { min-height: 47px; border: 0; border-top: 1px solid rgba(255,255,255,.07); background: transparent; color: #8e9aae; }
 .workspace { min-width: 0; }.topbar { height: 68px; display: flex; align-items: center; justify-content: space-between; background: white; padding: 0 26px; border-bottom: 1px solid var(--border); }
 .topbar > div { display: flex; align-items: center; gap: 10px; }.topbar strong { font-size: 14px; }.environment-chip { font-size: 11px; color: #6c5ed7; background: #efedff; padding: 4px 8px; border-radius: 5px; }
+.manual-sync-control { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.manual-sync-button { min-height: 34px; padding: 7px 12px; white-space: nowrap; }
+.manual-sync-status { max-width: 220px; display: inline-flex; align-items: center; min-height: 30px; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.manual-sync-status.success { color: #16835d; background: #eaf8f2; }
+.manual-sync-status.info { color: #2563b9; background: #edf5ff; }
+.manual-sync-status.warning { color: #a46705; background: #fff6dc; }
+.manual-sync-status.danger { color: #c83d45; background: #fff0f0; }
+.manual-sync-status.neutral { color: #637083; background: #f0f2f5; }
 .topbar-actions { color: #4a5568; }.topbar-actions > span:last-child { display: flex; flex-direction: column; }.topbar-actions small { color: #8b95a7; font-size: 11px; }
 .avatar { width: 34px; height: 34px; display: grid; place-items: center; color: white; border-radius: 50%; background: #5966d9; font-size: 13px; }.notification { width: 22px; height: 22px; display: grid; place-items: center; color: white; background: #e45858; border-radius: 50%; font-size: 11px; margin-right: 8px; }
 .main-content { padding: 24px 26px 40px; max-width: 1600px; margin: 0 auto; }
