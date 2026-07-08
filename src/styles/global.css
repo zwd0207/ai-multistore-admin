@@ -88,6 +88,11 @@ tbody tr:hover { background: #fafbff; }
 .manual-sync-result-item p { margin: 5px 0 0; color: #4a5568; font-size: 13px; line-height: 1.5; }
 .manual-sync-counts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; color: #5c687a; font-size: 12px; white-space: nowrap; }
 .manual-sync-counts span { border: 1px solid #e3e9f2; border-radius: 999px; padding: 4px 8px; background: #fff; }
+.overview-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
+.overview-actions span { color: var(--muted); font-size: 12px; }
+.overview-metric { min-width: 30px; min-height: 28px; display: inline-grid; place-items: center; border: 1px solid #dbe7f4; border-radius: 999px; padding: 4px 9px; color: #24476f; background: #eef4fb; font-weight: 800; }
+.overview-metric.unknown { color: #a46705; background: #fff6dc; border-color: #ecd28f; font-size: 16px; }
+.table-actions a { color: var(--primary); text-decoration: none; }
 .inline-action-feedback { display: block; color: #176a3a; font-size: 12px; margin-top: 6px; }
 .coupang-order-sync-panel, .coupang-product-sync-panel { display: grid; gap: 14px; }
 .panel-heading-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }

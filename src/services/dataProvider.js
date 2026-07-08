@@ -147,6 +147,111 @@ function mockManualBatchSyncResult(payload = {}) {
   };
 }
 
+function overviewMetric(value, dataStatus = 'confirmed', reason = '') {
+  return {
+    value,
+    display_value: value === null || value === undefined ? '?' : String(value),
+    data_status: dataStatus,
+    reason,
+  };
+}
+
+function mockStoreOverview() {
+  const stores = [
+    {
+      id: 8,
+      store_id: 8,
+      store_name: 'pxg球包店',
+      platform: 'naver',
+      owner_name: '运营',
+      store_status: 'active',
+      connection_status: '商品可读，订单暂未开放',
+      connection_tone: 'warning',
+      connection_reason: 'Naver暂未开放批量订单同步',
+      last_sync_at: '2026-07-08T09:10:00+09:00',
+      latest_manual_sync_status: 'partial_success',
+      resources: {
+        products: { status: 'success', error_code: '', message: 'Naver商品本地同步完成', data_status: 'confirmed' },
+        orders: { status: 'not_open', error_code: 'not_open', message: 'Naver暂未开放批量订单同步', data_status: 'not_open' },
+        customer_inquiries: { status: 'not_open', error_code: 'not_open', message: '客服消息暂未接入真实平台', data_status: 'not_open' },
+      },
+      metrics: {
+        today_orders: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
+        pending_shipments: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
+        abnormal_orders: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
+        inventory_alerts: overviewMetric(4, 'confirmed'),
+      },
+    },
+    {
+      id: 9,
+      store_id: 9,
+      store_name: '韩国本土运动鞋店',
+      platform: 'coupang',
+      owner_name: '运营',
+      store_status: 'active',
+      connection_status: 'IP 白名单未通过',
+      connection_tone: 'danger',
+      connection_reason: 'Coupang：IP 白名单未通过',
+      last_sync_at: '2026-07-08T09:05:00+09:00',
+      latest_manual_sync_status: 'failed',
+      resources: {
+        products: { status: 'failed', error_code: 'ip_not_allowed', message: 'Coupang：IP 白名单未通过', data_status: 'unknown' },
+        orders: { status: 'failed', error_code: 'ip_not_allowed', message: 'Coupang：IP 白名单未通过', data_status: 'unknown' },
+        customer_inquiries: { status: 'not_open', error_code: 'not_open', message: '客服消息暂未接入真实平台', data_status: 'not_open' },
+      },
+      metrics: {
+        today_orders: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
+        pending_shipments: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
+        abnormal_orders: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
+        inventory_alerts: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
+      },
+    },
+    {
+      id: 10,
+      store_id: 10,
+      store_name: 'Naver 日常运营店',
+      platform: 'naver',
+      owner_name: '运营',
+      store_status: 'active',
+      connection_status: '商品和订单可读',
+      connection_tone: 'success',
+      connection_reason: '商品和订单已可读取并写入本地 ERP。',
+      last_sync_at: '2026-07-08T09:00:00+09:00',
+      latest_manual_sync_status: 'success',
+      resources: {
+        products: { status: 'success', error_code: '', message: '本地同步完成', data_status: 'confirmed' },
+        orders: { status: 'success', error_code: '', message: '本地同步完成', data_status: 'confirmed' },
+        customer_inquiries: { status: 'not_open', error_code: 'not_open', message: '客服消息暂未接入真实平台', data_status: 'not_open' },
+      },
+      metrics: {
+        today_orders: overviewMetric(12, 'confirmed'),
+        pending_shipments: overviewMetric(5, 'confirmed'),
+        abnormal_orders: overviewMetric(1, 'confirmed'),
+        inventory_alerts: overviewMetric(2, 'confirmed'),
+      },
+    },
+  ];
+  return {
+    status: 'store_overview_ready',
+    data_policy: '无法确认真实平台数据时显示 ?，避免把未知误判为 0。',
+    business_timezone: 'Asia/Seoul',
+    business_date: '2026-07-08',
+    stores,
+    summary: {
+      store_count: stores.length,
+      connected_store_count: 1,
+      attention_store_count: 2,
+      ip_blocked_store_count: 1,
+      orders_unknown_store_count: 2,
+      inventory_unknown_store_count: 1,
+      today_order_count: 12,
+      pending_shipment_count: 5,
+      abnormal_order_count: 1,
+      inventory_alert_count: 6,
+    },
+  };
+}
+
 const NAVER_ORDER_PREVIEW_WINDOWS = {
   '24h': { key: '24h', label: '最近 24 小时', hours: 24 },
   '3d': { key: '3d', label: '最近 3 天', hours: 72 },
@@ -4214,6 +4319,12 @@ const sourceMethods = {
     if (!isBackendSource) return withMockFinancialSummary(await mockApi.getDashboardSummary(params));
     return adapters.dashboardSummary(await backendApi.getDashboardSummary(params)).summary;
   },
+  getStoreOverview: async (params = {}) => {
+    if (!isBackendSource) return adapters.storeOverview(mockStoreOverview(params));
+    return adapters.storeOverview(await backendApi.getStoreOverview({
+      include_inactive: params.includeInactive ?? params.include_inactive ?? false,
+    }));
+  },
   getDashboardSalesTrend: mockApi.getDashboardSalesTrend,
   getStores: async (params) => {
     if (!isBackendSource) return mockApi.getStores(params);
@@ -5407,6 +5518,68 @@ const sourceMethods = {
       ...request,
       store_id: Number(store.id),
     }));
+  },
+  runManualAllStoresSync: async (payload = {}) => {
+    const platforms = (payload.platforms || (payload.platform ? [payload.platform] : []))
+      .map(normalizeSyncPlatform)
+      .filter(Boolean);
+    const request = {
+      platforms: platforms.length ? platforms : ['naver', 'coupang'],
+      include_products: payload.includeProducts ?? payload.include_products ?? true,
+      include_orders: payload.includeOrders ?? payload.include_orders ?? true,
+      include_customer_inquiries: payload.includeCustomerInquiries ?? payload.include_customer_inquiries ?? true,
+      include_inactive: payload.includeInactive ?? payload.include_inactive ?? false,
+      replace_policy: payload.replacePolicy || payload.replace_policy || 'delete_absent_when_full_snapshot',
+    };
+    if (!isBackendSource) {
+      const overview = mockStoreOverview();
+      return {
+        status: 'skipped',
+        requestedPlatforms: request.platforms,
+        platformWrite: false,
+        storeResults: overview.stores.map((store) => ({
+          storeId: store.store_id,
+          storeName: store.store_name,
+          status: 'skipped',
+          message: '演示模式不调用真实平台',
+          platformWrite: false,
+        })),
+        summary: {
+          storeCount: overview.stores.length,
+          successCount: 0,
+          failedCount: 0,
+          skippedCount: overview.stores.length,
+          createdCount: 0,
+          updatedCount: 0,
+          deletedCount: 0,
+        },
+      };
+    }
+    const result = await backendApi.runManualAllStoresSync(request);
+    const summary = result.summary || {};
+    return {
+      status: result.status || 'skipped',
+      requestedPlatforms: result.requested_platforms || [],
+      platformWrite: Boolean(result.platform_write),
+      storeResults: (result.store_results || []).map((item) => ({
+        storeId: item.store_id,
+        storeName: item.store_name,
+        status: item.status,
+        message: item.message || item.summary?.message || '',
+        platformWrite: Boolean(item.platform_write),
+        summary: item.summary || {},
+      })),
+      summary: {
+        storeCount: Number(summary.store_count || 0),
+        successCount: Number(summary.success_count || 0),
+        partialSuccessCount: Number(summary.partial_success_count || 0),
+        failedCount: Number(summary.failed_count || 0),
+        skippedCount: Number(summary.skipped_count || 0),
+        createdCount: Number(summary.created_count || 0),
+        updatedCount: Number(summary.updated_count || 0),
+        deletedCount: Number(summary.deleted_count || 0),
+      },
+    };
   },
   previewCoupangOrders: async (payload) => {
     if (!isBackendSource) {

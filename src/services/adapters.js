@@ -1161,6 +1161,88 @@ export function adaptDashboardSummary(data = {}) {
   };
 }
 
+export function metricDisplayValue(metric = {}) {
+  if (!metric || typeof metric !== 'object') return '-';
+  if (metric.display_value !== undefined && metric.display_value !== null) return String(metric.display_value);
+  if (metric.displayValue !== undefined && metric.displayValue !== null) return String(metric.displayValue);
+  if (metric.value === null || metric.value === undefined) return '?';
+  return String(metric.value);
+}
+
+function adaptOverviewMetric(metric = {}) {
+  return {
+    value: metric.value ?? null,
+    displayValue: metricDisplayValue(metric),
+    dataStatus: metric.data_status || metric.dataStatus || 'unknown',
+    reason: metric.reason || '',
+  };
+}
+
+function adaptOverviewResource(resource = {}) {
+  return {
+    status: resource.status || 'unknown',
+    errorCode: resource.error_code || resource.errorCode || '',
+    message: resource.message || '',
+    dataStatus: resource.data_status || resource.dataStatus || 'unknown',
+  };
+}
+
+function adaptStoreOverviewRow(item = {}) {
+  const metrics = item.metrics || {};
+  const resources = item.resources || {};
+  return {
+    id: item.store_id || item.id,
+    storeId: item.store_id || item.id,
+    storeName: item.store_name || item.storeName || item.name || `店铺 #${item.store_id || item.id}`,
+    platform: adaptPlatform(item.platform),
+    rawPlatform: normalizePlatformForBackend(item.platform),
+    ownerName: item.owner_name || item.ownerName || '',
+    storeStatus: item.store_status || item.storeStatus || '',
+    connectionStatus: item.connection_status || item.connectionStatus || '待同步',
+    connectionTone: item.connection_tone || item.connectionTone || 'warning',
+    connectionReason: item.connection_reason || item.connectionReason || '',
+    lastSyncAt: item.last_sync_at || item.lastSyncAt || '',
+    latestManualSyncStatus: item.latest_manual_sync_status || item.latestManualSyncStatus || '',
+    metrics: {
+      todayOrders: adaptOverviewMetric(metrics.today_orders || metrics.todayOrders),
+      pendingShipments: adaptOverviewMetric(metrics.pending_shipments || metrics.pendingShipments),
+      abnormalOrders: adaptOverviewMetric(metrics.abnormal_orders || metrics.abnormalOrders),
+      inventoryAlerts: adaptOverviewMetric(metrics.inventory_alerts || metrics.inventoryAlerts),
+    },
+    resources: {
+      products: adaptOverviewResource(resources.products),
+      orders: adaptOverviewResource(resources.orders),
+      customerInquiries: adaptOverviewResource(resources.customer_inquiries || resources.customerInquiries),
+    },
+  };
+}
+
+export function adaptStoreOverview(data = {}) {
+  const summary = data.summary || {};
+  const stores = (data.stores || []).map(adaptStoreOverviewRow);
+  return {
+    status: data.status || '',
+    dataPolicy: data.data_policy || data.dataPolicy || '',
+    businessTimezone: data.business_timezone || data.businessTimezone || '',
+    businessDate: data.business_date || data.businessDate || '',
+    businessDayStart: data.business_day_start || data.businessDayStart || '',
+    businessDayEnd: data.business_day_end || data.businessDayEnd || '',
+    stores,
+    summary: {
+      storeCount: numberValue(summary.store_count ?? data.store_count ?? stores.length),
+      connectedStoreCount: numberValue(summary.connected_store_count),
+      attentionStoreCount: numberValue(summary.attention_store_count),
+      ipBlockedStoreCount: numberValue(summary.ip_blocked_store_count),
+      ordersUnknownStoreCount: numberValue(summary.orders_unknown_store_count),
+      inventoryUnknownStoreCount: numberValue(summary.inventory_unknown_store_count),
+      todayOrderCount: numberValue(summary.today_order_count),
+      pendingShipmentCount: numberValue(summary.pending_shipment_count),
+      abnormalOrderCount: numberValue(summary.abnormal_order_count),
+      inventoryAlertCount: numberValue(summary.inventory_alert_count),
+    },
+  };
+}
+
 export function adaptAiDailyContext(data = {}) {
   return {
     date: data.date,
@@ -1511,6 +1593,8 @@ export const adapters = {
   backupReportItem: adaptBackupReportItem,
   backupLocalReport: adaptBackupLocalReport,
   backupLocalReportSummary: adaptBackupLocalReportSummary,
+  storeOverview: adaptStoreOverview,
+  metricDisplayValue,
   manualBatchSyncResult,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,

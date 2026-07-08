@@ -6,6 +6,7 @@ import PageHeader from '../components/common/PageHeader';
 import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
+import { metricDisplayValue } from '../services/adapters';
 import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
 import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
 import { getKstTodayString } from '../utils/time';
@@ -69,6 +70,49 @@ const activityColumns = [
   { key: 'status', title: '状态', render: (value) => <StatusBadge value={value || '本地记录'} /> },
 ];
 
+function MetricCell({ metric }) {
+  const display = metricDisplayValue(metric);
+  const isUnknown = display === '?';
+  return (
+    <span className={`overview-metric ${isUnknown ? 'unknown' : ''}`} title={metric?.reason || ''}>
+      {display}
+    </span>
+  );
+}
+
+function unknownNote(count, label) {
+  return count ? `${count} 个店铺${label}无法确认` : '已确认店铺本地统计';
+}
+
+const storeOverviewColumns = [
+  {
+    key: 'storeName',
+    title: '店铺',
+    render: (value, row) => (
+      <strong>
+        {value}
+        <span className="cell-subtitle">{row.ownerName || '未配置负责人'}</span>
+      </strong>
+    ),
+  },
+  { key: 'platform', title: '平台' },
+  {
+    key: 'connectionStatus',
+    title: '连接状态',
+    render: (value, row) => (
+      <span title={row.connectionReason || ''}>
+        <StatusBadge value={value} />
+        {row.connectionReason ? <span className="cell-subtitle">{row.connectionReason}</span> : null}
+      </span>
+    ),
+  },
+  { key: 'todayOrders', title: '今日订单', render: (_, row) => <MetricCell metric={row.metrics.todayOrders} /> },
+  { key: 'pendingShipments', title: '待发货', render: (_, row) => <MetricCell metric={row.metrics.pendingShipments} /> },
+  { key: 'abnormalOrders', title: '异常订单', render: (_, row) => <MetricCell metric={row.metrics.abnormalOrders} /> },
+  { key: 'inventoryAlerts', title: '库存预警', render: (_, row) => <MetricCell metric={row.metrics.inventoryAlerts} /> },
+  { key: 'lastSyncAt', title: '最近同步' },
+];
+
 function QuickLink({ to, title, note }) {
   return (
     <Link className="business-capability-card info quick-entry-card" to={to}>
@@ -100,6 +144,7 @@ export default function Dashboard() {
   const {
     selectedStore,
     selectedStoreId,
+    setSelectedStoreId,
     loading: storeLoading,
     error: storeError,
   } = useStoreContext();
@@ -107,10 +152,13 @@ export default function Dashboard() {
     loading: true,
     error: '',
     summary: {},
+    overview: null,
     orders: [],
     products: [],
     activities: [],
   });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [overviewAction, setOverviewAction] = useState({ running: false, message: '' });
 
   useEffect(() => {
     let cancelled = false;
@@ -125,11 +173,13 @@ export default function Dashboard() {
       const commonParams = isBackendSource && selectedStoreId ? { storeId: selectedStoreId } : {};
       const [
         summary,
+        overview,
         orders,
         products,
         activities,
       ] = await Promise.all([
         safeLoad(() => dataProvider.getDashboardSummary(commonParams), {}),
+        safeLoad(() => dataProvider.getStoreOverview({ includeInactive: false }), null),
         safeLoad(() => dataProvider.getOrders({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
         safeLoad(() => dataProvider.getProducts({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
         safeLoad(() => dataProvider.getOperationAuditLogs({ ...commonParams, page: 1, pageSize: 8 }), { data: [] }),
@@ -139,6 +189,7 @@ export default function Dashboard() {
           loading: false,
           error: '',
           summary,
+          overview,
           orders: safeRows(orders),
           products: safeRows(products),
           activities: safeRows(activities),
@@ -148,7 +199,7 @@ export default function Dashboard() {
 
     load();
     return () => { cancelled = true; };
-  }, [selectedStoreId, storeError, storeLoading]);
+  }, [selectedStoreId, storeError, storeLoading, refreshKey]);
 
   const metrics = useMemo(() => {
     const today = getKstTodayString();
@@ -173,6 +224,63 @@ export default function Dashboard() {
 
   const sourceInfo = classifyCoreDataSource({ source_type: DATA_SOURCE === 'backend' ? 'local_saved' : 'mock' });
   const dangerousState = getDangerousActionState('shipment_writeback');
+  const overviewSummary = state.overview?.summary || {};
+  const overviewRows = state.overview?.stores || [];
+  const hasOverview = overviewRows.length > 0;
+  const todayOrderValue = hasOverview
+    ? `${overviewSummary.todayOrderCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
+    : metrics.todayOrders.length;
+  const pendingShipmentValue = hasOverview
+    ? `${overviewSummary.pendingShipmentCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
+    : metrics.pendingShipment.length;
+  const abnormalOrderValue = hasOverview
+    ? `${overviewSummary.abnormalOrderCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
+    : metrics.abnormalOrders.length;
+  const inventoryAlertValue = hasOverview
+    ? `${overviewSummary.inventoryAlertCount}${overviewSummary.inventoryUnknownStoreCount ? ' + ?' : ''}`
+    : metrics.inventoryAlerts.length;
+
+  const runAllStoreSync = async () => {
+    if (overviewAction.running) return;
+    setOverviewAction({ running: true, message: '全店铺同步中...' });
+    try {
+      const result = await dataProvider.runManualAllStoresSync({
+        includeProducts: true,
+        includeOrders: true,
+        includeCustomerInquiries: true,
+        includeInactive: false,
+      });
+      const failed = result.summary?.failedCount || 0;
+      const skipped = result.summary?.skippedCount || 0;
+      setOverviewAction({
+        running: false,
+        message: failed
+          ? `全店铺同步完成，${failed} 个店铺需要处理连接状态`
+          : `全店铺同步完成，跳过 ${skipped} 个暂未开放项`,
+      });
+      setRefreshKey((current) => current + 1);
+    } catch (error) {
+      setOverviewAction({ running: false, message: error.message || '全店铺同步失败' });
+    }
+  };
+
+  const runSingleStoreSync = async (row) => {
+    if (overviewAction.running) return;
+    setOverviewAction({ running: true, message: `${row.storeName} 同步中...` });
+    try {
+      const result = await dataProvider.runManualStoreSync({
+        storeId: row.storeId,
+        platforms: [row.rawPlatform],
+        includeProducts: true,
+        includeOrders: true,
+        includeCustomerInquiries: true,
+      });
+      setOverviewAction({ running: false, message: `${row.storeName}：${result.statusLabel || '同步完成'}` });
+      setRefreshKey((current) => current + 1);
+    } catch (error) {
+      setOverviewAction({ running: false, message: `${row.storeName}：${error.message || '同步失败'}` });
+    }
+  };
 
   if (state.loading) return <div className="table-state"><span className="spinner" />正在加载首页工作台...</div>;
 
@@ -180,7 +288,7 @@ export default function Dashboard() {
     <>
       <PageHeader
         title="核心运营工作台"
-        description="只打磨核心运营链路：订单、发货、商品、库存。运营打开首页后先判断今天要处理什么。"
+        description="全店铺先看连接与数据可信状态，再进入当前店铺处理订单、发货、商品和库存。"
         actions={(
           <>
             <span className="period-chip">{sourceInfo.label}</span>
@@ -192,13 +300,40 @@ export default function Dashboard() {
       {state.error ? <EmptyState title="首页数据加载失败" description={state.error} /> : null}
 
       <div className="summary-grid">
-        <SummaryCard title="今日订单" value={metrics.todayOrders.length} note="按韩国业务日期统计" tone="info" />
-        <SummaryCard title="待发货" value={metrics.pendingShipment.length} note="建议先进入发货辅助核对" tone={metrics.pendingShipment.length ? 'warning' : 'success'} />
-        <SummaryCard title="异常订单" value={metrics.abnormalOrders.length} note="取消/退货/换货/退款仅提醒" tone={metrics.abnormalOrders.length ? 'danger' : 'success'} />
-        <SummaryCard title="库存预警" value={metrics.inventoryAlerts.length} note="缺货和低库存商品" tone={metrics.inventoryAlerts.length ? 'warning' : 'success'} />
+        <SummaryCard title="今日订单" value={todayOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '订单') : '按韩国业务日期统计'} tone="info" />
+        <SummaryCard title="待发货" value={pendingShipmentValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '待发货') : '建议先进入发货辅助核对'} tone={String(pendingShipmentValue).includes('?') || metrics.pendingShipment.length ? 'warning' : 'success'} />
+        <SummaryCard title="异常订单" value={abnormalOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '异常订单') : '取消/退货/换货/退款仅提醒'} tone={String(abnormalOrderValue).includes('?') || metrics.abnormalOrders.length ? 'danger' : 'success'} />
+        <SummaryCard title="库存预警" value={inventoryAlertValue} note={hasOverview ? unknownNote(overviewSummary.inventoryUnknownStoreCount, '库存') : '缺货和低库存商品'} tone={String(inventoryAlertValue).includes('?') || metrics.inventoryAlerts.length ? 'warning' : 'success'} />
         <SummaryCard title="缺货商品" value={metrics.outOfStock.length} note="先确认补货或人工下架" tone={metrics.outOfStock.length ? 'danger' : 'success'} />
         <SummaryCard title="低库存商品" value={metrics.lowStock.length} note="再确认补货计划" tone={metrics.lowStock.length ? 'warning' : 'success'} />
       </div>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>全店铺运营总览</h2>
+            <p>连接状态和核心指标放在同一张表；无法确认时显示“?”，避免把 IP 白名单、权限或未接入造成的未知误判为 0。</p>
+          </div>
+          <div className="overview-actions">
+            <button type="button" className="button primary" onClick={runAllStoreSync} disabled={overviewAction.running}>
+              {overviewAction.running ? '同步中...' : '同步全部可用店铺'}
+            </button>
+            {overviewAction.message ? <span>{overviewAction.message}</span> : null}
+          </div>
+        </div>
+        <DataTable
+          columns={storeOverviewColumns}
+          rows={overviewRows}
+          renderActions={(row) => (
+            <>
+              <button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button>
+              <button type="button" onClick={() => runSingleStoreSync(row)}>同步</button>
+              <Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link>
+              <Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link>
+            </>
+          )}
+        />
+      </section>
 
       <section className="content-card">
         <div className="card-title">
