@@ -17,8 +17,30 @@ import mockApi from '../services/mockApi';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
-const statuses = ['문의 대기', '답변 완료', '처리중', '환불 요청', '교환 요청'];
-const priorities = ['일반', '중요', '긴급'];
+const statusOptions = [
+  { value: '문의 대기', label: '待处理' },
+  { value: '답변 완료', label: '已回复' },
+  { value: '처리중', label: '处理中' },
+  { value: '환불 요청', label: '退款请求' },
+  { value: '교환 요청', label: '换货请求' },
+];
+const priorityOptions = [
+  { value: '일반', label: '普通' },
+  { value: '중요', label: '重要' },
+  { value: '긴급', label: '紧急' },
+];
+
+function optionLabel(options, value) {
+  return options.find((item) => item.value === value)?.label || value || '待处理';
+}
+
+function ticketStatusLabel(value) {
+  return optionLabel(statusOptions, value);
+}
+
+function ticketPriorityLabel(value) {
+  return optionLabel(priorityOptions, value);
+}
 
 const columns = [
   { key: 'ticketNo', title: '咨询编号', render: (value) => <strong>{value}</strong> },
@@ -29,8 +51,8 @@ const columns = [
   { key: 'productName', title: '商品名' },
   { key: 'inquiryType', title: '咨询类型' },
   { key: 'summary', title: '咨询内容摘要' },
-  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'priority', title: '紧急程度', render: (value) => <StatusBadge value={value} /> },
+  { key: 'status', title: '状态', render: (value) => <StatusBadge value={ticketStatusLabel(value)} /> },
+  { key: 'priority', title: '紧急程度', render: (value) => <StatusBadge value={ticketPriorityLabel(value)} /> },
   { key: 'createdAt', title: '创建时间' },
   { key: 'lastReplyAt', title: '最后回复时间' },
 ];
@@ -50,6 +72,7 @@ export default function CustomerService() {
   const [replyForm, setReplyForm] = useState({ content: '', nextStatus: '답변 완료' });
   const [replyError, setReplyError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [syncMessage, setSyncMessage] = useState('');
 
   const load = async (nextQuery = query) => {
     if (isBackendSource && storeLoading) return;
@@ -63,12 +86,22 @@ export default function CustomerService() {
       }
       const response = await dataProvider.getCustomerInquiries(isBackendSource ? { ...nextQuery, storeId: selectedStoreId } : nextQuery);
       setResult(response);
+      return response;
     } catch (error) {
       setResult({ data: [], total: 0, page: nextQuery.page, pageSize: nextQuery.pageSize });
       setLoadError(error.message || '客服咨询加载失败');
     } finally {
       setLoading(false);
     }
+  };
+
+  const syncPlatformMessages = async () => {
+    const response = await load();
+    const count = Number(response?.total ?? response?.data?.length ?? 0);
+    setSyncMessage(count
+      ? `平台消息已检查，当前共有 ${count} 条消息。`
+      : '平台消息已检查，当前没有新的平台消息。');
+    window.setTimeout(() => setSyncMessage(''), 2800);
   };
 
   useEffect(() => {
@@ -127,7 +160,7 @@ export default function CustomerService() {
         description="集中查看平台咨询、客户投诉、退款和换货相关消息。"
         actions={(
           <>
-            <button type="button" className="button primary" onClick={() => load()}>同步平台消息</button>
+            <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
             <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
             <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
           </>
@@ -152,23 +185,24 @@ export default function CustomerService() {
           </select>
           <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
             <option value="">全部状态</option>
-            {statuses.map((item) => <option key={item}>{item}</option>)}
+            {statusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={draftQuery.priority} onChange={(event) => setDraftQuery({ ...draftQuery, priority: event.target.value })}>
             <option value="">全部紧急程度</option>
-            {priorities.map((item) => <option key={item}>{item}</option>)}
+            {priorityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </SearchBar>
       </FilterPanel>
 
       <section className="content-card">
+        {syncMessage ? <div className="form-info">{syncMessage}</div> : null}
         {loadError ? <EmptyState title="平台消息加载失败" description={loadError} /> : !loading && !(result.data || []).length ? (
           <EmptyState
             title="当前没有平台消息"
             description="当前没有平台消息。你可以同步平台消息，或检查店铺连接和邮箱连接状态。"
             actions={(
               <>
-                <button type="button" className="button primary" onClick={() => load()}>同步平台消息</button>
+                <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
                 <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
                 <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
               </>
@@ -198,8 +232,8 @@ export default function CustomerService() {
             <section className="detail-section">
               <h3>完整咨询内容</h3>
               <div className="badge-row">
-                <StatusBadge value={activeTicket.status} />
-                <StatusBadge value={activeTicket.priority} />
+                <StatusBadge value={ticketStatusLabel(activeTicket.status)} />
+                <StatusBadge value={ticketPriorityLabel(activeTicket.priority)} />
               </div>
               <p>{activeTicket.content}</p>
             </section>
@@ -267,7 +301,7 @@ export default function CustomerService() {
         <div className="form-grid">
           <FormField label="回复后状态" required>
             <select value={replyForm.nextStatus} onChange={(event) => setReplyForm({ ...replyForm, nextStatus: event.target.value })}>
-              {statuses.map((item) => <option key={item}>{item}</option>)}
+              {statusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </FormField>
           <FormField label="当前咨询摘要">

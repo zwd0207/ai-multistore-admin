@@ -189,7 +189,9 @@ export default function Settings() {
                       next[index] = { ...item, status: event.target.value };
                       setPlatforms(next);
                     }}>
-                      {['정상', '확인 필요', '중지'].map((status) => <option key={status}>{status}</option>)}
+                      {['정상', '확인 필요', '중지'].map((status) => (
+                        <option key={status} value={status}>{platformStatusLabel(status)}</option>
+                      ))}
                     </select>
                   </FormField>
                   <StatusBadge value={platformStatusLabel(item.status)} />

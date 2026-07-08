@@ -78,6 +78,60 @@ function statusLabel(value) {
   return labels[String(value || '').trim().toLowerCase()] || value || '未知';
 }
 
+function comparable(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function productDisplayStatus(row = {}) {
+  return statusLabel(row.rawStatus || row.status);
+}
+
+function matchesProductStatus(row = {}, status = '') {
+  if (!status) return true;
+  const displayStatus = productDisplayStatus(row);
+  if (status === '在售') return ['在售', '销售中'].includes(displayStatus);
+  if (status === '售罄 / 缺货') return displayStatus === '售罄 / 缺货' || Number(row.stock || 0) <= 0;
+  return displayStatus === status || comparable(row.status) === comparable(status) || comparable(row.rawStatus) === comparable(status);
+}
+
+function matchesProductKeyword(row = {}, keyword = '') {
+  const expected = comparable(keyword);
+  if (!expected) return true;
+  return [
+    row.name,
+    row.sku,
+    row.externalId,
+    row.platform,
+    row.rawPlatform,
+    row.brand,
+    row.category,
+    productDisplayStatus(row),
+    sourceLabel(row.sourceType),
+    row.price,
+    row.stock,
+  ].some((value) => comparable(value).includes(expected));
+}
+
+function matchesProductPlatform(row = {}, platform = '') {
+  if (!platform) return true;
+  return comparable(row.platform) === comparable(platform) || comparable(row.rawPlatform) === comparable(platform);
+}
+
+function paginateProducts(rows = [], page = 1, pageSize = 5) {
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safePageSize = Math.max(Number(pageSize) || 5, 1);
+  const start = (safePage - 1) * safePageSize;
+  return rows.slice(start, start + safePageSize);
+}
+
+function filterOperatorProducts(rows = [], params = {}) {
+  return rows.filter((row) => (
+    matchesProductKeyword(row, params.keyword)
+    && matchesProductPlatform(row, params.platform)
+    && matchesProductStatus(row, params.status)
+  ));
+}
+
 function moneyLabel(value, currency = 'KRW') {
   return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
 }
@@ -1198,6 +1252,27 @@ export default function Products() {
   const { selectedStore, selectedStoreId } = useStoreContext();
   const { versions } = useSyncRefresh();
   const columns = useMemo(() => buildColumns(selectedStore), [selectedStore]);
+  const pageApi = useMemo(() => ({
+    ...api,
+    list: async (params = {}) => {
+      const fullResult = await dataProvider.getProducts({
+        ...params,
+        keyword: '',
+        status: '',
+        page: 1,
+        pageSize: 100,
+      });
+      const filteredRows = filterOperatorProducts(fullResult.data || fullResult.items || [], params);
+      return {
+        ...fullResult,
+        data: paginateProducts(filteredRows, params.page, params.pageSize),
+        items: paginateProducts(filteredRows, params.page, params.pageSize),
+        total: filteredRows.length,
+        page: params.page || 1,
+        pageSize: params.pageSize || 5,
+      };
+    },
+  }), []);
 
   return (
     <>
@@ -1205,7 +1280,7 @@ export default function Products() {
         title="商品管理"
         description="查看商品名称、售价、库存、销售状态和最近同步情况。商品批量同步暂未开放。"
         resourceName="商品"
-        api={api}
+        api={pageApi}
         columns={columns}
         fields={fields}
         statuses={statusOptions}

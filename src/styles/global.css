@@ -70,6 +70,7 @@ tbody tr:hover { background: #fafbff; }
 .mock-sync-note { color: var(--muted); font-size: 12px; }
 .mock-sync-success { color: #176a3a; font-size: 12px; }
 .mock-sync-error { color: #b4232b; font-size: 12px; }
+.inline-action-feedback { display: block; color: #176a3a; font-size: 12px; margin-top: 6px; }
 .coupang-order-sync-panel, .coupang-product-sync-panel { display: grid; gap: 14px; }
 .panel-heading-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .panel-heading-row h2 { margin: 0 0 4px; font-size: 18px; }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import Modal from '../components/common/Modal';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
@@ -175,7 +176,7 @@ function buildOrderDetailMessage(row = {}) {
   ].join('\n');
 }
 
-function copyReceiverInfo(row = {}) {
+async function copyReceiverInfo(row = {}) {
   const receiver = [
     `收件人：${displayText(row.receiverName, row.receiver_name, row.customer)}`,
     `电话：${displayText(row.receiverPhone, row.receiver_phone, row.phone)}`,
@@ -184,23 +185,64 @@ function copyReceiverInfo(row = {}) {
   ].join('\n');
 
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(receiver).then(
-      () => window.alert('收件信息已复制。'),
-      () => window.alert(receiver),
-    );
-    return;
+    try {
+      await navigator.clipboard.writeText(receiver);
+      return { success: true, text: receiver };
+    } catch {
+      return { success: false, text: receiver };
+    }
   }
-  window.alert(receiver);
+  return { success: false, text: receiver };
+}
+
+function OrderRowActions({ row }) {
+  const navigate = useNavigate();
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [copyMessage, setCopyMessage] = useState('');
+
+  const handleCopy = async () => {
+    const result = await copyReceiverInfo(row);
+    setCopyMessage(result.success
+      ? '收件信息已复制。'
+      : '当前浏览器不支持自动复制，请打开详情查看收件信息。');
+    window.setTimeout(() => setCopyMessage(''), 2200);
+  };
+
+  return (
+    <>
+      <button type="button" onClick={() => setDetailOpen(true)}>查看详情</button>
+      <button type="button" onClick={handleCopy}>复制收件信息</button>
+      <button type="button" onClick={() => navigate('/shipping')}>填写运单号</button>
+      {copyMessage ? <span className="inline-action-feedback">{copyMessage}</span> : null}
+      <Modal
+        open={detailOpen}
+        title="订单详情"
+        onClose={() => setDetailOpen(false)}
+        showFooter={false}
+        width="720px"
+      >
+        <div className="detail-grid">
+          <div className="detail-item"><span>订单号</span><strong>{displayText(row.orderNo, row.external_order_id)}</strong></div>
+          <div className="detail-item"><span>平台</span><strong>{orderPlatformLabel(row.platform)}</strong></div>
+          <div className="detail-item"><span>店铺</span><strong>{displayText(row.store, row.store_name)}</strong></div>
+          <div className="detail-item"><span>商品</span><strong>{orderProductName(row.product, row)}</strong></div>
+          <div className="detail-item"><span>规格</span><strong>{orderOptionName(row.optionName, row)}</strong></div>
+          <div className="detail-item"><span>数量</span><strong>{orderQuantity(row.quantity, row)}</strong></div>
+          <div className="detail-item"><span>金额</span><strong>{formatMoney(row.amount ?? row.order_amount, row.currency)}</strong></div>
+          <div className="detail-item"><span>订单状态</span><strong>{displayText(row.status, row.order_status)}</strong></div>
+          <div className="detail-item"><span>发货状态</span><strong>{deliveryLabel(row.deliveryStatus, row)}</strong></div>
+          <div className="detail-item"><span>快递公司</span><strong>{courierLabel(row.courier, row)}</strong></div>
+          <div className="detail-item"><span>运单号</span><strong>{trackingLabel(row.trackingNo, row)}</strong></div>
+          <div className="detail-item"><span>下单时间</span><strong>{safeDateTime(row.createdAt || row.created_at || row.ordered_at)}</strong></div>
+        </div>
+        <p className="form-hint">收件信息默认只显示系统允许保存的内容；地址和电话未接入时不会展示完整隐私信息。</p>
+      </Modal>
+    </>
+  );
 }
 
 function renderOrderActions(row) {
-  return (
-    <>
-      <button type="button" onClick={() => window.alert(buildOrderDetailMessage(row))}>查看详情</button>
-      <button type="button" onClick={() => copyReceiverInfo(row)}>复制收件信息</button>
-      <button type="button" onClick={() => { window.location.href = '/shipping'; }}>填写运单号</button>
-    </>
-  );
+  return <OrderRowActions row={row} />;
 }
 
 function paymentStatusLabel(value) {
@@ -237,6 +279,66 @@ function paginateRows(rows = [], page = 1, pageSize = 5) {
   const safePageSize = Math.max(Number(pageSize) || 5, 1);
   const start = (safePage - 1) * safePageSize;
   return rows.slice(start, start + safePageSize);
+}
+
+function orderRawStatus(row = {}) {
+  return row.rawStatus || row.order_status || row.rawData?.order_status || row.raw_data?.order_status || row.status || '';
+}
+
+function matchesOrderStatusFilter(row = {}, status = '') {
+  if (!status) return true;
+  const presentation = getNaverOrderStatusPresentation(orderRawStatus(row));
+  const display = [
+    row.status,
+    row.order_status,
+    row.deliveryStatus,
+    row.delivery_status,
+    row.deliveryStatusLabelZh,
+    row.delivery_status_label_zh,
+    presentation.label,
+  ].map((item) => String(item || '')).join(' ');
+
+  if (status === '待发货') {
+    return ['newOrders', 'pendingDispatch'].includes(presentation.bucket)
+      || display.includes('已付款')
+      || display.includes('待发货');
+  }
+  if (status === '配送中') return presentation.bucket === 'inDelivery' || display.includes('配送中') || display.includes('已发货');
+  if (status === '已完成') return ['delivered', 'completed'].includes(presentation.bucket) || display.includes('配送完成') || display.includes('已确认购买');
+  if (status === '取消/退款') {
+    return ['cancelRequests', 'returnRequests', 'exchangeRequests', 'canceled'].includes(presentation.bucket)
+      || display.includes('取消')
+      || display.includes('退款')
+      || display.includes('退货')
+      || display.includes('换货');
+  }
+  return display.includes(status);
+}
+
+function matchesOrderKeyword(row = {}, keyword = '') {
+  const expected = String(keyword || '').trim().toLowerCase();
+  if (!expected) return true;
+  return [
+    row.orderNo,
+    row.fullOrderNo,
+    row.product,
+    row.productName,
+    row.optionName,
+    row.store,
+    row.customer,
+    row.status,
+    row.rawStatus,
+    row.deliveryStatusLabelZh,
+    row.courier,
+    row.trackingNo,
+  ].some((value) => String(value || '').toLowerCase().includes(expected));
+}
+
+function filterOperatorOrders(rows = [], params = {}) {
+  return rows.filter((row) => (
+    matchesOrderKeyword(row, params.keyword)
+    && matchesOrderStatusFilter(row, params.status)
+  ));
 }
 
 function getDeliveryDisplayText(complete = {}, order = {}) {
@@ -3787,6 +3889,7 @@ function OrderBusinessOverviewPanel({
     () => [...state.rows].sort((left, right) => String(right.createdAt || right.created_at || '').localeCompare(String(left.createdAt || left.created_at || ''))).slice(0, 5),
     [state.rows],
   );
+  const shippingAttentionCount = (summary.newOrders || 0) + (summary.pendingDispatch || 0);
 
   return (
     <section className="content-card">
@@ -3804,9 +3907,9 @@ function OrderBusinessOverviewPanel({
           <p>已付款或新进入处理流程的订单。</p>
           <Link className="button ghost" to="/orders">查看订单列表</Link>
         </article>
-        <article className={summary.pendingDispatch ? 'business-capability-card warning' : 'business-capability-card muted'}>
-          <div className="business-capability-head"><strong>待发货</strong><span>{summary.pendingDispatch || 0} 条</span></div>
-          <p>需要尽快核对库存、收件信息和物流商库存编号。</p>
+        <article className={shippingAttentionCount ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head"><strong>待处理发货</strong><span>{shippingAttentionCount} 条</span></div>
+          <p>包含已付款新订单和已确认待发货订单，需要核对库存、收件信息和物流商库存编号。</p>
           <Link className="button ghost" to="/shipping">进入发货辅助</Link>
         </article>
         <article className={summary.unknown ? 'business-capability-card warning' : 'business-capability-card success'}>
@@ -3878,6 +3981,8 @@ export default function Orders() {
       if (isBackendSource && isSelectedNaverStore) {
         const fullResult = await dataProvider.getOrders({
           ...params,
+          keyword: '',
+          status: '',
           page: 1,
           pageSize: 100,
         });
@@ -3886,11 +3991,12 @@ export default function Orders() {
           selectedStore,
           selectedStoreId,
         );
+        const filteredRows = filterOperatorOrders(visibleRows, params);
         return {
           ...fullResult,
-          data: paginateRows(visibleRows, params.page, params.pageSize),
-          items: paginateRows(visibleRows, params.page, params.pageSize),
-          total: visibleRows.length,
+          data: paginateRows(filteredRows, params.page, params.pageSize),
+          items: paginateRows(filteredRows, params.page, params.pageSize),
+          total: filteredRows.length,
           page: params.page || 1,
           pageSize: params.pageSize || 5,
         };
@@ -3926,7 +4032,7 @@ export default function Orders() {
           actions: (
             <>
               <button type="button" className="button primary" onClick={() => window.location.reload()}>同步订单</button>
-              <button type="button" className="button ghost" onClick={() => { window.location.href = '/settings'; }}>检查 Naver API 设置</button>
+              <button type="button" className="button ghost" onClick={() => { window.location.hash = '#/settings'; }}>检查 Naver API 设置</button>
             </>
           ),
         }}

@@ -58,13 +58,63 @@ function readFileAsBase64(file) {
       const result = String(reader.result || '');
       resolve(result.includes(',') ? result.split(',').pop() : result);
     };
-    reader.onerror = () => reject(new Error('File read failed.'));
+    reader.onerror = () => reject(new Error('文件读取失败，请重新选择物流商回传表。'));
     reader.readAsDataURL(file);
   });
 }
 
 function statusToneClass(tone) {
   return `status-badge ${tone || 'neutral'}`;
+}
+
+function gateReasonLabel(value) {
+  const labels = {
+    manual_approval: '人工批准',
+    manual_approval_required: '需要人工批准',
+    matched_order_evidence: '订单匹配证据',
+    matching_evidence_acknowledged: '已确认匹配证据',
+    backup_evidence_acknowledged: '已确认备份证据',
+    audit_evidence_acknowledged: '已确认操作记录证据',
+    operator_checklist_acknowledged: '已确认操作清单',
+    tracking_xlsx_file_required: '请先选择物流商回传表',
+    tracking_parser_contract_required: '请先确认导入表格式',
+  };
+  if (!value) return '需要补充操作';
+  return labels[value] || '需要管理员复核';
+}
+
+function gateReasonList(values = []) {
+  return values.map(gateReasonLabel).join('、');
+}
+
+function cleanBusinessMessage(value = '') {
+  const replacements = {
+    'backend 模式': '本地保存模式',
+    backend: '本地保存',
+    'dry-run': '预检',
+    dry_run: '预检',
+    mock: '演示',
+    xlsx: '物流商表格',
+    Excel: '发货表格',
+    JSON: '高级排查信息',
+    Payload: '请求内容',
+    payload: '请求内容',
+    Request: '请求内容',
+    request: '请求内容',
+    Response: '返回结果',
+    response: '返回结果',
+    manual_approval: '人工批准',
+    manual_approval_required: '需要人工批准',
+    matched_order_evidence: '订单匹配证据',
+    matching_evidence_acknowledged: '已确认匹配证据',
+    backup_evidence_acknowledged: '已确认备份证据',
+    audit_evidence_acknowledged: '已确认操作记录证据',
+    operator_checklist_acknowledged: '已确认操作清单',
+  };
+  return Object.entries(replacements).reduce(
+    (text, [from, to]) => text.replaceAll(from, to),
+    String(value || ''),
+  );
 }
 
 function buildDraftMapping(candidate = {}) {
@@ -129,8 +179,8 @@ function ShippingWorkflowSteps() {
   const steps = [
     ['1', '读取未发货订单', '只读取本地候选，不执行平台发货写入。'],
     ['2', '匹配库存编号', '第一阶段按商品名称 + 选项名称匹配。'],
-    ['3', '维护物流库存', 'backend 模式可保存到本地映射和库存表。'],
-    ['4', '生成导出预览', '真实 Excel 文件生成仍需单独审批。'],
+    ['3', '维护物流库存', '本地保存模式可保存库存编号和库存数量。'],
+    ['4', '生成发货表格', '生成前会先确认库存编号和物流库存。'],
   ];
 
   return (
@@ -138,7 +188,7 @@ function ShippingWorkflowSteps() {
       <div className="section-heading">
         <div>
           <h2>发货辅助流程</h2>
-          <p>Naver 未发货订单是第一个真实落地功能；页面保持简单，技术门禁留在高级详情里。</p>
+          <p>Naver 未发货订单是第一个真实落地功能；页面保持简单，排查信息留在高级详情里。</p>
         </div>
       </div>
       <div className="shipping-step-grid">
@@ -219,14 +269,14 @@ function StockMaintenancePanel({
       <div className="section-heading">
         <div>
           <h2>物流商库存维护</h2>
-          <p>{backendMode ? '保存后写入本地物流映射和库存表，不执行平台发货写入。' : 'mock 模式只维护页面状态，不写入数据库。'}</p>
+          <p>{backendMode ? '保存后写入本地物流映射和库存表，不执行平台发货写入。' : '演示数据只维护页面状态，不写入数据库。'}</p>
         </div>
         <button className="button primary" onClick={onSaveMappings} disabled={!writableCount || saving}>
           {saving ? '保存中...' : '保存映射与库存'}
         </button>
       </div>
-      {saveError ? <div className="mock-sync-error">{saveError}</div> : null}
-      {saveResult?.businessMessage ? <div className="mock-sync-success">{saveResult.businessMessage}</div> : null}
+      {saveError ? <div className="mock-sync-error">{cleanBusinessMessage(saveError)}</div> : null}
+      {saveResult?.businessMessage ? <div className="mock-sync-success">{cleanBusinessMessage(saveResult.businessMessage)}</div> : null}
       {activeMappings.length ? (
         <div className="table-wrap">
           <table>
@@ -289,20 +339,20 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate, generating = fals
     <section className="content-card">
       <div className="section-heading">
         <div>
-          <h2>物流商 Excel 导出预览</h2>
-          <p>{backendMode ? '可生成本地 Excel 文件，并写入导出记录和审计证据；不会回传 Naver。' : 'mock 模式只生成页面预览；真实文件、导出记录和审计记录不会写入。'}</p>
+          <h2>物流商发货表格导出</h2>
+          <p>{backendMode ? '可生成本地发货表格，并写入导出记录和操作记录；不会回传 Naver。' : '演示数据只生成页面预览；真实文件、导出记录和操作记录不会写入。'}</p>
         </div>
         <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount || generating}>
-          {generating ? '生成中...' : backendMode ? '生成本地 Excel 文件' : '生成 Excel 导出预览'}
+          {generating ? '生成中...' : backendMode ? '生成本地发货表格' : '生成发货表格预览'}
         </button>
       </div>
-      {exportError ? <div className="mock-sync-error">{exportError}</div> : null}
+      {exportError ? <div className="mock-sync-error">{cleanBusinessMessage(exportError)}</div> : null}
       {!gate.exportReadyCount ? (
         <EmptyState title="还不能导出" description="请先完成库存编号匹配，并确认物流库存足够。" />
       ) : null}
       {exportPreview ? (
         <div className="shipping-export-preview">
-          {exportPreview.businessMessage ? <div className="mock-sync-success">{exportPreview.businessMessage}</div> : null}
+          {exportPreview.businessMessage ? <div className="mock-sync-success">{cleanBusinessMessage(exportPreview.businessMessage)}</div> : null}
           <div className="sync-result-grid">
             <span>文件名</span>
             <strong>{exportPreview.fileName}</strong>
@@ -363,15 +413,15 @@ function ExportHistoryPanel({
       <div className="section-heading">
         <div>
           <h2>发货导出历史</h2>
-          <p>{businessMessage || '只读查看本地发货 Excel 导出记录，方便运营确认最近生成过哪些文件。'}</p>
+          <p>{cleanBusinessMessage(businessMessage || '查看本地发货表格导出记录，方便运营确认最近生成过哪些文件。')}</p>
         </div>
       </div>
       {loading ? <LoadingPanel /> : null}
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {!loading && !error && !history.length ? (
         <EmptyState
           title="暂无导出记录"
-          description="生成本地 Excel 后，这里会显示文件名、导出时间、行数和审计关联。"
+          description="生成本地发货表格后，这里会显示文件名、导出时间、行数和操作记录关联。"
         />
       ) : null}
       {!loading && !error && history.length ? (
@@ -383,7 +433,7 @@ function ExportHistoryPanel({
                 <th>文件</th>
                 <th>行数</th>
                 <th>状态</th>
-                <th>审计关联</th>
+                <th>操作记录关联</th>
               </tr>
             </thead>
             <tbody>
@@ -447,11 +497,11 @@ function TrackingImportHistoryPanel({
       <div className="section-heading">
         <div>
           <h2>物流单号导入记录</h2>
-          <p>{businessMessage || '只读查看本地物流单号导入批次；当前不会更新订单，也不会回填 Naver 发货。'}</p>
+          <p>{cleanBusinessMessage(businessMessage || '查看本地物流单号导入批次；当前不会更新订单，也不会回填 Naver 发货。')}</p>
         </div>
       </div>
       {loading ? <LoadingPanel /> : null}
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {!loading && !error && !history.length ? (
         <EmptyState
           title="暂无物流单号导入记录"
@@ -548,7 +598,7 @@ function TrackingImportParserUploadPanel({
       <div className="section-heading">
         <div>
           <h2>物流单号表导入</h2>
-          <p>{importResult?.businessMessage || preview?.businessMessage || '先预览物流商回传 xlsx，确认后保存为本地导入记录；不会回填 Naver。'}</p>
+          <p>{cleanBusinessMessage(importResult?.businessMessage || preview?.businessMessage || '先预览物流商回传表，确认后保存为本地导入记录；不会回填 Naver。')}</p>
         </div>
         <span className={statusToneClass(saved || preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'success' : 'neutral')}><i />{saved ? '已保存记录' : preview?.status === 'tracking_xlsx_parser_mock_ready' ? '预览通过' : '等待上传'}</span>
       </div>
@@ -560,9 +610,9 @@ function TrackingImportParserUploadPanel({
           disabled={loading || saving}
         />
         <div>
-          <strong>{fileName || 'No xlsx selected'}</strong>
+          <strong>{fileName || '未选择物流商回传表'}</strong>
           <span className="cell-subtitle">
-            {fileSize ? `${fileSize.toLocaleString()} bytes selected` : 'Expected columns: order reference, product order reference, carrier, tracking number.'}
+            {fileSize ? `已选择 ${fileSize.toLocaleString()} 字节` : '需要包含：订单号、商品订单号、物流公司、运单号。'}
           </span>
         </div>
         <button
@@ -571,7 +621,7 @@ function TrackingImportParserUploadPanel({
           onClick={onParse}
           disabled={loading || saving || !fileName}
         >
-          {loading ? '解析中...' : '预览 xlsx'}
+          {loading ? '解析中...' : '预览单号表'}
         </button>
         <button
           type="button"
@@ -582,8 +632,8 @@ function TrackingImportParserUploadPanel({
           {saving ? '保存中...' : '保存本地导入记录'}
         </button>
       </div>
-      {error ? <div className="mock-sync-error">{error}</div> : null}
-      {saveError ? <div className="mock-sync-error">{saveError}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
+      {saveError ? <div className="mock-sync-error">{cleanBusinessMessage(saveError)}</div> : null}
       {preview?.status === 'tracking_xlsx_parser_mock_ready' ? (
         <div className="mock-sync-success">预览通过。确认行内容后，可保存为本地物流单号导入记录。</div>
       ) : null}
@@ -595,10 +645,10 @@ function TrackingImportParserUploadPanel({
           <table>
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Tracking</th>
-                <th>Carrier</th>
-                <th>Row status</th>
+                <th>订单</th>
+                <th>运单号</th>
+                <th>物流公司</th>
+                <th>行状态</th>
               </tr>
             </thead>
             <tbody>
@@ -621,8 +671,8 @@ function TrackingImportParserUploadPanel({
         </div>
       ) : null}
       <TechnicalDetails
-        title="Tracking xlsx parser boundary"
-        description="Parser preview keeps file content out of storage and does not update orders or call Naver."
+        title="查看单号表导入边界"
+        description="导入预览不会保存文件内容，不更新订单，也不会调用 Naver。"
         items={[
           { label: 'phase', value: preview?.phase || SHIPPING_TRACKING_IMPORT_XLSX_PARSER_PHASE },
           { label: 'status', value: preview?.status || 'not_checked' },
@@ -684,12 +734,12 @@ function TrackingOrderMatchEvidencePanel({
       <div className="section-heading">
         <div>
           <h2>单号匹配订单证据</h2>
-          <p>{evidence?.businessMessage || '只读检查物流单号导入记录是否能匹配本地订单；当前不会更新订单状态。'}</p>
+          <p>{cleanBusinessMessage(evidence?.businessMessage || '检查物流单号导入记录是否能匹配本地订单；当前不会更新订单状态。')}</p>
         </div>
         <span className={statusToneClass(evidence?.matchedOrderCount ? 'success' : 'neutral')}><i />{statusLabel}</span>
       </div>
       {loading ? <LoadingPanel /> : null}
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {!loading && !error && !rows.length ? (
         <EmptyState
           title="暂无匹配证据"
@@ -775,7 +825,7 @@ function TrackingOrderStatusLocalUpdatePanel({
   const statusText = updateSucceeded
     ? '本地状态已更新'
     : mockReady
-      ? 'mock 流程通过'
+      ? '演示流程通过'
       : noopReady
       ? '无需重复更新'
       : gateReady
@@ -789,7 +839,7 @@ function TrackingOrderStatusLocalUpdatePanel({
       <div className="section-heading">
         <div>
           <h2>本地订单状态更新</h2>
-          <p>{result?.businessMessage || gate?.businessMessage || '物流单号已匹配后，可在本地把订单标记为已发货 / 配送中；不会回填 Naver。'}</p>
+          <p>{cleanBusinessMessage(result?.businessMessage || gate?.businessMessage || '物流单号已匹配后，可在本地把订单标记为已发货 / 配送中；不会回填 Naver。')}</p>
         </div>
         <span className={statusToneClass(updateSucceeded || mockReady || gateReady || noopReady ? 'success' : 'neutral')}><i />{statusText}</span>
       </div>
@@ -798,7 +848,7 @@ function TrackingOrderStatusLocalUpdatePanel({
         <SummaryCard title="匹配订单" value={matchedCount} note="来自物流单号匹配" tone={matchedCount ? 'success' : 'default'} />
         <SummaryCard title="可更新" value={gate?.updateCandidateCount ?? 0} note="本地订单状态" tone={gate?.updateCandidateCount ? 'success' : 'default'} />
         <SummaryCard title="已是发货中" value={gate?.alreadyUpdatedCount ?? result?.alreadyUpdatedCount ?? 0} note="重复执行不写入" tone="default" />
-        <SummaryCard title="已更新" value={result?.updatedOrderCount ?? 0} note={backendMode ? '本地数据库' : 'mock 演示'} tone={updateSucceeded ? 'success' : 'default'} />
+        <SummaryCard title="已更新" value={result?.updatedOrderCount ?? 0} note={backendMode ? '本地数据库' : '演示数据'} tone={updateSucceeded ? 'success' : 'default'} />
         <SummaryCard title="Naver 回填" value={result?.shipmentWritebackCalled ? '已调用' : '未调用'} note="本阶段保持关闭" tone="default" />
       </div>
 
@@ -815,15 +865,15 @@ function TrackingOrderStatusLocalUpdatePanel({
         ))}
       </div>
 
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {gate?.skipReason && gate.status === 'blocked' ? (
-        <div className="mock-sync-error">门禁未通过：{gate.skipReason}</div>
+        <div className="mock-sync-error">检查未通过：{gateReasonLabel(gate.skipReason)}</div>
       ) : null}
       {updateSucceeded ? (
-        <div className="mock-sync-success">订单状态更新证据已生成；正式批量同步和 Naver 回填仍未开放。</div>
+        <div className="mock-sync-success">订单状态更新记录已生成；正式批量同步和 Naver 回填仍未开放。</div>
       ) : null}
       {mockReady ? (
-        <div className="mock-sync-success">mock 模式已走通审批流程；没有写入数据库。</div>
+        <div className="mock-sync-success">演示数据已走通审批流程；没有写入数据库。</div>
       ) : null}
       {noopReady ? (
         <div className="mock-sync-success">匹配订单已经处于已发货 / 配送中，本次没有重复写入。</div>
@@ -831,7 +881,7 @@ function TrackingOrderStatusLocalUpdatePanel({
 
       <div className="table-toolbar">
         <button className="button ghost" type="button" onClick={onCheckGate} disabled={!canCheck || loading}>
-          {loading ? '检查中...' : '检查更新门禁'}
+          {loading ? '检查中...' : '检查更新条件'}
         </button>
         <button className="button primary" type="button" onClick={onWrite} disabled={!canWrite}>
           {loading ? '处理中...' : '更新本地订单状态'}
@@ -878,17 +928,17 @@ function ShipmentWritebackBoundaryPanel({ boundary }) {
       <div className="section-heading">
         <div>
           <h2>Naver 发货回填边界</h2>
-          <p>{boundary?.businessMessage || '当前仅展示未来回填前必须满足的审批、备份、审计和人工清单，不会调用 Naver。'}</p>
+          <p>{cleanBusinessMessage(boundary?.businessMessage || '当前仅展示未来回填前必须满足的审批、备份、操作记录和人工清单，不会调用 Naver。')}</p>
         </div>
         <span className={statusToneClass(boundary?.shipmentWritebackOpen ? 'warning' : 'neutral')}><i />{boundary?.shipmentWritebackOpen ? '已开放' : '未开放'}</span>
       </div>
       <div className="summary-grid shipping-summary-grid">
         <SummaryCard title="匹配订单" value={boundary?.matchedOrderCount ?? 0} note="只读证据" tone={boundary?.matchedOrderCount ? 'success' : 'default'} />
-        <SummaryCard title="待补门禁" value={missing.length} note="回填前检查项" tone={missing.length ? 'warning' : 'success'} />
+        <SummaryCard title="待补材料" value={missing.length} note="回填前检查项" tone={missing.length ? 'warning' : 'success'} />
         <SummaryCard title="Naver 回填" value={boundary?.shipmentWritebackCalled ? '已调用' : '未调用'} note="本阶段保持关闭" tone="default" />
       </div>
       {missing.length ? (
-        <div className="mock-sync-error">仍缺少：{missing.join(', ')}</div>
+        <div className="mock-sync-error">仍缺少：{gateReasonList(missing)}</div>
       ) : (
         <div className="mock-sync-success">边界材料可供后续阶段审核；当前仍不执行平台写入。</div>
       )}
@@ -924,25 +974,25 @@ function ShipmentWritebackDryRunPanel({
     <section className="content-card">
       <div className="section-heading">
         <div>
-          <h2>Naver 发货回填 dry-run 证据</h2>
-          <p>{dryRun?.businessMessage || '检查本地已发货订单是否具备未来 Naver 回填 dry-run 证据；当前不会调用 Naver。'}</p>
+          <h2>Naver 发货回填预检证据</h2>
+          <p>{cleanBusinessMessage(dryRun?.businessMessage || '检查本地已发货订单是否具备未来 Naver 回填预检证据；当前不会调用 Naver。')}</p>
         </div>
-        <span className={statusToneClass(ready ? 'success' : 'neutral')}><i />{ready ? 'dry-run 就绪' : '未就绪'}</span>
+        <span className={statusToneClass(ready ? 'success' : 'neutral')}><i />{ready ? '预检就绪' : '未就绪'}</span>
       </div>
 
       <div className="summary-grid shipping-summary-grid">
-        <SummaryCard title="可 dry-run" value={dryRun?.dryRunCandidateCount ?? 0} note="安全候选" tone={ready ? 'success' : 'default'} />
+        <SummaryCard title="可预检" value={dryRun?.dryRunCandidateCount ?? 0} note="安全候选" tone={ready ? 'success' : 'default'} />
         <SummaryCard title="阻断订单" value={dryRun?.blockedOrderCount ?? 0} note="需先处理" tone={dryRun?.blockedOrderCount ? 'warning' : 'success'} />
         <SummaryCard title="Naver 回填" value={dryRun?.shipmentWritebackCalled ? '已调用' : '未调用'} note="当前保持关闭" tone="default" />
         <SummaryCard title="平台写入" value={dryRun?.platformWritesEnabled ? '已开放' : '未开放'} note="需单独批准" tone="default" />
       </div>
 
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {dryRun?.skipReason && dryRun.status === 'blocked' ? (
-        <div className="mock-sync-error">dry-run 证据未就绪：{dryRun.skipReason}</div>
+        <div className="mock-sync-error">预检证据未就绪：{gateReasonLabel(dryRun.skipReason)}</div>
       ) : null}
       {ready ? (
-        <div className="mock-sync-success">dry-run 证据已就绪；真正 Naver 回填仍需要单独阶段批准。</div>
+        <div className="mock-sync-success">预检证据已就绪；真正 Naver 回填仍需要单独阶段批准。</div>
       ) : null}
 
       {candidates.length ? (
@@ -978,13 +1028,13 @@ function ShipmentWritebackDryRunPanel({
 
       <div className="table-toolbar">
         <button className="button ghost" type="button" onClick={onCheck} disabled={!latestImportBatchId || loading}>
-          {loading ? '检查中...' : '检查 dry-run 证据'}
+          {loading ? '检查中...' : '检查预检证据'}
         </button>
       </div>
 
       <TechnicalDetails
-        title="查看 dry-run 技术边界"
-        description="这里只展示未来平台回填前的候选证据；不会保存平台 payload，不会调用 Naver。"
+        title="查看预检技术边界"
+        description="这里只展示未来平台回填前的候选证据；不会保存平台请求内容，不会调用 Naver。"
         items={[
           { label: 'phase', value: dryRun?.phase || 'Shipping-8F' },
           { label: 'status', value: dryRun?.status || 'not_checked' },
@@ -1025,25 +1075,25 @@ function ShipmentWritebackExecutionGatePanel({
     <section className="content-card">
       <div className="section-heading">
         <div>
-          <h2>Naver 发货回填执行门禁</h2>
-          <p>{gate?.businessMessage || '最终复核 Naver 发货回填执行材料；当前仍不会调用 Naver，也不会写入平台。'}</p>
+          <h2>Naver 发货回填执行复核</h2>
+          <p>{cleanBusinessMessage(gate?.businessMessage || '最终复核 Naver 发货回填执行材料；当前仍不会调用 Naver，也不会写入平台。')}</p>
         </div>
         <span className={statusToneClass(ready ? 'success' : 'neutral')}><i />{ready ? '可复核' : '未就绪'}</span>
       </div>
 
       <div className="summary-grid shipping-summary-grid">
-        <SummaryCard title="执行候选" value={gate?.executionCandidateCount ?? 0} note="来自 dry-run 证据" tone={ready ? 'success' : 'default'} />
+        <SummaryCard title="执行候选" value={gate?.executionCandidateCount ?? 0} note="来自预检证据" tone={ready ? 'success' : 'default'} />
         <SummaryCard title="Naver 回填" value={gate?.shipmentWritebackCalled ? '已调用' : '未调用'} note="本阶段必须关闭" tone="default" />
         <SummaryCard title="平台写入" value={gate?.platformWritesEnabled ? '已开放' : '未开放'} note="需单独执行阶段" tone="default" />
-        <SummaryCard title="本地写入" value={gate?.realDatabaseWritten ? '已写入' : '未写入'} note="只读门禁" tone="default" />
+        <SummaryCard title="本地保存" value={gate?.realDatabaseWritten ? '已保存' : '未保存'} note="仅检查条件" tone="default" />
       </div>
 
-      {error ? <div className="mock-sync-error">{error}</div> : null}
+      {error ? <div className="mock-sync-error">{cleanBusinessMessage(error)}</div> : null}
       {gate?.skipReason && gate.status === 'blocked' ? (
-        <div className="mock-sync-error">执行门禁未就绪：{gate.skipReason}</div>
+        <div className="mock-sync-error">执行检查未就绪：{gateReasonLabel(gate.skipReason)}</div>
       ) : null}
       {ready ? (
-        <div className="mock-sync-success">执行门禁证据已可复核；真正 Naver 回填仍必须另开阶段并明确批准。</div>
+        <div className="mock-sync-success">执行复核材料已可复核；真正 Naver 回填仍必须另开阶段并明确批准。</div>
       ) : null}
 
       {candidates.length ? (
@@ -1079,13 +1129,13 @@ function ShipmentWritebackExecutionGatePanel({
 
       <div className="table-toolbar">
         <button className="button ghost" type="button" onClick={onCheck} disabled={!latestImportBatchId || loading}>
-          {loading ? '检查中...' : '检查执行门禁'}
+          {loading ? '检查中...' : '检查执行条件'}
         </button>
       </div>
 
       <TechnicalDetails
-        title="查看执行门禁技术边界"
-        description="这里只展示未来 Naver 回填执行前的 mock gate 证据；不会保存平台 payload，不会调用 Naver。"
+        title="查看执行复核技术边界"
+        description="这里只展示未来 Naver 回填执行前的审批证据；不会保存平台请求内容，不会调用 Naver。"
         items={[
           { label: 'phase', value: gate?.phase || 'Shipping-9B' },
           { label: 'status', value: gate?.status || 'not_checked' },
@@ -1124,7 +1174,7 @@ function ShippingOperatorRunbookPanel() {
   const steps = [
     ['1', '下载未发货订单', '确认订单仍处于待发货状态。'],
     ['2', '维护库存编号', '商品名和选项名必须能匹配物流商库存编号。'],
-    ['3', '导出 Excel', '把本地生成的发货请求表发给物流商。'],
+    ['3', '导出发货表格', '把本地生成的发货请求表发给物流商。'],
     ['4', '导入物流单号', '先保存本地导入记录，不更新订单。'],
     ['5', '只读匹配订单', '确认单号和本地订单一一对应。'],
     ['6', '人工审核回填', '备份、审计、权限和清单齐全后，后续阶段再考虑 Naver 回填。'],
@@ -1346,9 +1396,9 @@ export default function ShippingAssistant() {
         setMappings(persistedMappings);
         setDraftMappings(ensureDraftMappings(nextCandidates, persistedMappings, []));
         setExportHistory(historyResult.data || []);
-        setHistoryMessage(historyResult.businessMessage || '');
+        setHistoryMessage(cleanBusinessMessage(historyResult.businessMessage || ''));
         setTrackingImportHistory(trackingHistoryResult.data || []);
-        setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
+        setTrackingImportHistoryMessage(cleanBusinessMessage(trackingHistoryResult.businessMessage || ''));
         const latestTrackingBatch = (trackingHistoryResult.data || [])[0];
         setLatestTrackingImportBatchId(latestTrackingBatch?.id || null);
         const matchResult = await dataProvider.checkShippingTrackingOrderMatchReadonly({
@@ -1406,7 +1456,7 @@ export default function ShippingAssistant() {
           } catch (dryRunError) {
             if (cancelled) return;
             setShipmentDryRun(null);
-            setShipmentDryRunError(dryRunError.message || 'Naver 发货回填 dry-run 证据检查失败。');
+            setShipmentDryRunError(cleanBusinessMessage(dryRunError.message || 'Naver 发货回填预检证据检查失败。'));
           }
         } else {
           setShipmentDryRun(null);
@@ -1426,9 +1476,9 @@ export default function ShippingAssistant() {
           setStatusUpdateResult(null);
           setShipmentBoundary(null);
           setShipmentDryRun(null);
-          setShipmentDryRunError(error.message || 'Naver 发货回填 dry-run 证据检查失败。');
-          setTrackingMatchError(error.message || 'Tracking order match check failed.');
-          setLoadError(error.message || '发货候选加载失败。');
+          setShipmentDryRunError(cleanBusinessMessage(error.message || 'Naver 发货回填预检证据检查失败。'));
+          setTrackingMatchError(cleanBusinessMessage(error.message || '物流单号匹配订单检查失败。'));
+          setLoadError(cleanBusinessMessage(error.message || '发货候选加载失败。'));
         }
       } finally {
         if (!cancelled) {
@@ -1506,11 +1556,11 @@ export default function ShippingAssistant() {
       };
       const gateResult = await dataProvider.checkShippingLogisticsMappingWriteGate(payload);
       if (!['mapping_stock_write_gate_ready', 'mock_mapping_stock_updated'].includes(gateResult.status)) {
-        throw new Error(gateResult.businessMessage || gateResult.skipReason || '物流映射保存门禁未通过。');
+        throw new Error(gateResult.businessMessage || gateReasonLabel(gateResult.skipReason) || '物流映射保存条件未通过。');
       }
       const writeResult = await dataProvider.writeShippingLogisticsMappings(payload);
       if (!['mapping_stock_local_write_succeeded', 'mock_mapping_stock_updated'].includes(writeResult.status)) {
-        throw new Error(writeResult.businessMessage || writeResult.skipReason || '物流映射保存失败。');
+        throw new Error(writeResult.businessMessage || gateReasonLabel(writeResult.skipReason) || '物流映射保存失败。');
       }
       const nextMappings = writeResult.data?.length ? writeResult.data : writableMappings.map((item, index) => ({
         id: `shipping-local-map-${index + 1}`,
@@ -1564,7 +1614,7 @@ export default function ShippingAssistant() {
           })),
         });
         if (result.status !== 'shipping_excel_local_export_succeeded') {
-          throw new Error(result.businessMessage || result.skipReason || '本地 Excel 生成未通过。');
+          throw new Error(result.businessMessage || gateReasonLabel(result.skipReason) || '本地发货表格生成未通过。');
         }
         setExportPreview(result);
         const historyResult = await dataProvider.getShippingExportHistory({
@@ -1574,7 +1624,7 @@ export default function ShippingAssistant() {
           includeRows: false,
         });
         setExportHistory(historyResult.data || []);
-        setHistoryMessage(historyResult.businessMessage || '');
+        setHistoryMessage(cleanBusinessMessage(historyResult.businessMessage || ''));
         return;
       }
       setExportPreview(buildShippingExcelExportMock({
@@ -1584,7 +1634,7 @@ export default function ShippingAssistant() {
         includeReceiverPrivacy: false,
       }));
     } catch (error) {
-      setExportError(error.message || 'Excel 导出生成失败。');
+      setExportError(cleanBusinessMessage(error.message || '发货表格导出生成失败。'));
     } finally {
       setGeneratingExport(false);
     }
@@ -1606,20 +1656,20 @@ export default function ShippingAssistant() {
     setTrackingParserContentBase64('');
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.xlsx')) {
-      setTrackingParserError('Please select an xlsx file.');
+      setTrackingParserError('请选择物流商回传表文件。');
       return;
     }
     try {
       const content = await readFileAsBase64(file);
       setTrackingParserContentBase64(content);
     } catch (error) {
-      setTrackingParserError(error.message || 'File read failed.');
+      setTrackingParserError(error.message || '文件读取失败，请重新选择物流商回传表。');
     }
   };
 
   const previewTrackingParserFile = async () => {
     if (!trackingParserFile || !trackingParserContentBase64) {
-      setTrackingParserError('Please select an xlsx file first.');
+      setTrackingParserError('请先选择物流商回传表文件。');
       return;
     }
     setTrackingParserLoading(true);
@@ -1638,14 +1688,14 @@ export default function ShippingAssistant() {
         },
       });
       if (result.status !== 'tracking_xlsx_parser_mock_ready') {
-        throw new Error(result.businessMessage || result.skipReason || 'Tracking xlsx preview failed.');
+        throw new Error(result.businessMessage || gateReasonLabel(result.skipReason) || '物流商回传表预览失败。');
       }
       setTrackingParserPreview(result);
       setTrackingImportSaveResult(null);
       setTrackingImportSaveError('');
     } catch (error) {
       setTrackingParserPreview(null);
-      setTrackingParserError(error.message || 'Tracking xlsx preview failed.');
+      setTrackingParserError(cleanBusinessMessage(error.message || '物流商回传表预览失败。'));
     } finally {
       setTrackingParserLoading(false);
     }
@@ -1654,7 +1704,7 @@ export default function ShippingAssistant() {
   const saveTrackingImportRecord = async () => {
     const rows = trackingParserPreview?.rows || [];
     if (trackingParserPreview?.status !== 'tracking_xlsx_parser_mock_ready' || !rows.length) {
-      setTrackingImportSaveError('请先预览通过物流单号 xlsx。');
+      setTrackingImportSaveError('请先预览通过物流单号表。');
       return;
     }
     setTrackingImportSaving(true);
@@ -1691,11 +1741,11 @@ export default function ShippingAssistant() {
       };
       const gateResult = await dataProvider.checkShippingTrackingImportWriteGate(payload);
       if (!['tracking_import_local_write_gate_ready', 'mock_tracking_import_local_record_ready'].includes(gateResult.status)) {
-        throw new Error(gateResult.businessMessage || gateResult.skipReason || '物流单号导入记录门禁未通过。');
+        throw new Error(gateResult.businessMessage || gateReasonLabel(gateResult.skipReason) || '物流单号导入记录保存条件未通过。');
       }
       const writeResult = await dataProvider.writeShippingTrackingImport(payload);
       if (!['tracking_import_local_write_succeeded', 'mock_tracking_import_local_record_ready'].includes(writeResult.status)) {
-        throw new Error(writeResult.businessMessage || writeResult.skipReason || '物流单号导入记录保存失败。');
+        throw new Error(writeResult.businessMessage || gateReasonLabel(writeResult.skipReason) || '物流单号导入记录保存失败。');
       }
       setTrackingImportSaveResult(writeResult);
 
@@ -1706,7 +1756,7 @@ export default function ShippingAssistant() {
         includeRows: false,
       });
       setTrackingImportHistory(historyResult.data || []);
-      setTrackingImportHistoryMessage(historyResult.businessMessage || '');
+      setTrackingImportHistoryMessage(cleanBusinessMessage(historyResult.businessMessage || ''));
       const nextBatchId = writeResult.importBatchId || (historyResult.data || [])[0]?.id || null;
       setLatestTrackingImportBatchId(nextBatchId);
 
@@ -1723,7 +1773,7 @@ export default function ShippingAssistant() {
       setTrackingMatchEvidence(matchResult);
     } catch (error) {
       setTrackingImportSaveResult(null);
-      setTrackingImportSaveError(error.message || '物流单号导入记录保存失败。');
+      setTrackingImportSaveError(cleanBusinessMessage(error.message || '物流单号导入记录保存失败。'));
     } finally {
       setTrackingImportSaving(false);
     }
@@ -1798,7 +1848,7 @@ export default function ShippingAssistant() {
       return result;
     } catch (error) {
       setShipmentDryRun(null);
-      setShipmentDryRunError(error.message || 'Naver 发货回填 dry-run 证据检查失败。');
+      setShipmentDryRunError(cleanBusinessMessage(error.message || 'Naver 发货回填预检证据检查失败。'));
       return null;
     } finally {
       setShipmentDryRunLoading(false);
@@ -1820,7 +1870,7 @@ export default function ShippingAssistant() {
       return result;
     } catch (error) {
       setShipmentExecutionGate(null);
-      setShipmentExecutionGateError(error.message || 'Naver 发货回填执行门禁检查失败。');
+      setShipmentExecutionGateError(cleanBusinessMessage(error.message || 'Naver 发货回填执行条件检查失败。'));
       return null;
     } finally {
       setShipmentExecutionGateLoading(false);
@@ -1841,7 +1891,7 @@ export default function ShippingAssistant() {
       return result;
     } catch (error) {
       setStatusUpdateGate(null);
-      setStatusUpdateError(error.message || '本地订单状态更新门禁检查失败。');
+      setStatusUpdateError(cleanBusinessMessage(error.message || '本地订单状态更新条件检查失败。'));
       return null;
     } finally {
       setStatusUpdateLoading(false);
@@ -1850,7 +1900,7 @@ export default function ShippingAssistant() {
 
   const writeStatusUpdate = async () => {
     if (statusUpdateGate?.status !== 'tracking_order_status_update_gate_ready') {
-      setStatusUpdateError('请先通过本地状态更新门禁检查。');
+      setStatusUpdateError('请先通过本地状态更新条件检查。');
       return;
     }
     setStatusUpdateLoading(true);
@@ -1883,7 +1933,7 @@ export default function ShippingAssistant() {
           includeRows: false,
         });
         setTrackingImportHistory(trackingHistoryResult.data || []);
-        setTrackingImportHistoryMessage(trackingHistoryResult.businessMessage || '');
+        setTrackingImportHistoryMessage(cleanBusinessMessage(trackingHistoryResult.businessMessage || ''));
       }
       try {
         const dryRunResult = await dataProvider.checkShippingShipmentWritebackDryRunGate(buildShipmentWritebackDryRunPayload());
@@ -1891,7 +1941,7 @@ export default function ShippingAssistant() {
         setShipmentDryRunError('');
       } catch (dryRunError) {
         setShipmentDryRun(null);
-        setShipmentDryRunError(dryRunError.message || 'Naver 发货回填 dry-run 证据检查失败。');
+        setShipmentDryRunError(cleanBusinessMessage(dryRunError.message || 'Naver 发货回填预检证据检查失败。'));
       }
     } catch (error) {
       setStatusUpdateResult(null);
@@ -1938,7 +1988,7 @@ export default function ShippingAssistant() {
     <>
       <PageHeader
         title="发货辅助"
-        description="Naver 未发货订单下载、库存编号匹配、物流库存维护和 Excel 导出预览。"
+        description="Naver 未发货订单下载、库存编号匹配、物流库存维护和发货表格导出。"
       />
 
       <div className="summary-grid shipping-summary-grid">
@@ -1946,7 +1996,7 @@ export default function ShippingAssistant() {
         <SummaryCard title="已匹配库存编号" value={summary.matchedCount} note="商品名 + 选项名" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="待维护映射" value={summary.unmatchedCount} note="需要人工补齐" tone={summary.unmatchedCount ? 'warning' : 'success'} />
         <SummaryCard title="库存需关注" value={summary.stockAttentionCount} note="物流库存不足或偏低" tone={summary.stockAttentionCount ? 'warning' : 'success'} />
-        <SummaryCard title="可导出行" value={summary.exportReadyCount} note={isBackendSource ? '本地 Excel 文件' : 'Excel mock 预览'} tone={summary.exportReadyCount ? 'success' : 'default'} />
+        <SummaryCard title="可导出行" value={summary.exportReadyCount} note={isBackendSource ? '本地发货表格' : '发货表格预览'} tone={summary.exportReadyCount ? 'success' : 'default'} />
       </div>
 
       <ShippingWorkflowSteps />
@@ -1955,7 +2005,7 @@ export default function ShippingAssistant() {
         <div className="section-heading">
           <div>
             <h2>未发货订单候选</h2>
-            <p>{gate.businessMessage}</p>
+            <p>{cleanBusinessMessage(gate.businessMessage)}</p>
           </div>
           <span className="period-chip">{selectedStore?.name || 'Naver 店铺'}</span>
         </div>
@@ -2067,8 +2117,8 @@ export default function ShippingAssistant() {
       <ShippingOperatorRunbookPanel />
 
       <TechnicalDetails
-        title="查看 Excel 生成 mock 门禁"
-        description="当前只确认真实 Excel、导出记录、审计联动和物流单号回传的边界；不创建真实文件、不写导出记录。"
+        title="查看发货表格生成边界"
+        description="当前只确认真实发货表格、导出记录、审计联动和物流单号回传的边界；不创建真实文件、不写导出记录。"
         items={[
           { label: 'phase', value: exportPreview?.phase || SHIPPING_EXPORT_MOCK_PHASE },
           { label: 'file_type', value: exportPreview?.fileType || 'shipping_request' },
