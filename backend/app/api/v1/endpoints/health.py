@@ -15,5 +15,8 @@ def health_check() -> dict:
             "status": "ok",
             "environment": settings.app_env,
             "api_version": "v1",
+            "real_api_test_enabled": settings.real_api_test_enabled,
+            "real_api_write_enabled": settings.real_api_write_enabled,
+            "platform_write_closed": settings.real_api_write_enabled is False,
         }
     )
