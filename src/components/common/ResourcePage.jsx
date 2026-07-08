@@ -24,6 +24,8 @@ export default function ResourcePage({
   canEdit = !readOnly,
   canDelete = !readOnly,
   extraParams = {},
+  initialQuery = {},
+  initialQueryKey = '',
   reloadKey = '',
   onSaved,
   extraActions,
@@ -36,7 +38,18 @@ export default function ResourcePage({
   renderFormExtra,
   modalWidth,
 }) {
-  const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
+  const baseQuery = useMemo(
+    () => ({
+      keyword: '',
+      status: '',
+      platform: '',
+      page: 1,
+      pageSize: 5,
+      ...initialQuery,
+    }),
+    [initialQueryKey],
+  );
+  const [query, setQuery] = useState(baseQuery);
   const [draftQuery, setDraftQuery] = useState(query);
   const [result, setResult] = useState({ data: [], total: 0 });
   const [loading, setLoading] = useState(true);
@@ -49,6 +62,11 @@ export default function ResourcePage({
   const [formLoading, setFormLoading] = useState(false);
   const extraParamsKey = JSON.stringify(extraParams);
   const stableExtraParams = useMemo(() => extraParams, [extraParamsKey]);
+
+  useEffect(() => {
+    setQuery(baseQuery);
+    setDraftQuery(baseQuery);
+  }, [baseQuery]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,9 +141,8 @@ export default function ResourcePage({
 
   const search = () => setQuery({ ...draftQuery, page: 1 });
   const reset = () => {
-    const clean = { keyword: '', status: '', platform: '', page: 1, pageSize: 5 };
-    setDraftQuery(clean);
-    setQuery(clean);
+    setDraftQuery(baseQuery);
+    setQuery(baseQuery);
   };
 
   const rows = result.data || [];

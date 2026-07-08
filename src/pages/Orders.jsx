@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Modal from '../components/common/Modal';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
@@ -26,7 +26,7 @@ const api = {
   remove: mockApi.deleteOrder,
 };
 
-const statusOptions = ['待发货', '配送中', '已完成', '取消/退款'];
+const statusOptions = ['新订单', '待发货', '配送中', '配送完成', '购买确认', '取消订单', '退货 / 换货', '异常订单'];
 
 const columns = [
   { key: 'orderNo', title: '订单号', render: (value, row) => <strong>{displayText(value, row.external_order_id, row.fullOrderNo)}</strong> },
@@ -195,7 +195,7 @@ async function copyReceiverInfo(row = {}) {
   return { success: false, text: receiver };
 }
 
-function OrderRowActions({ row }) {
+function OrderRowActions({ row, activeStatus = '' }) {
   const navigate = useNavigate();
   const [detailOpen, setDetailOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
@@ -208,11 +208,17 @@ function OrderRowActions({ row }) {
     window.setTimeout(() => setCopyMessage(''), 2200);
   };
 
+  const handleConfirmOrder = () => {
+    setCopyMessage('已进入接单核对流程。当前不会自动提交到 Naver，请在平台后台完成接单后再刷新订单。');
+    window.setTimeout(() => setCopyMessage(''), 3200);
+  };
+
   return (
     <>
+      {activeStatus === '新订单' ? <button type="button" onClick={handleConfirmOrder}>确认接单</button> : null}
       <button type="button" onClick={() => setDetailOpen(true)}>查看详情</button>
       <button type="button" onClick={handleCopy}>复制收件信息</button>
-      <button type="button" onClick={() => navigate('/shipping')}>填写运单号</button>
+      <button type="button" onClick={() => navigate('/shipping')}>{activeStatus === '待发货' ? '发货处理' : '填写运单号'}</button>
       {copyMessage ? <span className="inline-action-feedback">{copyMessage}</span> : null}
       <Modal
         open={detailOpen}
@@ -241,8 +247,8 @@ function OrderRowActions({ row }) {
   );
 }
 
-function renderOrderActions(row) {
-  return <OrderRowActions row={row} />;
+function renderOrderActions(row, activeStatus = '') {
+  return <OrderRowActions row={row} activeStatus={activeStatus} />;
 }
 
 function paymentStatusLabel(value) {
@@ -288,6 +294,7 @@ function orderRawStatus(row = {}) {
 function matchesOrderStatusFilter(row = {}, status = '') {
   if (!status) return true;
   const presentation = getNaverOrderStatusPresentation(orderRawStatus(row));
+  const normalizedRaw = String(orderRawStatus(row) || '').trim().toUpperCase();
   const display = [
     row.status,
     row.order_status,
@@ -298,12 +305,29 @@ function matchesOrderStatusFilter(row = {}, status = '') {
     presentation.label,
   ].map((item) => String(item || '')).join(' ');
 
+  if (status === '新订单') {
+    return presentation.bucket === 'newOrders'
+      || display.includes('新订单')
+      || display.includes('已付款');
+  }
   if (status === '待发货') {
-    return ['newOrders', 'pendingDispatch'].includes(presentation.bucket)
-      || display.includes('已付款')
+    return presentation.bucket === 'pendingDispatch'
       || display.includes('待发货');
   }
   if (status === '配送中') return presentation.bucket === 'inDelivery' || display.includes('配送中') || display.includes('已发货');
+  if (status === '配送完成') return presentation.bucket === 'delivered' || display.includes('配送完成');
+  if (status === '购买确认') return normalizedRaw === 'PURCHASE_DECIDED' || display.includes('已确认购买') || display.includes('购买确认');
+  if (status === '取消订单') {
+    return ['cancelRequests', 'canceled'].includes(presentation.bucket)
+      || display.includes('取消')
+      || display.includes('退款');
+  }
+  if (status === '退货 / 换货') {
+    return ['returnRequests', 'exchangeRequests'].includes(presentation.bucket)
+      || display.includes('退货')
+      || display.includes('换货');
+  }
+  if (status === '异常订单') return presentation.bucket === 'unknown' || display.includes('未识别') || display.includes('异常');
   if (status === '已完成') return ['delivered', 'completed'].includes(presentation.bucket) || display.includes('配送完成') || display.includes('已确认购买');
   if (status === '取消/退款') {
     return ['cancelRequests', 'returnRequests', 'exchangeRequests', 'canceled'].includes(presentation.bucket)
@@ -3853,8 +3877,10 @@ function OrderBusinessOverviewPanel({
   selectedStoreId,
   storeLoading,
   reloadKey,
+  activeStatus = '',
 }) {
   const [state, setState] = useState({ loading: true, rows: [], error: '' });
+  const [actionMessage, setActionMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -3885,11 +3911,81 @@ function OrderBusinessOverviewPanel({
     () => buildNaverClaimReadonlySummary(summary),
     [summary],
   );
-  const recentRows = useMemo(
-    () => [...state.rows].sort((left, right) => String(right.createdAt || right.created_at || '').localeCompare(String(left.createdAt || left.created_at || ''))).slice(0, 5),
-    [state.rows],
+  const overviewRows = useMemo(
+    () => (activeStatus ? state.rows.filter((row) => matchesOrderStatusFilter(row, activeStatus)) : state.rows),
+    [activeStatus, state.rows],
   );
-  const shippingAttentionCount = (summary.newOrders || 0) + (summary.pendingDispatch || 0);
+  const recentRows = useMemo(
+    () => [...overviewRows].sort((left, right) => String(right.createdAt || right.created_at || '').localeCompare(String(left.createdAt || left.created_at || ''))).slice(0, 5),
+    [overviewRows],
+  );
+  const statusCards = useMemo(() => ([
+    {
+      status: '新订单',
+      count: summary.newOrders || 0,
+      tone: summary.newOrders ? 'info' : 'muted',
+      description: '已付款但还没有确认接单的订单。',
+      cta: '只看新订单',
+    },
+    {
+      status: '待发货',
+      count: summary.pendingDispatch || 0,
+      tone: summary.pendingDispatch ? 'warning' : 'muted',
+      description: '已经进入发货准备，需要核对库存和物流信息。',
+      cta: '只看待发货',
+    },
+    {
+      status: '配送中',
+      count: summary.inDelivery || 0,
+      tone: summary.inDelivery ? 'info' : 'muted',
+      description: '已经发出，正在配送过程中的订单。',
+      cta: '只看配送中',
+    },
+    {
+      status: '配送完成',
+      count: summary.delivered || 0,
+      tone: summary.delivered ? 'success' : 'muted',
+      description: '物流已经完成配送的订单。',
+      cta: '只看配送完成',
+    },
+    {
+      status: '购买确认',
+      count: state.rows.filter((row) => matchesOrderStatusFilter(row, '购买确认')).length,
+      tone: state.rows.some((row) => matchesOrderStatusFilter(row, '购买确认')) ? 'success' : 'muted',
+      description: '买家已确认购买或平台已完成确认的订单。',
+      cta: '只看购买确认',
+    },
+    {
+      status: '取消订单',
+      count: (claimSummary.cancelRequests || 0) + (claimSummary.canceled || 0),
+      tone: (claimSummary.cancelRequests || claimSummary.canceled) ? 'warning' : 'muted',
+      description: '取消请求或已经取消的订单。',
+      cta: '只看取消订单',
+    },
+    {
+      status: '退货 / 换货',
+      count: (claimSummary.returnRequests || 0) + (claimSummary.exchangeRequests || 0),
+      tone: (claimSummary.returnRequests || claimSummary.exchangeRequests) ? 'warning' : 'muted',
+      description: '需要关注商品、库存和物流条件的售后订单。',
+      cta: '只看退换货',
+    },
+    {
+      status: '异常订单',
+      count: summary.unknown || 0,
+      tone: summary.unknown ? 'danger' : 'muted',
+      description: '状态不清楚或需要人工复核的订单。',
+      cta: '只看异常订单',
+    },
+  ]), [claimSummary, state.rows, summary]);
+  const activeCard = statusCards.find((card) => card.status === activeStatus);
+
+  useEffect(() => {
+    setActionMessage('');
+  }, [activeStatus]);
+
+  const handleConfirmNewOrders = () => {
+    setActionMessage('已进入新订单接单核对。当前不会自动提交到 Naver，请在平台后台完成接单后再刷新订单。');
+  };
 
   return (
     <section className="content-card">
@@ -3898,35 +3994,52 @@ function OrderBusinessOverviewPanel({
           <h2>订单处理概览</h2>
           <p>先看今天需要处理的新订单、待发货、异常和售后请求，再进入列表处理具体订单。</p>
         </div>
-        <span className="period-chip">{state.loading ? '加载中' : `${summary.total || 0} 条订单`}</span>
+        <span className="period-chip">{state.loading ? '加载中' : (activeCard ? `${activeCard.count} 条${activeCard.status}` : `${summary.total || 0} 条订单`)}</span>
       </div>
       {state.error ? <div className="mock-sync-error">{state.error}</div> : null}
-      <div className="business-capability-grid compact">
-        <article className={summary.newOrders ? 'business-capability-card info' : 'business-capability-card muted'}>
-          <div className="business-capability-head"><strong>新订单</strong><span>{summary.newOrders || 0} 条</span></div>
-          <p>已付款或新进入处理流程的订单。</p>
-          <Link className="button ghost" to="/orders">查看订单列表</Link>
-        </article>
-        <article className={shippingAttentionCount ? 'business-capability-card warning' : 'business-capability-card muted'}>
-          <div className="business-capability-head"><strong>待处理发货</strong><span>{shippingAttentionCount} 条</span></div>
-          <p>包含已付款新订单和已确认待发货订单，需要核对库存、收件信息和物流商库存编号。</p>
-          <Link className="button ghost" to="/shipping">进入发货辅助</Link>
-        </article>
-        <article className={summary.unknown ? 'business-capability-card warning' : 'business-capability-card success'}>
-          <div className="business-capability-head"><strong>异常订单</strong><span>{summary.unknown || 0} 条</span></div>
-          <p>状态未识别或需要人工复核的订单。</p>
-          <Link className="button ghost" to="/orders">查看异常</Link>
-        </article>
-        <article className={(claimSummary.cancelRequests || summary.canceled) ? 'business-capability-card info' : 'business-capability-card muted'}>
-          <div className="business-capability-head"><strong>取消订单</strong><span>{(claimSummary.cancelRequests || 0) + (claimSummary.canceled || 0)} 条</span></div>
-          <p>包含取消请求和已取消订单。</p>
-          <Link className="button ghost" to="/orders">查看取消订单</Link>
-        </article>
-        <article className={(claimSummary.returnRequests || claimSummary.exchangeRequests) ? 'business-capability-card warning' : 'business-capability-card muted'}>
-          <div className="business-capability-head"><strong>退货 / 换货</strong><span>{(claimSummary.returnRequests || 0) + (claimSummary.exchangeRequests || 0)} 条</span></div>
-          <p>需要人工确认商品、库存和物流条件。</p>
-          <Link className="button ghost" to="/orders">查看售后请求</Link>
-        </article>
+      <div className="business-capability-grid compact order-status-grid">
+        {statusCards.map((card) => (
+          <Link
+            className={`business-capability-card order-stage-card ${card.tone}${activeStatus === card.status ? ' active' : ''}`}
+            to={`/orders?status=${encodeURIComponent(card.status)}`}
+            key={card.status}
+          >
+            <div className="business-capability-head"><strong>{card.status}</strong><span>{card.count} 条</span></div>
+            <p>{card.description}</p>
+            <span className="button ghost order-stage-cta">{card.cta}</span>
+          </Link>
+        ))}
+      </div>
+      <div className="order-stage-action-panel">
+        {activeCard ? (
+          <>
+            <div>
+              <h3>{activeCard.status}处理</h3>
+              <p>当前列表只显示“{activeCard.status}”订单。先核对订单信息，再执行下面的运营动作。</p>
+            </div>
+            <div className="detail-toolbar">
+              {activeCard.status === '新订单' ? (
+                <button className="button primary" type="button" onClick={handleConfirmNewOrders}>确认接单</button>
+              ) : null}
+              {activeCard.status === '待发货' ? (
+                <Link className="button primary" to="/shipping">发货处理</Link>
+              ) : null}
+              <Link className="button ghost" to="/orders">查看全部订单</Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <h3>按状态处理订单</h3>
+              <p>点击上方状态卡片，可以只看对应状态的订单。新订单可先做接单核对，待发货订单进入发货处理。</p>
+            </div>
+            <div className="detail-toolbar">
+              <Link className="button ghost" to="/orders?status=%E6%96%B0%E8%AE%A2%E5%8D%95">查看新订单</Link>
+              <Link className="button ghost" to="/orders?status=%E5%BE%85%E5%8F%91%E8%B4%A7">查看待发货</Link>
+            </div>
+          </>
+        )}
+        {actionMessage ? <div className="inline-action-feedback">{actionMessage}</div> : null}
       </div>
       {recentRows.length ? (
         <div className="table-wrap">
@@ -3965,6 +4078,9 @@ function OrderBusinessOverviewPanel({
 export default function Orders() {
   const { selectedStore, selectedStoreId, loading: storeLoading } = useStoreContext();
   const { versions } = useSyncRefresh();
+  const [searchParams] = useSearchParams();
+  const requestedStatus = searchParams.get('status') || '';
+  const activeStatus = statusOptions.includes(requestedStatus) ? requestedStatus : '';
   const pageApi = useMemo(() => ({
     ...api,
     list: async (params = {}) => {
@@ -4012,10 +4128,13 @@ export default function Orders() {
         selectedStoreId={selectedStoreId}
         storeLoading={storeLoading}
         reloadKey={`${selectedStoreId}-${versions.orders}`}
+        activeStatus={activeStatus}
       />
       <ResourcePage
         title="订单管理"
-        description="查看订单、发货状态、快递信息和售后状态。需要发货时进入发货辅助填写或导入运单号。"
+        description={activeStatus
+          ? `当前只显示“${activeStatus}”订单。需要发货时进入发货辅助填写或导入运单号。`
+          : '查看订单、发货状态、快递信息和售后状态。需要发货时进入发货辅助填写或导入运单号。'}
         resourceName="订单"
         api={pageApi}
         columns={columns}
@@ -4024,8 +4143,10 @@ export default function Orders() {
         initialForm={{ orderNo: '', product: '', store: '', customer: '', amount: 0, status: '', createdAt: '' }}
         readOnly={isBackendSource}
         extraParams={isBackendSource && selectedStoreId ? { storeId: selectedStoreId } : {}}
+        initialQuery={activeStatus ? { status: activeStatus } : {}}
+        initialQueryKey={activeStatus}
         reloadKey={`${selectedStoreId}-${versions.orders}`}
-        renderActions={renderOrderActions}
+        renderActions={(row) => renderOrderActions(row, activeStatus)}
         emptyState={{
           title: '当前没有订单',
           description: '当前店铺暂无可处理订单。你可以同步订单，或检查 Naver API 设置是否正常。',
