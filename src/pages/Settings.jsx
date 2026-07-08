@@ -14,6 +14,24 @@ const tabs = [
   ['templates', '模板设置'],
 ];
 
+function normalizeBasicSettings(data = {}) {
+  return {
+    ...data,
+    systemName: data.systemName && !data.systemName.includes('环境管理') ? data.systemName : 'AI 多店铺运营工作台',
+    defaultTimezone: data.defaultTimezone === 'Asia/Shanghai' ? 'Asia/Seoul' : (data.defaultTimezone || 'Asia/Seoul'),
+    defaultCurrency: data.defaultCurrency || 'KRW',
+  };
+}
+
+function platformStatusLabel(value) {
+  const labels = {
+    '정상': '正常运营',
+    '확인 필요': '需要检查',
+    '중지': '暂停使用',
+  };
+  return labels[value] || value || '正常运营';
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('basic');
   const [basic, setBasic] = useState(null);
@@ -31,7 +49,7 @@ export default function Settings() {
       mockApi.getRiskRules(),
       mockApi.getTemplateSettings(),
     ]);
-    setBasic(basicData);
+    setBasic(normalizeBasicSettings(basicData));
     setPlatforms(platformData);
     setNotifications(notificationData);
     setRiskRules(riskData);
@@ -104,16 +122,16 @@ export default function Settings() {
     <>
       <PageHeader
         title="系统设置"
-        description="维护系统基础参数、平台配置、通知规则、风险阈值和模板内容。"
-        actions={<><button className="button ghost" onClick={resetAll}>重置设置</button><button className="button primary" onClick={saveCurrent}>保存设置</button></>}
+        description="维护系统名称、韩国业务时间、默认币种、平台开关和提醒规则。高级排查信息不在普通页面展示。"
+        actions={<><button type="button" className="button ghost" onClick={resetAll}>恢复默认设置</button><button type="button" className="button primary" onClick={saveCurrent}>保存设置</button></>}
       />
 
       <div className="tab-row">
-        {tabs.map(([key, label]) => <button key={key} className={activeTab === key ? 'active' : ''} onClick={() => setActiveTab(key)}>{label}</button>)}
+        {tabs.map(([key, label]) => <button type="button" key={key} className={activeTab === key ? 'active' : ''} onClick={() => setActiveTab(key)}>{label}</button>)}
       </div>
 
       {activeTab === 'basic' && (
-        <SettingsSection title="基础设置" description="系统基础参数和默认显示行为。">
+        <SettingsSection title="基础设置" description="系统基础显示口径，默认按韩国店铺运营使用。">
           <div className="settings-grid">
             <FormField label="系统名称" required error={errors.systemName}>
               <input value={basic.systemName} onChange={(event) => setBasic({ ...basic, systemName: event.target.value })} />
@@ -121,19 +139,19 @@ export default function Settings() {
             <FormField label="默认语言">
               <select value={basic.defaultLanguage} onChange={(event) => setBasic({ ...basic, defaultLanguage: event.target.value })}>
                 <option value="zh-CN">中文</option>
-                <option value="ko-KR">한국어</option>
+                <option value="ko-KR">韩文</option>
               </select>
             </FormField>
             <FormField label="默认时区">
               <select value={basic.defaultTimezone} onChange={(event) => setBasic({ ...basic, defaultTimezone: event.target.value })}>
-                <option value="Asia/Shanghai">Asia/Shanghai</option>
-                <option value="Asia/Seoul">Asia/Seoul</option>
+                <option value="Asia/Seoul">韩国时间（KST / Asia/Seoul）</option>
+                <option value="Asia/Shanghai">中国时间（CST / Asia/Shanghai）</option>
               </select>
             </FormField>
-            <FormField label="默认货币">
+            <FormField label="默认币种">
               <select value={basic.defaultCurrency} onChange={(event) => setBasic({ ...basic, defaultCurrency: event.target.value })}>
-                <option value="KRW">KRW</option>
-                <option value="CNY">CNY</option>
+                <option value="KRW">韩元（KRW）</option>
+                <option value="CNY">人民币（CNY）</option>
               </select>
             </FormField>
             <FormField label="每页默认条数" required error={errors.defaultPageSize}>
@@ -144,12 +162,12 @@ export default function Settings() {
       )}
 
       {activeTab === 'platforms' && (
-        <SettingsSection title="平台设置" description="启用平台、显示名和平台状态控制。">
+        <SettingsSection title="平台设置" description="控制平台是否在普通运营页面展示。API 设置仍在管理员可见范围内。">
           <div className="settings-stack">
             {platforms.map((item, index) => (
               <div className="settings-row" key={item.key}>
                 <div>
-                  <strong>{item.key}</strong>
+                  <strong>{item.displayName || item.key}</strong>
                   <p>{item.note}</p>
                 </div>
                 <div className="mini-grid">
@@ -171,10 +189,10 @@ export default function Settings() {
                       next[index] = { ...item, status: event.target.value };
                       setPlatforms(next);
                     }}>
-                      {['정상', '확인 필요', '위험'].map((status) => <option key={status}>{status}</option>)}
+                      {['정상', '확인 필요', '중지'].map((status) => <option key={status}>{status}</option>)}
                     </select>
                   </FormField>
-                  <StatusBadge value={item.status} />
+                  <StatusBadge value={platformStatusLabel(item.status)} />
                 </div>
               </div>
             ))}
@@ -183,14 +201,14 @@ export default function Settings() {
       )}
 
       {activeTab === 'notifications' && (
-        <SettingsSection title="通知设置" description="控制系统提醒与通知行为。">
+        <SettingsSection title="通知设置" description="控制订单、库存、消息、邮箱和申诉提醒。">
           <div className="settings-stack">
             {[
-              ['emailNotice', '邮箱通知开关'],
-              ['appealReminder', '申诉提醒开关'],
-              ['customerTimeoutReminder', '客服超时提醒'],
+              ['emailNotice', '邮箱通知'],
+              ['appealReminder', '申诉提醒'],
+              ['customerTimeoutReminder', '平台消息超时提醒'],
               ['orderExceptionReminder', '订单异常提醒'],
-              ['environmentRiskReminder', '环境风险提醒'],
+              ['environmentRiskReminder', '店铺连接风险提醒'],
             ].map(([key, label]) => (
               <div className="settings-row" key={key}>
                 <div><strong>{label}</strong></div>
@@ -202,14 +220,14 @@ export default function Settings() {
       )}
 
       {activeTab === 'risks' && (
-        <SettingsSection title="风险规则" description="配置提醒规则、触发阈值和提醒天数。">
+        <SettingsSection title="风险规则" description="配置提醒规则和提醒天数。">
           <div className="settings-stack">
             {[
               ['sameIpMultiAccount', '同 IP 多账号提醒'],
-              ['emailReceiveFailure', '邮箱收件失败提醒'],
-              ['cookieExpired', 'Cookie 过期提醒'],
+              ['emailReceiveFailure', '邮箱收信失败提醒'],
+              ['cookieExpired', '登录状态过期提醒'],
               ['loginRegionAbnormal', '登录地区异常提醒'],
-              ['appealDeadline', '申诉截止时间提醒'],
+              ['appealDeadline', '申诉截止提醒'],
               ['salesAbnormalFluctuation', '销售异常波动提醒'],
             ].map(([key, label]) => (
               <div className="settings-row" key={key}>
@@ -230,10 +248,10 @@ export default function Settings() {
       )}
 
       {activeTab === 'templates' && (
-        <SettingsSection title="模板设置" description="维护客服模板、申诉资料模板和平台备注模板。">
+        <SettingsSection title="模板设置" description="维护平台消息、申诉资料和邮件备注模板。">
           <div className="settings-stack">
             {[
-              ['customerReplyTemplate', '客服常用回复模板'],
+              ['customerReplyTemplate', '平台消息常用回复模板'],
               ['authenticityTemplate', '正品保证说明模板'],
               ['refundTemplate', '退款说明模板'],
               ['appealDocumentTemplate', '申诉资料清单模板'],

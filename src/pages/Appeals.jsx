@@ -24,6 +24,16 @@ function BackendAppeals() {
       resourceName="申诉案件"
       loadData={dataProvider.getAppealCases}
       columns={columns}
+      emptyState={{
+        title: '当前没有申诉案件',
+        description: '当前没有申诉案件。你可以新建申诉资料档案，用于整理正品审核、侵权、结算冻结、客户投诉等资料。',
+        actions: (
+          <>
+            <button type="button" className="button primary" disabled>新建申诉案件（暂未开放）</button>
+            <button type="button" className="button ghost" disabled>查看资料模板（暂未开放）</button>
+          </>
+        ),
+      }}
     />
   );
 }

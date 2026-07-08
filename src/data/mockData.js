@@ -562,7 +562,7 @@ export const emailAccounts = [
     status: '정상',
     riskLevel: '낮음',
     recentEmails: [
-      { id: 9001, accountId: 5001, title: '네이버 스마트스토어 판매자센터 알림', sender: '네이버 스마트스토어 판매자센터', emailType: '平台通知', receivedAt: '2026-06-29 15:02', handledStatus: '未处理', important: true, summary: '6 月经营数据报表已生成，请及时查看。' },
+      { id: 9001, accountId: 5001, title: '네이버 스마트스토어 판매자센터 알림', sender: '네이버 스마트스토어 판매자센터', emailType: '平台通知', receivedAt: '2026-06-29 15:02', handledStatus: '未处理', important: true, summary: '6 月经营数据摘要已生成，请及时查看。' },
       { id: 9002, accountId: 5001, title: '客服退款咨询', sender: 'customer@naver.com', emailType: '客服咨询', receivedAt: '2026-06-29 13:11', handledStatus: '处理中', important: false, summary: '客户咨询退款到账时间。' },
     ],
     importantAlerts: ['订单通知与客服退款邮件需要在 2 小时内处理。'],
@@ -854,9 +854,9 @@ export const accounts = [
 
 export const systemSettings = {
   basic: {
-    systemName: 'AI 多店铺运营与环境管理系统',
+    systemName: 'AI 多店铺运营工作台',
     defaultLanguage: 'zh-CN',
-    defaultTimezone: 'Asia/Shanghai',
+    defaultTimezone: 'Asia/Seoul',
     defaultCurrency: 'KRW',
     defaultPageSize: 10,
   },

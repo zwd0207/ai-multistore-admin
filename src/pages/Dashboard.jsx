@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import ActivityList from '../components/common/ActivityList';
 import EmptyState from '../components/common/EmptyState';
 import MockSyncPanel from '../components/common/MockSyncPanel';
@@ -33,6 +34,15 @@ import {
 } from '../utils/time';
 
 const formatWon = (value) => `₩${Number(value || 0).toLocaleString()}`;
+
+function businessActivityText(value = '') {
+  return String(value || '')
+    .replace(/mock/gi, '演示')
+    .replace(/sync/gi, '同步')
+    .replace(/success/gi, '成功')
+    .replace(/orders/gi, '订单')
+    .replace(/products/gi, '商品');
+}
 
 const emptyApiCapabilitySummary = {
   semanticNotice: 'mock 模式不维护后端连接检查记录。',
@@ -447,6 +457,8 @@ function NaverErpWorkbenchSection({
           ? '当前没有影响 Naver 工作台展示的连接异常。'
           : '正在读取本地连接检测结果，暂不判断平台授权是否正常。',
       nextAction: activeIssue?.description || '需要写入数据时仍需单独批准。',
+      actionLabel: '检查 Naver API 设置',
+      actionTo: '/settings',
     },
     {
       key: 'products',
@@ -454,15 +466,19 @@ function NaverErpWorkbenchSection({
       statusLabel: '5 条本地商品稳定',
       tone: 'success',
       reason: '当前本地已有 5 条 Naver 商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
-      nextAction: '正式商品批量同步仍未开放。',
+      nextAction: '商品批量同步暂未开放。',
+      actionLabel: '查看商品管理',
+      actionTo: '/products',
     },
     {
       key: 'product_changes',
       title: '价格 / 库存变化',
       statusLabel: productChangeHints?.statusLabel || '读取本地商品',
       tone: productChangeHints?.tone || 'muted',
-      reason: productChangeHints?.businessMessage || '等待本地商品和 dry-run 摘要支撑价格 / 库存变化提示。',
-      nextAction: productChangeHints?.nextAction || '不执行平台商品写入，正式商品批量同步仍未开放。',
+      reason: productChangeHints?.businessMessage || '等待本地商品和同步预检摘要支撑价格 / 库存变化提示。',
+      nextAction: productChangeHints?.nextAction || '不执行平台商品写入，商品批量同步暂未开放。',
+      actionLabel: '查看库存异常',
+      actionTo: '/inventory',
     },
     {
       key: 'orders',
@@ -470,7 +486,9 @@ function NaverErpWorkbenchSection({
       statusLabel: orderFulfillmentSummary?.total ? `${orderFulfillmentSummary.total} 条运营订单` : '等待订单数据',
       tone: orderActionCount > 0 ? 'info' : 'success',
       reason: orderFulfillmentSummary?.businessMessage || '当前没有可用于履约 / 售后分类的 Naver 本地订单。',
-      nextAction: '正式订单批量同步仍未开放。',
+      nextAction: '订单批量同步暂未开放。',
+      actionLabel: '查看待发货订单',
+      actionTo: '/orders',
     },
     {
       key: 'inventory',
@@ -479,6 +497,8 @@ function NaverErpWorkbenchSection({
       tone: inventoryAttentionCount > 0 ? 'warning' : inventorySummary?.tone || 'muted',
       reason: inventorySummary?.businessMessage || '库存提醒只基于本地 Naver 商品记录。',
       nextAction: inventorySummary?.nextAction || '低库存和缺货只做提醒，不执行平台库存写入。',
+      actionLabel: '查看库存异常',
+      actionTo: '/inventory',
     },
     {
       key: 'fulfillment',
@@ -489,6 +509,8 @@ function NaverErpWorkbenchSection({
         ? `新订单 ${orderFulfillmentSummary.newOrders} 条，待发货 ${orderFulfillmentSummary.pendingDispatch} 条，配送中 ${orderFulfillmentSummary.inDelivery} 条，售后请求 ${claimRequestCount} 条。`
         : '配送和售后状态等待本地订单数据支撑。',
       nextAction: '发货、取消、退货、换货写操作仍未开放。',
+      actionLabel: '查看平台消息',
+      actionTo: '/customer-service',
     },
     {
       key: 'sales',
@@ -496,7 +518,9 @@ function NaverErpWorkbenchSection({
       statusLabel: `${formatWon(totalOrderAmount)}`,
       tone: orderSalesSummary?.totalOrders ? 'info' : 'muted',
       reason: orderSalesSummary?.businessMessage || '当前没有可用于金额统计的 Naver 运营订单。',
-      nextAction: orderSalesSummary?.boundaryMessage || '该金额只来自本地订单，不是平台结算金额、利润或账户可提取资金。',
+      nextAction: orderSalesSummary?.boundaryMessage || '仅为本地订单金额，不代表平台最终结算金额。',
+      actionLabel: '查看订单管理',
+      actionTo: '/orders',
     },
   ];
 
@@ -521,7 +545,7 @@ function NaverErpWorkbenchSection({
         <article className="financial-card">
           <div className="financial-card-head">
             <h3>本地经营数据</h3>
-            <p>只读取本地 Naver ERP 数据</p>
+            <p>只读取本地店铺数据</p>
           </div>
           <strong>{productCount} 商品 / {orderCount} 订单</strong>
           <small>本地商品和订单记录已可用于日常观察。</small>
@@ -540,12 +564,12 @@ function NaverErpWorkbenchSection({
             <p>本地订单金额口径</p>
           </div>
           <strong>{formatWon(totalOrderAmount)}</strong>
-          <small>不是 Naver 结算、利润或账户可提取资金。</small>
+          <small>仅为本地订单金额，不代表平台最终结算金额。</small>
         </article>
       </div>
       <div className="financial-card-note">
-        <span>正式商品批量同步未开放</span>
-        <span>正式订单批量同步未开放</span>
+        <span>商品批量同步暂未开放</span>
+        <span>订单批量同步暂未开放</span>
         <span>平台发货 / 售后写操作未开放</span>
         <span>Naver 销售 / 结算数据待接入</span>
       </div>
@@ -558,6 +582,7 @@ function NaverErpWorkbenchSection({
             </div>
             <p>{card.reason}</p>
             <small>{card.nextAction}</small>
+            {card.actionTo ? <Link className="button ghost" to={card.actionTo}>{card.actionLabel}</Link> : null}
           </article>
         ))}
       </div>
@@ -1174,9 +1199,9 @@ export default function Dashboard() {
           </div>
           <ActivityList items={(activities.logs || []).map((item) => ({
             id: item.id,
-            title: item.module,
-            description: item.summary,
-            status: item.status,
+            title: businessActivityText(item.module),
+            description: businessActivityText(item.summary),
+            status: businessActivityText(item.status),
             time: formatKstDateTimeWithLabel(item.time),
           }))}
           />

@@ -7,12 +7,12 @@ const menuItems = [
   ['首', '首页工作台', '/workbench'],
   ['发', '发货辅助', '/shipping'],
   ['单', '订单管理', '/orders'],
-  ['品', '商品与库存', '/products'],
+  ['品', '商品管理', '/products'],
+  ['库', '库存预警', '/inventory'],
   ['店', '店铺管理', '/stores'],
   ['消', '平台消息', '/customer-service'],
   ['诉', '申诉中心', '/appeals'],
   ['邮', '邮箱中心', '/emails'],
-  ['报', '数据报表', '/sales'],
   ['设', '系统设置', '/settings'],
 ];
 
@@ -26,8 +26,8 @@ export default function AdminLayout() {
           <span className="brand-mark">AI</span>
           {!collapsed && (
             <span>
-              <strong>StorePilot</strong>
-              <small>多店铺运营工作台</small>
+              <strong>AI 多店铺运营工作台</strong>
+              <small>跨境电商日常运营</small>
             </span>
           )}
         </div>
@@ -46,7 +46,7 @@ export default function AdminLayout() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <strong>多平台电商运营工作台</strong>
+            <strong>AI 多店铺运营工作台</strong>
             <span className="environment-chip">内部使用</span>
             <span className="environment-chip">时间显示：{BUSINESS_TIME_LABEL}</span>
             <StoreSelector />

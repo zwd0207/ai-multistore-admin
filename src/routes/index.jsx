@@ -3,6 +3,7 @@ import AdminLayout from '../layouts/AdminLayout';
 import Dashboard from '../pages/Dashboard';
 import Stores from '../pages/Stores';
 import Products from '../pages/Products';
+import InventoryAlerts from '../pages/InventoryAlerts';
 import Orders from '../pages/Orders';
 import CustomerService from '../pages/CustomerService';
 import Sales from '../pages/Sales';
@@ -25,6 +26,7 @@ export default function AppRoutes() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="stores" element={<Stores />} />
         <Route path="products" element={<Products />} />
+        <Route path="inventory" element={<InventoryAlerts />} />
         <Route path="orders" element={<Orders />} />
         <Route path="shipping" element={<ShippingAssistant />} />
         <Route path="customer-service" element={<CustomerService />} />

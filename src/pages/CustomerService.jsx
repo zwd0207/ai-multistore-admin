@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
-import MockSyncPanel from '../components/common/MockSyncPanel';
 import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
@@ -36,6 +36,7 @@ const columns = [
 ];
 
 export default function CustomerService() {
+  const navigate = useNavigate();
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const { versions } = useSyncRefresh();
   const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1, pageSize: 5 });
@@ -122,9 +123,15 @@ export default function CustomerService() {
   return (
     <>
       <PageHeader
-        title="客服管理"
-        description="集中处理多平台咨询、回复、退款与换货流转。"
-        actions={<><button className="button ghost" onClick={() => load()}>刷新列表</button>{isBackendSource && <MockSyncPanel types={['customerInquiries']} compact />}{isBackendSource && <span className="period-chip">后端只读</span>}</>}
+        title="平台消息"
+        description="集中查看平台咨询、客户投诉、退款和换货相关消息。"
+        actions={(
+          <>
+            <button type="button" className="button primary" onClick={() => load()}>同步平台消息</button>
+            <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
+            <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
+          </>
+        )}
       />
 
       <FilterPanel>
@@ -155,7 +162,19 @@ export default function CustomerService() {
       </FilterPanel>
 
       <section className="content-card">
-        {loadError ? <EmptyState title="客服咨询加载失败" description={loadError} /> : <><DataTable
+        {loadError ? <EmptyState title="平台消息加载失败" description={loadError} /> : !loading && !(result.data || []).length ? (
+          <EmptyState
+            title="当前没有平台消息"
+            description="当前没有平台消息。你可以同步平台消息，或检查店铺连接和邮箱连接状态。"
+            actions={(
+              <>
+                <button type="button" className="button primary" onClick={() => load()}>同步平台消息</button>
+                <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
+                <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
+              </>
+            )}
+          />
+        ) : <><DataTable
           columns={columns}
           rows={result.data || []}
           loading={loading}

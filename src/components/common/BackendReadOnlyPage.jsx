@@ -13,6 +13,7 @@ export default function BackendReadOnlyPage({
   loadData,
   columns,
   extraContent,
+  emptyState,
 }) {
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [query, setQuery] = useState({ keyword: '', page: 1, pageSize: 5 });
@@ -61,7 +62,7 @@ export default function BackendReadOnlyPage({
       <PageHeader
         title={title}
         description={description}
-        actions={<><button className="button ghost" onClick={load}>刷新</button><span className="period-chip">后端只读</span></>}
+        actions={<><button className="button ghost" type="button" onClick={load}>刷新</button><span className="period-chip">暂不支持在线处理</span></>}
       />
       {extraContent}
       <section className="content-card">
@@ -76,6 +77,8 @@ export default function BackendReadOnlyPage({
           <EmptyState title={`${resourceName}数据加载失败`} description={loadError} />
         ) : !selectedStoreId && !storeLoading ? (
           <EmptyState title="暂无店铺数据" description="请先选择店铺后再查看该页面。" />
+        ) : !loading && !(result.data || []).length && emptyState ? (
+          <EmptyState title={emptyState.title} description={emptyState.description} actions={emptyState.actions} />
         ) : (
           <>
             <DataTable columns={columns} rows={result.data || []} loading={loading || storeLoading} />

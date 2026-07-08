@@ -25,13 +25,40 @@ const initialForm = {
   remark: '',
 };
 
+function displaySender(value) {
+  const text = String(value || '').trim();
+  if (!text) return '平台通知';
+  if (text.toLowerCase().includes('mock')) return 'Naver 平台通知';
+  return text;
+}
+
+function displayPriority(value) {
+  const labels = {
+    urgent: '紧急',
+    high: '重要',
+    normal: '普通',
+    low: '低优先级',
+  };
+  return labels[String(value || '').toLowerCase()] || value || '普通';
+}
+
+function displayMailStatus(value) {
+  const labels = {
+    processed: '已处理',
+    pending: '待处理',
+    unread: '未读',
+    read: '已读',
+  };
+  return labels[String(value || '').toLowerCase()] || value || '待处理';
+}
+
 const accountColumns = [
   { key: 'email', title: '邮箱地址', render: (value) => <strong>{value}</strong> },
   { key: 'store', title: '店铺' },
   { key: 'provider', title: '服务商' },
   { key: 'label', title: '账号标签' },
-  { key: 'hasCredential', title: '认证配置', render: (value) => (value ? '已配置' : '未配置') },
-  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'hasCredential', title: '连接信息', render: (value) => (value ? '已配置' : '未配置') },
+  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value === 'active' ? '已启用' : '已停用'} /> },
   { key: 'lastCheckedAt', title: '最近检查' },
   { key: 'remark', title: '备注' },
 ];
@@ -40,14 +67,14 @@ const importantColumns = [
   { key: 'subject', title: '重要邮件', render: (value, row) => <div><strong>{value}</strong><small className="cell-subtitle">{row.snippet}</small></div> },
   { key: 'platform', title: '平台' },
   { key: 'type', title: '类型' },
-  { key: 'sender', title: '发件人' },
-  { key: 'priority', title: '优先级', render: (value) => <StatusBadge value={value} /> },
-  { key: 'status', title: '状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'sender', title: '发件人', render: displaySender },
+  { key: 'priority', title: '优先级', render: (value) => <StatusBadge value={displayPriority(value)} /> },
+  { key: 'status', title: '状态', render: (value) => <StatusBadge value={displayMailStatus(value)} /> },
   { key: 'receivedAt', title: '收件时间' },
 ];
 
 function cleanError(error) {
-  return error?.message || '后端保存失败，请检查 Codex1 后端状态或表单内容';
+  return error?.message || '保存失败，请检查服务状态或表单内容';
 }
 
 function ImportantEmailsReadOnly() {
@@ -58,6 +85,11 @@ function ImportantEmailsReadOnly() {
       resourceName="重要邮件"
       loadData={dataProvider.getImportantEmails}
       columns={importantColumns}
+      emptyState={{
+        title: '当前没有重要邮件',
+        description: '当前没有需要优先处理的重要邮件。你可以先新增运营邮箱，用于接收平台通知、客户投诉和审核邮件。',
+        actions: <button type="button" className="button primary" onClick={() => { window.location.href = '/emails'; }}>新增邮箱账号</button>,
+      }}
     />
   );
 }
@@ -173,13 +205,13 @@ export default function BackendEmailAccountsPage() {
   return (
     <>
       <PageHeader
-        title="邮箱管理"
-        description={storeError || (!selectedStoreId && !storeLoading ? '请先选择店铺' : '维护当前店铺的本地邮箱账号配置，不进行真实邮箱连接校验。')}
+        title="邮箱中心"
+        description={storeError || (!selectedStoreId && !storeLoading ? '请先选择店铺' : '维护当前店铺的运营邮箱，用于接收平台通知、客户投诉和审核邮件。')}
         actions={(
           <>
-            <button className="button ghost" onClick={load}>刷新</button>
-            <span className="period-chip">本地后端写入</span>
-            {canWrite && <button className="button primary" onClick={() => openModal()}>新增邮箱账号</button>}
+            <button type="button" className="button ghost" onClick={load}>刷新</button>
+            <span className="period-chip">本地保存</span>
+            {canWrite && <button type="button" className="button primary" onClick={() => openModal()}>新增邮箱账号</button>}
           </>
         )}
       />
@@ -193,7 +225,7 @@ export default function BackendEmailAccountsPage() {
         >
           <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
             <option value="">全部状态</option>
-            {statusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            {statusOptions.map((item) => <option key={item} value={item}>{item === 'active' ? '已启用' : '已停用'}</option>)}
           </select>
         </SearchBar>
         {notice && <div className="form-info">{notice}</div>}
@@ -201,6 +233,12 @@ export default function BackendEmailAccountsPage() {
           <EmptyState title="邮箱账号数据加载失败" description={loadError} />
         ) : !selectedStoreId && !storeLoading ? (
           <EmptyState title="暂无店铺数据" description="请先选择店铺后再维护邮箱账号。" />
+        ) : !loading && !(result.data || []).length ? (
+          <EmptyState
+            title="当前没有邮箱账号"
+            description="当前没有邮箱账号。请先添加运营邮箱，用于接收平台通知、客户投诉和审核邮件。"
+            actions={canWrite ? <button type="button" className="button primary" onClick={() => openModal()}>新增邮箱账号</button> : null}
+          />
         ) : (
           <>
             <DataTable
@@ -209,8 +247,8 @@ export default function BackendEmailAccountsPage() {
               loading={loading || storeLoading}
               renderActions={(row) => (
                 <>
-                  <button onClick={() => openModal(row)} disabled={!canWrite || submitting}>编辑</button>
-                  <button onClick={showTestNotice}>测试连接</button>
+                  <button type="button" onClick={() => openModal(row)} disabled={!canWrite || submitting}>编辑</button>
+                  <button type="button" onClick={showTestNotice}>测试连接</button>
                 </>
               )}
             />
@@ -240,12 +278,12 @@ export default function BackendEmailAccountsPage() {
           <FormField label="账号标签">
             <input value={form.label} disabled={submitting} onChange={(event) => setForm({ ...form, label: event.target.value })} placeholder="请输入账号标签" />
           </FormField>
-          <FormField label="认证值">
-            <input type="password" value={form.credentialInput} disabled={submitting} onChange={(event) => setForm({ ...form, credentialInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '可选填写认证值'} />
+          <FormField label="密钥信息">
+            <input type="password" value={form.credentialInput} disabled={submitting} onChange={(event) => setForm({ ...form, credentialInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '默认隐藏，可选填写'} />
           </FormField>
           <FormField label="状态" required error={errors.status}>
             <select value={form.status} disabled={submitting} onChange={(event) => setForm({ ...form, status: event.target.value })}>
-              {statusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+              {statusOptions.map((item) => <option key={item} value={item}>{item === 'active' ? '已启用' : '已停用'}</option>)}
             </select>
           </FormField>
           <FormField label="备注">

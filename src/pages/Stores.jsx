@@ -3,12 +3,27 @@ import StatusBadge from '../components/common/StatusBadge';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
+import { filterVisibleBusinessStores, normalizeStoreDisplay } from '../utils/storeDisplay';
 
-const api = {
+const baseApi = {
   list: dataProvider.getStores,
   create: isBackendSource ? dataProvider.createStore : mockApi.createStore,
   update: isBackendSource ? dataProvider.updateStore : mockApi.updateStore,
   remove: mockApi.deleteStore,
+};
+
+const api = {
+  ...baseApi,
+  list: async (params = {}) => {
+    const result = await baseApi.list(params);
+    const rows = filterVisibleBusinessStores(result.data || result.items || []);
+    return {
+      ...result,
+      data: rows,
+      items: rows,
+      total: rows.length,
+    };
+  },
 };
 
 const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
@@ -38,7 +53,7 @@ export default function Stores() {
   return (
     <ResourcePage
       title="店铺管理"
-      description="统一管理 Naver、Coupang 等平台店铺和运营状态。"
+      description="查看真实业务店铺、平台归属、负责人和运营状态。测试店铺默认隐藏在普通运营页面之外。"
       resourceName="店铺"
       api={api}
       columns={columns}
@@ -49,7 +64,7 @@ export default function Stores() {
         name: '',
         platform: 'Naver',
         manager: '',
-        region: 'KR',
+        region: '韩国',
         language: 'ko-KR',
         status: '正常运营',
         remark: '',
@@ -57,7 +72,7 @@ export default function Stores() {
       canCreate
       canEdit
       canDelete={!isBackendSource}
-      onSaved={(store) => refreshStores({ preferredStoreId: selectedStoreId || store?.id })}
+      onSaved={(store) => refreshStores({ preferredStoreId: selectedStoreId || normalizeStoreDisplay(store)?.id })}
     />
   );
 }

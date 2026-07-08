@@ -2,6 +2,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useState,
 } from 'react';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
+import { filterVisibleBusinessStores } from '../utils/storeDisplay';
 
 const STORAGE_KEY = 'codex2.selectedStoreId';
 const StoreContext = createContext(null);
@@ -26,7 +27,8 @@ function writeStoredStoreId(storeId) {
 function pickSelectedStoreId(nextStores, preferredStoreId) {
   const candidateId = preferredStoreId || readStoredStoreId();
   const candidateStore = nextStores.find((store) => String(store.id) === String(candidateId));
-  const fallbackId = nextStores[0]?.id ? String(nextStores[0].id) : '';
+  const primaryBusinessStore = nextStores.find((store) => String(store.id) === '8' || String(store.name || '').includes('pxg球包店'));
+  const fallbackId = primaryBusinessStore?.id ? String(primaryBusinessStore.id) : (nextStores[0]?.id ? String(nextStores[0].id) : '');
   return candidateStore ? String(candidateStore.id) : fallbackId;
 }
 
@@ -42,7 +44,7 @@ export function StoreProvider({ children }) {
 
     try {
       const response = await dataProvider.getStores({ page: 1, pageSize: 100 });
-      const nextStores = response.data || response.items || [];
+      const nextStores = filterVisibleBusinessStores(response.data || response.items || []);
       setStores(nextStores);
 
       const nextSelectedId = pickSelectedStoreId(nextStores, preferredStoreId);
@@ -67,7 +69,7 @@ export function StoreProvider({ children }) {
     dataProvider.getStores({ page: 1, pageSize: 100 })
       .then((response) => {
         if (cancelled) return;
-        const nextStores = response.data || response.items || [];
+        const nextStores = filterVisibleBusinessStores(response.data || response.items || []);
         const nextSelectedId = pickSelectedStoreId(nextStores);
         setStores(nextStores);
         setSelectedStoreIdState(nextSelectedId);

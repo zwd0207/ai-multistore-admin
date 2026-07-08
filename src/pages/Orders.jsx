@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
@@ -27,15 +28,18 @@ const api = {
 const statusOptions = ['待发货', '配送中', '已完成', '取消/退款'];
 
 const columns = [
-  { key: 'orderNo', title: '订单编号', render: (value) => <strong>{value}</strong> },
-  { key: 'product', title: '商品' },
-  { key: 'store', title: '店铺' },
-  { key: 'sourceType', title: '数据来源', render: (value, row) => sourceTypeLabel(row) },
-  { key: 'customer', title: '买家' },
-  { key: 'phone', title: '联系电话' },
+  { key: 'orderNo', title: '订单号', render: (value, row) => <strong>{displayText(value, row.external_order_id, row.fullOrderNo)}</strong> },
+  { key: 'platform', title: '平台', render: (value) => orderPlatformLabel(value) },
+  { key: 'store', title: '店铺', render: (value) => value || '当前店铺' },
+  { key: 'product', title: '商品名', render: (value, row) => orderProductName(value, row) },
+  { key: 'optionName', title: '规格', render: (value, row) => orderOptionName(value, row) },
+  { key: 'quantity', title: '数量', render: (value, row) => orderQuantity(value, row) },
   { key: 'amount', title: '订单金额', render: (value, row) => formatMoney(value, row.currency) },
   { key: 'status', title: '订单状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'createdAt', title: '下单时间' },
+  { key: 'deliveryStatus', title: '发货状态', render: (value, row) => deliveryLabel(value, row) },
+  { key: 'courier', title: '快递公司', render: (value, row) => courierLabel(value, row) },
+  { key: 'trackingNo', title: '运单号', render: (value, row) => trackingLabel(value, row) },
 ];
 
 const fields = [
@@ -116,6 +120,87 @@ function safeDateTime(value) {
 
 function formatMoney(value, currency = 'KRW') {
   return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
+}
+
+function orderPlatformLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'naver') return 'Naver';
+  if (normalized === 'coupang') return 'Coupang';
+  return value || 'Naver';
+}
+
+function orderProductName(value, row = {}) {
+  return displayText(value, row.productName, row.product_name, row.rawData?.product_name, row.raw_data?.product_name);
+}
+
+function orderOptionName(value, row = {}) {
+  return displayText(value, row.optionName, row.option_name, row.rawData?.option_name, row.raw_data?.option_name);
+}
+
+function orderQuantity(value, row = {}) {
+  return displayText(value, row.quantity, row.rawData?.quantity, row.raw_data?.quantity);
+}
+
+function deliveryLabel(value, row = {}) {
+  return businessStatusDisplay(
+    value,
+    row.delivery_status,
+    row.deliveryStatusLabelZh,
+    row.delivery_status_label_zh,
+    row.rawData?.delivery_status_label_zh,
+    row.raw_data?.delivery_status_label_zh,
+    row.status,
+  );
+}
+
+function courierLabel(value, row = {}) {
+  return displayText(value, row.courierCompany, row.courier_company, row.deliveryCompany, row.delivery_company);
+}
+
+function trackingLabel(value, row = {}) {
+  return displayText(value, row.trackingNo, row.tracking_no, row.invoiceNo, row.invoice_no);
+}
+
+function buildOrderDetailMessage(row = {}) {
+  return [
+    `订单号：${displayText(row.orderNo, row.external_order_id)}`,
+    `平台：${orderPlatformLabel(row.platform)}`,
+    `店铺：${displayText(row.store, row.store_name)}`,
+    `商品：${orderProductName(row.product, row)}`,
+    `规格：${orderOptionName(row.optionName, row)}`,
+    `数量：${orderQuantity(row.quantity, row)}`,
+    `金额：${formatMoney(row.amount ?? row.order_amount, row.currency)}`,
+    `状态：${displayText(row.status, row.order_status)}`,
+    `发货状态：${deliveryLabel(row.deliveryStatus, row)}`,
+  ].join('\n');
+}
+
+function copyReceiverInfo(row = {}) {
+  const receiver = [
+    `收件人：${displayText(row.receiverName, row.receiver_name, row.customer)}`,
+    `电话：${displayText(row.receiverPhone, row.receiver_phone, row.phone)}`,
+    `地址：${displayText(row.receiverAddress, row.receiver_address)}`,
+    `邮编：${displayText(row.zipCode, row.zip_code)}`,
+  ].join('\n');
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(receiver).then(
+      () => window.alert('收件信息已复制。'),
+      () => window.alert(receiver),
+    );
+    return;
+  }
+  window.alert(receiver);
+}
+
+function renderOrderActions(row) {
+  return (
+    <>
+      <button type="button" onClick={() => window.alert(buildOrderDetailMessage(row))}>查看详情</button>
+      <button type="button" onClick={() => copyReceiverInfo(row)}>复制收件信息</button>
+      <button type="button" onClick={() => { window.location.href = '/shipping'; }}>填写运单号</button>
+    </>
+  );
 }
 
 function paymentStatusLabel(value) {
@@ -3661,6 +3746,119 @@ function NaverOrderCompleteDetailPanel() {
   );
 }
 
+function OrderBusinessOverviewPanel({
+  selectedStore,
+  selectedStoreId,
+  storeLoading,
+  reloadKey,
+}) {
+  const [state, setState] = useState({ loading: true, rows: [], error: '' });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (storeLoading) return () => { cancelled = true; };
+    if (!selectedStoreId) {
+      setState({ loading: false, rows: [], error: '' });
+      return () => { cancelled = true; };
+    }
+
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    dataProvider.getOrders({ storeId: selectedStoreId, platform: 'naver', page: 1, pageSize: 100 })
+      .then((result) => {
+        if (cancelled) return;
+        const rows = filterNaverOrdersForStore(result.data || result.items || [], selectedStore, selectedStoreId);
+        setState({ loading: false, rows, error: '' });
+      })
+      .catch((error) => {
+        if (!cancelled) setState({ loading: false, rows: [], error: error.message || '订单数据加载失败' });
+      });
+    return () => { cancelled = true; };
+  }, [selectedStore, selectedStoreId, storeLoading, reloadKey]);
+
+  const summary = useMemo(
+    () => buildNaverOrderFulfillmentSummary(state.rows, { selectedStore, selectedStoreId }),
+    [state.rows, selectedStore, selectedStoreId],
+  );
+  const claimSummary = useMemo(
+    () => buildNaverClaimReadonlySummary(summary),
+    [summary],
+  );
+  const recentRows = useMemo(
+    () => [...state.rows].sort((left, right) => String(right.createdAt || right.created_at || '').localeCompare(String(left.createdAt || left.created_at || ''))).slice(0, 5),
+    [state.rows],
+  );
+
+  return (
+    <section className="content-card">
+      <div className="card-title">
+        <div>
+          <h2>订单处理概览</h2>
+          <p>先看今天需要处理的新订单、待发货、异常和售后请求，再进入列表处理具体订单。</p>
+        </div>
+        <span className="period-chip">{state.loading ? '加载中' : `${summary.total || 0} 条订单`}</span>
+      </div>
+      {state.error ? <div className="mock-sync-error">{state.error}</div> : null}
+      <div className="business-capability-grid compact">
+        <article className={summary.newOrders ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head"><strong>新订单</strong><span>{summary.newOrders || 0} 条</span></div>
+          <p>已付款或新进入处理流程的订单。</p>
+          <Link className="button ghost" to="/orders">查看订单列表</Link>
+        </article>
+        <article className={summary.pendingDispatch ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head"><strong>待发货</strong><span>{summary.pendingDispatch || 0} 条</span></div>
+          <p>需要尽快核对库存、收件信息和物流商库存编号。</p>
+          <Link className="button ghost" to="/shipping">进入发货辅助</Link>
+        </article>
+        <article className={summary.unknown ? 'business-capability-card warning' : 'business-capability-card success'}>
+          <div className="business-capability-head"><strong>异常订单</strong><span>{summary.unknown || 0} 条</span></div>
+          <p>状态未识别或需要人工复核的订单。</p>
+          <Link className="button ghost" to="/orders">查看异常</Link>
+        </article>
+        <article className={(claimSummary.cancelRequests || summary.canceled) ? 'business-capability-card info' : 'business-capability-card muted'}>
+          <div className="business-capability-head"><strong>取消订单</strong><span>{(claimSummary.cancelRequests || 0) + (claimSummary.canceled || 0)} 条</span></div>
+          <p>包含取消请求和已取消订单。</p>
+          <Link className="button ghost" to="/orders">查看取消订单</Link>
+        </article>
+        <article className={(claimSummary.returnRequests || claimSummary.exchangeRequests) ? 'business-capability-card warning' : 'business-capability-card muted'}>
+          <div className="business-capability-head"><strong>退货 / 换货</strong><span>{(claimSummary.returnRequests || 0) + (claimSummary.exchangeRequests || 0)} 条</span></div>
+          <p>需要人工确认商品、库存和物流条件。</p>
+          <Link className="button ghost" to="/orders">查看售后请求</Link>
+        </article>
+      </div>
+      {recentRows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>商品名</th>
+                <th>数量</th>
+                <th>订单金额</th>
+                <th>订单状态</th>
+                <th>下单时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentRows.map((row) => (
+                <tr key={row.id || row.orderNo}>
+                  <td><strong>{displayText(row.orderNo, row.external_order_id)}</strong></td>
+                  <td>{orderProductName(row.product, row)}</td>
+                  <td>{orderQuantity(row.quantity, row)}</td>
+                  <td>{formatMoney(row.amount ?? row.order_amount, row.currency)}</td>
+                  <td><StatusBadge value={displayText(row.status, row.order_status)} /></td>
+                  <td>{safeDateTime(row.createdAt || row.created_at || row.ordered_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : !state.loading ? (
+        <div className="empty-state compact">当前店铺暂无订单记录。你可以先同步订单，或检查 Naver API 设置。</div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function Orders() {
   const { selectedStore, selectedStoreId, loading: storeLoading } = useStoreContext();
   const { versions } = useSyncRefresh();
@@ -3703,21 +3901,15 @@ export default function Orders() {
 
   return (
     <>
-      <NaverOrderPreviewStatusPanel />
-      <NaverRoleAwareActionVisibilityPanel />
-      <FormalBatchOperatorChecklistPanel />
-      <NaverBatchApprovalEvidencePanel />
-      <FormalBatchApprovalDecisionRuntimePanel />
-      <FormalBatchApprovalDecisionAuditLinkageRuntimePanel />
-      <FormalBatchExecutionPreflightRuntimePanel />
-      <FormalBatchExecutionFinalBoundaryPanel />
-      <NaverOrderBatchAuditReadinessPanel />
-      <NaverOrderBatchExecutionApprovalPanel />
-      <NaverOrderCompleteDetailPanel />
-      <CoupangOrderSyncPanel />
+      <OrderBusinessOverviewPanel
+        selectedStore={selectedStore}
+        selectedStoreId={selectedStoreId}
+        storeLoading={storeLoading}
+        reloadKey={`${selectedStoreId}-${versions.orders}`}
+      />
       <ResourcePage
         title="订单管理"
-        description="查看订单履约、发货、退款和异常处理状态。Naver 订单的完整信息放在上方详情区，主列表保持业务摘要。"
+        description="查看订单、发货状态、快递信息和售后状态。需要发货时进入发货辅助填写或导入运单号。"
         resourceName="订单"
         api={pageApi}
         columns={columns}
@@ -3727,6 +3919,17 @@ export default function Orders() {
         readOnly={isBackendSource}
         extraParams={isBackendSource && selectedStoreId ? { storeId: selectedStoreId } : {}}
         reloadKey={`${selectedStoreId}-${versions.orders}`}
+        renderActions={renderOrderActions}
+        emptyState={{
+          title: '当前没有订单',
+          description: '当前店铺暂无可处理订单。你可以同步订单，或检查 Naver API 设置是否正常。',
+          actions: (
+            <>
+              <button type="button" className="button primary" onClick={() => window.location.reload()}>同步订单</button>
+              <button type="button" className="button ghost" onClick={() => { window.location.href = '/settings'; }}>检查 Naver API 设置</button>
+            </>
+          ),
+        }}
       />
     </>
   );

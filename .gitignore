@@ -1,5 +1,7 @@
 node_modules/
 dist/
+acceptance-screenshots/
+output/
 .env
 .env.*
 *.log

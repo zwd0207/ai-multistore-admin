@@ -156,6 +156,9 @@ function formatValue(value) {
 }
 
 export default function TechnicalDetails({ title = '查看技术详情', description, items = [], children, redactionMode = 'strict' }) {
+  const showAdvancedDetails = import.meta.env.VITE_SHOW_ADVANCED_DETAILS === 'true';
+  if (!showAdvancedDetails) return null;
+
   const safeItems = items
     .filter((item) => item && item.label)
     .map((item) => ({

@@ -176,6 +176,7 @@ tbody tr:hover { background: #fafbff; }
 .empty-panel { min-height: 160px; border: 1px dashed #d7ddea; border-radius: 12px; display: grid; place-items: center; text-align: center; padding: 20px; color: #6f7a8c; background: #fbfcfe; }
 .empty-panel strong { display: block; color: #334155; }
 .empty-panel p { margin: 6px 0 0; }
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; }
 .empty-state.compact { min-height: auto; justify-content: flex-start; padding: 8px 0; }
 .template-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .template-item { border: 1px solid #e1e8f3; border-radius: 10px; padding: 12px; background: #fff; text-align: left; }

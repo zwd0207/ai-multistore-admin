@@ -27,6 +27,8 @@ export default function ResourcePage({
   reloadKey = '',
   onSaved,
   extraActions,
+  emptyState,
+  renderActions,
 }) {
   const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
@@ -103,6 +105,9 @@ export default function ResourcePage({
     setQuery(clean);
   };
 
+  const rows = result.data || [];
+  const shouldShowEmptyState = !loading && !loadError && rows.length === 0 && emptyState;
+
   return (
     <>
       <PageHeader
@@ -110,10 +115,10 @@ export default function ResourcePage({
         description={description}
         actions={(
           <>
-            <button className="button ghost" onClick={load}>刷新</button>
+            <button className="button ghost" type="button" onClick={load}>刷新</button>
             {extraActions}
-            {readOnly ? <span className="period-chip">只读展示</span> : null}
-            {canCreate ? <button className="button primary" onClick={() => openModal()}>新增{resourceName}</button> : null}
+            {readOnly ? <span className="period-chip">暂不支持在线处理</span> : null}
+            {canCreate ? <button className="button primary" type="button" onClick={() => openModal()}>新增{resourceName}</button> : null}
           </>
         )}
       />
@@ -138,9 +143,18 @@ export default function ResourcePage({
         </SearchBar>
         {loadError ? (
           <EmptyState title={`${resourceName}数据加载失败`} description={loadError} />
+        ) : shouldShowEmptyState ? (
+          <EmptyState title={emptyState.title} description={emptyState.description} actions={emptyState.actions} />
         ) : (
           <>
-            <DataTable columns={columns} rows={result.data || []} loading={loading} onEdit={canEdit ? openModal : undefined} onDelete={canDelete ? remove : undefined} />
+            <DataTable
+              columns={columns}
+              rows={rows}
+              loading={loading}
+              onEdit={canEdit ? openModal : undefined}
+              onDelete={canDelete ? remove : undefined}
+              renderActions={renderActions}
+            />
             <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
           </>
         )}

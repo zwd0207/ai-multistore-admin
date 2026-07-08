@@ -23,7 +23,7 @@ const api = {
 };
 
 const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
-const statusOptions = ['销售中', '审核中', '停售', '待同步', '草稿'];
+const statusOptions = ['在售', '审核中', '禁售 / 平台限制', '售罄 / 缺货', '待同步', '草稿'];
 const coupangStatusOptions = [
   'APPROVED',
   'IN_REVIEW',
@@ -64,10 +64,15 @@ function statusLabel(value) {
   const labels = {
     active: '销售中',
     approved: '销售中',
+    sale: '在售',
+    판매중: '在售',
     review: '审核中',
     in_review: '审核中',
+    prohibition: '禁售 / 平台限制',
     suspended: '停售',
     inactive: '停售',
+    outofstock: '售罄 / 缺货',
+    판매중지: '售罄 / 缺货',
     deleted: '已删除',
   };
   return labels[String(value || '').trim().toLowerCase()] || value || '未知';
@@ -87,7 +92,7 @@ function businessReadableSummary(value = '') {
   return String(value)
     .replace('已只读检查', '已汇总')
     .replace('继续只读观察', '继续观察')
-    .replace('dry-run', '预览')
+    .replace('dry-run', '同步预检')
     .replace('price', '价格')
     .replace('stock_quantity', '库存');
 }
@@ -1196,15 +1201,9 @@ export default function Products() {
 
   return (
     <>
-      <NaverProductPreviewStatusPanel />
-      <NaverProductBatchSyncHistoryPanel />
-      <ProductRollbackReadonlyReportRoutePanel />
-      <ProductBatchApprovalEvidenceLinkagePanel />
-      <NaverProductBatchExecutionApprovalPanel />
-      <CoupangProductSyncPanel />
       <ResourcePage
         title="商品管理"
-        description="查看各平台商品、售价、库存、状态和最近同步情况。技术编号默认脱敏，正式批量同步未开放。"
+        description="查看商品名称、售价、库存、销售状态和最近同步情况。商品批量同步暂未开放。"
         resourceName="商品"
         api={api}
         columns={columns}

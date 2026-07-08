@@ -114,13 +114,13 @@ export function buildNaverProductChangeHints(products = [], {
       : '暂无价格 / 库存变化';
   const tone = businessChangeObserved ? 'warning' : 'success';
   const businessMessage = priceChangeObserved || stockChangeObserved
-    ? `最近一次商品 dry-run 暴露${changedFieldLabels.join(' / ')}字段变化，需要人工核对后再决定是否写库。`
+    ? `最近一次商品同步预检发现${changedFieldLabels.join(' / ')}字段变化，需要人工核对后再决定是否本地保存。`
     : businessChangeObserved
-      ? '最近一次商品 dry-run 提示存在业务字段变化，但没有明确落在价格或库存字段，需先人工核对。'
-      : `最近一次 Naver 商品 dry-run 未发现价格或库存业务字段变化；当前本地 ${coverage.total} 条商品可用于价格和库存日常查看。`;
+      ? '最近一次商品同步预检提示存在业务字段变化，但没有明确落在价格或库存字段，需先人工核对。'
+      : `最近一次 Naver 商品同步预检未发现价格或库存业务字段变化；当前本地 ${coverage.total} 条商品可用于价格和库存日常查看。`;
   const nextAction = businessChangeObserved
-    ? '先核对变更字段和商品列表；未单独批准前不写库、不开放正式商品批量同步。'
-    : '继续只读观察；后续 dry-run 如出现 price 或 stock_quantity 变化，再进入人工核对。';
+    ? '先核对变更字段和商品列表；未单独批准前不本地保存、不开放商品批量同步。'
+    : '继续观察；后续同步预检如出现价格或库存变化，再进入人工核对。';
 
   return {
     ...coverage,
