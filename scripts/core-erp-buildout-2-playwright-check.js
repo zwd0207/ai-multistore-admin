@@ -26,7 +26,10 @@ async (page) => {
 
   await page.screenshot({ path: `${base}/01-store-overview.png`, fullPage: true });
   await page.getByRole('button', { name: '同步全部可用店铺' }).click();
-  await page.waitForTimeout(700);
+  await page.waitForFunction(() => {
+    const text = document.body.innerText || '';
+    return text.includes('全店铺同步完成') || text.includes('全店铺同步失败');
+  }, { timeout: 30000 }).catch(() => {});
   const afterSyncText = await page.locator('body').innerText();
   await page.screenshot({ path: `${base}/02-sync-all-feedback.png`, fullPage: true });
 
