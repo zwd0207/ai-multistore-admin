@@ -29,6 +29,12 @@ export default function ResourcePage({
   extraActions,
   emptyState,
   renderActions,
+  renderExtraActions,
+  prepareForm,
+  buildSavePayload,
+  afterSave,
+  renderFormExtra,
+  modalWidth,
 }) {
   const [query, setQuery] = useState({ keyword: '', status: '', platform: '', page: 1, pageSize: 5 });
   const [draftQuery, setDraftQuery] = useState(query);
@@ -40,6 +46,7 @@ export default function ResourcePage({
   const [loadError, setLoadError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
   const extraParamsKey = JSON.stringify(extraParams);
   const stableExtraParams = useMemo(() => extraParams, [extraParamsKey]);
 
@@ -58,17 +65,30 @@ export default function ResourcePage({
 
   useEffect(() => { load(); }, [load]);
 
-  const openModal = (record = null) => {
+  const openModal = async (record = null) => {
+    const baseForm = record ? fields.reduce((value, field) => (
+      field.type === 'section' ? value : { ...value, [field.key]: record[field.key] ?? '' }
+    ), {}) : initialForm;
     setModal({ open: true, record });
-    setForm(record ? fields.reduce((value, field) => ({ ...value, [field.key]: record[field.key] ?? '' }), {}) : initialForm);
+    setForm(baseForm);
     setErrors({});
     setSaveError('');
+    if (prepareForm) {
+      setFormLoading(true);
+      try {
+        setForm(await prepareForm({ record, form: baseForm }));
+      } catch (error) {
+        setSaveError(error.message || '表单数据加载失败');
+      } finally {
+        setFormLoading(false);
+      }
+    }
   };
 
   const save = async () => {
     if (submitting) return;
     const nextErrors = fields.reduce(
-      (value, field) => (field.required && !String(form[field.key] ?? '').trim()
+      (value, field) => (field.type !== 'section' && field.required && (!field.showWhen || field.showWhen(form)) && !String(form[field.key] ?? '').trim()
         ? { ...value, [field.key]: `请填写${field.label}` }
         : value),
       {},
@@ -80,8 +100,11 @@ export default function ResourcePage({
     setSubmitting(true);
     setSaveError('');
     try {
-      const payload = { ...form, ...stableExtraParams };
+      const payload = buildSavePayload
+        ? buildSavePayload({ form, record: modal.record, extraParams: stableExtraParams })
+        : { ...form, ...stableExtraParams };
       const saved = modal.record ? await api.update(modal.record.id, payload) : await api.create(payload);
+      if (afterSave) await afterSave({ saved, form, record: modal.record, payload });
       setModal({ open: false, record: null });
       await load();
       if (onSaved) await onSaved(saved);
@@ -154,6 +177,7 @@ export default function ResourcePage({
               onEdit={canEdit ? openModal : undefined}
               onDelete={canDelete ? remove : undefined}
               renderActions={renderActions}
+              renderExtraActions={renderExtraActions}
             />
             <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
           </>
@@ -166,34 +190,50 @@ export default function ResourcePage({
           onClose={() => setModal({ open: false, record: null })}
           onConfirm={save}
           confirmText={submitting ? '保存中...' : '保存'}
-          confirmDisabled={submitting}
+          confirmDisabled={submitting || formLoading}
+          width={modalWidth}
         >
+          {formLoading && <div className="table-state"><span className="spinner" />正在读取店铺 API 设置...</div>}
           {saveError && <div className="form-error">{saveError}</div>}
           <div className="form-grid">
-            {fields.map((field) => (
-              <FormField key={field.key} label={field.label} required={field.required} error={errors[field.key]}>
-                {field.type === 'select' ? (
-                  <select
-                    value={form[field.key] ?? ''}
-                    disabled={submitting || field.disabled}
-                    onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                  >
-                    <option value="">请选择</option>
-                    {field.options.map((option) => (typeof option === 'object'
-                      ? <option key={option.value} value={option.value}>{option.label}</option>
-                      : <option key={option}>{option}</option>))}
-                  </select>
-                ) : (
-                  <input
-                    type={field.type || 'text'}
-                    value={form[field.key] ?? ''}
-                    disabled={submitting || field.disabled}
-                    placeholder={field.placeholder || `请输入${field.label}`}
-                    onChange={(e) => setForm({ ...form, [field.key]: field.type === 'number' ? Number(e.target.value) : e.target.value })}
-                  />
-                )}
-              </FormField>
-            ))}
+            {fields.map((field) => {
+              if (field.showWhen && !field.showWhen(form)) return null;
+              if (field.type === 'section') {
+                return (
+                  <div key={field.key} className="form-section-title">
+                    <h3>{field.label}</h3>
+                    {field.description ? <p>{field.description}</p> : null}
+                  </div>
+                );
+              }
+              const help = typeof field.help === 'function' ? field.help(form) : field.help;
+              return (
+                <FormField key={field.key} label={field.label} required={field.required} error={errors[field.key]}>
+                  {field.type === 'select' ? (
+                    <select
+                      value={form[field.key] ?? ''}
+                      disabled={submitting || formLoading || field.disabled}
+                      onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                    >
+                      <option value="">请选择</option>
+                      {field.options.map((option) => (typeof option === 'object'
+                        ? <option key={option.value} value={option.value}>{option.label}</option>
+                        : <option key={option}>{option}</option>))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.type || 'text'}
+                      value={form[field.key] ?? ''}
+                      disabled={submitting || formLoading || field.disabled}
+                      placeholder={field.placeholder || `请输入${field.label}`}
+                      onChange={(e) => setForm({ ...form, [field.key]: field.type === 'number' ? Number(e.target.value) : e.target.value })}
+                    />
+                  )}
+                  {help ? <small className="form-help">{help}</small> : null}
+                </FormField>
+              );
+            })}
+            {renderFormExtra ? renderFormExtra({ form, setForm, record: modal.record, submitting, formLoading }) : null}
           </div>
         </Modal>
       )}

@@ -39,10 +39,12 @@ export default function DataTable({
   onEdit,
   onDelete,
   renderActions,
+  renderExtraActions,
 }) {
   if (loading) return <div className="table-state"><span className="spinner" />正在加载数据...</div>;
 
-  const actionColSpan = columns.length + ((onEdit || onDelete || renderActions) ? 1 : 0);
+  const hasActions = onEdit || onDelete || renderActions || renderExtraActions;
+  const actionColSpan = columns.length + (hasActions ? 1 : 0);
 
   return (
     <div className="table-wrap">
@@ -50,14 +52,14 @@ export default function DataTable({
         <thead>
           <tr>
             {columns.map((column) => <th key={column.key}>{column.title}</th>)}
-            {(onEdit || onDelete || renderActions) && <th>操作</th>}
+            {hasActions && <th>操作</th>}
           </tr>
         </thead>
         <tbody>
           {rows.length ? rows.map((row) => (
             <tr key={row[rowKey]}>
               {columns.map((column) => <td key={column.key}>{renderCell(column, row)}</td>)}
-              {(onEdit || onDelete || renderActions) && (
+              {hasActions && (
                 <td className="table-actions">
                   {renderActions ? renderActions(row) : (
                     <>
@@ -65,6 +67,7 @@ export default function DataTable({
                       {onDelete && <button type="button" className="danger-text" onClick={() => onDelete(row)}>删除</button>}
                     </>
                   )}
+                  {renderExtraActions ? renderExtraActions(row) : null}
                 </td>
               )}
             </tr>

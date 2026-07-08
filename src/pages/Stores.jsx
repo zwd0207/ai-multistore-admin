@@ -12,6 +12,121 @@ const baseApi = {
   remove: mockApi.deleteStore,
 };
 
+function normalizePlatform(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeCredentialPlatform(value) {
+  const platform = normalizePlatform(value);
+  if (platform === 'naver') return 'naver';
+  if (platform === 'coupang') return 'coupang';
+  return platform;
+}
+
+function samePlatform(left, right) {
+  return normalizeCredentialPlatform(left) === normalizeCredentialPlatform(right);
+}
+
+async function findStoreCredential(store = {}) {
+  if (!store.id) return null;
+  try {
+    const result = await dataProvider.getCredentials({
+      storeId: store.id,
+      page: 1,
+      pageSize: 20,
+    });
+    const rows = result.data || result.items || [];
+    const platform = normalizeCredentialPlatform(store.rawPlatform || store.platform);
+    return rows.find((item) => samePlatform(item.rawPlatform || item.platform, platform)) || rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function apiConnectionStatus(credential) {
+  if (!credential) return '未配置';
+  const hasMainKey = Boolean(credential.clientId || credential.vendorId || credential.hasAccessKey);
+  const hasSecret = Boolean(credential.hasSecretKey);
+  if (hasMainKey && hasSecret) return '已配置';
+  if (hasMainKey || hasSecret) return '待补齐';
+  return '未配置';
+}
+
+async function withApiConnectionStatus(store) {
+  if (!isBackendSource) return { ...store, apiConnectionStatus: '演示数据' };
+  const credential = await findStoreCredential(store);
+  return {
+    ...store,
+    apiConnectionStatus: apiConnectionStatus(credential),
+  };
+}
+
+const STORE_PAYLOAD_KEYS = ['name', 'platform', 'manager', 'region', 'language', 'status', 'remark'];
+
+function buildStorePayload({ form }) {
+  return STORE_PAYLOAD_KEYS.reduce((payload, key) => ({ ...payload, [key]: form[key] }), {});
+}
+
+function hasText(value) {
+  return Boolean(String(value || '').trim());
+}
+
+function hasCredentialInput(form = {}) {
+  return Boolean(
+    form.apiCredentialId
+    || hasText(form.apiCredentialName)
+    || hasText(form.naverClientId)
+    || hasText(form.coupangVendorId)
+    || hasText(form.coupangAccessKeyInput)
+    || hasText(form.apiSecretKeyInput)
+    || hasText(form.apiRemark),
+  );
+}
+
+function credentialPayload(savedStore, form = {}) {
+  const platform = normalizeCredentialPlatform(form.platform);
+  const storeName = savedStore?.name || form.name || '店铺';
+  return {
+    storeId: savedStore?.id || form.storeId,
+    platform,
+    name: form.apiCredentialName || `${storeName} ${platform === 'coupang' ? 'Coupang' : 'Naver'} API`,
+    clientId: platform === 'naver' ? form.naverClientId : undefined,
+    vendorId: platform === 'coupang' ? form.coupangVendorId : undefined,
+    accessKeyInput: platform === 'coupang' ? form.coupangAccessKeyInput : undefined,
+    secretKeyInput: form.apiSecretKeyInput,
+    status: form.apiStatus || 'active',
+    apiRemark: form.apiRemark,
+  };
+}
+
+async function saveStoreCredential({ saved, form }) {
+  if (!hasCredentialInput(form)) return;
+  const payload = credentialPayload(saved, form);
+  if (!payload.storeId || !['naver', 'coupang'].includes(payload.platform)) return;
+  if (form.apiCredentialId) {
+    await dataProvider.updateCredential(form.apiCredentialId, payload);
+  } else {
+    await dataProvider.createCredential(payload);
+  }
+}
+
+async function prepareStoreForm({ record, form }) {
+  const credential = record ? await findStoreCredential(record) : null;
+  return {
+    ...form,
+    apiCredentialId: credential?.id || '',
+    apiCredentialName: credential?.name || '',
+    naverClientId: credential?.clientId || '',
+    coupangVendorId: credential?.vendorId || '',
+    coupangAccessKeyInput: '',
+    apiSecretKeyInput: '',
+    apiStatus: credential?.status || 'active',
+    apiRemark: credential?.apiRemark || '',
+    apiSecretExistingStatus: credential?.hasSecretKey ? '已保存，更新时重新填写' : '未保存',
+    coupangAccessKeyExistingStatus: credential?.hasAccessKey ? '已保存，更新时重新填写' : '未保存',
+  };
+}
+
 const api = {
   ...baseApi,
   list: async (params = {}) => {
@@ -33,7 +148,7 @@ const api = {
     }
     const total = rows.length;
     const start = (page - 1) * pageSize;
-    const pageRows = rows.slice(start, start + pageSize);
+    const pageRows = await Promise.all(rows.slice(start, start + pageSize).map(withApiConnectionStatus));
     return {
       ...result,
       data: pageRows,
@@ -47,6 +162,12 @@ const api = {
 
 const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
 const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用'];
+const apiStatusOptions = [
+  { value: 'active', label: '启用' },
+  { value: 'inactive', label: '停用' },
+];
+const isNaverForm = (form) => normalizeCredentialPlatform(form.platform) === 'naver';
+const isCoupangForm = (form) => normalizeCredentialPlatform(form.platform) === 'coupang';
 
 function displaySyncedProductCount(_value, row = {}) {
   const formalCount = row.platformProductCount
@@ -65,10 +186,12 @@ const columns = [
   { key: 'manager', title: '负责人' },
   { key: 'region', title: '地区' },
   { key: 'products', title: '同步商品数', render: displaySyncedProductCount },
+  { key: 'apiConnectionStatus', title: 'API连接', render: (value) => <StatusBadge value={value || '未配置'} /> },
   { key: 'status', title: '运营状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'updatedAt', title: '最近更新' },
 ];
 const fields = [
+  { key: 'store-section', type: 'section', label: '店铺基础信息', description: '店铺名称、平台、负责人和运营状态。' },
   { key: 'name', label: '店铺名称', required: true },
   { key: 'platform', label: '平台', type: 'select', required: true, options: platformOptions },
   { key: 'manager', label: '负责人' },
@@ -76,6 +199,48 @@ const fields = [
   { key: 'language', label: '语言', required: true },
   { key: 'status', label: '运营状态', type: 'select', required: true, options: statusOptions },
   { key: 'remark', label: '备注' },
+  {
+    key: 'api-section',
+    type: 'section',
+    label: '平台 API 连接资料',
+    description: 'Naver / Coupang API 可在这里和店铺一起填写。密钥不会明文回显，需要更新时重新输入。',
+  },
+  { key: 'apiCredentialName', label: 'API 连接名称', placeholder: '例如：pxg球包店 Naver API', showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
+  { key: 'apiStatus', label: 'API 启用状态', type: 'select', options: apiStatusOptions, showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
+  {
+    key: 'naverClientId',
+    label: 'Naver Client ID',
+    placeholder: '填写 Naver Commerce API Center 的 Client ID',
+    showWhen: isNaverForm,
+  },
+  {
+    key: 'coupangVendorId',
+    label: 'Coupang Vendor ID',
+    placeholder: '填写 Coupang Vendor ID',
+    showWhen: isCoupangForm,
+  },
+  {
+    key: 'coupangAccessKeyInput',
+    label: 'Coupang Access Key',
+    type: 'password',
+    placeholder: '不修改可留空',
+    showWhen: isCoupangForm,
+    help: (form) => `当前状态：${form.coupangAccessKeyExistingStatus || '未保存'}。`,
+  },
+  {
+    key: 'apiSecretKeyInput',
+    label: 'API 密钥',
+    type: 'password',
+    placeholder: '不修改可留空',
+    showWhen: (form) => isNaverForm(form) || isCoupangForm(form),
+    help: (form) => `当前状态：${form.apiSecretExistingStatus || '未保存'}。保存后不会在页面明文显示。`,
+  },
+  {
+    key: 'apiRemark',
+    label: 'API 备注',
+    placeholder: '例如：主账号 API、仅用于商品/订单读取',
+    showWhen: (form) => isNaverForm(form) || isCoupangForm(form),
+  },
 ];
 
 export default function Stores() {
@@ -84,7 +249,7 @@ export default function Stores() {
   return (
     <ResourcePage
       title="店铺管理"
-      description="这里显示普通运营可见店铺列表。同步商品数只统计正式平台同步结果，本地历史保存商品不计入；非业务店铺默认不显示。"
+      description="新增或编辑店铺时，可以在同一个窗口填写 Naver / Coupang API 连接资料。普通店铺信息和 API 密钥分区展示，保存后密钥不会明文回显。"
       resourceName="店铺"
       api={api}
       columns={columns}
@@ -99,10 +264,24 @@ export default function Stores() {
         language: 'ko-KR',
         status: '正常运营',
         remark: '',
+        apiCredentialId: '',
+        apiCredentialName: '',
+        naverClientId: '',
+        coupangVendorId: '',
+        coupangAccessKeyInput: '',
+        apiSecretKeyInput: '',
+        apiStatus: 'active',
+        apiRemark: '',
+        apiSecretExistingStatus: '未保存',
+        coupangAccessKeyExistingStatus: '未保存',
       }}
       canCreate
       canEdit
       canDelete={!isBackendSource}
+      prepareForm={prepareStoreForm}
+      buildSavePayload={buildStorePayload}
+      afterSave={saveStoreCredential}
+      modalWidth="min(820px, 94vw)"
       onSaved={(store) => refreshStores({ preferredStoreId: selectedStoreId || normalizeStoreDisplay(store)?.id })}
     />
   );
