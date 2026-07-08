@@ -1,4 +1,9 @@
 const tones = {
+  success: 'success',
+  info: 'info',
+  warning: 'warning',
+  danger: 'danger',
+
   正常: 'success',
   正常运营: 'success',
   已完成: 'success',
@@ -48,6 +53,14 @@ const tones = {
   演示数据: 'neutral',
 };
 
+const displayLabels = {
+  success: '正常',
+  info: '提示',
+  warning: '警告',
+  danger: '风险',
+};
+
 export default function StatusBadge({ value }) {
-  return <span className={`status-badge ${tones[value] || 'neutral'}`}><i />{value}</span>;
+  const displayValue = displayLabels[value] || value;
+  return <span className={`status-badge ${tones[value] || tones[displayValue] || 'neutral'}`}><i />{displayValue}</span>;
 }

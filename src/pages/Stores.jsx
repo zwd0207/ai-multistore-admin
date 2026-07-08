@@ -15,13 +15,32 @@ const baseApi = {
 const api = {
   ...baseApi,
   list: async (params = {}) => {
-    const result = await baseApi.list(params);
-    const rows = filterVisibleBusinessStores(result.data || result.items || []);
+    const page = Math.max(Number(params.page) || 1, 1);
+    const pageSize = Math.max(Number(params.pageSize) || 5, 1);
+    const result = await baseApi.list({ ...params, page: 1, pageSize: 100 });
+    let rows = filterVisibleBusinessStores(result.data || result.items || []);
+    const keyword = String(params.keyword || '').trim().toLowerCase();
+    const platform = String(params.platform || '').trim().toLowerCase();
+    const status = String(params.status || '').trim();
+    if (keyword) {
+      rows = rows.filter((item) => `${item.name || ''} ${item.manager || ''} ${item.platform || ''}`.toLowerCase().includes(keyword));
+    }
+    if (platform) {
+      rows = rows.filter((item) => String(item.platform || '').trim().toLowerCase() === platform);
+    }
+    if (status) {
+      rows = rows.filter((item) => String(item.status || '').trim() === status);
+    }
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    const pageRows = rows.slice(start, start + pageSize);
     return {
       ...result,
-      data: rows,
-      items: rows,
-      total: rows.length,
+      data: pageRows,
+      items: pageRows,
+      total,
+      page,
+      pageSize,
     };
   },
 };

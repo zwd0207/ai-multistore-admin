@@ -4,6 +4,10 @@ const TEST_STORE_PATTERNS = [
   /capability/i,
   /verify/i,
   /preview/i,
+  /测试/i,
+  /테스트/i,
+  /환경/i,
+  /环境/i,
 ];
 
 const STATUS_LABELS = {
@@ -28,8 +32,10 @@ const REGION_LABELS = {
 
 export function isVisibleBusinessStore(store = {}) {
   const name = String(store.name || store.storeName || '').trim();
-  if (!name) return true;
-  return !TEST_STORE_PATTERNS.some((pattern) => pattern.test(name));
+  const manager = String(store.manager || store.ownerName || store.owner_name || store.managerName || '').trim();
+  const visibleText = `${name} ${manager}`.trim();
+  if (!visibleText) return true;
+  return !TEST_STORE_PATTERNS.some((pattern) => pattern.test(visibleText));
 }
 
 export function normalizeStoreDisplay(store = {}) {
