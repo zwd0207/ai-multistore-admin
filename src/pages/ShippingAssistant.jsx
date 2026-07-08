@@ -89,6 +89,18 @@ function gateReasonList(values = []) {
 
 function cleanBusinessMessage(value = '') {
   const replacements = {
+    'No local tracking import rows are available for order matching.': '当前没有可匹配的物流单号导入记录。',
+    'Mock xlsx parser preview is ready. The file is not saved, rows are not written, and Naver is not called.': '物流单号表预览已完成；当前不会保存文件、不会写入行数据，也不会调用 Naver。',
+    'Mock tracking import history. Codex1 database is not read or written in mock mode.': '当前显示演示导入历史；不会读取或写入正式数据库。',
+    'Mock shipment writeback remains closed until approval is complete.': 'Naver 发货回填暂未开放，当前仅用于人工核对和发货表格准备。',
+    'Mock shipment writeback boundary is ready for review only. No Naver API is called.': 'Naver 发货回填边界仅供复核；当前不会调用 Naver。',
+    'Mock shipment writeback dry-run is waiting for approval evidence.': 'Naver 发货回填预检正在等待审批材料。',
+    'Mock shipment writeback dry-run evidence is ready. No Naver API is called.': 'Naver 发货回填预检材料已准备好；当前不会调用 Naver。',
+    'Shipment writeback remains closed until every approval, backup, audit, and operator checklist item is ready.': 'Naver 发货回填暂未开放；人工批准、备份、操作记录和操作清单全部确认前都保持关闭。',
+    'shipment writeback remains closed until every approval, backup, audit, and operator checklist item is ready.': 'Naver 发货回填暂未开放；人工批准、备份、操作记录和操作清单全部确认前都保持关闭。',
+    'until every approval, backup, audit, and operator checklist item is ready': '人工批准、备份、操作记录和操作清单全部确认前都保持关闭',
+    'Shipment writeback remains closed': 'Naver 发货回填暂未开放',
+    'shipment writeback remains closed': 'Naver 发货回填暂未开放',
     'backend 模式': '本地保存模式',
     backend: '本地保存',
     'dry-run': '预检',
@@ -340,7 +352,7 @@ function ExportPreviewPanel({ gate, exportPreview, onGenerate, generating = fals
       <div className="section-heading">
         <div>
           <h2>物流商发货表格导出</h2>
-          <p>{backendMode ? '可生成本地发货表格，并写入导出记录和操作记录；不会回传 Naver。' : '演示数据只生成页面预览；真实文件、导出记录和操作记录不会写入。'}</p>
+          <p>{backendMode ? '可生成本地发货表格，并写入导出记录和操作记录；Naver 发货回填暂未开放，当前仅用于人工核对和发货表格准备。' : '演示数据只生成页面预览；真实文件、导出记录和操作记录不会写入。'}</p>
         </div>
         <button className="button primary" onClick={onGenerate} disabled={!gate.exportReadyCount || generating}>
           {generating ? '生成中...' : backendMode ? '生成本地发货表格' : '生成发货表格预览'}
@@ -497,7 +509,7 @@ function TrackingImportHistoryPanel({
       <div className="section-heading">
         <div>
           <h2>物流单号导入记录</h2>
-          <p>{cleanBusinessMessage(businessMessage || '查看本地物流单号导入批次；当前不会更新订单，也不会回填 Naver 发货。')}</p>
+          <p>{cleanBusinessMessage(businessMessage || '查看本地物流单号导入批次；Naver 发货回填暂未开放，当前仅用于人工核对和发货表格准备。')}</p>
         </div>
       </div>
       {loading ? <LoadingPanel /> : null}
@@ -598,19 +610,25 @@ function TrackingImportParserUploadPanel({
       <div className="section-heading">
         <div>
           <h2>物流单号表导入</h2>
-          <p>{cleanBusinessMessage(importResult?.businessMessage || preview?.businessMessage || '先预览物流商回传表，确认后保存为本地导入记录；不会回填 Naver。')}</p>
+          <p>{cleanBusinessMessage(importResult?.businessMessage || preview?.businessMessage || '先预览物流商回传表，确认后保存为本地导入记录；Naver 发货回填暂未开放，当前仅用于人工核对和发货表格准备。')}</p>
         </div>
         <span className={statusToneClass(saved || preview?.status === 'tracking_xlsx_parser_mock_ready' ? 'success' : 'neutral')}><i />{saved ? '已保存记录' : preview?.status === 'tracking_xlsx_parser_mock_ready' ? '预览通过' : '等待上传'}</span>
       </div>
       <div className="upload-shell">
         <input
+          id="shipping-tracking-import-file"
           type="file"
           accept=".xlsx"
           onChange={onFileChange}
           disabled={loading || saving}
+          aria-label="选择物流表格"
+          style={{ display: 'none' }}
         />
+        <label className="button ghost" htmlFor="shipping-tracking-import-file">
+          选择物流表格
+        </label>
         <div>
-          <strong>{fileName || '未选择物流商回传表'}</strong>
+          <strong>{fileName || '暂未选择文件'}</strong>
           <span className="cell-subtitle">
             {fileSize ? `已选择 ${fileSize.toLocaleString()} 字节` : '需要包含：订单号、商品订单号、物流公司、运单号。'}
           </span>
@@ -839,7 +857,7 @@ function TrackingOrderStatusLocalUpdatePanel({
       <div className="section-heading">
         <div>
           <h2>本地订单状态更新</h2>
-          <p>{cleanBusinessMessage(result?.businessMessage || gate?.businessMessage || '物流单号已匹配后，可在本地把订单标记为已发货 / 配送中；不会回填 Naver。')}</p>
+          <p>{cleanBusinessMessage(result?.businessMessage || gate?.businessMessage || '物流单号已匹配后，可在本地把订单标记为已发货 / 配送中；Naver 发货回填暂未开放，当前仅用于人工核对和发货表格准备。')}</p>
         </div>
         <span className={statusToneClass(updateSucceeded || mockReady || gateReady || noopReady ? 'success' : 'neutral')}><i />{statusText}</span>
       </div>

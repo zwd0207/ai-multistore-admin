@@ -1278,7 +1278,7 @@ export default function Products() {
     <>
       <ResourcePage
         title="商品管理"
-        description="查看商品名称、售价、库存、销售状态和最近同步情况。商品批量同步暂未开放。"
+        description="当前显示的是系统已保存的商品记录，正式批量同步暂未开放。"
         resourceName="商品"
         api={pageApi}
         columns={columns}

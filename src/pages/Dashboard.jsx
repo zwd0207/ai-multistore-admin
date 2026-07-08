@@ -109,7 +109,7 @@ function SellerTodoOverview({
     : {
       id: 'naver-products',
       title: '商品状态稳定',
-      description: '当前本地已有 5 条 Naver 商品，暂无新增或业务字段更新，仅同步时间需要刷新。正式批量同步仍未开放。',
+      description: '当前显示的是系统已保存的 Naver 商品记录，可用于商品管理、库存预警和内部测试；正式批量同步仍未开放。',
       status: 'success',
     };
   const naverProductChangeTodo = !isNaverStore || !productChangeHints
@@ -463,9 +463,9 @@ function NaverErpWorkbenchSection({
     {
       key: 'products',
       title: '商品状态',
-      statusLabel: '5 条本地商品稳定',
+      statusLabel: `${productCount} 条已保存商品记录`,
       tone: 'success',
-      reason: '当前本地已有 5 条 Naver 商品，暂无新增或业务字段更新，仅同步时间需要刷新。',
+      reason: '当前显示的是系统已保存的 Naver 商品记录，可用于商品管理、库存预警和内部测试；正式批量同步暂未开放。',
       nextAction: '商品批量同步暂未开放。',
       actionLabel: '查看商品管理',
       actionTo: '/products',
@@ -547,8 +547,8 @@ function NaverErpWorkbenchSection({
             <h3>本地经营数据</h3>
             <p>只读取本地店铺数据</p>
           </div>
-          <strong>{productCount} 商品 / {orderCount} 订单</strong>
-          <small>本地商品和订单记录已可用于日常观察。</small>
+          <strong>{productCount} 条已保存商品记录 / {orderCount} 订单</strong>
+          <small>商品为系统已保存记录，不代表正式平台商品总数；订单为本地运营记录。</small>
         </article>
         <article className="financial-card">
           <div className="financial-card-head">
@@ -1068,7 +1068,7 @@ export default function Dashboard() {
     const amountDetail = isSelectedNaverStore ? '来自运营订单金额' : '来自订单金额';
     return [
       { label: '店铺数量', value: sellerDisplaySummary.storeTotal, detail: '已接入店铺', tone: 'info' },
-      { label: '本地商品', value: sellerDisplaySummary.productTotal, detail: '当前店铺商品记录', tone: 'info' },
+      { label: '已保存商品记录', value: sellerDisplaySummary.productTotal, detail: '系统已保存商品，不代表正式平台商品总数', tone: 'info' },
       { label: '订单数', value: sellerDisplaySummary.scopeOrderCount ?? sellerDisplaySummary.todayOrderCount, detail: orderDetail, tone: 'positive' },
       { label: '订单金额', value: formatWon(sellerDisplaySummary.scopeSalesAmount ?? sellerDisplaySummary.todaySalesAmount), detail: amountDetail, tone: 'positive' },
       { label: '待回复客服', value: sellerDisplaySummary.pendingCustomers, detail: '客户咨询', tone: sellerDisplaySummary.pendingCustomers > 0 ? 'warning' : 'positive' },
@@ -1172,8 +1172,8 @@ export default function Dashboard() {
         <article className="content-card">
           <div className="card-title">
             <div>
-              <h2>销售趋势</h2>
-              <p>近 7 天订单金额趋势，用于观察店铺销售波动。</p>
+              <h2>历史销售趋势</h2>
+              <p>近 7 天本地 / 历史订单金额趋势，用于观察波动，不代表平台最终结算。</p>
             </div>
             <span className="period-chip">KST</span>
           </div>

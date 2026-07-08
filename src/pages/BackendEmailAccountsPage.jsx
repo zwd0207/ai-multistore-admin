@@ -278,8 +278,9 @@ export default function BackendEmailAccountsPage() {
           <FormField label="账号标签">
             <input value={form.label} disabled={submitting} onChange={(event) => setForm({ ...form, label: event.target.value })} placeholder="请输入账号标签" />
           </FormField>
-          <FormField label="密钥信息">
-            <input type="password" value={form.credentialInput} disabled={submitting} onChange={(event) => setForm({ ...form, credentialInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '默认隐藏，可选填写'} />
+          <FormField label="邮箱授权码 / 应用专用密码">
+            <input type="password" value={form.credentialInput} disabled={submitting} onChange={(event) => setForm({ ...form, credentialInput: event.target.value })} placeholder={modal.record ? '留空则不更新' : '暂未启用真实邮箱连接时可不填写'} />
+            <small className="form-help">不是邮箱登录密码，请填写邮箱服务商提供的授权码或应用专用密码。暂未启用真实邮箱连接时可不填写。</small>
           </FormField>
           <FormField label="状态" required error={errors.status}>
             <select value={form.status} disabled={submitting} onChange={(event) => setForm({ ...form, status: event.target.value })}>

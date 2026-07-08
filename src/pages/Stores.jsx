@@ -47,12 +47,24 @@ const api = {
 
 const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
 const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用'];
+
+function displaySyncedProductCount(_value, row = {}) {
+  const formalCount = row.platformProductCount
+    ?? row.syncedProductCount
+    ?? row.formalProductCount
+    ?? row.formalSyncedProductCount;
+  if (formalCount === undefined || formalCount === null || formalCount === '') return '待同步';
+  const count = Number(formalCount);
+  if (!Number.isFinite(count) || count <= 0) return '待同步';
+  return `${count.toLocaleString()} 条`;
+}
+
 const columns = [
   { key: 'name', title: '店铺名称', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
   { key: 'manager', title: '负责人' },
   { key: 'region', title: '地区' },
-  { key: 'products', title: '商品数' },
+  { key: 'products', title: '同步商品数', render: displaySyncedProductCount },
   { key: 'status', title: '运营状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'updatedAt', title: '最近更新' },
 ];
@@ -72,7 +84,7 @@ export default function Stores() {
   return (
     <ResourcePage
       title="店铺管理"
-      description="查看真实业务店铺、平台归属、负责人和运营状态。测试店铺默认隐藏在普通运营页面之外。"
+      description="这里显示普通运营可见店铺列表。同步商品数只统计正式平台同步结果，本地历史保存商品不计入；非业务店铺默认不显示。"
       resourceName="店铺"
       api={api}
       columns={columns}
