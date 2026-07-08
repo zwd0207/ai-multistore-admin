@@ -89,7 +89,7 @@ function credentialPayload(savedStore, form = {}) {
   return {
     storeId: savedStore?.id || form.storeId,
     platform,
-    name: form.apiCredentialName || `${storeName} ${platform === 'coupang' ? 'Coupang' : 'Naver'} API`,
+    name: form.apiCredentialName || `${storeName} ${platform === 'coupang' ? 'Coupang' : 'Naver'} 接口`,
     clientId: platform === 'naver' ? form.naverClientId : undefined,
     vendorId: platform === 'coupang' ? form.coupangVendorId : undefined,
     accessKeyInput: platform === 'coupang' ? form.coupangAccessKeyInput : undefined,
@@ -97,6 +97,14 @@ function credentialPayload(savedStore, form = {}) {
     status: form.apiStatus || 'active',
     apiRemark: form.apiRemark,
   };
+}
+
+function readableStoreRemark(value = '') {
+  return String(value || '')
+    .replaceAll('OpenAPI', '开放接口')
+    .replaceAll('vendor_id', '卖家编号')
+    .replaceAll('client_id', '客户端编号')
+    .replaceAll('API', '接口');
 }
 
 async function saveStoreCredential({ saved, form }) {
@@ -114,6 +122,7 @@ async function prepareStoreForm({ record, form }) {
   const credential = record ? await findStoreCredential(record) : null;
   return {
     ...form,
+    remark: readableStoreRemark(form.remark),
     apiCredentialId: credential?.id || '',
     apiCredentialName: credential?.name || '',
     naverClientId: credential?.clientId || '',
@@ -121,7 +130,7 @@ async function prepareStoreForm({ record, form }) {
     coupangAccessKeyInput: '',
     apiSecretKeyInput: '',
     apiStatus: credential?.status || 'active',
-    apiRemark: credential?.apiRemark || '',
+    apiRemark: readableStoreRemark(credential?.apiRemark || ''),
     apiSecretExistingStatus: credential?.hasSecretKey ? '已保存，更新时重新填写' : '未保存',
     coupangAccessKeyExistingStatus: credential?.hasAccessKey ? '已保存，更新时重新填写' : '未保存',
   };
@@ -160,11 +169,15 @@ const api = {
   },
 };
 
-const platformOptions = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
+const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
 const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用'];
 const apiStatusOptions = [
   { value: 'active', label: '启用' },
   { value: 'inactive', label: '停用' },
+];
+const languageOptions = [
+  { value: 'ko-KR', label: '韩文' },
+  { value: 'zh-CN', label: '中文' },
 ];
 const isNaverForm = (form) => normalizeCredentialPlatform(form.platform) === 'naver';
 const isCoupangForm = (form) => normalizeCredentialPlatform(form.platform) === 'coupang';
@@ -186,7 +199,7 @@ const columns = [
   { key: 'manager', title: '负责人' },
   { key: 'region', title: '地区' },
   { key: 'products', title: '同步商品数', render: displaySyncedProductCount },
-  { key: 'apiConnectionStatus', title: 'API连接', render: (value) => <StatusBadge value={value || '未配置'} /> },
+  { key: 'apiConnectionStatus', title: '接口连接', render: (value) => <StatusBadge value={value || '未配置'} /> },
   { key: 'status', title: '运营状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'updatedAt', title: '最近更新' },
 ];
@@ -196,32 +209,32 @@ const fields = [
   { key: 'platform', label: '平台', type: 'select', required: true, options: platformOptions },
   { key: 'manager', label: '负责人' },
   { key: 'region', label: '地区', required: true },
-  { key: 'language', label: '语言', required: true },
+  { key: 'language', label: '语言', type: 'select', required: true, options: languageOptions },
   { key: 'status', label: '运营状态', type: 'select', required: true, options: statusOptions },
   { key: 'remark', label: '备注' },
   {
     key: 'api-section',
     type: 'section',
     label: '平台 API 连接资料',
-    description: 'Naver / Coupang API 可在这里和店铺一起填写。密钥不会明文回显，需要更新时重新输入。',
+    description: 'Naver / Coupang 官方接口资料可在这里和店铺一起填写。密钥不会明文回显，需要更新时重新输入。',
   },
-  { key: 'apiCredentialName', label: 'API 连接名称', placeholder: '例如：pxg球包店 Naver API', showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
-  { key: 'apiStatus', label: 'API 启用状态', type: 'select', options: apiStatusOptions, showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
+  { key: 'apiCredentialName', label: '接口连接名称', placeholder: '例如：pxg球包店 Naver 接口', showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
+  { key: 'apiStatus', label: '接口启用状态', type: 'select', options: apiStatusOptions, showWhen: (form) => isNaverForm(form) || isCoupangForm(form) },
   {
     key: 'naverClientId',
-    label: 'Naver Client ID',
-    placeholder: '填写 Naver Commerce API Center 的 Client ID',
+    label: 'Naver 客户端编号',
+    placeholder: '填写 Naver Commerce API Center 的客户端编号',
     showWhen: isNaverForm,
   },
   {
     key: 'coupangVendorId',
-    label: 'Coupang Vendor ID',
-    placeholder: '填写 Coupang Vendor ID',
+    label: 'Coupang 卖家编号',
+    placeholder: '填写 Coupang 卖家编号',
     showWhen: isCoupangForm,
   },
   {
     key: 'coupangAccessKeyInput',
-    label: 'Coupang Access Key',
+    label: 'Coupang 访问密钥',
     type: 'password',
     placeholder: '不修改可留空',
     showWhen: isCoupangForm,
@@ -229,7 +242,7 @@ const fields = [
   },
   {
     key: 'apiSecretKeyInput',
-    label: 'API 密钥',
+    label: '接口密钥',
     type: 'password',
     placeholder: '不修改可留空',
     showWhen: (form) => isNaverForm(form) || isCoupangForm(form),
@@ -237,8 +250,8 @@ const fields = [
   },
   {
     key: 'apiRemark',
-    label: 'API 备注',
-    placeholder: '例如：主账号 API、仅用于商品/订单读取',
+    label: '接口备注',
+    placeholder: '例如：主账号接口资料，仅用于商品/订单读取',
     showWhen: (form) => isNaverForm(form) || isCoupangForm(form),
   },
 ];

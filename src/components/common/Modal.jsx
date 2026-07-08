@@ -24,7 +24,7 @@ export default function Modal({
       <section className="modal-card" role="dialog" aria-modal="true" style={width ? { width } : undefined}>
         <header>
           <h2>{title}</h2>
-          <button className="modal-close" onClick={onClose} disabled={confirmDisabled}>×</button>
+          <button className="modal-close" onClick={onClose} disabled={confirmDisabled} aria-label="关闭">×</button>
         </header>
         <div className="modal-body">{children}</div>
         {showFooter && (

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
@@ -10,315 +10,319 @@ import PageHeader from '../components/common/PageHeader';
 import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
-import { useSyncRefresh } from '../context/SyncRefreshContext';
+import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import mockApi from '../services/mockApi';
-import { formatKstDateTimeWithLabel } from '../utils/time';
+import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
 
-const platforms = ['Naver', 'Coupang', 'Gmarket', '11街', '옥션'];
-const statusOptions = [
-  { value: '문의 대기', label: '待处理' },
-  { value: '답변 완료', label: '已回复' },
-  { value: '처리중', label: '处理中' },
-  { value: '환불 요청', label: '退款请求' },
-  { value: '교환 요청', label: '换货请求' },
-];
-const priorityOptions = [
-  { value: '일반', label: '普通' },
-  { value: '중요', label: '重要' },
-  { value: '긴급', label: '紧急' },
-];
+const PAGE_SIZE = 10;
+const statusOptions = ['待处理', '处理中', '已记录', '需人工处理'];
+const priorityOptions = ['普通', '重要', '紧急'];
+const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
 
-function optionLabel(options, value) {
-  return options.find((item) => item.value === value)?.label || value || '待处理';
+function comparable(value) {
+  return String(value ?? '').trim().toLowerCase();
 }
 
-function ticketStatusLabel(value) {
-  return optionLabel(statusOptions, value);
+function text(value, fallback = '-') {
+  const next = String(value ?? '').trim();
+  return next || fallback;
 }
 
-function ticketPriorityLabel(value) {
-  return optionLabel(priorityOptions, value);
+function statusLabel(value) {
+  const normalized = comparable(value);
+  if (['문의 대기', 'pending', '待处理'].includes(normalized)) return '待处理';
+  if (['처리중', 'processing', '处理中', '환불 요청', '교환 요청'].includes(normalized)) return '处理中';
+  if (['답변 완료', 'done', 'closed', '已回复', '已记录'].includes(normalized)) return '已记录';
+  return value ? '需人工处理' : '待处理';
+}
+
+function priorityLabel(value) {
+  const normalized = comparable(value);
+  if (['긴급', 'urgent', '紧急'].includes(normalized)) return '紧急';
+  if (['중요', 'important', '重要'].includes(normalized)) return '重要';
+  return '普通';
+}
+
+function normalizeMessage(row = {}) {
+  const sourceInfo = classifyCoreDataSource(row);
+  return {
+    ...row,
+    ticketNo: row.ticketNo || row.caseNo || `MSG-${row.id}`,
+    platform: text(row.platform || row.rawPlatform),
+    store: text(row.store || row.storeName || row.store_name),
+    customerName: text(row.customerName || row.customer || row.buyerName, '客户'),
+    orderNo: text(row.orderNo || row.external_order_id, '未关联订单'),
+    productName: text(row.productName || row.product || row.product_name, '未关联商品'),
+    inquiryType: text(row.inquiryType || row.type || row.category, '平台消息'),
+    summary: text(row.summary || row.content || row.title, '暂无摘要'),
+    content: text(row.content || row.summary, '暂无内容'),
+    statusLabel: statusLabel(row.status),
+    priorityLabel: priorityLabel(row.priority),
+    createdAt: row.createdAt || row.created_at || '',
+    lastReplyAt: row.lastReplyAt || row.updatedAt || '',
+    sourceInfo,
+  };
+}
+
+function matches(row, query = {}) {
+  const keyword = comparable(query.keyword);
+  const haystack = [
+    row.ticketNo,
+    row.platform,
+    row.store,
+    row.customerName,
+    row.orderNo,
+    row.productName,
+    row.inquiryType,
+    row.summary,
+    row.statusLabel,
+    row.priorityLabel,
+  ].map(comparable).join(' ');
+  if (keyword && !haystack.includes(keyword)) return false;
+  if (query.platform && comparable(row.platform) !== comparable(query.platform)) return false;
+  if (query.status && row.statusLabel !== query.status) return false;
+  if (query.priority && row.priorityLabel !== query.priority) return false;
+  return true;
 }
 
 const columns = [
-  { key: 'ticketNo', title: '咨询编号', render: (value) => <strong>{value}</strong> },
+  { key: 'ticketNo', title: '消息编号', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
   { key: 'store', title: '店铺' },
-  { key: 'customerName', title: '客户名' },
+  { key: 'customerName', title: '客户' },
   { key: 'orderNo', title: '订单号' },
-  { key: 'productName', title: '商品名' },
-  { key: 'inquiryType', title: '咨询类型' },
-  { key: 'summary', title: '咨询内容摘要' },
-  { key: 'status', title: '状态', render: (value) => <StatusBadge value={ticketStatusLabel(value)} /> },
-  { key: 'priority', title: '紧急程度', render: (value) => <StatusBadge value={ticketPriorityLabel(value)} /> },
+  { key: 'productName', title: '商品' },
+  { key: 'inquiryType', title: '消息类型' },
+  { key: 'summary', title: '内容摘要' },
+  { key: 'statusLabel', title: '状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'priorityLabel', title: '紧急程度', render: (value) => <StatusBadge value={value} /> },
   { key: 'createdAt', title: '创建时间' },
-  { key: 'lastReplyAt', title: '最后回复时间' },
 ];
 
 export default function CustomerService() {
-  const navigate = useNavigate();
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
-  const { versions } = useSyncRefresh();
-  const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1, pageSize: 5 });
-  const [draftQuery, setDraftQuery] = useState(query);
-  const [result, setResult] = useState({ data: [], total: 0, page: 1, pageSize: 5 });
+  const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1 });
+  const [draft, setDraft] = useState(query);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [templates, setTemplates] = useState([]);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [activeTicket, setActiveTicket] = useState(null);
-  const [replyForm, setReplyForm] = useState({ content: '', nextStatus: '답변 완료' });
-  const [replyError, setReplyError] = useState('');
-  const [loadError, setLoadError] = useState('');
+  const [error, setError] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
+  const [activeMessage, setActiveMessage] = useState(null);
+  const [draftModal, setDraftModal] = useState({ open: false, message: null, content: '' });
+  const [draftReplies, setDraftReplies] = useState({});
 
   const load = async (nextQuery = query) => {
-    if (isBackendSource && storeLoading) return;
+    if (isBackendSource && storeLoading) return [];
     setLoading(true);
-    setLoadError('');
+    setError('');
     try {
       if (isBackendSource && storeError) throw new Error(storeError);
-      if (isBackendSource && !selectedStoreId) {
-        setResult({ data: [], total: 0, page: nextQuery.page, pageSize: nextQuery.pageSize });
-        return;
-      }
-      const response = await dataProvider.getCustomerInquiries(isBackendSource ? { ...nextQuery, storeId: selectedStoreId } : nextQuery);
-      setResult(response);
-      return response;
-    } catch (error) {
-      setResult({ data: [], total: 0, page: nextQuery.page, pageSize: nextQuery.pageSize });
-      setLoadError(error.message || '客服咨询加载失败');
+      const params = { page: 1, pageSize: 100, platform: nextQuery.platform };
+      if (isBackendSource && selectedStoreId) params.storeId = selectedStoreId;
+      const result = await dataProvider.getCustomerInquiries(params);
+      const normalized = (result.data || result.items || []).map(normalizeMessage).filter((item) => matches(item, nextQuery));
+      setRows(normalized);
+      return normalized;
+    } catch (requestError) {
+      setRows([]);
+      setError(requestError.message || '平台消息加载失败');
+      return [];
     } finally {
       setLoading(false);
     }
   };
 
-  const syncPlatformMessages = async () => {
-    const response = await load();
-    const count = Number(response?.total ?? response?.data?.length ?? 0);
-    setSyncMessage(count
-      ? `平台消息已检查，当前共有 ${count} 条消息。`
-      : '平台消息已检查，当前没有新的平台消息。');
-    window.setTimeout(() => setSyncMessage(''), 2800);
-  };
-
   useEffect(() => {
     load();
-  }, [query, selectedStoreId, storeLoading, storeError, versions.customerInquiries]);
+  }, [query, selectedStoreId, storeLoading, storeError]);
 
-  useEffect(() => {
-    if (!isBackendSource) mockApi.getReplyTemplates().then(setTemplates);
-  }, []);
+  const summary = useMemo(() => ({
+    total: rows.length,
+    pending: rows.filter((item) => item.statusLabel === '待处理').length,
+    urgent: rows.filter((item) => item.priorityLabel === '紧急').length,
+    manual: rows.filter((item) => item.statusLabel === '需人工处理' || item.priorityLabel === '紧急').length,
+  }), [rows]);
 
-  const openDetail = async (row) => {
-    const detail = isBackendSource ? row : await mockApi.getCustomerTicketDetail(row.id);
-    setActiveTicket(detail);
-    setDetailOpen(true);
+  const dangerousState = getDangerousActionState('customer_auto_reply');
+  const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
+
+  const syncPlatformMessages = async () => {
+    const latestRows = await load(query);
+    setSyncMessage(latestRows.length
+      ? `同步按钮已检查本地保存记录，当前显示 ${latestRows.length} 条消息；暂未接入真实平台消息深度同步。`
+      : '同步按钮已检查，本地暂无平台消息；暂未接入真实平台消息。');
+    window.setTimeout(() => setSyncMessage(''), 3200);
   };
 
-  const openReply = async (row) => {
-    const detail = await mockApi.getCustomerTicketDetail(row.id);
-    setActiveTicket(detail);
-    setReplyForm({ content: '', nextStatus: '답변 완료' });
-    setReplyError('');
-    setReplyOpen(true);
+  const openDraft = (message) => {
+    setDraftModal({
+      open: true,
+      message,
+      content: draftReplies[message.ticketNo] || '',
+    });
   };
 
-  const applyStatus = async (row, status) => {
-    await mockApi.updateCustomerTicketStatus(row.id, status);
-    if (activeTicket?.id === row.id) {
-      setActiveTicket(await mockApi.getCustomerTicketDetail(row.id));
+  const saveDraft = () => {
+    if (draftModal.message?.ticketNo) {
+      setDraftReplies((current) => ({
+        ...current,
+        [draftModal.message.ticketNo]: draftModal.content,
+      }));
     }
-    await load();
+    setDraftModal({ open: false, message: null, content: '' });
   };
 
-  const submitReply = async () => {
-    const content = replyForm.content.trim();
-    if (!content) {
-      setReplyError('回复内容不能为空');
-      return;
-    }
-    if (content.length < 5) {
-      setReplyError('回复内容至少需要 5 个字符');
-      return;
-    }
-
-    await mockApi.replyCustomerTicket(activeTicket.id, replyForm);
-    setReplyOpen(false);
-    if (detailOpen) {
-      setActiveTicket(await mockApi.getCustomerTicketDetail(activeTicket.id));
-    }
-    await load();
+  const search = () => setQuery({ ...draft, page: 1 });
+  const reset = () => {
+    const clean = { keyword: '', platform: '', status: '', priority: '', page: 1 };
+    setDraft(clean);
+    setQuery(clean);
   };
 
   return (
     <>
       <PageHeader
         title="平台消息"
-        description="集中查看平台咨询、客户投诉、退款和换货相关消息。"
+        description="当前先做平台消息入口和基础管理，暂未接入真实平台消息深度同步；回复只保存为本地草稿，需人工到平台后台处理。"
         actions={(
           <>
             <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
-            <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
-            <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
+            <Link className="button ghost" to="/stores">检查店铺连接</Link>
+            <Link className="button ghost" to="/emails">检查邮箱连接</Link>
           </>
         )}
       />
 
+      <div className="summary-grid">
+        <SummaryCard title="平台消息" value={summary.total} note="读取自本地保存记录" tone="info" />
+        <SummaryCard title="待处理" value={summary.pending} note="需人工查看" tone={summary.pending ? 'warning' : 'success'} />
+        <SummaryCard title="紧急消息" value={summary.urgent} note="优先处理" tone={summary.urgent ? 'danger' : 'success'} />
+        <SummaryCard title="需人工到平台后台处理" value={summary.manual} note="不自动回复客户" tone="warning" />
+      </div>
+
+      <section className="content-card">
+        <div className="business-capability-grid compact">
+          <article className="business-capability-card warning">
+            <div className="business-capability-head"><strong>真实平台消息</strong><span>暂未接入</span></div>
+            <p>当前页面展示系统已保存记录和本地管理入口，不宣称已经完成平台消息真实同步。</p>
+          </article>
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>回复草稿</strong><span>本地辅助</span></div>
+            <p>回复内容只保存为本地草稿，不会发送到 Naver / Coupang / Gmarket。</p>
+          </article>
+          <article className="business-capability-card muted">
+            <div className="business-capability-head"><strong>自动回复客户</strong><span>{dangerousState.label}</span></div>
+            <p>{dangerousState.note}</p>
+          </article>
+        </div>
+      </section>
+
       <FilterPanel>
         <SearchBar
-          value={draftQuery.keyword}
-          onChange={(keyword) => setDraftQuery({ ...draftQuery, keyword })}
-          onSearch={() => setQuery({ ...draftQuery, page: 1 })}
-          onReset={() => {
-            const clean = { keyword: '', platform: '', status: '', priority: '', page: 1, pageSize: 5 };
-            setDraftQuery(clean);
-            setQuery(clean);
-          }}
-          placeholder="搜索客户名、订单号、商品名或咨询内容"
+          value={draft.keyword}
+          onChange={(keyword) => setDraft({ ...draft, keyword })}
+          onSearch={search}
+          onReset={reset}
+          placeholder="搜索客户、订单号、商品名或消息内容"
         >
-          <select value={draftQuery.platform} onChange={(event) => setDraftQuery({ ...draftQuery, platform: event.target.value })}>
+          <select value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value })}>
             <option value="">全部平台</option>
-            {platforms.map((item) => <option key={item}>{item}</option>)}
+            {platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
+          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
             <option value="">全部状态</option>
-            {statusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {statusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <select value={draftQuery.priority} onChange={(event) => setDraftQuery({ ...draftQuery, priority: event.target.value })}>
+          <select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}>
             <option value="">全部紧急程度</option>
-            {priorityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {priorityOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </SearchBar>
       </FilterPanel>
 
       <section className="content-card">
         {syncMessage ? <div className="form-info">{syncMessage}</div> : null}
-        {loadError ? <EmptyState title="平台消息加载失败" description={loadError} /> : !loading && !(result.data || []).length ? (
+        {error ? <EmptyState title="平台消息加载失败" description={error} /> : null}
+        {!error && !loading && !rows.length ? (
           <EmptyState
             title="当前没有平台消息"
-            description="当前没有平台消息。你可以同步平台消息，或检查店铺连接和邮箱连接状态。"
+            description="暂未接入真实平台消息。可以检查店铺连接或邮箱连接，后续接入官方 API 后再读取真实消息。"
             actions={(
               <>
                 <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
-                <button type="button" className="button ghost" onClick={() => navigate('/stores')}>检查店铺连接</button>
-                <button type="button" className="button ghost" onClick={() => navigate('/emails')}>检查邮箱连接</button>
+                <Link className="button ghost" to="/stores">检查店铺连接</Link>
+                <Link className="button ghost" to="/emails">检查邮箱连接</Link>
               </>
             )}
           />
-        ) : <><DataTable
-          columns={columns}
-          rows={result.data || []}
-          loading={loading}
-          renderActions={(row) => (
-            <>
-              <button onClick={() => openDetail(row)}>详情</button>
-              {!isBackendSource && <><button onClick={() => openReply(row)}>回复</button>
-                <button onClick={() => applyStatus(row, '답변 완료')}>标记完成</button>
-                <button onClick={() => applyStatus(row, '환불 요청')}>转退款</button>
-                <button onClick={() => applyStatus(row, '교환 요청')}>转换货</button></>}
-            </>
-          )}
-        />
-        <Pagination page={query.page} pageSize={query.pageSize} total={result.total} onChange={(page) => setQuery({ ...query, page })} />
-        </>}
+        ) : (
+          <>
+            <DataTable
+              columns={columns}
+              rows={pageRows}
+              loading={loading}
+              renderActions={(row) => (
+                <>
+                  <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
+                  <button type="button" onClick={() => openDraft(row)}>回复草稿</button>
+                  <button type="button" disabled title="需人工到平台后台处理">平台后台处理</button>
+                </>
+              )}
+            />
+            <Pagination page={query.page} pageSize={PAGE_SIZE} total={rows.length} onChange={(page) => setQuery({ ...query, page })} />
+          </>
+        )}
       </section>
 
-      <DetailModal open={detailOpen} title={activeTicket ? `咨询详情 · ${activeTicket.ticketNo}` : '咨询详情'} onClose={() => setDetailOpen(false)}>
-        {activeTicket ? (
+      <DetailModal open={Boolean(activeMessage)} title={activeMessage ? `消息详情 · ${activeMessage.ticketNo}` : '消息详情'} onClose={() => setActiveMessage(null)}>
+        {activeMessage ? (
           <>
+            <div className="detail-grid">
+              {[
+                ['平台', activeMessage.platform],
+                ['店铺', activeMessage.store],
+                ['客户', activeMessage.customerName],
+                ['订单号', activeMessage.orderNo],
+                ['商品', activeMessage.productName],
+                ['状态', <StatusBadge value={activeMessage.statusLabel} />],
+                ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
+                ['数据来源', activeMessage.sourceInfo.label],
+              ].map(([label, value]) => (
+                <div className="detail-item" key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
             <section className="detail-section">
-              <h3>完整咨询内容</h3>
-              <div className="badge-row">
-                <StatusBadge value={ticketStatusLabel(activeTicket.status)} />
-                <StatusBadge value={ticketPriorityLabel(activeTicket.priority)} />
-              </div>
-              <p>{activeTicket.content}</p>
+              <h3>消息内容</h3>
+              <p>{activeMessage.content}</p>
             </section>
-
             <section className="detail-section">
-              <h3>订单信息</h3>
-              <div className="detail-grid">
-                <div className="detail-item"><span>订单号</span><strong>{activeTicket.orderInfo.orderNo}</strong></div>
-                <div className="detail-item"><span>支付方式</span><strong>{activeTicket.orderInfo.paymentMethod}</strong></div>
-                <div className="detail-item"><span>收件人</span><strong>{activeTicket.orderInfo.receiver}</strong></div>
-                <div className="detail-item"><span>订单金额</span><strong>{activeTicket.orderInfo.amount.toLocaleString()}원</strong></div>
-                <div className="detail-item"><span>收货地址</span><strong>{activeTicket.orderInfo.address}</strong></div>
-              </div>
-            </section>
-
-            <section className="detail-section">
-              <h3>商品信息</h3>
-              <div className="detail-grid">
-                <div className="detail-item"><span>商品名</span><strong>{activeTicket.productInfo.productName}</strong></div>
-                <div className="detail-item"><span>SKU</span><strong>{activeTicket.productInfo.sku}</strong></div>
-                <div className="detail-item"><span>数量</span><strong>{activeTicket.productInfo.quantity}</strong></div>
-                <div className="detail-item"><span>店铺</span><strong>{activeTicket.productInfo.store}</strong></div>
-              </div>
-            </section>
-
-            <section className="detail-section">
-              <h3>历史回复记录</h3>
-              <div className="reply-list">
-                {activeTicket.replies.length ? activeTicket.replies.map((reply) => (
-                  <article key={reply.id} className="reply-item">
-                    <header>
-                      <strong>{reply.author}</strong>
-                      <time>{formatKstDateTimeWithLabel(reply.createdAt)}</time>
-                    </header>
-                    <p>{reply.content}</p>
-                  </article>
-                )) : <EmptyState title="暂无历史回复" description="这条咨询还没有人工回复记录。" />}
-              </div>
+              <h3>处理边界</h3>
+              <p>回复、退款、换货和投诉处理需人工到平台后台处理；系统当前只提供查看和回复草稿。</p>
             </section>
           </>
-        ) : <EmptyState title="暂无详情" description="请选择一条咨询记录查看详情。" />}
+        ) : <EmptyState title="暂无消息详情" description="请选择消息查看详情。" />}
       </DetailModal>
 
       <Modal
-        open={replyOpen}
-        title={activeTicket ? `回复咨询 · ${activeTicket.ticketNo}` : '回复咨询'}
-        onClose={() => setReplyOpen(false)}
-        onConfirm={submitReply}
-        confirmText="发送回复"
-        width="min(900px, 94vw)"
+        open={draftModal.open}
+        title={draftModal.message ? `回复草稿 · ${draftModal.message.ticketNo}` : '回复草稿'}
+        onClose={() => setDraftModal({ open: false, message: null, content: '' })}
+        onConfirm={saveDraft}
+        confirmText="保存本地草稿"
+        width="min(860px, 94vw)"
       >
-        <div className="detail-section">
-          <h3>常用回复模板</h3>
-          <div className="template-list">
-            {templates.map((item) => (
-              <article key={item.id} className="template-item">
-                <strong>{item.title}</strong>
-                <p>{item.content}</p>
-                <button className="button ghost" onClick={() => setReplyForm({ ...replyForm, content: item.content })}>使用模板</button>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className="form-grid">
-          <FormField label="回复后状态" required>
-            <select value={replyForm.nextStatus} onChange={(event) => setReplyForm({ ...replyForm, nextStatus: event.target.value })}>
-              {statusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </FormField>
-          <FormField label="当前咨询摘要">
-            <input value={activeTicket?.summary || ''} readOnly />
-          </FormField>
-        </div>
-
-        <FormField label="回复内容" required error={replyError}>
+        <FormField label="草稿内容">
           <textarea
-            value={replyForm.content}
-            onChange={(event) => {
-              setReplyForm({ ...replyForm, content: event.target.value });
-              if (replyError) setReplyError('');
-            }}
-            placeholder="请输入回复内容，至少 5 个字符"
+            value={draftModal.content}
+            onChange={(event) => setDraftModal({ ...draftModal, content: event.target.value })}
+            placeholder="这里只保存本地草稿，不会发送给客户。"
           />
         </FormField>
+        <p className="mock-sync-note">回复草稿是本地辅助功能。正式回复需人工到平台后台处理。</p>
       </Modal>
     </>
   );

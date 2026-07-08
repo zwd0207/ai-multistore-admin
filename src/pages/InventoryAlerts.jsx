@@ -1,143 +1,195 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import EmptyState from '../components/common/EmptyState';
+import FilterPanel from '../components/common/FilterPanel';
 import PageHeader from '../components/common/PageHeader';
+import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
-import { useSyncRefresh } from '../context/SyncRefreshContext';
+import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
-import dataProvider from '../services/dataProvider';
-import { getInventoryStatusForStock } from '../utils/naverInventory';
+import dataProvider, { isBackendSource } from '../services/dataProvider';
+import { classifyCoreDataSource } from '../utils/coreErpContract';
 
-function moneyLabel(value, currency = 'KRW') {
+const inventoryTabs = [
+  { key: '', label: '全部库存' },
+  { key: '缺货', label: '缺货商品' },
+  { key: '低库存', label: '低库存商品' },
+  { key: '库存正常', label: '库存正常商品' },
+];
+
+function comparable(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function money(value, currency = 'KRW') {
   return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
 }
 
-function sourceLabel(value) {
-  const labels = {
-    naver_real_sync: '正式同步',
-    naver_product_preview: '商品预览',
-    naver_product_preview_dry_run: '同步预检',
-    coupang_real_sync: '正式同步',
-    coupang_product_sync: '正式同步',
-  };
-  return labels[value] || value || '本地记录';
+function inventoryStatus(stock) {
+  const count = Number(stock || 0);
+  if (count <= 0) return '缺货';
+  if (count <= 5) return '低库存';
+  return '库存正常';
 }
 
-function displayStoreName(value, selectedStore) {
-  const text = String(value || '').trim();
-  if (!text || /^店铺\s*#/.test(text)) return selectedStore?.name || '当前店铺';
-  return text;
+function suggestionForStatus(status) {
+  if (status === '缺货') return '建议尽快补货；无法补货时由运营人工到平台后台下架或暂停销售。';
+  if (status === '低库存') return '建议核对物流商库存编号和实际库存，确认是否补货。';
+  return '库存暂时正常，继续观察最近订单和补货周期。';
+}
+
+function normalizeProduct(row = {}, stores = []) {
+  const stock = Number(row.stock ?? row.stock_quantity ?? 0);
+  const status = inventoryStatus(stock);
+  const store = stores.find((item) => String(item.id) === String(row.storeId || row.store_id));
+  const sourceInfo = classifyCoreDataSource(row);
+  return {
+    ...row,
+    name: row.name || row.productName || row.product_name || '-',
+    platform: row.platform || row.rawPlatform || '-',
+    store: row.store || row.storeName || row.store_name || store?.name || '未关联店铺',
+    storeId: row.storeId || row.store_id,
+    price: Number(row.price || 0),
+    currency: row.currency || 'KRW',
+    stock,
+    inventoryStatus: status,
+    sourceLabel: sourceInfo.label,
+    sourceDescription: sourceInfo.description,
+    suggestion: suggestionForStatus(status),
+    updatedAt: row.updatedAt || row.lastSyncedAt || '',
+  };
+}
+
+function matches(row, query = {}) {
+  const keyword = comparable(query.keyword);
+  const haystack = [row.name, row.platform, row.store, row.inventoryStatus, row.sourceLabel].map(comparable).join(' ');
+  if (keyword && !haystack.includes(keyword)) return false;
+  if (query.status && row.inventoryStatus !== query.status) return false;
+  if (query.platform && comparable(row.platform) !== comparable(query.platform)) return false;
+  if (query.storeId && String(row.storeId || '') !== String(query.storeId)) return false;
+  return true;
 }
 
 const columns = [
   { key: 'name', title: '商品名称', render: (value) => <strong>{value}</strong> },
-  { key: 'store', title: '店铺' },
   { key: 'platform', title: '平台' },
-  { key: 'price', title: '售价', render: (value, row) => moneyLabel(value, row.currency) },
-  { key: 'stock', title: '当前库存', render: (value) => {
-    const status = getInventoryStatusForStock(value);
-    return (
-      <div>
-        <strong>{status.stockLabel}</strong>
-        <small className="cell-subtitle">{status.label}</small>
-      </div>
-    );
-  } },
-  { key: 'statusLabel', title: '预警状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'sourceType', title: '数据来源', render: sourceLabel },
+  { key: 'store', title: '店铺' },
+  { key: 'price', title: '售价', render: (value, row) => money(value, row.currency) },
+  { key: 'stock', title: '当前库存' },
+  { key: 'inventoryStatus', title: '库存状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'suggestion', title: '库存不足处理建议' },
+  { key: 'sourceLabel', title: '数据来源' },
   { key: 'updatedAt', title: '最近同步' },
 ];
 
 export default function InventoryAlerts() {
-  const { selectedStore, selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
-  const { versions } = useSyncRefresh();
-  const [state, setState] = useState({ loading: true, rows: [], error: '' });
+  const {
+    stores,
+    selectedStoreId,
+    loading: storeLoading,
+    error: storeError,
+  } = useStoreContext();
+  const [query, setQuery] = useState({ keyword: '', status: '', platform: '', storeId: '' });
+  const [draft, setDraft] = useState(query);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    if (storeLoading) return () => { cancelled = true; };
-    if (storeError) {
-      setState({ loading: false, rows: [], error: storeError });
-      return () => { cancelled = true; };
+    async function load() {
+      if (storeLoading) return;
+      setLoading(true);
+      setError('');
+      try {
+        const params = { page: 1, pageSize: 200 };
+        if (isBackendSource && (query.storeId || selectedStoreId)) params.storeId = query.storeId || selectedStoreId;
+        const result = await dataProvider.getProducts(params);
+        const normalized = (result.data || result.items || []).map((item) => normalizeProduct(item, stores));
+        if (!cancelled) setRows(normalized.filter((item) => matches(item, query)));
+      } catch (requestError) {
+        if (!cancelled) {
+          setRows([]);
+          setError(requestError.message || '库存数据加载失败');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-    if (!selectedStoreId) {
-      setState({ loading: false, rows: [], error: '' });
-      return () => { cancelled = true; };
-    }
-
-    setState((current) => ({ ...current, loading: true, error: '' }));
-    dataProvider.getProducts({ storeId: selectedStoreId, page: 1, pageSize: 100 })
-      .then((result) => {
-        if (cancelled) return;
-        const rows = (result.data || result.items || []).map((item) => {
-          const stock = item.stock ?? item.stock_quantity ?? 0;
-          const stockStatus = getInventoryStatusForStock(stock);
-          return {
-            ...item,
-            store: displayStoreName(item.store || item.store_name, selectedStore),
-            stock,
-            statusLabel: stockStatus.label,
-            sourceType: item.sourceType || item.source_type,
-          };
-        }).filter((item) => Number(item.stock || 0) <= 5);
-        setState({ loading: false, rows, error: '' });
-      })
-      .catch((error) => {
-        if (!cancelled) setState({ loading: false, rows: [], error: error.message || '库存数据加载失败' });
-      });
-
+    load();
     return () => { cancelled = true; };
-  }, [selectedStore, selectedStoreId, storeError, storeLoading, versions.products]);
+  }, [query, selectedStoreId, storeLoading, stores]);
 
-  const summary = useMemo(() => {
-    const outOfStock = state.rows.filter((item) => Number(item.stock || 0) <= 0).length;
-    const lowStock = state.rows.length - outOfStock;
-    return { outOfStock, lowStock, total: state.rows.length };
-  }, [state.rows]);
+  const summary = useMemo(() => ({
+    out: rows.filter((item) => item.inventoryStatus === '缺货').length,
+    low: rows.filter((item) => item.inventoryStatus === '低库存').length,
+    normal: rows.filter((item) => item.inventoryStatus === '库存正常').length,
+    total: rows.length,
+  }), [rows]);
+
+  const search = () => setQuery({ ...draft });
+  const reset = () => {
+    const clean = { keyword: '', status: '', platform: '', storeId: '' };
+    setDraft(clean);
+    setQuery(clean);
+  };
 
   return (
     <>
       <PageHeader
         title="库存预警"
-        description="查看当前店铺缺货和低库存商品，优先补货或调整销售状态。"
-        actions={<button type="button" className="button ghost" onClick={() => window.location.reload()}>刷新库存</button>}
+        description="按本地库存判断缺货商品、低库存商品和库存正常商品，帮助运营决定补货、下架或人工确认。"
+        actions={(
+          <>
+            <Link className="button ghost" to="/products">跳转商品管理</Link>
+            <Link className="button primary" to="/shipping">跳转发货辅助</Link>
+          </>
+        )}
       />
+
+      <div className="summary-grid">
+        <SummaryCard title="缺货商品" value={summary.out} note="库存为 0" tone={summary.out ? 'danger' : 'success'} />
+        <SummaryCard title="低库存商品" value={summary.low} note="库存 1-5 件" tone={summary.low ? 'warning' : 'success'} />
+        <SummaryCard title="库存正常商品" value={summary.normal} note="库存高于预警线" tone="success" />
+        <SummaryCard title="本地库存判断" value={summary.total} note="不修改平台库存" tone="info" />
+      </div>
+
+      <FilterPanel>
+        <SearchBar
+          value={draft.keyword}
+          onChange={(keyword) => setDraft({ ...draft, keyword })}
+          onSearch={search}
+          onReset={reset}
+          placeholder="搜索商品、店铺、平台或库存状态"
+        >
+          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
+            {inventoryTabs.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+          </select>
+          <select value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value })}>
+            <option value="">全部平台</option>
+            <option value="Naver">Naver</option>
+            <option value="Coupang">Coupang</option>
+            <option value="Gmarket">Gmarket/ESM</option>
+          </select>
+          <select value={draft.storeId} onChange={(event) => setDraft({ ...draft, storeId: event.target.value })}>
+            <option value="">全部店铺</option>
+            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+          </select>
+        </SearchBar>
+      </FilterPanel>
+
       <section className="content-card">
-        <div className="business-capability-grid compact">
-          <article className={summary.total ? 'business-capability-card warning' : 'business-capability-card success'}>
-            <div className="business-capability-head">
-              <strong>需要关注</strong>
-              <span>{summary.total} 个商品</span>
-            </div>
-            <p>包含缺货和低库存商品，建议先处理缺货商品。</p>
-          </article>
-          <article className={summary.outOfStock ? 'business-capability-card danger' : 'business-capability-card muted'}>
-            <div className="business-capability-head">
-              <strong>缺货</strong>
-              <span>{summary.outOfStock} 个</span>
-            </div>
-            <p>库存为 0 的商品需要尽快补货或下架。</p>
-          </article>
-          <article className={summary.lowStock ? 'business-capability-card info' : 'business-capability-card muted'}>
-            <div className="business-capability-head">
-              <strong>低库存</strong>
-              <span>{summary.lowStock} 个</span>
-            </div>
-            <p>库存偏低，建议核对物流商库存编号和实际库存。</p>
-          </article>
-        </div>
-      </section>
-      <section className="content-card">
-        {state.error ? (
-          <EmptyState title="库存数据加载失败" description={state.error} />
-        ) : !state.loading && !state.rows.length ? (
+        {storeError ? <EmptyState title="店铺信息不可用" description={storeError} /> : null}
+        {error ? <EmptyState title="库存数据加载失败" description={error} /> : null}
+        {!error && !loading && !rows.length ? (
           <EmptyState
-            title="当前没有库存异常"
-            description="当前店铺暂未发现缺货或低库存商品。你可以返回商品管理查看全部商品。"
-            actions={<button type="button" className="button primary" onClick={() => { window.location.href = '/products'; }}>查看商品管理</button>}
+            title="暂无符合条件的库存记录"
+            description="可以切换库存状态或返回商品管理查看系统已保存商品记录。"
+            actions={<Link className="button primary" to="/products">查看商品管理</Link>}
           />
         ) : (
-          <DataTable columns={columns} rows={state.rows} loading={state.loading || storeLoading} />
+          <DataTable columns={columns} rows={rows} loading={loading || storeLoading} />
         )}
       </section>
     </>

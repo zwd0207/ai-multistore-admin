@@ -15,10 +15,10 @@ export default function ResourcePage({
   resourceName,
   api,
   columns,
-  fields,
-  statuses,
+  fields = [],
+  statuses = [],
   platforms = [],
-  initialForm,
+  initialForm = {},
   readOnly = false,
   canCreate = !readOnly,
   canEdit = !readOnly,
@@ -106,7 +106,10 @@ export default function ResourcePage({
   const save = async () => {
     if (submitting) return;
     const nextErrors = fields.reduce(
-      (value, field) => (field.type !== 'section' && field.required && (!field.showWhen || field.showWhen(form)) && !String(form[field.key] ?? '').trim()
+      (value, field) => (field.type !== 'section'
+        && field.required
+        && (!field.showWhen || field.showWhen(form))
+        && !String(form[field.key] ?? '').trim()
         ? { ...value, [field.key]: `请填写${field.label}` }
         : value),
       {},
@@ -134,7 +137,8 @@ export default function ResourcePage({
   };
 
   const remove = async (record) => {
-    if (!window.confirm(`确认删除“${record.name || record.orderNo}”吗？此操作不可撤销。`)) return;
+    const name = record.name || record.orderNo || record.id;
+    if (!window.confirm(`确认删除“${name}”吗？此操作只影响系统本地记录。`)) return;
     await api.remove(record.id);
     await load();
   };
@@ -157,7 +161,7 @@ export default function ResourcePage({
           <>
             <button className="button ghost" type="button" onClick={load}>刷新</button>
             {extraActions}
-            {readOnly ? <span className="period-chip">暂不支持在线处理</span> : null}
+            {readOnly ? <span className="period-chip">暂不支持在线编辑</span> : null}
             {canCreate ? <button className="button primary" type="button" onClick={() => openModal()}>新增{resourceName}</button> : null}
           </>
         )}
@@ -171,15 +175,21 @@ export default function ResourcePage({
           placeholder={`搜索${resourceName}名称、编号或负责人`}
         >
           {platforms.length > 0 && (
-            <select value={draftQuery.platform} onChange={(e) => setDraftQuery({ ...draftQuery, platform: e.target.value })}>
+            <select value={draftQuery.platform} onChange={(event) => setDraftQuery({ ...draftQuery, platform: event.target.value })}>
               <option value="">全部平台</option>
-              {platforms.map((item) => <option key={item}>{item}</option>)}
+              {platforms.map((item) => (typeof item === 'object'
+                ? <option key={item.value} value={item.value}>{item.label}</option>
+                : <option key={item}>{item}</option>))}
             </select>
           )}
-          <select value={draftQuery.status} onChange={(e) => setDraftQuery({ ...draftQuery, status: e.target.value })}>
-            <option value="">全部状态</option>
-            {statuses.map((item) => <option key={item}>{item}</option>)}
-          </select>
+          {statuses.length > 0 && (
+            <select value={draftQuery.status} onChange={(event) => setDraftQuery({ ...draftQuery, status: event.target.value })}>
+              <option value="">全部状态</option>
+              {statuses.map((item) => (typeof item === 'object'
+                ? <option key={item.value} value={item.value}>{item.label}</option>
+                : <option key={item}>{item}</option>))}
+            </select>
+          )}
         </SearchBar>
         {loadError ? (
           <EmptyState title={`${resourceName}数据加载失败`} description={loadError} />
@@ -210,7 +220,7 @@ export default function ResourcePage({
           confirmDisabled={submitting || formLoading}
           width={modalWidth}
         >
-          {formLoading && <div className="table-state"><span className="spinner" />正在读取店铺 API 设置...</div>}
+          {formLoading && <div className="table-state"><span className="spinner" />正在读取表单数据...</div>}
           {saveError && <div className="form-error">{saveError}</div>}
           <div className="form-grid">
             {fields.map((field) => {
@@ -230,7 +240,7 @@ export default function ResourcePage({
                     <select
                       value={form[field.key] ?? ''}
                       disabled={submitting || formLoading || field.disabled}
-                      onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                      onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
                     >
                       <option value="">请选择</option>
                       {field.options.map((option) => (typeof option === 'object'
@@ -243,14 +253,19 @@ export default function ResourcePage({
                       value={form[field.key] ?? ''}
                       disabled={submitting || formLoading || field.disabled}
                       placeholder={field.placeholder || `请输入${field.label}`}
-                      onChange={(e) => setForm({ ...form, [field.key]: field.type === 'number' ? Number(e.target.value) : e.target.value })}
+                      onChange={(event) => setForm({
+                        ...form,
+                        [field.key]: field.type === 'number' ? Number(event.target.value) : event.target.value,
+                      })}
                     />
                   )}
                   {help ? <small className="form-help">{help}</small> : null}
                 </FormField>
               );
             })}
-            {renderFormExtra ? renderFormExtra({ form, setForm, record: modal.record, submitting, formLoading }) : null}
+            {renderFormExtra ? renderFormExtra({
+              form, setForm, record: modal.record, submitting, formLoading,
+            }) : null}
           </div>
         </Modal>
       )}

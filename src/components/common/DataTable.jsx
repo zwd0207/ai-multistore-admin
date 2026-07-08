@@ -28,7 +28,7 @@ function renderCell(column, row) {
   if (column.render) return column.render(value, row);
   if (column.key === 'date') return toKstDisplayDate(value);
   if (TIME_COLUMN_KEYS.has(column.key)) return formatKstDateTimeWithLabel(value);
-  return value;
+  return value ?? '-';
 }
 
 export default function DataTable({
@@ -56,8 +56,8 @@ export default function DataTable({
           </tr>
         </thead>
         <tbody>
-          {rows.length ? rows.map((row) => (
-            <tr key={row[rowKey]}>
+          {rows.length ? rows.map((row, index) => (
+            <tr key={row[rowKey] ?? `${rowKey}-${index}`}>
               {columns.map((column) => <td key={column.key}>{renderCell(column, row)}</td>)}
               {hasActions && (
                 <td className="table-actions">

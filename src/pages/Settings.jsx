@@ -17,7 +17,9 @@ const tabs = [
 function normalizeBasicSettings(data = {}) {
   return {
     ...data,
-    systemName: data.systemName && !data.systemName.includes('环境管理') ? data.systemName : 'AI 多店铺运营工作台',
+    systemName: data.systemName && !data.systemName.includes('环境管理') && !data.systemName.includes('AI')
+      ? data.systemName
+      : '多店铺电商管理后台',
     defaultTimezone: data.defaultTimezone === 'Asia/Shanghai' ? 'Asia/Seoul' : (data.defaultTimezone || 'Asia/Seoul'),
     defaultCurrency: data.defaultCurrency || 'KRW',
   };
@@ -122,7 +124,7 @@ export default function Settings() {
     <>
       <PageHeader
         title="系统设置"
-        description="维护系统名称、韩国业务时间、默认币种、平台开关和提醒规则。高级排查信息不在普通页面展示。"
+        description="维护多店铺电商管理后台的系统名称、韩国时间 KST、韩元 KRW、平台显示、通知、风险规则和模板。高级排查信息不在普通运营主流程展示。"
         actions={<><button type="button" className="button ghost" onClick={resetAll}>恢复默认设置</button><button type="button" className="button primary" onClick={saveCurrent}>保存设置</button></>}
       />
 

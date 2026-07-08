@@ -1,66 +1,37 @@
-const tones = {
-  success: 'success',
-  info: 'info',
-  warning: 'warning',
-  danger: 'danger',
+const toneKeywords = [
+  { tone: 'danger', words: ['失败', '错误', '异常', '风险', '紧急', '缺货', '取消', '退款', '退货', '侵权', '冻结', '停用', '未通过'] },
+  { tone: 'warning', words: ['待', '需要', '预警', '低库存', '审核', '申诉', '补充', '处理中', '未开放', '暂未', '待同步', '待配置'] },
+  { tone: 'success', words: ['正常', '成功', '完成', '已配置', '已启用', '已保存', '已发货', '销售中', '可导出', '可查询', '可使用'] },
+  { tone: 'info', words: ['本地', '只读', '演示', '提示', '同步中', '配送中', '读取', '预览'] },
+];
 
-  正常: 'success',
-  正常运营: 'success',
-  已完成: 'success',
-  完成: 'success',
-  成功: 'success',
-  已处理: 'success',
-  备份可用: 'success',
-  低风险: 'success',
-  성공: 'success',
-  완료: 'success',
-
-  处理中: 'info',
-  待发货: 'info',
-  已发货: 'info',
-  配送中: 'info',
-  已计划: 'info',
-  已跳过: 'info',
-  中风险: 'info',
-  처리중: 'info',
-  배송중: 'info',
-
-  警告: 'warning',
-  需要复核: 'warning',
-  大小不一致: 'warning',
-  需复核: 'warning',
-  等待处理: 'warning',
-  等待批准: 'warning',
-  已阻断: 'warning',
-  已回滚: 'warning',
-  高风险: 'warning',
-  경고: 'warning',
-
-  失败: 'danger',
-  '失败，需要处理': 'danger',
-  紧急: 'danger',
-  风险: 'danger',
-  备份文件缺失: 'danger',
-  已取消: 'danger',
-  取消请求: 'danger',
-  退货请求: 'danger',
-  换货请求: 'danger',
-  실패: 'danger',
-
-  待确认: 'neutral',
-  未知: 'neutral',
-  暂无: 'neutral',
-  演示数据: 'neutral',
-};
-
-const displayLabels = {
+const valueLabels = {
+  active: '已启用',
+  inactive: '已停用',
+  normal: '正常',
   success: '正常',
-  info: '提示',
-  warning: '警告',
+  warning: '提醒',
   danger: '风险',
+  info: '提示',
+  pending: '待处理',
+  not_open: '暂未开放',
+  configured: '已配置',
+  unconfigured: '未配置',
 };
+
+function normalizeDisplay(value) {
+  const text = String(value ?? '').trim();
+  return valueLabels[text] || text || '-';
+}
+
+function getTone(value) {
+  const text = normalizeDisplay(value).toLowerCase();
+  if (['success', 'warning', 'danger', 'info', 'neutral', 'pending'].includes(String(value))) return String(value);
+  const matched = toneKeywords.find((item) => item.words.some((word) => text.includes(word.toLowerCase())));
+  return matched?.tone || 'neutral';
+}
 
 export default function StatusBadge({ value }) {
-  const displayValue = displayLabels[value] || value;
-  return <span className={`status-badge ${tones[value] || tones[displayValue] || 'neutral'}`}><i />{displayValue}</span>;
+  const displayValue = normalizeDisplay(value);
+  return <span className={`status-badge ${getTone(value)}`}><i />{displayValue}</span>;
 }
