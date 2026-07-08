@@ -27,3 +27,15 @@ def get_dashboard_summary(
         include_test_orders=include_test_orders,
     )
     return success_response(data=result)
+
+
+@router.get("/store-overview")
+def get_store_overview(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict:
+    result = stats_service.get_store_overview(
+        db,
+        include_inactive=include_inactive,
+    )
+    return success_response(data=result)

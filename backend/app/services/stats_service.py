@@ -10,6 +10,7 @@ from app.core.timezone import get_business_date, get_business_day_range, get_bus
 from app.core.exceptions import ApiError
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
+from app.models.api_credential import ApiCredential
 from app.models.order import Order
 from app.models.product import Product
 from app.models.store import Store
@@ -382,6 +383,325 @@ def _count_open_customer_inquiries(
     if platform is not None:
         statement = statement.where(CustomerInquiry.platform == platform)
     return len(db.scalars(statement).all())
+
+
+def _latest_manual_batch_log(db: Session, store_id: int, platform: str) -> SyncLog | None:
+    return db.scalar(
+        select(SyncLog)
+        .where(
+            SyncLog.store_id == store_id,
+            SyncLog.platform == platform,
+            SyncLog.sync_type == "manual_batch_sync",
+        )
+        .order_by(SyncLog.started_at.desc(), SyncLog.id.desc())
+    )
+
+
+def _latest_credential(db: Session, store_id: int, platform: str) -> ApiCredential | None:
+    return db.scalar(
+        select(ApiCredential)
+        .where(ApiCredential.store_id == store_id, ApiCredential.platform == platform)
+        .order_by(ApiCredential.id.desc())
+    )
+
+
+def _metric(value: int | None, data_status: str, reason: str = "") -> dict[str, Any]:
+    return {
+        "value": value,
+        "display_value": "?" if value is None else str(value),
+        "data_status": data_status,
+        "reason": reason,
+    }
+
+
+def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: str, credential: ApiCredential | None) -> dict[str, Any]:
+    if credential is None:
+        label = "Coupang" if platform == "coupang" else "Naver"
+        return {
+            "status": "unknown",
+            "error_code": "credential_not_ready",
+            "message": f"{label}：API 资料未配置完整",
+            "data_status": "unknown",
+        }
+
+    if log is None:
+        return {
+            "status": "pending",
+            "error_code": "not_synced",
+            "message": "待同步",
+            "data_status": "unknown",
+        }
+
+    raw_summary = log.raw_summary or {}
+    items = raw_summary.get("items") if isinstance(raw_summary, dict) else []
+    item = next((entry for entry in items or [] if entry.get("resource") == resource), None)
+    if item is None:
+        return {
+            "status": raw_summary.get("status") or log.status,
+            "error_code": "resource_not_synced",
+            "message": "待同步",
+            "data_status": "unknown",
+        }
+
+    status = str(item.get("status") or "").lower()
+    error_code = str(item.get("error_code") or "").lower()
+    message = item.get("message") or ""
+
+    if status == "success":
+        return {
+            "status": "success",
+            "error_code": error_code,
+            "message": message or "本地同步完成",
+            "data_status": "confirmed",
+        }
+    if error_code == "not_open":
+        return {
+            "status": "not_open",
+            "error_code": error_code,
+            "message": message or "暂未开放",
+            "data_status": "not_open",
+        }
+    if error_code in {"ip_not_allowed", "auth_failed"}:
+        return {
+            "status": "failed",
+            "error_code": "ip_not_allowed",
+            "message": message or ("Coupang：IP 白名单未通过" if platform == "coupang" else "Naver：IP 白名单未通过"),
+            "data_status": "unknown",
+        }
+    if "permission" in error_code or error_code in {"product_api_not_allowed", "order_api_not_allowed"}:
+        return {
+            "status": "failed",
+            "error_code": error_code,
+            "message": message or ("Coupang：API 权限未开通" if platform == "coupang" else "Naver：API 权限未开通"),
+            "data_status": "unknown",
+        }
+    if error_code in {"credential_not_ready", "credential_invalid", "credential_not_found", "channel_no_missing"}:
+        return {
+            "status": "failed",
+            "error_code": error_code,
+            "message": message or ("Coupang：API 资料未配置完整" if platform == "coupang" else "Naver：API 资料未配置完整"),
+            "data_status": "unknown",
+        }
+
+    return {
+        "status": status or "skipped",
+        "error_code": error_code or "sync_not_confirmed",
+        "message": message or "同步状态未确认",
+        "data_status": "unknown",
+    }
+
+
+def _order_is_pending_shipment(order: Order) -> bool:
+    raw_data = order.raw_data or {}
+    text = " ".join(str(value or "") for value in (
+        order.order_status,
+        raw_data.get("order_status_label_zh"),
+        raw_data.get("delivery_status"),
+        raw_data.get("delivery_status_label_zh"),
+    )).lower()
+    return any(flag in text for flag in (
+        "待发货",
+        "新订单",
+        "已付款",
+        "ready",
+        "payed",
+        "paid",
+        "place_product_order",
+        "delivery_ready",
+    ))
+
+
+def _order_is_abnormal(order: Order) -> bool:
+    raw_data = order.raw_data or {}
+    text = " ".join(str(value or "") for value in (
+        order.order_status,
+        raw_data.get("order_status_label_zh"),
+        raw_data.get("claim_status"),
+        raw_data.get("claim_status_label_zh"),
+    )).lower()
+    return any(flag in text for flag in (
+        "取消",
+        "退款",
+        "退货",
+        "换货",
+        "异常",
+        "cancel",
+        "refund",
+        "return",
+        "exchange",
+    ))
+
+
+def _store_order_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
+    if data_status["data_status"] != "confirmed":
+        reason = data_status["message"]
+        return {
+            "today_orders": _metric(None, data_status["data_status"], reason),
+            "pending_shipments": _metric(None, data_status["data_status"], reason),
+            "abnormal_orders": _metric(None, data_status["data_status"], reason),
+        }
+
+    today = get_business_date()
+    orders = db.scalars(select(Order).where(*_order_filters(
+        store_id=store_id,
+        platform=platform,
+        start_date=today,
+        end_date=today,
+        include_test_orders=False,
+    ))).all()
+    return {
+        "today_orders": _metric(len(orders), "confirmed"),
+        "pending_shipments": _metric(sum(1 for order in orders if _order_is_pending_shipment(order)), "confirmed"),
+        "abnormal_orders": _metric(sum(1 for order in orders if _order_is_abnormal(order)), "confirmed"),
+    }
+
+
+def _store_inventory_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
+    if data_status["data_status"] != "confirmed":
+        return {
+            "inventory_alerts": _metric(None, data_status["data_status"], data_status["message"]),
+        }
+    products = db.scalars(
+        select(Product).where(Product.store_id == store_id, Product.platform == platform)
+    ).all()
+    return {
+        "inventory_alerts": _metric(sum(1 for product in products if int(product.stock_quantity or 0) <= 5), "confirmed"),
+    }
+
+
+def _connection_status(resources: dict[str, dict[str, Any]], credential: ApiCredential | None) -> dict[str, str]:
+    ordered_resources = [resources["products"], resources["orders"], resources["customer_inquiries"]]
+    if credential is None:
+        return {"label": "API资料未配置完整", "tone": "danger", "reason": "请先在店铺管理中填写平台 API 资料。"}
+    for code, label in (
+        ("ip_not_allowed", "IP 白名单未通过"),
+        ("product_api_not_allowed", "API 权限未开通"),
+        ("order_api_not_allowed", "API 权限未开通"),
+        ("credential_not_ready", "API资料未配置完整"),
+        ("credential_invalid", "API资料未配置完整"),
+    ):
+        if any(resource.get("error_code") == code for resource in ordered_resources):
+            reason = next((resource["message"] for resource in ordered_resources if resource.get("error_code") == code), label)
+            return {"label": label, "tone": "danger", "reason": reason}
+
+    products_confirmed = resources["products"]["data_status"] == "confirmed"
+    orders_confirmed = resources["orders"]["data_status"] == "confirmed"
+    orders_not_open = resources["orders"]["data_status"] == "not_open"
+    customer_not_open = resources["customer_inquiries"]["data_status"] == "not_open"
+    if products_confirmed and orders_confirmed:
+        return {"label": "商品和订单可读", "tone": "success", "reason": "商品和订单已可读取并写入本地 ERP。"}
+    if products_confirmed and orders_not_open:
+        return {"label": "商品可读，订单暂未开放", "tone": "warning", "reason": resources["orders"]["message"]}
+    if products_confirmed and customer_not_open:
+        return {"label": "商品可读，客服暂未接入", "tone": "warning", "reason": resources["customer_inquiries"]["message"]}
+    if all(resource["status"] == "pending" for resource in ordered_resources):
+        return {"label": "待同步", "tone": "warning", "reason": "还没有执行过当前店铺手动同步。"}
+    if any(resource["data_status"] == "confirmed" for resource in ordered_resources):
+        return {"label": "部分同步完成", "tone": "warning", "reason": "部分基础数据已写入本地，其余项目仍需处理。"}
+    return {"label": "同步状态未确认", "tone": "warning", "reason": ordered_resources[0]["message"]}
+
+
+def _store_overview_row(db: Session, store: Store) -> dict[str, Any]:
+    try:
+        platform = normalize_platform(store.platform)
+    except ApiError:
+        not_open_reason = "该平台暂未接入官方 API 读取。"
+        return {
+            "id": store.id,
+            "store_id": store.id,
+            "store_name": store.name,
+            "platform": store.platform,
+            "owner_name": store.owner_name,
+            "store_status": store.status,
+            "connection_status": "暂未接入",
+            "connection_tone": "warning",
+            "connection_reason": "该平台暂未接入官方 API 读取。",
+            "last_sync_at": None,
+            "latest_manual_sync_status": None,
+            "resources": {
+                "products": {"status": "not_open", "error_code": "not_open", "message": "暂未接入", "data_status": "not_open"},
+                "orders": {"status": "not_open", "error_code": "not_open", "message": "暂未接入", "data_status": "not_open"},
+                "customer_inquiries": {"status": "not_open", "error_code": "not_open", "message": "暂未接入", "data_status": "not_open"},
+            },
+            "metrics": {
+                "today_orders": _metric(None, "not_open", not_open_reason),
+                "pending_shipments": _metric(None, "not_open", not_open_reason),
+                "abnormal_orders": _metric(None, "not_open", not_open_reason),
+                "inventory_alerts": _metric(None, "not_open", not_open_reason),
+            },
+        }
+    credential = _latest_credential(db, store.id, platform)
+    latest_log = _latest_manual_batch_log(db, store.id, platform)
+    resources = {
+        "products": _manual_item_status_from_log(latest_log, "products", platform, credential),
+        "orders": _manual_item_status_from_log(latest_log, "orders", platform, credential),
+        "customer_inquiries": _manual_item_status_from_log(latest_log, "customer_inquiries", platform, credential),
+    }
+    connection = _connection_status(resources, credential)
+    metrics = {
+        **_store_order_metrics(db, store.id, platform, resources["orders"]),
+        **_store_inventory_metrics(db, store.id, platform, resources["products"]),
+    }
+    last_sync_at = None
+    if latest_log is not None:
+        last_sync_at = (latest_log.finished_at or latest_log.started_at).isoformat()
+
+    return {
+        "id": store.id,
+        "store_id": store.id,
+        "store_name": store.name,
+        "platform": platform,
+        "owner_name": store.owner_name,
+        "store_status": store.status,
+        "connection_status": connection["label"],
+        "connection_tone": connection["tone"],
+        "connection_reason": connection["reason"],
+        "last_sync_at": last_sync_at,
+        "latest_manual_sync_status": (latest_log.raw_summary or {}).get("status") if latest_log and isinstance(latest_log.raw_summary, dict) else None,
+        "resources": resources,
+        "metrics": metrics,
+    }
+
+
+def _metric_known_value(row: dict[str, Any], metric_key: str) -> int:
+    metric = row["metrics"][metric_key]
+    return int(metric["value"] or 0) if metric["value"] is not None else 0
+
+
+def get_store_overview(
+    db: Session,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    stores = db.scalars(select(Store).order_by(Store.id.asc())).all()
+    if not include_inactive:
+        stores = [store for store in stores if store.status != "inactive"]
+    rows = [_store_overview_row(db, store) for store in stores]
+    orders_unknown_store_count = sum(
+        1 for row in rows
+        if row["metrics"]["today_orders"]["display_value"] == "?"
+        or row["metrics"]["pending_shipments"]["display_value"] == "?"
+        or row["metrics"]["abnormal_orders"]["display_value"] == "?"
+    )
+    inventory_unknown_store_count = sum(1 for row in rows if row["metrics"]["inventory_alerts"]["display_value"] == "?")
+    return {
+        **_business_scope_metadata(),
+        "status": "store_overview_ready",
+        "data_policy": "无法确认真实平台数据时显示 ?，避免把未知误判为 0。",
+        "store_count": len(rows),
+        "stores": rows,
+        "summary": {
+            "store_count": len(rows),
+            "connected_store_count": sum(1 for row in rows if row["connection_tone"] == "success"),
+            "attention_store_count": sum(1 for row in rows if row["connection_tone"] in {"warning", "danger"}),
+            "ip_blocked_store_count": sum(1 for row in rows if any(resource.get("error_code") == "ip_not_allowed" for resource in row["resources"].values())),
+            "orders_unknown_store_count": orders_unknown_store_count,
+            "inventory_unknown_store_count": inventory_unknown_store_count,
+            "today_order_count": sum(_metric_known_value(row, "today_orders") for row in rows),
+            "pending_shipment_count": sum(_metric_known_value(row, "pending_shipments") for row in rows),
+            "abnormal_order_count": sum(_metric_known_value(row, "abnormal_orders") for row in rows),
+            "inventory_alert_count": sum(_metric_known_value(row, "inventory_alerts") for row in rows),
+        },
+    }
 
 
 def _get_stores(db: Session, store_id: int | None = None) -> list[Store]:

@@ -23,6 +23,7 @@ from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
 from app.models.product import Product
 from app.models.sync_checkpoint import SyncCheckpoint
+from app.models.store import Store
 from app.schemas.credential import DecryptedCredential
 from app.services import api_credential_readiness_service
 from app.services.encryption import decrypt_value
@@ -1384,6 +1385,113 @@ def manual_batch_sync(
         },
     )
     return result
+
+
+def manual_batch_sync_all_stores(
+    db: Session,
+    *,
+    platforms: list[str] | None = None,
+    include_products: bool = True,
+    include_orders: bool = True,
+    include_customer_inquiries: bool = True,
+    include_inactive: bool = False,
+    replace_policy: str = "delete_absent_when_full_snapshot",
+) -> dict:
+    requested_platforms: list[str] = []
+    for platform in platforms or []:
+        try:
+            normalized = normalize_platform(platform)
+        except ApiError:
+            continue
+        if normalized not in requested_platforms:
+            requested_platforms.append(normalized)
+    if not requested_platforms:
+        requested_platforms = sorted(MANUAL_BATCH_SUPPORTED_PLATFORMS)
+
+    stores = db.scalars(select(Store).order_by(Store.id.asc())).all()
+    if not include_inactive:
+        stores = [store for store in stores if store.status != "inactive"]
+
+    store_results: list[dict] = []
+    for store in stores:
+        try:
+            store_platform = normalize_platform(store.platform)
+        except ApiError:
+            store_results.append({
+                "store_id": store.id,
+                "store_name": store.name,
+                "platform": store.platform,
+                "status": "skipped",
+                "message": "该平台暂未接入真实读取同步",
+                "platform_write": False,
+                "items": [],
+                "summary": {"success_count": 0, "failed_count": 0, "skipped_count": 1, "created_count": 0, "updated_count": 0, "deleted_count": 0},
+            })
+            continue
+        if store_platform not in requested_platforms:
+            continue
+        try:
+            result = manual_batch_sync(
+                db,
+                store_id=store.id,
+                platforms=[store_platform],
+                include_products=include_products,
+                include_orders=include_orders,
+                include_customer_inquiries=include_customer_inquiries,
+                replace_policy=replace_policy,
+            )
+            store_results.append({
+                **result,
+                "store_name": store.name,
+                "platform_write": False,
+            })
+        except Exception as exc:
+            items: list[dict] = []
+            if include_products:
+                items.append(_manual_batch_item_from_error(store_platform, "products", exc))
+            if include_orders:
+                items.append(_manual_batch_item_from_error(store_platform, "orders", exc))
+            if include_customer_inquiries:
+                items.append(_manual_sync_customer_inquiries(store_platform))
+            status = _manual_batch_result_status(items)
+            store_results.append({
+                "store_id": store.id,
+                "store_name": store.name,
+                "store_platform": store_platform,
+                "platform": store_platform,
+                "status": status,
+                "message": _manual_batch_message_for_error(store_platform, getattr(exc, "error_code", None), getattr(exc, "message", str(exc))),
+                "platform_write": False,
+                "items": items,
+                "summary": {
+                    "success_count": sum(1 for item in items if item.get("status") == "success"),
+                    "failed_count": sum(1 for item in items if item.get("status") == "failed"),
+                    "skipped_count": sum(1 for item in items if item.get("status") == "skipped"),
+                    "created_count": 0,
+                    "updated_count": 0,
+                    "deleted_count": 0,
+                },
+            })
+
+    summary = {
+        "store_count": len(store_results),
+        "success_count": sum(1 for item in store_results if item.get("status") == "success"),
+        "partial_success_count": sum(1 for item in store_results if item.get("status") == "partial_success"),
+        "failed_count": sum(1 for item in store_results if item.get("status") == "failed"),
+        "skipped_count": sum(1 for item in store_results if item.get("status") == "skipped"),
+        "created_count": sum(int(item.get("summary", {}).get("created_count") or 0) for item in store_results),
+        "updated_count": sum(int(item.get("summary", {}).get("updated_count") or 0) for item in store_results),
+        "deleted_count": 0,
+    }
+    return {
+        "status": "success" if summary["failed_count"] == 0 else ("partial_success" if summary["success_count"] or summary["partial_success_count"] else "failed"),
+        "requested_platforms": requested_platforms,
+        "replace_policy": replace_policy,
+        "delete_policy": "delete_absent_only_when_full_snapshot_confirmed",
+        "platform_write": False,
+        "store_results": store_results,
+        "summary": summary,
+    }
 
 
 def preview_coupang_orders(

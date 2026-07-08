@@ -9,6 +9,7 @@ from app.schemas.sync import (
     CoupangProductSyncRequest,
     CoupangSalesPreviewRequest,
     CoupangSettlementPreviewRequest,
+    ManualAllStoresSyncRequest,
     ManualBatchSyncRequest,
     NaverOrderPreviewRequest,
     NaverProductPreviewRequest,
@@ -34,6 +35,23 @@ def manual_batch_sync(
         replace_policy=payload.replace_policy,
     )
     return success_response(data=result, message="manual batch sync completed")
+
+
+@router.post("/manual-batch/all")
+def manual_batch_sync_all_stores(
+    payload: ManualAllStoresSyncRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.manual_batch_sync_all_stores(
+        db,
+        platforms=payload.platforms,
+        include_products=payload.include_products,
+        include_orders=payload.include_orders,
+        include_customer_inquiries=payload.include_customer_inquiries,
+        include_inactive=payload.include_inactive,
+        replace_policy=payload.replace_policy,
+    )
+    return success_response(data=result, message="manual batch sync for all stores completed")
 
 
 @router.post("/products/mock")

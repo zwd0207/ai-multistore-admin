@@ -94,3 +94,12 @@ class ManualBatchSyncRequest(BaseModel):
     include_orders: bool = True
     include_customer_inquiries: bool = True
     replace_policy: str = "delete_absent_when_full_snapshot"
+
+
+class ManualAllStoresSyncRequest(BaseModel):
+    platforms: list[str] = Field(default_factory=lambda: ["naver", "coupang"])
+    include_products: bool = True
+    include_orders: bool = True
+    include_customer_inquiries: bool = True
+    include_inactive: bool = False
+    replace_policy: str = "delete_absent_when_full_snapshot"
