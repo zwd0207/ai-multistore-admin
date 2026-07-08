@@ -4,6 +4,7 @@ import PageHeader from '../components/common/PageHeader';
 import SettingsSection from '../components/common/SettingsSection';
 import StatusBadge from '../components/common/StatusBadge';
 import ToggleSwitch from '../components/common/ToggleSwitch';
+import dataProvider, { DATA_SOURCE } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
 
 const tabs = [
@@ -12,6 +13,7 @@ const tabs = [
   ['notifications', '通知设置'],
   ['risks', '风险规则'],
   ['templates', '模板设置'],
+  ['readiness', '交付检查'],
 ];
 
 function normalizeBasicSettings(data = {}) {
@@ -34,6 +36,14 @@ function platformStatusLabel(value) {
   return labels[value] || value || '正常运营';
 }
 
+function readinessStatusTone(item = {}) {
+  if (item.tone) return item.tone;
+  if (String(item.status || '').includes('通过')) return 'success';
+  if (String(item.status || '').includes('禁止')) return 'danger';
+  if (String(item.status || '').includes('需要') || String(item.status || '').includes('建议')) return 'warning';
+  return 'neutral';
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('basic');
   const [basic, setBasic] = useState(null);
@@ -41,21 +51,31 @@ export default function Settings() {
   const [notifications, setNotifications] = useState(null);
   const [riskRules, setRiskRules] = useState(null);
   const [templates, setTemplates] = useState(null);
+  const [operatorReadiness, setOperatorReadiness] = useState(null);
+  const [readinessError, setReadinessError] = useState('');
   const [errors, setErrors] = useState({});
 
   const load = async () => {
-    const [basicData, platformData, notificationData, riskData, templateData] = await Promise.all([
+    const [basicData, platformData, notificationData, riskData, templateData, readinessData] = await Promise.all([
       mockApi.getSystemSettings(),
       mockApi.getPlatformSettings(),
       mockApi.getNotificationSettings(),
       mockApi.getRiskRules(),
       mockApi.getTemplateSettings(),
+      dataProvider.getOperatorReadiness().catch((error) => {
+        setReadinessError(error.message || '交付检查加载失败');
+        return null;
+      }),
     ]);
     setBasic(normalizeBasicSettings(basicData));
     setPlatforms(platformData);
     setNotifications(notificationData);
     setRiskRules(riskData);
     setTemplates(templateData);
+    if (readinessData) {
+      setOperatorReadiness(readinessData);
+      setReadinessError('');
+    }
   };
 
   useEffect(() => {
@@ -116,6 +136,15 @@ export default function Settings() {
     await mockApi.resetSystemSettings();
     setErrors({});
     await load();
+  };
+
+  const refreshOperatorReadiness = async () => {
+    setReadinessError('');
+    try {
+      setOperatorReadiness(await dataProvider.getOperatorReadiness());
+    } catch (error) {
+      setReadinessError(error.message || '交付检查加载失败');
+    }
   };
 
   if (!basic || !notifications || !riskRules || !templates) return null;
@@ -265,6 +294,64 @@ export default function Settings() {
                 <textarea value={templates[key]} onChange={(event) => setTemplates({ ...templates, [key]: event.target.value })} />
               </FormField>
             ))}
+          </div>
+        </SettingsSection>
+      )}
+
+      {activeTab === 'readiness' && (
+        <SettingsSection
+          title="运营试用交付检查"
+          description="给运营人员使用前先看这里：确认后端服务、数据源、平台写入关闭、店铺连接和备份状态。"
+          actions={<button type="button" className="button ghost" onClick={refreshOperatorReadiness}>刷新检查</button>}
+        >
+          {readinessError ? (
+            <div className="form-error">{readinessError}</div>
+          ) : null}
+          <div className="readiness-grid">
+            <article className="readiness-card">
+              <span>当前数据源</span>
+              <strong>{DATA_SOURCE === 'backend' ? '读取本地保存记录' : '演示数据'}</strong>
+              <p>{DATA_SOURCE === 'backend' ? '正在连接 Codex1 本地后端。' : '当前不会读取真实本地数据库。'}</p>
+            </article>
+            <article className="readiness-card">
+              <span>店铺状态</span>
+              <strong>{operatorReadiness?.storeCount ?? '-'} 个店铺</strong>
+              <p>{operatorReadiness?.unknownStoreCount ?? 0} 个店铺有无法确认指标，页面会显示“?”，不是 0。</p>
+            </article>
+            <article className="readiness-card">
+              <span>IP 白名单</span>
+              <strong>{operatorReadiness?.ipBlockedStoreCount ?? 0} 个阻断</strong>
+              <p>出现 IP 白名单未通过时，需要到对应平台后台或开放平台处理。</p>
+            </article>
+            <article className="readiness-card">
+              <span>平台写入关闭</span>
+              <strong>{operatorReadiness?.platformWriteClosed ? '已关闭' : '需要立即检查'}</strong>
+              <p>本阶段不允许发货回填、改价、改库存、自动回复或自动提交申诉。</p>
+            </article>
+          </div>
+
+          <div className="readiness-check-list">
+            {(operatorReadiness?.checks || []).map((item) => (
+              <div className="settings-row" key={item.key}>
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.detail}</p>
+                </div>
+                <StatusBadge value={item.status} tone={readinessStatusTone(item)} />
+              </div>
+            ))}
+          </div>
+
+          <div className="operator-runbook">
+            <h3>运营 SOP</h3>
+            <ol>
+              <li>每天先看首页“全店铺运营总览”，优先处理待发货、异常订单和库存预警。</li>
+              <li>看到“?”时表示系统无法确认平台真实数据，不要当作 0。</li>
+              <li>看到 IP 白名单或 API 资料问题时，先到“店铺管理”补资料或联系平台处理。</li>
+              <li>发货辅助只帮助人工核对和导出表格，不会自动回填 Naver / Coupang。</li>
+              <li>交接或大批量手动同步前，先运行 scripts/operator-db-backup.ps1 创建本地备份。</li>
+            </ol>
+            <p>详细说明见 PHASE_CORE_ERP_OPERATOR_READY_1.md。</p>
           </div>
         </SettingsSection>
       )}

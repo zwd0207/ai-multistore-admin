@@ -31,7 +31,7 @@ function getTone(value) {
   return matched?.tone || 'neutral';
 }
 
-export default function StatusBadge({ value }) {
+export default function StatusBadge({ value, tone }) {
   const displayValue = normalizeDisplay(value);
-  return <span className={`status-badge ${getTone(value)}`}><i />{displayValue}</span>;
+  return <span className={`status-badge ${tone || getTone(value)}`}><i />{displayValue}</span>;
 }

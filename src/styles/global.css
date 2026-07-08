@@ -217,6 +217,16 @@ tbody tr:hover { background: #fafbff; }
 .settings-section + .settings-section { margin-top: 18px; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; }
 .settings-stack { display: flex; flex-direction: column; gap: 14px; }
+.readiness-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.readiness-card { border: 1px solid #e6edf6; border-radius: 10px; background: #fbfcff; padding: 14px; }
+.readiness-card span { display: block; color: var(--muted); font-size: 12px; }
+.readiness-card strong { display: block; margin: 8px 0 6px; color: #1f2937; font-size: 20px; }
+.readiness-card p { margin: 0; color: #5d6878; font-size: 12px; line-height: 1.5; }
+.readiness-check-list { display: grid; gap: 10px; margin-bottom: 16px; }
+.operator-runbook { border: 1px solid #e6edf6; border-radius: 10px; background: #fff; padding: 16px; }
+.operator-runbook h3 { margin: 0 0 10px; font-size: 15px; }
+.operator-runbook ol { margin: 0; padding-left: 20px; color: #405066; line-height: 1.7; }
+.operator-runbook p { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .toggle-switch { display: inline-flex; align-items: center; gap: 10px; color: #334155; font-size: 14px; }
 .toggle-switch input { display: none; }
 .toggle-track { width: 44px; height: 24px; border-radius: 999px; background: #d9dfeb; position: relative; transition: .2s ease; }
@@ -249,4 +259,4 @@ tbody tr:hover { background: #fafbff; }
 @media (max-width: 1400px) { .shipping-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .shipping-step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1200px) { .shipping-summary-grid, .shipping-step-grid, .shipping-approval-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1400px) { .summary-grid { grid-template-columns: repeat(3, 1fr); } .panel-grid { grid-template-columns: 1fr; } }
-@media (max-width: 1200px) { .template-list, .detail-grid, .form-grid, .summary-grid, .info-grid, .binding-item, .settings-grid, .mini-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1200px) { .template-list, .detail-grid, .form-grid, .summary-grid, .info-grid, .binding-item, .settings-grid, .mini-grid, .readiness-grid { grid-template-columns: 1fr; } }

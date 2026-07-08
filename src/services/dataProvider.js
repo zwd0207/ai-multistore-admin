@@ -5833,6 +5833,96 @@ const sourceMethods = {
     }
     return adapters.backupLocalReportSummary(await backendApi.getBackupLocalReportSummary({ limit: params.limit || 20 }));
   },
+  getOperatorReadiness: async () => {
+    const health = isBackendSource
+      ? await backendApi.healthCheck()
+      : {
+        status: 'mock',
+        environment: 'mock',
+        api_version: 'local',
+        real_api_write_enabled: false,
+        platform_write_closed: true,
+      };
+    const overview = isBackendSource
+      ? adapters.storeOverview(await backendApi.getStoreOverview({ include_inactive: false }))
+      : adapters.storeOverview(mockStoreOverview());
+    const backup = isBackendSource
+      ? adapters.backupLocalReportSummary(await backendApi.getBackupLocalReportSummary({ limit: 5 }))
+      : adapters.backupLocalReportSummary({
+        status: 'mock_backup_summary_unavailable',
+        business_message: 'mock 模式不读取本地真实备份摘要。',
+        backup_report_readonly: true,
+        backup_count: 0,
+        manifest_count: 0,
+        existing_backup_count: 0,
+        needs_attention_count: 0,
+        backup_deleted: false,
+        real_restore_executed: false,
+        production_db_touched: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+        privacy_fields_redacted: true,
+        formal_sync_open: false,
+        platform_writes_enabled: false,
+      });
+    const overviewSummary = overview.summary || {};
+    const unknownStoreCount = Math.max(
+      Number(overviewSummary.ordersUnknownStoreCount || 0),
+      Number(overviewSummary.inventoryUnknownStoreCount || 0),
+    );
+    const platformWriteClosed = Boolean(
+      health.platform_write_closed ?? health.platformWriteClosed ?? health.real_api_write_enabled === false,
+    ) && backup.platformWritesEnabled !== true && backup.formalSyncOpen !== true;
+    const checks = [
+      {
+        key: 'backend',
+        label: '后端服务',
+        status: health.status === 'ok' || health.status === 'mock' ? '通过' : '需要检查',
+        detail: isBackendSource ? `API ${health.api_version || 'v1'} / ${health.environment || 'local'}` : '当前为 mock 数据源。',
+        tone: health.status === 'ok' || health.status === 'mock' ? 'success' : 'danger',
+      },
+      {
+        key: 'platform_write_closed',
+        label: '平台写入关闭',
+        status: platformWriteClosed ? '通过' : '禁止交付',
+        detail: platformWriteClosed ? 'Naver / Coupang 写入、回填、改价、改库存仍保持关闭。' : '检测到平台写入或正式同步开关打开，请先关闭。',
+        tone: platformWriteClosed ? 'success' : 'danger',
+      },
+      {
+        key: 'store_overview',
+        label: '全店铺总览',
+        status: overview.stores.length ? '可查看' : '需要检查',
+        detail: `${overview.stores.length} 个店铺；${unknownStoreCount} 个店铺存在无法确认指标。`,
+        tone: overview.stores.length ? (unknownStoreCount ? 'warning' : 'success') : 'danger',
+      },
+      {
+        key: 'ip_whitelist',
+        label: 'IP 白名单',
+        status: overviewSummary.ipBlockedStoreCount ? '需要处理' : '未发现阻断',
+        detail: overviewSummary.ipBlockedStoreCount ? `${overviewSummary.ipBlockedStoreCount} 个店铺显示 IP 白名单未通过。` : '当前总览未发现 IP 白名单阻断。',
+        tone: overviewSummary.ipBlockedStoreCount ? 'warning' : 'success',
+      },
+      {
+        key: 'backup',
+        label: '备份状态',
+        status: backup.existingBackupCount ? '已有备份' : '建议先备份',
+        detail: backup.existingBackupCount ? `可用备份 ${backup.existingBackupCount} 个，需复核 ${backup.needsAttentionCount} 个。` : '交给运营前建议运行 scripts/operator-db-backup.ps1。',
+        tone: backup.existingBackupCount ? (backup.needsAttentionCount ? 'warning' : 'success') : 'warning',
+      },
+    ];
+    return {
+      status: 'operator_readiness',
+      dataSource: DATA_SOURCE,
+      backendOnline: health.status === 'ok' || health.status === 'mock',
+      platformWriteClosed,
+      unknownStoreCount,
+      ipBlockedStoreCount: Number(overviewSummary.ipBlockedStoreCount || 0),
+      storeCount: overview.stores.length,
+      backup,
+      overview,
+      checks,
+    };
+  },
   getDeviceEnvironments: async (params) => {
     if (!isBackendSource) return mockApi.getEnvironments(params);
     const { store, stores } = await resolveBackendStore(params);
