@@ -1074,6 +1074,318 @@ def sync_customer_inquiries_mock(db: Session, store_id: int, platform: str) -> d
     )
 
 
+MANUAL_BATCH_SYNC_TYPE = "manual_batch_sync"
+MANUAL_BATCH_SUPPORTED_PLATFORMS = {"naver", "coupang"}
+MANUAL_BATCH_RESOURCE_LABELS = {
+    "products": "商品",
+    "orders": "订单",
+    "customer_inquiries": "客服消息",
+}
+MANUAL_BATCH_PLATFORM_LABELS = {
+    "naver": "Naver",
+    "coupang": "Coupang",
+}
+
+
+def _manual_batch_platforms(platforms: list[str] | None, store_platform: str) -> list[str]:
+    requested = []
+    for platform in platforms or []:
+        normalized = normalize_platform(platform)
+        if normalized in MANUAL_BATCH_SUPPORTED_PLATFORMS and normalized not in requested:
+            requested.append(normalized)
+    if requested:
+        return requested
+    return [store_platform] if store_platform in MANUAL_BATCH_SUPPORTED_PLATFORMS else []
+
+
+def _manual_batch_item(
+    *,
+    platform: str,
+    resource: str,
+    status: str,
+    message: str,
+    error_code: str | None = None,
+    created_count: int = 0,
+    updated_count: int = 0,
+    skipped_count: int = 0,
+    deleted_count: int = 0,
+    full_snapshot: bool = False,
+    delete_executed: bool = False,
+    source_type: str | None = None,
+    raw_status: str | None = None,
+) -> dict:
+    return {
+        "status": status,
+        "platform": platform,
+        "resource": resource,
+        "message": message,
+        "error_code": error_code,
+        "created_count": int(created_count or 0),
+        "updated_count": int(updated_count or 0),
+        "skipped_count": int(skipped_count or 0),
+        "deleted_count": int(deleted_count or 0),
+        "full_snapshot": bool(full_snapshot),
+        "delete_executed": bool(delete_executed),
+        "platform_write": False,
+        "source_type": source_type,
+        "raw_status": raw_status,
+    }
+
+
+def _manual_batch_message_for_error(platform: str, error_code: str | None, fallback: str | None = None) -> str:
+    label = MANUAL_BATCH_PLATFORM_LABELS.get(platform, platform)
+    code = str(error_code or "").lower()
+    if code in {"ip_not_allowed", "auth_failed"}:
+        return f"{label}：IP 白名单未通过"
+    if code in {"permission_forbidden", "product_api_not_allowed", "order_api_not_allowed"} or "permission" in code:
+        return f"{label}：API 权限未开通"
+    if code in {"credential_not_ready", "credential_invalid", "channel_no_missing"}:
+        return f"{label}：API 资料未配置完整"
+    if code in {"real_api_test_disabled", "guardrail_blocked"}:
+        return f"{label}：当前同步门禁未开放"
+    if code == "store_platform_mismatch":
+        return f"当前店铺不是 {label} 店铺，已跳过"
+    return fallback or f"{label}：同步失败"
+
+
+def _manual_batch_item_from_error(platform: str, resource: str, exc: Exception) -> dict:
+    raw_code = getattr(exc, "error_code", None) or "manual_sync_failed"
+    error_code = "ip_not_allowed" if platform == "coupang" and str(raw_code).lower() == "auth_failed" else raw_code
+    message = _manual_batch_message_for_error(platform, error_code, getattr(exc, "message", str(exc)))
+    skipped_codes = {"store_platform_mismatch", "real_api_test_disabled", "guardrail_blocked"}
+    status = "skipped" if str(raw_code).lower() in skipped_codes else "failed"
+    return _manual_batch_item(
+        platform=platform,
+        resource=resource,
+        status=status,
+        message=message,
+        error_code=error_code,
+    )
+
+
+def _manual_batch_result_status(items: list[dict]) -> str:
+    if not items:
+        return "skipped"
+    statuses = {item.get("status") for item in items}
+    if statuses == {"success"}:
+        return "success"
+    if "success" in statuses:
+        return "partial_success"
+    if "failed" in statuses:
+        return "failed"
+    return "skipped"
+
+
+def _manual_batch_resource_message(platform: str, resource: str, result: dict) -> str:
+    label = MANUAL_BATCH_PLATFORM_LABELS.get(platform, platform)
+    resource_label = MANUAL_BATCH_RESOURCE_LABELS.get(resource, resource)
+    created = int(result.get("created_count") or 0)
+    updated = int(result.get("updated_count") or 0)
+    return f"{label}{resource_label}本地同步完成：新增 {created}，更新 {updated}"
+
+
+def _manual_sync_naver_products(db: Session, store_id: int) -> dict:
+    result = preview_naver_products(
+        db,
+        store_id=store_id,
+        credential_id=None,
+        page=1,
+        size=5,
+        status="ALL",
+        real_preview=True,
+        real_sync=True,
+        manual_approval=False,
+    )
+    local_result = result.get("local_sync_result") or {}
+    if result.get("preview_status") == "failed":
+        error_code = result.get("error_code") or "readonly_request_failed"
+        return _manual_batch_item(
+            platform="naver",
+            resource="products",
+            status="failed",
+            message=_manual_batch_message_for_error("naver", error_code),
+            error_code=error_code,
+        )
+    if local_result.get("status") == "success":
+        return _manual_batch_item(
+            platform="naver",
+            resource="products",
+            status="success",
+            message=_manual_batch_resource_message("naver", "products", local_result),
+            created_count=local_result.get("created_count", 0),
+            updated_count=local_result.get("updated_count", 0),
+            skipped_count=local_result.get("skipped_count", 0),
+            source_type=local_result.get("source_type") or NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+            raw_status=local_result.get("status"),
+        )
+    error_code = local_result.get("skip_reason") or result.get("error_code") or "local_sync_not_ready"
+    return _manual_batch_item(
+        platform="naver",
+        resource="products",
+        status="skipped",
+        message=_manual_batch_message_for_error("naver", error_code, "Naver商品暂未写入本地"),
+        error_code=error_code,
+        skipped_count=local_result.get("skipped_count", 0),
+        source_type=local_result.get("source_type") or NAVER_PRODUCT_SYNC_SOURCE_TYPE,
+        raw_status=local_result.get("status"),
+    )
+
+
+def _manual_sync_naver_orders() -> dict:
+    return _manual_batch_item(
+        platform="naver",
+        resource="orders",
+        status="skipped",
+        message="Naver暂未开放批量订单同步",
+        error_code="not_open",
+        source_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+    )
+
+
+def _manual_sync_coupang_products(db: Session, store_id: int) -> dict:
+    result = sync_coupang_products(db, store_id=store_id, status="APPROVED", max_pages=1)
+    return _manual_batch_item(
+        platform="coupang",
+        resource="products",
+        status="success",
+        message=_manual_batch_resource_message("coupang", "products", result),
+        created_count=result.get("created_count", 0),
+        updated_count=result.get("updated_count", 0),
+        skipped_count=result.get("skipped_count", 0),
+        full_snapshot=False,
+        delete_executed=False,
+        source_type=result.get("source_type") or COUPANG_PRODUCT_SOURCE_TYPE,
+        raw_status=result.get("sync_type"),
+    )
+
+
+def _manual_sync_coupang_orders(db: Session, store_id: int) -> dict:
+    result = sync_coupang_orders(db, store_id=store_id, max_pages=1)
+    return _manual_batch_item(
+        platform="coupang",
+        resource="orders",
+        status="success",
+        message=_manual_batch_resource_message("coupang", "orders", result),
+        created_count=result.get("created_count", 0),
+        updated_count=result.get("updated_count", 0),
+        skipped_count=result.get("skipped_count", 0),
+        full_snapshot=False,
+        delete_executed=False,
+        source_type=result.get("source_type") or COUPANG_ORDER_SOURCE_TYPE,
+        raw_status=result.get("sync_type"),
+    )
+
+
+def _manual_sync_customer_inquiries(platform: str) -> dict:
+    return _manual_batch_item(
+        platform=platform,
+        resource="customer_inquiries",
+        status="skipped",
+        message="客服消息暂未接入真实平台",
+        error_code="not_open",
+    )
+
+
+def manual_batch_sync(
+    db: Session,
+    *,
+    store_id: int,
+    platforms: list[str] | None = None,
+    include_products: bool = True,
+    include_orders: bool = True,
+    include_customer_inquiries: bool = True,
+    replace_policy: str = "delete_absent_when_full_snapshot",
+) -> dict:
+    store = ensure_store_exists(db, store_id)
+    store_platform = normalize_platform(store.platform)
+    requested_platforms = _manual_batch_platforms(platforms, store_platform)
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform=store_platform or "manual",
+        sync_type=MANUAL_BATCH_SYNC_TYPE,
+        message="manual batch sync started",
+        raw_summary={
+            "stage": "started",
+            "requested_platforms": requested_platforms,
+            "replace_policy": replace_policy,
+            "platform_write": False,
+        },
+    )
+    items: list[dict] = []
+
+    for platform in requested_platforms:
+        if platform != store_platform:
+            for resource, included in (
+                ("products", include_products),
+                ("orders", include_orders),
+                ("customer_inquiries", include_customer_inquiries),
+            ):
+                if included:
+                    items.append(_manual_batch_item(
+                        platform=platform,
+                        resource=resource,
+                        status="skipped",
+                        message=_manual_batch_message_for_error(platform, "STORE_PLATFORM_MISMATCH"),
+                        error_code="STORE_PLATFORM_MISMATCH",
+                    ))
+            continue
+
+        if include_products:
+            try:
+                if platform == "naver":
+                    items.append(_manual_sync_naver_products(db, store_id))
+                elif platform == "coupang":
+                    items.append(_manual_sync_coupang_products(db, store_id))
+            except Exception as exc:
+                items.append(_manual_batch_item_from_error(platform, "products", exc))
+
+        if include_orders:
+            try:
+                if platform == "naver":
+                    items.append(_manual_sync_naver_orders())
+                elif platform == "coupang":
+                    items.append(_manual_sync_coupang_orders(db, store_id))
+            except Exception as exc:
+                items.append(_manual_batch_item_from_error(platform, "orders", exc))
+
+        if include_customer_inquiries:
+            items.append(_manual_sync_customer_inquiries(platform))
+
+    status = _manual_batch_result_status(items)
+    result = {
+        "status": status,
+        "store_id": store_id,
+        "store_platform": store_platform,
+        "requested_platforms": requested_platforms,
+        "replace_policy": replace_policy,
+        "delete_policy": "delete_absent_only_when_full_snapshot_confirmed",
+        "platform_write": False,
+        "items": items,
+        "summary": {
+            "success_count": sum(1 for item in items if item.get("status") == "success"),
+            "failed_count": sum(1 for item in items if item.get("status") == "failed"),
+            "skipped_count": sum(1 for item in items if item.get("status") == "skipped"),
+            "created_count": sum(int(item.get("created_count") or 0) for item in items),
+            "updated_count": sum(int(item.get("updated_count") or 0) for item in items),
+            "deleted_count": sum(int(item.get("deleted_count") or 0) for item in items),
+        },
+    }
+    result["sync_log"] = sync_log_service.finish_sync_log(
+        db,
+        sync_log_id=sync_log["id"],
+        message="manual batch sync completed",
+        raw_summary={
+            "stage": "completed",
+            "status": status,
+            "platform_write": False,
+            "items": items,
+            "summary": result["summary"],
+        },
+    )
+    return result
+
+
 def preview_coupang_orders(
     db: Session,
     store_id: int,

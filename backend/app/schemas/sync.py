@@ -85,3 +85,12 @@ class CoupangSettlementPreviewRequest(BaseModel):
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be less than or equal to end_date")
         return self
+
+
+class ManualBatchSyncRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platforms: list[str] = Field(default_factory=lambda: ["naver", "coupang"])
+    include_products: bool = True
+    include_orders: bool = True
+    include_customer_inquiries: bool = True
+    replace_policy: str = "delete_absent_when_full_snapshot"

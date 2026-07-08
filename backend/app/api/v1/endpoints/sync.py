@@ -9,6 +9,7 @@ from app.schemas.sync import (
     CoupangProductSyncRequest,
     CoupangSalesPreviewRequest,
     CoupangSettlementPreviewRequest,
+    ManualBatchSyncRequest,
     NaverOrderPreviewRequest,
     NaverProductPreviewRequest,
 )
@@ -16,6 +17,23 @@ from app.services import sync_service
 
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+
+
+@router.post("/manual-batch")
+def manual_batch_sync(
+    payload: ManualBatchSyncRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.manual_batch_sync(
+        db,
+        store_id=payload.store_id,
+        platforms=payload.platforms,
+        include_products=payload.include_products,
+        include_orders=payload.include_orders,
+        include_customer_inquiries=payload.include_customer_inquiries,
+        replace_policy=payload.replace_policy,
+    )
+    return success_response(data=result, message="manual batch sync completed")
 
 
 @router.post("/products/mock")
