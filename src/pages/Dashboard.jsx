@@ -30,11 +30,6 @@ function isAbnormalOrder(order = {}) {
   return ['取消', '退款', '退货', '换货', '异常', 'cancel', 'refund', 'return', 'exchange'].some((flag) => text.includes(flag.toLowerCase()));
 }
 
-function needsAppealAttention(item = {}) {
-  const text = String(item.status || '').toLowerCase();
-  return !['完成', '已解决', 'resolved', 'closed', '제출 완료'].some((flag) => text.includes(flag.toLowerCase()));
-}
-
 function safeRows(result) {
   return result?.data || result?.items || [];
 }
@@ -86,6 +81,21 @@ function QuickLink({ to, title, note }) {
   );
 }
 
+function PriorityCard({
+  title, count, note, to, tone = 'info',
+}) {
+  return (
+    <Link className={`business-capability-card ${tone}`} to={to}>
+      <div className="business-capability-head">
+        <strong>{title}</strong>
+        <span>{count}</span>
+      </div>
+      <p>{note}</p>
+      <small>进入处理</small>
+    </Link>
+  );
+}
+
 export default function Dashboard() {
   const {
     selectedStore,
@@ -99,11 +109,7 @@ export default function Dashboard() {
     summary: {},
     orders: [],
     products: [],
-    messages: [],
-    appeals: [],
-    emails: [],
     activities: [],
-    readiness: null,
   });
 
   useEffect(() => {
@@ -121,22 +127,12 @@ export default function Dashboard() {
         summary,
         orders,
         products,
-        messages,
-        appeals,
-        emails,
         activities,
-        readiness,
       ] = await Promise.all([
         safeLoad(() => dataProvider.getDashboardSummary(commonParams), {}),
         safeLoad(() => dataProvider.getOrders({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
         safeLoad(() => dataProvider.getProducts({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
-        safeLoad(() => dataProvider.getCustomerInquiries({ ...commonParams, page: 1, pageSize: 20 }), { data: [] }),
-        safeLoad(() => dataProvider.getAppealCases({ ...commonParams, page: 1, pageSize: 20 }), { data: [] }),
-        safeLoad(() => dataProvider.getEmailAccounts({ ...commonParams, page: 1, pageSize: 20 }), { data: [] }),
         safeLoad(() => dataProvider.getOperationAuditLogs({ ...commonParams, page: 1, pageSize: 8 }), { data: [] }),
-        selectedStoreId
-          ? safeLoad(() => dataProvider.getApiCredentialReadiness({ storeId: selectedStoreId }), null)
-          : null,
       ]);
       if (!cancelled) {
         setState({
@@ -145,11 +141,7 @@ export default function Dashboard() {
           summary,
           orders: safeRows(orders),
           products: safeRows(products),
-          messages: safeRows(messages),
-          appeals: safeRows(appeals),
-          emails: safeRows(emails),
           activities: safeRows(activities),
-          readiness,
         });
       }
     }
@@ -164,20 +156,18 @@ export default function Dashboard() {
     const pendingShipment = state.orders.filter(isPendingShipment);
     const abnormalOrders = state.orders.filter(isAbnormalOrder);
     const inventoryAlerts = state.products.filter((item) => Number(item.stock ?? item.stock_quantity ?? 0) <= 5);
-    const appealAlerts = state.appeals.filter(needsAppealAttention);
-    const importantMails = state.emails.reduce((sum, account) => (
-      sum + Number(account.importantCount || account.important_count || 0)
-    ), 0);
-    const connectionStatus = state.readiness?.platforms?.some((item) => item.credentialStatus === 'configured' || item.readinessStatus === 'configured')
-      || state.readiness?.storeBoundReadiness?.configured;
+    const outOfStock = state.products.filter((item) => Number(item.stock ?? item.stock_quantity ?? 0) <= 0);
+    const lowStock = state.products.filter((item) => {
+      const stock = Number(item.stock ?? item.stock_quantity ?? 0);
+      return stock > 0 && stock <= 5;
+    });
     return {
       todayOrders,
       pendingShipment,
       abnormalOrders,
       inventoryAlerts,
-      appealAlerts,
-      importantMails,
-      connectionStatus,
+      outOfStock,
+      lowStock,
     };
   }, [state]);
 
@@ -189,8 +179,8 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        title="首页工作台"
-        description="集中查看今天要处理的订单、发货、库存、店铺连接、平台消息、申诉和邮箱提醒。"
+        title="核心运营工作台"
+        description="只打磨核心运营链路：订单、发货、商品、库存。运营打开首页后先判断今天要处理什么。"
         actions={(
           <>
             <span className="period-chip">{sourceInfo.label}</span>
@@ -206,39 +196,46 @@ export default function Dashboard() {
         <SummaryCard title="待发货" value={metrics.pendingShipment.length} note="建议先进入发货辅助核对" tone={metrics.pendingShipment.length ? 'warning' : 'success'} />
         <SummaryCard title="异常订单" value={metrics.abnormalOrders.length} note="取消/退货/换货/退款仅提醒" tone={metrics.abnormalOrders.length ? 'danger' : 'success'} />
         <SummaryCard title="库存预警" value={metrics.inventoryAlerts.length} note="缺货和低库存商品" tone={metrics.inventoryAlerts.length ? 'warning' : 'success'} />
-        <SummaryCard title="平台消息" value={state.messages.length} note="当前为入口和基础管理" tone={state.messages.length ? 'info' : 'default'} />
-        <SummaryCard title="申诉/审核" value={metrics.appealAlerts.length} note="资料整理和人工处理" tone={metrics.appealAlerts.length ? 'warning' : 'success'} />
+        <SummaryCard title="缺货商品" value={metrics.outOfStock.length} note="先确认补货或人工下架" tone={metrics.outOfStock.length ? 'danger' : 'success'} />
+        <SummaryCard title="低库存商品" value={metrics.lowStock.length} note="再确认补货计划" tone={metrics.lowStock.length ? 'warning' : 'success'} />
       </div>
 
       <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>今天先处理什么</h2>
+            <p>按订单履约优先级排序，帮助普通运营从首页直接进入当天工作。</p>
+          </div>
+        </div>
         <div className="business-capability-grid compact">
-          <article className="business-capability-card success">
-            <div className="business-capability-head">
-              <strong>店铺连接状态</strong>
-              <span>{metrics.connectionStatus ? '已配置' : '待检查'}</span>
-            </div>
-            <p>{selectedStore?.name || '当前店铺'} 的 API 资料在店铺管理中维护，密钥不会明文回显。</p>
-          </article>
-          <article className="business-capability-card info">
-            <div className="business-capability-head">
-              <strong>重要邮件</strong>
-              <span>{metrics.importantMails}</span>
-            </div>
-            <p>邮箱中心只保留账号和重要邮件入口，不做邮箱深度 AI 识别。</p>
-          </article>
-          <article className="business-capability-card warning">
+          <PriorityCard
+            title="1. 处理待发货"
+            count={`${metrics.pendingShipment.length} 单`}
+            note="先核对商品规格、库存编号和物流单号，避免漏发或错发。"
+            to="/shipping"
+            tone={metrics.pendingShipment.length ? 'warning' : 'success'}
+          />
+          <PriorityCard
+            title="2. 查看异常订单"
+            count={`${metrics.abnormalOrders.length} 单`}
+            note="取消、退货、换货和退款只做提醒，正式处理需人工确认。"
+            to="/orders"
+            tone={metrics.abnormalOrders.length ? 'danger' : 'success'}
+          />
+          <PriorityCard
+            title="3. 补库存缺口"
+            count={`${metrics.inventoryAlerts.length} 个`}
+            note="先处理缺货，再处理低库存，最后回到商品管理复核状态。"
+            to="/inventory"
+            tone={metrics.inventoryAlerts.length ? 'warning' : 'success'}
+          />
+          <article className="business-capability-card muted">
             <div className="business-capability-head">
               <strong>平台写入边界</strong>
               <span>{dangerousState.label}</span>
             </div>
             <p>{dangerousState.note}</p>
-          </article>
-          <article className="business-capability-card muted">
-            <div className="business-capability-head">
-              <strong>数据口径</strong>
-              <span>{sourceInfo.key === 'demo_data' ? '演示' : '本地'}</span>
-            </div>
-            <p>本页面优先展示系统已保存记录和本地辅助状态，不宣称已自动操作平台。</p>
+            <small>{selectedStore?.name || '当前店铺'} · {sourceInfo.label}</small>
           </article>
         </div>
       </section>
@@ -246,8 +243,8 @@ export default function Dashboard() {
       <section className="content-card">
         <div className="card-title">
           <div>
-            <h2>快捷入口</h2>
-            <p>普通运营每天最常用的处理路径。</p>
+            <h2>核心快捷入口</h2>
+            <p>只打磨核心运营链路，其他模块先保持入口状态。</p>
           </div>
         </div>
         <div className="business-capability-grid compact">

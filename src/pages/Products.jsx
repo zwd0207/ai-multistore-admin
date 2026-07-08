@@ -175,6 +175,7 @@ export default function Products() {
     active: rows.filter((item) => item.salesStatus === '在售').length,
     low: rows.filter((item) => item.stockStatus === '低库存').length,
     out: rows.filter((item) => item.stockStatus === '缺货').length,
+    attention: rows.filter((item) => item.salesStatus !== '在售' || item.stockStatus !== '库存正常').length,
   }), [rows]);
 
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
@@ -196,6 +197,7 @@ export default function Products() {
         actions={(
           <>
             <Link className="button ghost" to="/inventory">查看库存预警</Link>
+            <Link className="button ghost" to="/shipping">跳转发货辅助</Link>
             <span className="period-chip">暂不支持在线编辑</span>
           </>
         )}
@@ -207,6 +209,33 @@ export default function Products() {
         <SummaryCard title="低库存商品" value={summary.low} note="建议补货或人工确认" tone={summary.low ? 'warning' : 'success'} />
         <SummaryCard title="缺货商品" value={summary.out} note="建议补货或人工下架" tone={summary.out ? 'danger' : 'success'} />
       </div>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>运营建议</h2>
+            <p>先看库存和销售状态，再决定补货、人工下架或进入发货辅助核对待发货订单。</p>
+          </div>
+        </div>
+        <div className="business-capability-grid compact">
+          <article className={summary.out ? 'business-capability-card danger' : 'business-capability-card success'}>
+            <div className="business-capability-head"><strong>缺货处理</strong><span>{summary.out} 个</span></div>
+            <p>缺货商品先确认能否补货；不能补货时由运营人工到平台后台处理销售状态。</p>
+          </article>
+          <article className={summary.low ? 'business-capability-card warning' : 'business-capability-card success'}>
+            <div className="business-capability-head"><strong>低库存复核</strong><span>{summary.low} 个</span></div>
+            <p>低库存商品优先核对物流商库存编号和实际库存，避免待发货订单缺货。</p>
+          </article>
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>需要关注</strong><span>{summary.attention} 个</span></div>
+            <p>把非在售、缺货和低库存商品作为每日商品巡检重点。</p>
+          </article>
+          <article className="business-capability-card muted">
+            <div className="business-capability-head"><strong>发货联动</strong><span>本地辅助</span></div>
+            <p>进入发货辅助核对待发货订单，不会自动修改平台商品或库存。</p>
+          </article>
+        </div>
+      </section>
 
       <FilterPanel>
         <SearchBar

@@ -21,6 +21,8 @@ function includesAll(file, phrases) {
 includesAll('src/pages/Products.jsx', [
   '系统已保存商品记录',
   '暂不支持在线编辑',
+  '运营建议',
+  '跳转发货辅助',
   '修改平台库存暂未开放',
   '删除真实平台商品暂未开放',
 ]);
@@ -29,14 +31,30 @@ includesAll('src/pages/InventoryAlerts.jsx', [
   '缺货商品',
   '低库存商品',
   '库存正常商品',
+  '处理优先级',
+  '先处理缺货',
   '本地库存判断',
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
   '不会自动回填 Naver',
+  '下一步',
+  '发货处理顺序',
   '生成发货表格',
   '导入物流单号表',
   '记录发货准备状态',
+]);
+
+includesAll('src/pages/Dashboard.jsx', [
+  '核心运营工作台',
+  '今天先处理什么',
+  '只打磨核心运营链路',
+]);
+
+includesAll('src/pages/Orders.jsx', [
+  '订单状态分组',
+  '共 {rows.length} 条订单',
+  'Pagination',
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [

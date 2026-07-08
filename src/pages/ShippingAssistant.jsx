@@ -124,6 +124,14 @@ function buildShippingRows(rows = [], prepStatus = {}, trackingMap = {}) {
   });
 }
 
+function nextShippingStep(summary) {
+  if (!summary.pending) return ['暂无待发货订单', '回到订单管理确认订单状态，或等待新订单进入待发货。', '/orders'];
+  if (summary.matched < summary.pending) return ['先核对商品和库存编号', '有订单还没有匹配到库存编号，先确认商品名称、规格和库存编号。', '/products'];
+  if (summary.enough < summary.pending) return ['确认库存是否足够', '有订单库存不足或待人工确认，先处理库存缺口。', '/inventory'];
+  if (summary.imported < summary.pending) return ['再导入物流单号', '库存足够后，把物流商表格中的订单号、快递公司和运单号导入本地匹配。', '/shipping'];
+  return ['最后人工发货', '发货准备状态已具备，仍需人工到平台后台处理，不会自动回填 Naver。', '/shipping'];
+}
+
 const columns = [
   { key: 'orderNo', title: '订单号', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
@@ -217,6 +225,7 @@ export default function ShippingAssistant() {
   }), [rows]);
 
   const dangerousState = getDangerousActionState('shipment_writeback');
+  const [nextTitle, nextDescription] = nextShippingStep(summary);
 
   const importTracking = () => {
     const parsed = parseTrackingText(trackingText);
@@ -279,6 +288,34 @@ export default function ShippingAssistant() {
         <SummaryCard title="已导入物流单号" value={summary.imported} note="本地匹配结果" tone={summary.imported ? 'success' : 'default'} />
         <SummaryCard title="可人工发货" value={summary.ready} note="需人工到平台后台处理" tone={summary.ready ? 'success' : 'default'} />
       </div>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>下一步</h2>
+            <p>{nextDescription}</p>
+          </div>
+          <StatusBadge value={nextTitle} />
+        </div>
+        <div className="business-capability-grid compact">
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>发货处理顺序</strong><span>1</span></div>
+            <p>先核对商品和规格，确认订单商品与库存编号匹配。</p>
+          </article>
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>确认库存</strong><span>2</span></div>
+            <p>再看库存是否足够，库存不足时回到库存预警处理。</p>
+          </article>
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>导入物流单号</strong><span>3</span></div>
+            <p>然后导入物流单号表，只做本地匹配和发货准备记录。</p>
+          </article>
+          <article className="business-capability-card warning">
+            <div className="business-capability-head"><strong>人工发货</strong><span>4</span></div>
+            <p>最后人工到平台后台处理，系统当前不会自动回填 Naver。</p>
+          </article>
+        </div>
+      </section>
 
       <section className="content-card">
         <div className="business-capability-grid compact">

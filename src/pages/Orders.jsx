@@ -7,6 +7,7 @@ import FilterPanel from '../components/common/FilterPanel';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
 import PageHeader from '../components/common/PageHeader';
+import Pagination from '../components/common/Pagination';
 import SearchBar from '../components/common/SearchBar';
 import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
@@ -115,6 +116,7 @@ export default function Orders() {
     platform: '',
     storeId: '',
     status: '',
+    page: 1,
   });
   const [draft, setDraft] = useState(query);
   const [rows, setRows] = useState([]);
@@ -167,9 +169,9 @@ export default function Orders() {
     abnormal: rows.filter((item) => matchesStatus(item, 'abnormal')).length,
   }), [rows]);
 
-  const search = () => setQuery({ ...draft });
+  const search = () => setQuery({ ...draft, page: 1 });
   const reset = () => {
-    const next = { keyword: '', platform: '', storeId: '', status: '' };
+    const next = { keyword: '', platform: '', storeId: '', status: '', page: 1 };
     setDraft(next);
     setQuery(next);
   };
@@ -191,6 +193,7 @@ export default function Orders() {
   };
 
   const dangerousState = getDangerousActionState('shipment_writeback');
+  const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
 
   return (
     <>
@@ -213,6 +216,28 @@ export default function Orders() {
       </div>
 
       <FilterPanel>
+        <div className="card-title">
+          <div>
+            <h2>订单状态分组</h2>
+            <p>共 {rows.length} 条订单，先处理新订单和待发货，再查看取消、退货、换货和异常订单。</p>
+          </div>
+        </div>
+        <div className="tab-row">
+          {statusTabs.map((item) => (
+            <button
+              type="button"
+              key={item.key || 'all'}
+              className={draft.status === item.key ? 'active' : ''}
+              onClick={() => {
+                const next = { ...draft, status: item.key, page: 1 };
+                setDraft(next);
+                setQuery(next);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <SearchBar
           value={draft.keyword}
           onChange={(keyword) => setDraft({ ...draft, keyword })}
@@ -242,7 +267,7 @@ export default function Orders() {
         {copyMessage ? <div className="form-info">{copyMessage}</div> : null}
         <DataTable
           columns={columns}
-          rows={rows.slice(0, PAGE_SIZE)}
+          rows={pageRows}
           loading={loading || storeLoading}
           rowKey="id"
           renderActions={(row) => (
@@ -255,6 +280,14 @@ export default function Orders() {
             </>
           )}
         />
+        {!error ? (
+          <Pagination
+            page={query.page}
+            pageSize={PAGE_SIZE}
+            total={rows.length}
+            onChange={(page) => setQuery({ ...query, page })}
+          />
+        ) : null}
       </section>
 
       <DetailModal

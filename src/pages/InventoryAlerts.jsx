@@ -34,9 +34,9 @@ function inventoryStatus(stock) {
 }
 
 function suggestionForStatus(status) {
-  if (status === '缺货') return '建议尽快补货；无法补货时由运营人工到平台后台下架或暂停销售。';
-  if (status === '低库存') return '建议核对物流商库存编号和实际库存，确认是否补货。';
-  return '库存暂时正常，继续观察最近订单和补货周期。';
+  if (status === '缺货') return '先补货；无法补货则人工下架。';
+  if (status === '低库存') return '核对实际库存，确认是否补货。';
+  return '继续观察订单和补货周期。';
 }
 
 function normalizeProduct(row = {}, stores = []) {
@@ -154,6 +154,33 @@ export default function InventoryAlerts() {
         <SummaryCard title="库存正常商品" value={summary.normal} note="库存高于预警线" tone="success" />
         <SummaryCard title="本地库存判断" value={summary.total} note="不修改平台库存" tone="info" />
       </div>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>处理优先级</h2>
+            <p>先处理缺货，再处理低库存，最后观察库存正常商品。本页面只做本地库存判断，不修改平台库存。</p>
+          </div>
+        </div>
+        <div className="business-capability-grid compact">
+          <article className={summary.out ? 'business-capability-card danger' : 'business-capability-card success'}>
+            <div className="business-capability-head"><strong>1. 先处理缺货</strong><span>{summary.out} 个</span></div>
+            <p>确认能否补货；无法补货时，运营人工到平台后台下架或暂停销售。</p>
+          </article>
+          <article className={summary.low ? 'business-capability-card warning' : 'business-capability-card success'}>
+            <div className="business-capability-head"><strong>2. 再处理低库存</strong><span>{summary.low} 个</span></div>
+            <p>核对物流商库存编号和实际库存，决定是否补货。</p>
+          </article>
+          <article className="business-capability-card info">
+            <div className="business-capability-head"><strong>3. 回看商品</strong><span>复核</span></div>
+            <p>处理后回到商品管理查看售价、库存、平台状态和数据来源。</p>
+          </article>
+          <article className="business-capability-card muted">
+            <div className="business-capability-head"><strong>4. 准备发货</strong><span>联动</span></div>
+            <p>库存确认后进入发货辅助，核对待发货订单和物流单号。</p>
+          </article>
+        </div>
+      </section>
 
       <FilterPanel>
         <SearchBar
