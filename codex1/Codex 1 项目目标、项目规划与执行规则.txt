@@ -1,0 +1,791 @@
+# Codex 1 项目目标、项目规划与执行规则
+
+## 一、Codex 1 项目角色
+
+Codex 1 负责本项目的 **后端、数据库、平台 API、数据同步、凭证加密、接口日志和数据整合底座**。
+
+项目名称：
+
+AI 多店铺运营与环境管理系统
+
+当前阶段重点：
+
+先做 Naver / Coupang API 数据底座，让系统能够添加店铺、绑定平台 API、测试连接、同步商品、同步订单、同步客服/咨询数据、统计销售额，并为前端和后续 AI 日报提供统一接口。
+
+Codex 1 不负责复杂前端 UI，只需要保证后端接口稳定、数据结构清晰、接口文档可访问。
+
+---
+
+## 二、Codex 1 项目目标
+
+第一阶段后端目标如下：
+
+1. 建立 FastAPI 后端项目结构。
+2. 建立数据库模型。
+3. 实现店铺添加、删除、编辑、查询。
+4. 实现 Naver API 凭证保存。
+5. 实现 Coupang API 凭证保存。
+6. 实现敏感凭证加密保存。
+7. 实现 Naver API Client。
+8. 实现 Coupang API Client。
+9. 实现 API 连接测试。
+10. 实现 API 同步日志。
+11. 实现商品同步。
+12. 实现订单同步。
+13. 实现客服 / 咨询同步。
+14. 实现销售额统计。
+15. 实现设备环境数据接口。
+16. 实现店铺邮箱与重点邮件接口。
+17. 实现申诉案件数据接口。
+18. 实现首页驾驶舱数据接口。
+19. 实现 AI 日报上下文接口。
+20. 提供 Swagger API 文档和 README 启动说明。
+
+---
+
+## 三、技术栈建议
+
+后端使用：
+
+```text
+FastAPI
+SQLAlchemy
+Pydantic
+SQLite 开发阶段数据库
+PostgreSQL 预留迁移能力
+APScheduler 预留定时同步能力
+```
+
+项目目录结构：
+
+```text
+backend/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── database.py
+│   ├── models/
+│   ├── schemas/
+│   ├── routers/
+│   ├── services/
+│   └── tasks/
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 四、核心开发原则
+
+### 1. 所有数据必须绑定 store_id
+
+系统以店铺为中心。
+
+所有业务数据都必须绑定 `store_id`：
+
+```text
+平台账号
+API 凭证
+设备环境
+店铺邮箱
+商品数据
+订单数据
+客服咨询
+销售额统计
+重点邮件
+申诉案件
+证据文件
+同步日志
+AI 日报上下文
+```
+
+不能出现没有店铺归属的业务数据。
+
+---
+
+### 2. API 凭证必须加密保存
+
+以下信息必须加密保存：
+
+```text
+Naver Client Secret
+Naver Access Token
+Naver Refresh Token
+Coupang Access Key
+Coupang Secret Key
+设备远程账号
+设备远程密码
+邮箱授权信息
+```
+
+前端查询时只返回脱敏字段，不返回明文 Secret。
+
+---
+
+### 3. 平台 API 由后端调用
+
+前端不能直接调用 Naver / Coupang API。
+
+所有平台请求流程：
+
+```text
+前端请求本系统后端
+→ 后端读取加密凭证
+→ 后端解密
+→ 后端调用 Naver / Coupang API
+→ 后端保存数据
+→ 后端返回内部统一格式
+```
+
+---
+
+### 4. 第一阶段以只读同步为主
+
+第一阶段主要做数据读取：
+
+```text
+读取商品
+读取订单
+读取客服 / 咨询
+读取销售额所需订单数据
+读取状态
+保存日志
+```
+
+平台写入类动作后续再做。
+
+---
+
+### 5. 中文和韩文必须避免乱码
+
+全项目统一 UTF-8。
+
+要求：
+
+```text
+源码文件 UTF-8
+API JSON 返回 UTF-8
+数据库 UTF-8
+日志文件 UTF-8
+JSON 保存 ensure_ascii=False
+CSV 导出使用 utf-8-sig
+文件名支持中文和韩文
+```
+
+测试数据必须包含中文和韩文。
+
+示例：
+
+```text
+店铺名称：韩国美妆1号店
+商品名称：SK-II 피테라 에센스 230ml
+客户咨询：정품 맞나요? 언제 발송되나요?
+邮件标题：[네이버] 판매 상품 증빙자료 제출 요청
+申诉类型：정품 소명 자료 제출
+```
+
+---
+
+## 五、数据库模型规划
+
+需要建立以下模型：
+
+```text
+stores
+platform_credentials
+api_sync_logs
+products
+orders
+customer_inquiries
+sales_daily
+device_environments
+store_emails
+important_emails
+appeal_cases
+evidence_files
+```
+
+### stores
+
+```text
+id
+store_name
+platform
+company_name
+owner_name
+store_memo
+status
+created_at
+updated_at
+```
+
+### platform_credentials
+
+```text
+id
+store_id
+platform
+
+naver_client_id
+naver_client_secret_encrypted
+naver_access_token_encrypted
+naver_refresh_token_encrypted
+naver_token_expires_at
+naver_api_allowed_ip
+
+coupang_vendor_id
+coupang_access_key_encrypted
+coupang_secret_key_encrypted
+coupang_market
+
+auth_status
+last_test_at
+last_sync_at
+created_at
+updated_at
+```
+
+### api_sync_logs
+
+```text
+id
+store_id
+platform
+api_type
+endpoint
+request_time
+response_status
+success
+error_message
+duration_ms
+raw_response_path
+```
+
+### products
+
+```text
+id
+store_id
+platform
+platform_product_id
+product_name
+seller_sku
+sale_status
+price
+stock_quantity
+raw_data_json
+synced_at
+```
+
+### orders
+
+```text
+id
+store_id
+platform
+platform_order_id
+product_order_id
+order_status
+product_name
+option_name
+quantity
+paid_amount
+order_date
+buyer_name_masked
+raw_data_json
+synced_at
+```
+
+### customer_inquiries
+
+```text
+id
+store_id
+platform
+inquiry_id
+product_id
+order_id
+inquiry_status
+inquiry_title
+inquiry_content
+created_at_platform
+raw_data_json
+synced_at
+```
+
+### sales_daily
+
+```text
+id
+store_id
+platform
+date
+order_count
+gross_sales_amount
+cancel_amount
+return_amount
+net_sales_amount
+calculated_at
+```
+
+### device_environments
+
+```text
+id
+store_id
+device_name
+device_type
+provider
+ip_region
+ip_address
+remote_address
+remote_port
+username_encrypted
+password_encrypted
+expire_at
+status
+memo
+created_at
+updated_at
+```
+
+### store_emails
+
+```text
+id
+store_id
+email_address
+email_provider
+auth_type
+auth_status
+last_sync_at
+filter_rules_json
+created_at
+updated_at
+```
+
+### important_emails
+
+```text
+id
+store_id
+platform
+email_from
+email_subject
+email_received_at
+email_type
+ai_classification
+related_product_name
+deadline_at
+process_status
+raw_email_path
+created_at
+```
+
+### appeal_cases
+
+```text
+id
+store_id
+platform
+related_email_id
+product_name
+appeal_type
+required_documents_json
+missing_documents_json
+status
+deadline_at
+created_at
+updated_at
+```
+
+### evidence_files
+
+```text
+id
+store_id
+appeal_case_id
+product_id
+file_type
+file_name
+file_path
+memo
+created_at
+```
+
+---
+
+## 六、后端 Services 规划
+
+建立以下服务文件：
+
+```text
+services/encryption.py
+services/naver_client.py
+services/coupang_client.py
+services/sync_logger.py
+services/email_filter.py
+services/sales_calculator.py
+```
+
+### encryption.py
+
+实现：
+
+```python
+encrypt_value(value: str) -> str
+decrypt_value(value: str) -> str
+mask_secret(value: str) -> str
+```
+
+### naver_client.py
+
+实现：
+
+```python
+class NaverClient:
+    def __init__(self, credential):
+        pass
+
+    def test_connection(self):
+        pass
+
+    def get_account_info(self):
+        pass
+
+    def get_products(self):
+        pass
+
+    def get_orders(self, start_date, end_date):
+        pass
+
+    def get_inquiries(self, start_date, end_date):
+        pass
+```
+
+### coupang_client.py
+
+实现：
+
+```python
+class CoupangClient:
+    def __init__(self, credential):
+        pass
+
+    def generate_hmac(self, method, path, query):
+        pass
+
+    def test_connection(self):
+        pass
+
+    def get_products(self):
+        pass
+
+    def get_orders(self, start_date, end_date):
+        pass
+
+    def get_inquiries(self, start_date, end_date):
+        pass
+```
+
+Naver 和 Coupang 的 API 逻辑必须分开，不要混在同一个 client 里。
+
+---
+
+## 七、后端 Routers 规划
+
+建立以下 routers：
+
+```text
+routers/stores.py
+routers/credentials.py
+routers/sync.py
+routers/products.py
+routers/orders.py
+routers/inquiries.py
+routers/sales.py
+routers/devices.py
+routers/emails.py
+routers/appeals.py
+routers/dashboard.py
+routers/daily_report.py
+```
+
+---
+
+## 八、内部接口规划
+
+### 店铺接口
+
+```text
+POST /stores
+GET /stores
+GET /stores/{id}
+PUT /stores/{id}
+DELETE /stores/{id}
+```
+
+### API 凭证接口
+
+```text
+POST /credentials/naver
+POST /credentials/coupang
+GET /credentials
+GET /credentials/{store_id}
+PUT /credentials/{id}
+DELETE /credentials/{id}
+POST /credentials/{id}/test
+```
+
+### 同步接口
+
+```text
+POST /sync/naver/products
+POST /sync/naver/orders
+POST /sync/naver/inquiries
+
+POST /sync/coupang/products
+POST /sync/coupang/orders
+POST /sync/coupang/inquiries
+
+GET /sync/logs
+```
+
+### 商品 / 订单 / 咨询接口
+
+```text
+GET /products
+GET /orders
+GET /customer-inquiries
+```
+
+### 销售额接口
+
+```text
+POST /sales/calculate
+GET /sales/summary
+```
+
+### 设备接口
+
+```text
+POST /devices
+GET /devices
+GET /devices/{id}
+PUT /devices/{id}
+DELETE /devices/{id}
+```
+
+### 邮箱接口
+
+```text
+POST /store-emails
+GET /store-emails
+PUT /store-emails/{id}
+DELETE /store-emails/{id}
+
+POST /important-emails/import
+GET /important-emails
+PUT /important-emails/{id}
+```
+
+### 申诉接口
+
+```text
+POST /appeal-cases
+GET /appeal-cases
+GET /appeal-cases/{id}
+PUT /appeal-cases/{id}
+
+POST /evidence-files
+GET /evidence-files
+```
+
+### 首页和日报接口
+
+```text
+GET /dashboard/summary
+GET /daily-report/context
+```
+
+---
+
+## 九、同步逻辑规则
+
+### 商品同步
+
+从平台 API 获取商品列表后保存到 `products`。
+
+去重更新依据：
+
+```text
+store_id + platform + platform_product_id
+```
+
+### 订单同步
+
+从平台 API 获取订单列表后保存到 `orders`。
+
+去重更新依据：
+
+```text
+store_id + platform + platform_order_id + product_order_id
+```
+
+### 咨询同步
+
+从平台 API 获取咨询数据后保存到 `customer_inquiries`。
+
+去重更新依据：
+
+```text
+store_id + platform + inquiry_id
+```
+
+### 销售额统计
+
+基于 `orders` 表计算：
+
+```text
+今日销售额
+今日订单数
+按店铺销售额
+按平台销售额
+取消金额
+退货金额
+净销售额
+```
+
+---
+
+## 十、首页驾驶舱接口
+
+`GET /dashboard/summary` 返回：
+
+```json
+{
+  "today_sales": 0,
+  "today_orders": 0,
+  "pending_shipments": 0,
+  "pending_inquiries": 0,
+  "pending_appeals": 0,
+  "api_errors": [],
+  "email_alerts": [],
+  "device_alerts": [],
+  "stores": []
+}
+```
+
+每个 store 返回：
+
+```json
+{
+  "store_id": 1,
+  "store_name": "MaisonAuror",
+  "platform": "NAVER",
+  "status": "normal",
+  "api_status": "normal",
+  "email_status": "normal",
+  "device_status": "normal",
+  "today_orders": 0,
+  "today_sales": 0,
+  "pending_inquiries": 0,
+  "pending_appeals": 0,
+  "last_sync_at": null
+}
+```
+
+---
+
+## 十一、AI 日报上下文接口
+
+`GET /daily-report/context` 返回：
+
+```json
+{
+  "sales_summary": {},
+  "store_status": [],
+  "api_errors": [],
+  "device_alerts": [],
+  "important_emails": [],
+  "appeal_cases": [],
+  "customer_inquiries": [],
+  "sync_failures": []
+}
+```
+
+该接口暂时只返回结构化数据，后续再接 AI。
+
+---
+
+## 十二、执行顺序
+
+按以下顺序执行：
+
+```text
+1. 建立 FastAPI 项目结构
+2. 建立数据库连接和模型
+3. 完成店铺模块
+4. 完成凭证加密服务
+5. 完成 API 凭证模块
+6. 完成 Naver API Client
+7. 完成 Coupang API Client
+8. 完成 API 测试接口
+9. 完成 API 同步日志
+10. 完成商品同步
+11. 完成订单同步
+12. 完成客服 / 咨询同步
+13. 完成销售额统计
+14. 完成设备环境接口
+15. 完成邮箱与重点邮件接口
+16. 完成申诉案件接口
+17. 完成首页驾驶舱接口
+18. 完成 AI 日报上下文接口
+19. 编写 README
+20. 提供 seed 示例数据
+```
+
+---
+
+## 十三、交付物
+
+Codex 1 最终交付：
+
+```text
+可运行 FastAPI 后端
+数据库初始化方式
+API 文档地址 /docs
+README 启动说明
+示例数据 seed 脚本
+Naver / Coupang API Client 文件
+API 同步日志功能
+首页 summary 接口
+AI 日报 context 接口
+未验证成功的平台接口清单
+```
+
+---
+
+## 十四、验收标准
+
+完成后需要满足：
+
+```text
+可以添加 / 删除 / 编辑店铺
+可以保存 Naver API 凭证
+可以保存 Coupang API 凭证
+敏感字段已加密
+可以测试 API 连接
+可以记录 API 调用日志
+可以同步商品
+可以同步订单
+可以同步咨询
+可以统计销售额
+可以添加设备环境
+可以绑定店铺邮箱
+可以导入重点邮件
+可以创建申诉案件
+可以返回首页 dashboard summary
+可以返回 daily-report context
+中文和韩文数据保存、读取、显示不乱码
+```
