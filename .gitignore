@@ -14,6 +14,5 @@ output/
 .venv/
 venv/
 __pycache__/
-codex1/
 codex1-db-backups/
 backups/
