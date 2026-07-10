@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "encoding:scan": "node scripts/scan-encoding.mjs",
+    "session:verify": "node scripts/verify-session-security.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

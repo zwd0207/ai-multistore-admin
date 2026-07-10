@@ -29,7 +29,7 @@ from app.schemas.shipping import (
 )
 from app.services import shipping_service
 from app.services import warehouse_shipping_service
-from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_store_permission
+from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_operator_recent_auth, require_store_permission
 
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
@@ -88,6 +88,7 @@ def download_warehouse_shipping_manifest(
     if batch is None:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="recipient_pii.export")
+    require_operator_recent_auth(identity)
     if not payload.approval_token or not warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope="manifest", token=payload.approval_token):
         return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_token_invalid"})
     return success_response(
@@ -160,6 +161,7 @@ def execute_warehouse_shipping_writeback(
     if batch is None:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.writeback.approve")
+    require_operator_recent_auth(identity)
     approved_candidate_hash = warehouse_shipping_service.consume_approval_grant_with_candidate_hash(
         db, batch_id=batch_id, user_id=identity.user_id, grant_scope="writeback", token=payload.approval_token,
     ) if payload.approval_token else None
@@ -188,6 +190,8 @@ def issue_warehouse_shipping_approval(
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
     permission = "recipient_pii.export" if grant_scope == "manifest" else "shipping.writeback.approve"
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key=permission)
+    if grant_scope in {"manifest", "writeback"}:
+        require_operator_recent_auth(identity)
     return success_response(data=warehouse_shipping_service.issue_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope=grant_scope))
 
 

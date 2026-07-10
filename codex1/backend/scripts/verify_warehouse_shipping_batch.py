@@ -1,5 +1,6 @@
 import base64
 import os
+os.environ.setdefault("ALLOW_DEV_AUTH", "true")
 import sys
 import tempfile
 from pathlib import Path
@@ -203,7 +204,7 @@ def main():
         with TestClient(app) as client:
             details_path = f"/api/v1/shipping/warehouse-batches/{batch_id}/tracking-details"
             unauthorized = client.get(details_path)
-            assert unauthorized.status_code == 403, unauthorized.text
+            assert unauthorized.status_code == 401, unauthorized.text
             permission_denied = client.get(details_path, headers={"X-ERP-User-Key": restricted_user.user_key_hash})
             assert permission_denied.status_code == 403, permission_denied.text
             cross_store = client.get(details_path, headers={"X-ERP-User-Key": other_user.user_key_hash})

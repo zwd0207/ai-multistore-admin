@@ -18,6 +18,8 @@ AUTH_TABLES = {
     "erp_permissions",
     "erp_role_permissions",
     "erp_store_memberships",
+    "erp_user_security",
+    "erp_sessions",
 }
 
 AUTH_TABLE_COLUMNS = {
@@ -74,6 +76,16 @@ AUTH_TABLE_COLUMNS = {
         "created_at",
         "updated_at",
     },
+    "erp_user_security": {
+        "user_id", "password_hash", "mfa_type", "mfa_secret_encrypted", "mfa_enabled_at",
+        "session_version", "authz_version", "failed_login_count", "blocked_until",
+        "password_changed_at", "created_at", "updated_at",
+    },
+    "erp_sessions": {
+        "id", "session_token_hash", "user_id", "environment", "authn_level", "session_version",
+        "authz_version_at_issue", "csrf_token_hash", "created_at", "last_seen_at", "idle_expires_at",
+        "absolute_expires_at", "last_reauthenticated_at", "revoked_at", "revoke_reason",
+    },
 }
 
 AUTH_NOT_NULL_COLUMNS = {
@@ -120,6 +132,13 @@ AUTH_NOT_NULL_COLUMNS = {
         "created_at",
         "updated_at",
     },
+    "erp_user_security": {
+        "user_id", "mfa_type", "session_version", "authz_version", "failed_login_count", "created_at", "updated_at",
+    },
+    "erp_sessions": {
+        "id", "session_token_hash", "user_id", "environment", "authn_level", "session_version",
+        "authz_version_at_issue", "created_at", "last_seen_at", "idle_expires_at", "absolute_expires_at",
+    },
 }
 
 AUTH_INDEXES = {
@@ -135,6 +154,8 @@ AUTH_INDEXES = {
         ["user_id", "store_id", "role_id"],
         True,
     ),
+    "ix_erp_sessions_token_hash": ("erp_sessions", ["session_token_hash"], True),
+    "ix_erp_sessions_user_active": ("erp_sessions", ["user_id", "revoked_at", "absolute_expires_at"], False),
 }
 
 FORBIDDEN_AUTH_COLUMNS = {
@@ -279,6 +300,45 @@ def create_auth_schema(connection: sqlite3.Connection) -> list[str]:
             CHECK (store_id > 0),
             CHECK (scope_type IN ('all', 'assigned')),
             CHECK (membership_status IN ('active', 'inactive', 'revoked'))
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS erp_user_security (
+            user_id INTEGER PRIMARY KEY,
+            password_hash TEXT,
+            mfa_type VARCHAR(30) NOT NULL DEFAULT 'totp',
+            mfa_secret_encrypted TEXT,
+            mfa_enabled_at DATETIME,
+            session_version INTEGER NOT NULL DEFAULT 1,
+            authz_version INTEGER NOT NULL DEFAULT 1,
+            failed_login_count INTEGER NOT NULL DEFAULT 0,
+            blocked_until DATETIME,
+            password_changed_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES erp_users(id)
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS erp_sessions (
+            id VARCHAR(64) PRIMARY KEY,
+            session_token_hash VARCHAR(128) NOT NULL,
+            user_id INTEGER NOT NULL,
+            environment VARCHAR(30) NOT NULL,
+            authn_level VARCHAR(30) NOT NULL,
+            session_version INTEGER NOT NULL,
+            authz_version_at_issue INTEGER NOT NULL,
+            csrf_token_hash VARCHAR(128),
+            created_at DATETIME NOT NULL,
+            last_seen_at DATETIME NOT NULL,
+            idle_expires_at DATETIME NOT NULL,
+            absolute_expires_at DATETIME NOT NULL,
+            last_reauthenticated_at DATETIME,
+            revoked_at DATETIME,
+            revoke_reason VARCHAR(120),
+            FOREIGN KEY (user_id) REFERENCES erp_users(id),
+            CHECK (environment IN ('development', 'test', 'production')),
+            CHECK (authn_level IN ('mfa_pending', 'mfa_verified'))
         )
     """)
 

@@ -46,6 +46,10 @@ async function sendData(method, path, body, params) {
 }
 
 export const backendApi = {
+  login: (payload) => sendData('post', '/auth/login', payload),
+  verifyMfa: (payload) => sendData('post', '/auth/mfa/verify', payload),
+  getSession: () => getData('/auth/session'),
+  logout: () => sendData('post', '/auth/logout'),
   healthCheck: () => getData('/health'),
   getStores: (params) => getData('/stores', params),
   createStore: (payload) => sendData('post', '/stores', payload),
