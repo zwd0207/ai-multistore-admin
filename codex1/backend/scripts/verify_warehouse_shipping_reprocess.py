@@ -291,6 +291,41 @@ def main():
         assert sibling_one_row.tracking_number_hash is not None
         sibling_one_row.product_order_reference = sibling_one.external_product_order_id
         db.commit()
+        missing_target_import = db.scalar(select(ShippingTrackingImportRow).where(
+            ShippingTrackingImportRow.import_batch_id == sibling_import_batch_id,
+            ShippingTrackingImportRow.product_order_reference == sibling_one.external_product_order_id,
+        ))
+        db.delete(missing_target_import)
+        db.commit()
+        missing_target_release = warehouse_shipping_service.remove_warehouse_batch_row(
+            db,
+            batch_id=sibling_batch_id,
+            row_id=sibling_one_row.id,
+            reason_code="warehouse_exception",
+            warehouse_stopped_shipping=True,
+            actor_context=ACTOR,
+        )
+        assert missing_target_release["skip_reason"] == "shipping_tracking_cleanup_ambiguous_manual_resolution_required", missing_target_release
+        protected_sibling_import = db.scalars(select(ShippingTrackingImportRow).where(
+            ShippingTrackingImportRow.import_batch_id == sibling_import_batch_id,
+        )).all()
+        assert len(protected_sibling_import) == 1
+        assert protected_sibling_import[0].product_order_reference == sibling_two.external_product_order_id
+        db.add(ShippingTrackingImportRow(
+            import_batch_id=sibling_import_batch_id,
+            store_id=store.id,
+            platform="naver",
+            order_reference=shared_order_reference,
+            product_order_reference=sibling_one.external_product_order_id,
+            logistics_inventory_code="WH-TEST-001",
+            carrier="CJ",
+            tracking_number="1111111111",
+            shipped_at="2026-07-11T09:00:00+09:00",
+            row_status="ready_for_confirmation",
+            operator_note=None,
+            future_write_allowed=False,
+        ))
+        db.commit()
         sibling_release = warehouse_shipping_service.remove_warehouse_batch_row(
             db,
             batch_id=sibling_batch_id,
@@ -336,7 +371,7 @@ def main():
         stale_grant = warehouse_shipping_service.issue_approval_grant(
             db, batch_id=stale_batch_id, user_id=77, grant_scope="manifest",
         )
-        db.get(WarehouseShippingBatchOrder, stale_row_id).carrier = "CJ"
+        db.get(WarehouseShippingBatchOrder, stale_row_id).product_name = "Changed manifest product"
         db.commit()
         assert warehouse_shipping_service.consume_approval_grant(
             db, batch_id=stale_batch_id, user_id=77, grant_scope="manifest", token=stale_grant["approval_token"],
@@ -346,22 +381,96 @@ def main():
         db.commit()
         writeback_batch = create_batch(db, store.id, writeback_order.id)
         writeback_batch_id = writeback_batch["batch"]["id"]
-        writeback_row = db.get(WarehouseShippingBatchOrder, writeback_batch["batch"]["rows"][0]["id"])
-        writeback_row.row_status = "ready_for_writeback"
-        writeback_row.carrier = "CJ"
-        writeback_row.tracking_number_hash = shipping_service._safe_hash_identifier("3333333333")
-        writeback_row.shipped_at = "2026-07-11T10:00:00+09:00"
-        db.commit()
-        writeback_grant = warehouse_shipping_service.issue_approval_grant(
-            db, batch_id=writeback_batch_id, user_id=80, grant_scope="writeback",
+        writeback_manifest = warehouse_shipping_service.download_warehouse_manifest(
+            db, batch_id=writeback_batch_id, manual_approval=True,
+            privacy_access_acknowledged=True, actor_context=ACTOR,
         )
-        writeback_row.carrier = "LOTTE"
-        writeback_row.tracking_number_hash = shipping_service._safe_hash_identifier("4444444444")
-        writeback_row.shipped_at = "2026-07-11T10:30:00+09:00"
-        db.commit()
-        assert warehouse_shipping_service.consume_approval_grant(
-            db, batch_id=writeback_batch_id, user_id=80, grant_scope="writeback", token=writeback_grant["approval_token"],
-        ) is False
+        assert writeback_manifest["status"] == "warehouse_manifest_ready", writeback_manifest
+        writeback_import = warehouse_shipping_service.import_warehouse_tracking_xlsx(
+            db,
+            batch_id=writeback_batch_id,
+            source_file_name="writeback-approval.xlsx",
+            file_content_base64=tracking_xlsx([{
+                "order_reference": writeback_order.external_order_id,
+                "product_order_reference": writeback_order.external_product_order_id,
+                "logistics_inventory_code": "WH-TEST-001",
+                "carrier": "CJ",
+                "tracking_number": "3333333333",
+                "shipped_at": "2026-07-11T10:00:00+09:00",
+            }]),
+            manual_approval=True,
+            actor_context=ACTOR,
+        )
+        assert writeback_import["normal_count"] == 1, writeback_import
+        writeback_confirmed = warehouse_shipping_service.confirm_warehouse_batch(
+            db, batch_id=writeback_batch_id, confirmed_row_ids=[], manual_approval=True, actor_context=ACTOR,
+        )
+        assert writeback_confirmed["status"] == "ready_to_writeback", writeback_confirmed
+        writeback_import_batch_id = db.get(WarehouseShippingBatch, writeback_batch_id).tracking_import_batch_id
+        actual_tracking = db.scalar(select(ShippingTrackingImportRow).where(
+            ShippingTrackingImportRow.import_batch_id == writeback_import_batch_id,
+        ))
+        original_tracking = {
+            "carrier": actual_tracking.carrier,
+            "tracking_number": actual_tracking.tracking_number,
+            "shipped_at": actual_tracking.shipped_at,
+        }
+        changed_values = {
+            "carrier": "LOTTE",
+            "tracking_number": "4444444444",
+            "shipped_at": "2026-07-11T10:30:00+09:00",
+        }
+        for index, (field, changed_value) in enumerate(changed_values.items(), start=81):
+            grant = warehouse_shipping_service.issue_approval_grant(
+                db, batch_id=writeback_batch_id, user_id=index, grant_scope="writeback",
+            )
+            assert grant["status"] == "approval_granted", grant
+            setattr(actual_tracking, field, changed_value)
+            db.commit()
+            assert warehouse_shipping_service.consume_approval_grant(
+                db, batch_id=writeback_batch_id, user_id=index, grant_scope="writeback", token=grant["approval_token"],
+            ) is False
+            setattr(actual_tracking, field, original_tracking[field])
+            db.commit()
+
+        final_candidates, final_candidate_error = warehouse_shipping_service._writeback_execution_candidates(
+            db, db.get(WarehouseShippingBatch, writeback_batch_id),
+        )
+        assert final_candidate_error is None and final_candidates, final_candidate_error
+        final_grant = warehouse_shipping_service.issue_approval_grant(
+            db, batch_id=writeback_batch_id, user_id=90, grant_scope="writeback",
+        )
+        approved_candidate_hash = warehouse_shipping_service.consume_approval_grant_with_candidate_hash(
+            db, batch_id=writeback_batch_id, user_id=90, grant_scope="writeback", token=final_grant["approval_token"],
+        )
+        captured_tracking_rows = []
+        original_writeback = shipping_service.execute_naver_shipment_writeback
+
+        def fake_writeback(*_args, **kwargs):
+            captured_tracking_rows.extend(kwargs["tracking_rows"])
+            return {"status": "success", "real_api_called": False}
+
+        shipping_service.execute_naver_shipment_writeback = fake_writeback
+        try:
+            writeback_result = warehouse_shipping_service.execute_warehouse_batch_writeback(
+                db,
+                batch_id=writeback_batch_id,
+                manual_approval=True,
+                final_operator_confirmation=True,
+                real_api_call_requested=True,
+                actor_context=ACTOR,
+                approved_candidate_hash=approved_candidate_hash,
+            )
+        finally:
+            shipping_service.execute_naver_shipment_writeback = original_writeback
+        assert writeback_result["status"] == "success", writeback_result
+        assert captured_tracking_rows == [{
+            "order_reference": final_candidates[0]["order_reference"],
+            "product_order_reference": final_candidates[0]["product_order_reference"],
+            "carrier": final_candidates[0]["carrier"],
+            "tracking_number": final_candidates[0]["tracking_number"],
+            "shipped_at": final_candidates[0]["shipped_at"],
+        }], captured_tracking_rows
 
         recipient_order = add_order(db, store.id, "recipient", {"delivery_memo": "Original memo"})
         db.commit()

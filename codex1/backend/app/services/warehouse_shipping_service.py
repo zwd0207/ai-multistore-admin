@@ -68,59 +68,95 @@ def _safe_batch_row(row: WarehouseShippingBatchOrder) -> dict[str, Any]:
     }
 
 
-def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
-    candidate_statuses = {
-        "manifest": {"pending_export"},
-        "writeback": {"ready_for_writeback"},
-    }.get(grant_scope, set())
-    candidates = []
-    for row in sorted(batch.rows, key=lambda item: item.id):
-        if not row.is_active or row.row_status not in candidate_statuses:
-            continue
+def _match_tracking_import_row(
+    import_rows: list[ShippingTrackingImportRow],
+    batch_row: WarehouseShippingBatchOrder,
+) -> tuple[ShippingTrackingImportRow | None, str | None]:
+    product_reference = str(batch_row.product_order_reference or "").strip()
+    if product_reference:
+        matches = [item for item in import_rows if item.product_order_reference == product_reference]
+        if len(matches) != 1:
+            return None, "shipping_tracking_product_order_match_not_unique"
+        return matches[0], None
+    matches = [item for item in import_rows if item.order_reference == batch_row.order_reference]
+    if len(matches) != 1:
+        return None, "shipping_tracking_order_match_not_unique"
+    return matches[0], None
+
+
+def _writeback_execution_candidates(
+    db: Session,
+    batch: WarehouseShippingBatch,
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    if not batch.tracking_import_batch_id:
+        return None, "tracking_import_required"
+    import_rows = db.scalars(select(ShippingTrackingImportRow).where(
+        ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
+    )).all()
+    candidates: list[dict[str, Any]] = []
+    selected_tracking_ids: set[int] = set()
+    ready_batch_rows = [row for row in batch.rows if row.is_active and row.row_status == "ready_for_writeback"]
+    for batch_row in sorted(ready_batch_rows, key=lambda item: item.id):
+        tracking_row, error = _match_tracking_import_row(import_rows, batch_row)
+        if error or tracking_row is None or tracking_row.id in selected_tracking_ids:
+            return None, error or "shipping_tracking_record_reused"
         candidates.append({
-            "id": row.id,
-            "order_id": row.local_order_id,
-            "order_reference": row.order_reference,
-            "product_order_reference": row.product_order_reference,
-            "product_name": row.product_name,
-            "quantity": row.quantity,
-            "internal_sku": row.internal_sku,
-            "logistics_inventory_code": row.logistics_inventory_code,
-            "row_status": row.row_status,
-            "carrier": row.carrier,
-            "tracking_number_hash": row.tracking_number_hash,
-            "shipped_at": row.shipped_at,
-            "recipient": order_service.recipient_contract(row.order),
+            "batch_row_id": batch_row.id,
+            "tracking_record_id": tracking_row.id,
+            "product_order_reference": tracking_row.product_order_reference,
+            "order_reference": tracking_row.order_reference,
+            "carrier": tracking_row.carrier,
+            "tracking_number": tracking_row.tracking_number,
+            "tracking_number_hash": shipping_service._safe_hash_identifier(tracking_row.tracking_number),
+            "shipped_at": tracking_row.shipped_at,
         })
+        selected_tracking_ids.add(tracking_row.id)
+    if not candidates:
+        return None, "no_confirmed_tracking_rows"
+    return candidates, None
+
+
+def _candidate_hash(db: Session, batch: WarehouseShippingBatch, grant_scope: str) -> str:
+    if grant_scope == "writeback":
+        execution_candidates, error = _writeback_execution_candidates(db, batch)
+        candidates = [
+            {
+                "tracking_record_id": item["tracking_record_id"],
+                "product_order_reference": item["product_order_reference"],
+                "order_reference": item["order_reference"],
+                "carrier": item["carrier"],
+                "tracking_number_hash": item["tracking_number_hash"],
+                "shipped_at": item["shipped_at"],
+            }
+            for item in (execution_candidates or [])
+        ]
+    else:
+        error = None
+        candidates = []
+        for row in sorted(batch.rows, key=lambda item: item.id):
+            if not row.is_active or row.row_status != "pending_export":
+                continue
+            candidates.append({
+                "id": row.id,
+                "order_id": row.local_order_id,
+                "order_reference": row.order_reference,
+                "product_order_reference": row.product_order_reference,
+                "product_name": row.product_name,
+                "quantity": row.quantity,
+                "internal_sku": row.internal_sku,
+                "logistics_inventory_code": row.logistics_inventory_code,
+                "recipient": order_service.recipient_contract(row.order),
+            })
     payload = {
         "batch_id": batch.id,
         "batch_version": batch.version,
         "grant_scope": grant_scope,
+        "candidate_error": error,
         "candidates": candidates,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-
-
-def _tracking_rows_for_batch_rows(
-    import_rows: list[ShippingTrackingImportRow],
-    batch_rows: list[WarehouseShippingBatchOrder],
-) -> list[ShippingTrackingImportRow]:
-    selected: list[ShippingTrackingImportRow] = []
-    selected_ids: set[int] = set()
-    for batch_row in batch_rows:
-        product_reference = str(batch_row.product_order_reference or "").strip()
-        if product_reference:
-            matches = [item for item in import_rows if item.product_order_reference == product_reference]
-        else:
-            matches = [item for item in import_rows if item.order_reference == batch_row.order_reference]
-            if len(matches) != 1:
-                continue
-        if len(matches) == 1 and matches[0].id not in selected_ids:
-            selected.append(matches[0])
-            selected_ids.add(matches[0].id)
-    return selected
 
 
 def _write_workflow_audit(db: Session, *, batch: WarehouseShippingBatch, actor_context: dict[str, Any] | None, action: str, row_count: int, reason_code: str) -> None:
@@ -152,7 +188,11 @@ def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scop
         return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
     if grant_scope not in {"manifest", "writeback"}:
         return {"status": "blocked", "skip_reason": "shipping_approval_scope_invalid"}
-    candidate_hash = _candidate_hash(batch, grant_scope)
+    if grant_scope == "writeback":
+        _candidates, candidate_error = _writeback_execution_candidates(db, batch)
+        if candidate_error:
+            return {"status": "blocked", "skip_reason": candidate_error}
+    candidate_hash = _candidate_hash(db, batch, grant_scope)
     token = secrets.token_urlsafe(32)
     now = get_utc_now()
     db.add(WarehouseShippingApprovalGrant(
@@ -164,7 +204,9 @@ def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scop
     return {"status": "approval_granted", "approval_token": token, "expires_at": now + timedelta(minutes=10), "batch_version": batch.version}
 
 
-def consume_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scope: str, token: str) -> bool:
+def _consume_approval_grant(
+    db: Session, *, batch_id: int, user_id: int, grant_scope: str, token: str,
+) -> str | None:
     grant = db.scalar(select(WarehouseShippingApprovalGrant).where(
         WarehouseShippingApprovalGrant.batch_id == batch_id,
         WarehouseShippingApprovalGrant.user_id == user_id,
@@ -179,12 +221,26 @@ def consume_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_sc
         or batch is None
         or expires_at < get_utc_now()
         or grant.batch_version != batch.version
-        or grant.candidate_hash != _candidate_hash(batch, grant_scope)
+        or grant.candidate_hash != _candidate_hash(db, batch, grant_scope)
     ):
-        return False
+        return None
     grant.used_at = get_utc_now()
     db.commit()
-    return True
+    return grant.candidate_hash
+
+
+def consume_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scope: str, token: str) -> bool:
+    return _consume_approval_grant(
+        db, batch_id=batch_id, user_id=user_id, grant_scope=grant_scope, token=token,
+    ) is not None
+
+
+def consume_approval_grant_with_candidate_hash(
+    db: Session, *, batch_id: int, user_id: int, grant_scope: str, token: str,
+) -> str | None:
+    return _consume_approval_grant(
+        db, batch_id=batch_id, user_id=user_id, grant_scope=grant_scope, token=token,
+    )
 
 
 def _serialize_batch(batch: WarehouseShippingBatch, *, include_rows: bool = True) -> dict[str, Any]:
@@ -513,24 +569,23 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
         return {"status": "blocked", "skip_reason": "no_confirmed_tracking_rows"}
     if not batch.tracking_import_batch_id:
         return {"status": "blocked", "skip_reason": "tracking_import_required"}
-    import_rows = db.scalars(select(ShippingTrackingImportRow).where(
-        ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
-    )).all()
-    ready_batch_rows = [row for row in batch.rows if row.row_status == "ready_for_writeback"]
-    ready_import_rows = _tracking_rows_for_batch_rows(import_rows, ready_batch_rows)
+    execution_candidates, candidate_error = _writeback_execution_candidates(db, batch)
+    if candidate_error or execution_candidates is None:
+        db.rollback()
+        return {"status": "blocked", "skip_reason": candidate_error or "no_confirmed_tracking_rows"}
     local_update = shipping_service.write_tracking_order_status_local_update(
         db,
         store_id=batch.store_id,
         platform=batch.platform,
         tracking_rows=[
             {
-                "order_reference": row.order_reference,
-                "product_order_reference": row.product_order_reference,
-                "carrier": row.carrier,
-                "tracking_number": row.tracking_number,
-                "shipped_at": row.shipped_at,
+                "order_reference": item["order_reference"],
+                "product_order_reference": item["product_order_reference"],
+                "carrier": item["carrier"],
+                "tracking_number": item["tracking_number"],
+                "shipped_at": item["shipped_at"],
             }
-            for row in ready_import_rows
+            for item in execution_candidates
         ],
         import_batch_id=batch.tracking_import_batch_id,
         manual_approval=True,
@@ -555,6 +610,7 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
 def execute_warehouse_batch_writeback(
     db: Session, *, batch_id: int, manual_approval: bool, final_operator_confirmation: bool,
     real_api_call_requested: bool, actor_context: dict[str, Any] | None,
+    approved_candidate_hash: str | None = None,
 ) -> dict[str, Any]:
     if not manual_approval or not final_operator_confirmation or not real_api_call_requested:
         return {"status": "blocked", "skip_reason": "final_operator_confirmation_and_real_api_request_required", "real_api_called": False}
@@ -565,20 +621,21 @@ def execute_warehouse_batch_writeback(
         return {"status": "blocked", "skip_reason": "batch_not_ready_for_writeback", "real_api_called": False}
     if batch.platform != "naver" or not batch.tracking_import_batch_id:
         return {"status": "blocked", "skip_reason": "naver_tracking_import_required", "real_api_called": False}
-    import_rows = db.scalars(select(ShippingTrackingImportRow).where(
-        ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
-    )).all()
-    ready_batch_rows = [row for row in batch.rows if row.row_status == "ready_for_writeback"]
-    ready_import_rows = _tracking_rows_for_batch_rows(import_rows, ready_batch_rows)
+    execution_candidates, candidate_error = _writeback_execution_candidates(db, batch)
+    if candidate_error or execution_candidates is None:
+        return {"status": "blocked", "skip_reason": candidate_error or "no_confirmed_tracking_rows", "real_api_called": False}
+    current_candidate_hash = _candidate_hash(db, batch, "writeback")
+    if not approved_candidate_hash or approved_candidate_hash != current_candidate_hash:
+        return {"status": "blocked", "skip_reason": "shipping_approval_candidate_changed", "real_api_called": False}
     tracking_rows = [
         {
-            "order_reference": row.order_reference,
-            "product_order_reference": row.product_order_reference,
-            "carrier": row.carrier,
-            "tracking_number": row.tracking_number,
-            "shipped_at": row.shipped_at,
+            "order_reference": item["order_reference"],
+            "product_order_reference": item["product_order_reference"],
+            "carrier": item["carrier"],
+            "tracking_number": item["tracking_number"],
+            "shipped_at": item["shipped_at"],
         }
-        for row in ready_import_rows
+        for item in execution_candidates
     ]
     if not tracking_rows:
         return {"status": "blocked", "skip_reason": "no_confirmed_tracking_rows", "real_api_called": False}
@@ -623,7 +680,7 @@ def execute_warehouse_batch_writeback(
             if row.row_status == "ready_for_writeback":
                 row.failure_reason = result.get("skip_reason") or "platform_writeback_failed"
     db.commit()
-    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="platform_writeback_recorded", row_count=len(ready_import_rows), reason_code=str(result.get("status") or "failed"))
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="platform_writeback_recorded", row_count=len(execution_candidates), reason_code=str(result.get("status") or "failed"))
     db.refresh(batch)
     return {"status": result.get("status"), "writeback": result, "batch": _serialize_batch(batch), "real_api_called": bool(result.get("real_api_called"))}
 
@@ -656,26 +713,14 @@ def remove_warehouse_batch_row(
     if tracking_import_batch_id:
         import_batch = db.get(ShippingTrackingImportBatch, tracking_import_batch_id)
         if import_batch is not None:
-            related_import_rows = [
-                import_row for import_row in import_batch.rows
-                if import_row.order_reference == row.order_reference
-            ]
-            product_order_reference = str(row.product_order_reference or "").strip()
-            if product_order_reference:
-                matched_import_rows = [
-                    import_row for import_row in related_import_rows
-                    if import_row.product_order_reference == product_order_reference
-                ]
-                if not matched_import_rows:
-                    if len(related_import_rows) != 1:
-                        return {"status": "blocked", "skip_reason": "shipping_tracking_cleanup_ambiguous_manual_resolution_required"}
-                    matched_import_rows = related_import_rows
-            else:
-                if len(related_import_rows) != 1:
-                    return {"status": "blocked", "skip_reason": "shipping_tracking_cleanup_ambiguous_manual_resolution_required"}
-                matched_import_rows = related_import_rows
-            for import_row in matched_import_rows:
-                db.delete(import_row)
+            matched_import_row, match_error = _match_tracking_import_row(list(import_batch.rows), row)
+            if match_error or matched_import_row is None:
+                return {
+                    "status": "blocked",
+                    "skip_reason": "shipping_tracking_cleanup_ambiguous_manual_resolution_required",
+                    "match_error": match_error,
+                }
+            db.delete(matched_import_row)
             db.flush()
             remaining_import_rows = db.scalars(select(ShippingTrackingImportRow).where(
                 ShippingTrackingImportRow.import_batch_id == import_batch.id,

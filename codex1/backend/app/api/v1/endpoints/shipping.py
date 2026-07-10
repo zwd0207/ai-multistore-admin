@@ -143,13 +143,17 @@ def execute_warehouse_shipping_writeback(
     if batch is None:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.writeback.approve")
-    if not payload.approval_token or not warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope="writeback", token=payload.approval_token):
+    approved_candidate_hash = warehouse_shipping_service.consume_approval_grant_with_candidate_hash(
+        db, batch_id=batch_id, user_id=identity.user_id, grant_scope="writeback", token=payload.approval_token,
+    ) if payload.approval_token else None
+    if not approved_candidate_hash:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_token_invalid"})
     return success_response(
         data=warehouse_shipping_service.execute_warehouse_batch_writeback(
             db, batch_id=batch_id, manual_approval=payload.manual_approval,
             final_operator_confirmation=payload.final_operator_confirmation,
             real_api_call_requested=payload.real_api_call_requested, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
+            approved_candidate_hash=approved_candidate_hash,
         ),
         message="warehouse shipping platform writeback completed",
     )
