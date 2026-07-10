@@ -11,11 +11,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import {
-  classifyCoreDataSource,
-  getCoreApiCapability,
-  getDangerousActionState,
-} from '../utils/coreErpContract';
+import { classifyCoreDataSource } from '../utils/coreErpContract';
 import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const PAGE_SIZE = 20;
@@ -118,7 +114,7 @@ const columns = [
   { key: 'price', title: '售价', render: (value, row) => money(value, row.currency) },
   { key: 'stock', title: '库存' },
   { key: 'platformStatus', title: '平台状态', render: (value) => <StatusBadge value={value} /> },
-  { key: 'sourceLabel', title: '数据来源' },
+  { key: 'sourceLabel', title: '记录状态' },
   { key: 'updatedAt', title: '最近同步时间' },
 ];
 
@@ -179,8 +175,6 @@ export default function Products() {
   }), [rows]);
 
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
-  const dangerousState = getDangerousActionState('platform_inventory_write');
-  const readCapability = getCoreApiCapability(activeProduct?.platform, 'product_read');
 
   const search = () => setQuery({ ...draft, page: 1 });
   const reset = () => {
@@ -193,19 +187,19 @@ export default function Products() {
     <>
       <PageHeader
         title="商品管理"
-        description="当前显示系统已保存商品记录，用于日常查看售价、库存、平台状态、数据来源和最近同步时间；不要把历史本地记录当作正式平台总商品数。"
+        description="查看商品售价、库存和销售状态，帮助安排补货和发货。商品资料修改请按店铺流程处理。"
         actions={(
           <>
             <Link className="button ghost" to="/inventory">查看库存预警</Link>
-            <Link className="button ghost" to="/shipping">跳转发货辅助</Link>
+            <Link className="button ghost" to="/shipping">进入仓库发货</Link>
             <span className="period-chip">暂不支持在线编辑</span>
           </>
         )}
       />
 
       <div className="summary-grid">
-        <SummaryCard title="系统已保存商品记录" value={summary.total} note="不是正式平台总商品数" tone="info" />
-        <SummaryCard title="在售商品" value={summary.active} note="按本地状态映射" tone="success" />
+        <SummaryCard title="商品记录" value={summary.total} note="当前可查看商品" tone="info" />
+        <SummaryCard title="在售商品" value={summary.active} note="当前销售状态" tone="success" />
         <SummaryCard title="低库存商品" value={summary.low} note="建议补货或人工确认" tone={summary.low ? 'warning' : 'success'} />
         <SummaryCard title="缺货商品" value={summary.out} note="建议补货或人工下架" tone={summary.out ? 'danger' : 'success'} />
       </div>
@@ -214,7 +208,7 @@ export default function Products() {
         <div className="card-title">
           <div>
             <h2>运营建议</h2>
-            <p>先看库存和销售状态，再决定补货、人工下架或进入发货辅助核对待发货订单。</p>
+            <p>先看库存和销售状态，再决定补货、下架或进入仓库发货核对待发货订单。</p>
           </div>
         </div>
         <div className="business-capability-grid compact">
@@ -231,8 +225,8 @@ export default function Products() {
             <p>把非在售、缺货和低库存商品作为每日商品巡检重点。</p>
           </article>
           <article className="business-capability-card muted">
-            <div className="business-capability-head"><strong>发货联动</strong><span>本地辅助</span></div>
-            <p>进入发货辅助核对待发货订单，不会自动修改平台商品或库存。</p>
+            <div className="business-capability-head"><strong>发货联动</strong><span>待发货</span></div>
+            <p>进入仓库发货核对待发货订单和仓库货号。</p>
           </article>
         </div>
       </section>
@@ -308,9 +302,8 @@ export default function Products() {
                 ['库存', `${activeProduct.stock} 件`],
                 ['销售状态', <StatusBadge value={activeProduct.salesStatus} />],
                 ['库存状态', <StatusBadge value={activeProduct.stockStatus} />],
-                ['数据来源', activeProduct.sourceInfo.label],
-                ['最近同步时间', activeProduct.updatedAt ? formatKstDateTimeWithLabel(activeProduct.updatedAt) : '-'],
-                ['官方 API 能力', `${readCapability.category} 类：${readCapability.currentPhase}`],
+                ['记录状态', activeProduct.sourceInfo.label],
+                ['最近更新时间', activeProduct.updatedAt ? formatKstDateTimeWithLabel(activeProduct.updatedAt) : '-'],
                 ['当前编辑状态', '暂不支持在线编辑'],
               ].map(([label, value]) => (
                 <div className="detail-item" key={label}>
@@ -320,8 +313,8 @@ export default function Products() {
               ))}
             </div>
             <section className="detail-section">
-              <h3>数据口径</h3>
-              <p>{activeProduct.sourceInfo.description}</p>
+              <h3>商品记录说明</h3>
+              <p>商品信息用于日常查看和发货核对；平台资料以平台后台显示为准。</p>
             </section>
             <section className="detail-section">
               <h3>暂未开放功能</h3>
@@ -331,7 +324,7 @@ export default function Products() {
                 <StatusBadge value="批量上下架暂未开放" />
                 <StatusBadge value="删除真实平台商品暂未开放" />
               </div>
-              <p>{dangerousState.note}</p>
+              <p>商品价格、库存和上下架需要按店铺权限在平台后台处理。</p>
             </section>
           </>
         ) : (

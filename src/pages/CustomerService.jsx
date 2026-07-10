@@ -13,7 +13,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
+import { classifyCoreDataSource } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 10;
 const NAVER_REPLY_BODY_FIELD = 'answerComment';
@@ -55,7 +55,7 @@ function normalizeMessage(row = {}) {
     customerName: text(row.customerName || row.customer || row.buyerName, '客户'),
     orderNo: text(row.orderNo || row.external_order_id, '未关联订单'),
     productName: text(row.productName || row.product || row.product_name, '未关联商品'),
-    inquiryType: text(row.inquiryType || row.type || row.category, '平台消息'),
+    inquiryType: text(row.inquiryType || row.type || row.category, '客户咨询'),
     summary: text(row.summary || row.content || row.title, '暂无摘要'),
     content: text(row.content || row.summary, '暂无内容'),
     statusLabel: statusLabel(row.status),
@@ -129,7 +129,7 @@ export default function CustomerService() {
       return normalized;
     } catch (requestError) {
       setRows([]);
-      setError(requestError.message || '平台消息加载失败');
+      setError(requestError.message || '客户咨询加载失败');
       return [];
     } finally {
       setLoading(false);
@@ -147,12 +147,11 @@ export default function CustomerService() {
     manual: rows.filter((item) => item.statusLabel === '需人工处理' || item.priorityLabel === '紧急').length,
   }), [rows]);
 
-  const dangerousState = getDangerousActionState('customer_auto_reply');
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
 
   const syncPlatformMessages = async () => {
     if (!selectedStoreId) {
-      setSyncMessage('请先选择 Naver 店铺，再同步客服消息。');
+      setSyncMessage('请先选择 Naver 店铺，再更新客户咨询。');
       window.setTimeout(() => setSyncMessage(''), 3200);
       return;
     }
@@ -163,9 +162,9 @@ export default function CustomerService() {
         size: 50,
       });
       const latestRows = await load(query);
-      setSyncMessage(syncResult.message || `已接入 Naver 官方 API 读取，当前显示 ${latestRows.length} 条消息。`);
+      setSyncMessage(syncResult.message || `客户咨询已更新，当前显示 ${latestRows.length} 条。`);
     } catch (syncError) {
-      setSyncMessage(syncError.message || 'Naver 客服消息同步失败，请检查店铺 API 权限或 IP 白名单。');
+      setSyncMessage(syncError.message || '客户咨询更新失败，请联系管理员检查店铺连接。');
     }
     window.setTimeout(() => setSyncMessage(''), 3200);
   };
@@ -207,7 +206,7 @@ export default function CustomerService() {
       setReplyConfirm(false);
       await load(query);
     } catch (replyError) {
-      setSyncMessage(replyError.message || 'Naver 客服回复提交失败，请检查 API 权限或消息状态。');
+      setSyncMessage(replyError.message || '客户回复提交失败，请确认咨询状态或联系管理员。');
     } finally {
       setReplySubmitting(false);
       window.setTimeout(() => setSyncMessage(''), 3600);
@@ -224,19 +223,17 @@ export default function CustomerService() {
   return (
     <>
       <PageHeader
-        title="平台消息"
-        description="已接入 Naver 官方 API 读取；Coupang / Gmarket 消息仍作为本地入口。回复必须由运营人工确认后提交。"
+        title="客户咨询"
+        description="集中查看客户问题并准备回复。发送回复前，请先核对订单和物流信息。"
         actions={(
           <>
-            <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
-            <Link className="button ghost" to="/stores">检查店铺连接</Link>
-            <Link className="button ghost" to="/emails">检查邮箱连接</Link>
+            <button type="button" className="button primary" onClick={syncPlatformMessages}>更新客户咨询</button>
           </>
         )}
       />
 
       <div className="summary-grid">
-        <SummaryCard title="平台消息" value={summary.total} note="读取自本地保存记录" tone="info" />
+        <SummaryCard title="客户咨询" value={summary.total} note="当前可处理咨询" tone="info" />
         <SummaryCard title="待处理" value={summary.pending} note="需人工查看" tone={summary.pending ? 'warning' : 'success'} />
         <SummaryCard title="紧急消息" value={summary.urgent} note="优先处理" tone={summary.urgent ? 'danger' : 'success'} />
         <SummaryCard title="需人工到平台后台处理" value={summary.manual} note="不自动回复客户" tone="warning" />
@@ -245,16 +242,16 @@ export default function CustomerService() {
       <section className="content-card">
         <div className="business-capability-grid compact">
           <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>Naver 客服消息</strong><span>已接入读取</span></div>
-            <p>已接入 Naver 官方 API 读取，写入本地 ERP；Coupang / Gmarket 暂未接入真实平台消息。</p>
+            <div className="business-capability-head"><strong>先看订单进度</strong><span>处理前</span></div>
+            <p>回复前请核对订单、商品规格和物流进度，避免给客户错误答复。</p>
           </article>
           <article className="business-capability-card info">
             <div className="business-capability-head"><strong>回复处理</strong><span>人工确认</span></div>
-            <p>Naver 回复可以在人工确认发送后提交到平台；本地草稿仍可单独保存。</p>
+            <p>回复内容可先保存为草稿；确认无误后，再由运营人员发送给客户。</p>
           </article>
           <article className="business-capability-card muted">
-            <div className="business-capability-head"><strong>自动回复客户</strong><span>{dangerousState.label}</span></div>
-            <p>{dangerousState.note}</p>
+            <div className="business-capability-head"><strong>复杂问题</strong><span>人工处理</span></div>
+            <p>退款、换货、投诉和平台审核问题需要按实际情况人工处理。</p>
           </article>
         </div>
       </section>
@@ -284,16 +281,14 @@ export default function CustomerService() {
 
       <section className="content-card">
         {syncMessage ? <div className="form-info">{syncMessage}</div> : null}
-        {error ? <EmptyState title="平台消息加载失败" description={error} /> : null}
+        {error ? <EmptyState title="客户咨询加载失败" description={error} /> : null}
         {!error && !loading && !rows.length ? (
           <EmptyState
-            title="当前没有平台消息"
-            description="可以同步 Naver 客服消息；如果仍为空，请检查店铺连接、API 权限或 IP 白名单。"
+            title="当前没有客户咨询"
+            description="可以更新客户咨询；如果仍为空，请联系管理员检查店铺连接。"
             actions={(
               <>
-                <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
-                <Link className="button ghost" to="/stores">检查店铺连接</Link>
-                <Link className="button ghost" to="/emails">检查邮箱连接</Link>
+                <button type="button" className="button primary" onClick={syncPlatformMessages}>更新客户咨询</button>
               </>
             )}
           />
@@ -328,7 +323,7 @@ export default function CustomerService() {
                 ['商品', activeMessage.productName],
                 ['状态', <StatusBadge value={activeMessage.statusLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
-                ['数据来源', activeMessage.sourceInfo.label],
+                ['记录状态', activeMessage.sourceInfo.label],
               ].map(([label, value]) => (
                 <div className="detail-item" key={label}>
                   <span>{label}</span>
@@ -341,7 +336,7 @@ export default function CustomerService() {
               <p>{activeMessage.content}</p>
             </section>
             <section className="detail-section">
-              <h3>处理边界</h3>
+              <h3>处理提示</h3>
               <p>Naver 客服回复支持人工确认后提交；退款、换货、投诉处理仍需人工到平台后台处理。</p>
             </section>
           </>
@@ -375,7 +370,7 @@ export default function CustomerService() {
         <div className="modal-actions-inline">
           <button type="button" className="button ghost" onClick={saveDraft} disabled={replySubmitting}>保存本地草稿</button>
         </div>
-        <p className="mock-sync-note">自动回复客户仍未开放；这里只允许运营人工确认后提交单条 Naver 回复。</p>
+        <p className="mock-sync-note">当前每条客户咨询都需要运营人员核对后单独发送。</p>
       </Modal>
     </>
   );

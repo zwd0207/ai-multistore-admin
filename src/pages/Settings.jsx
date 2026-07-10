@@ -152,8 +152,8 @@ export default function Settings() {
   return (
     <>
       <PageHeader
-        title="系统设置"
-        description="维护多店铺电商管理后台的系统名称、韩国时间 KST、韩元 KRW、平台显示、通知、风险规则和模板。高级排查信息不在普通运营主流程展示。"
+        title="管理员设置"
+        description="管理员维护平台显示、通知、风险规则和模板。日常运营不需要在此页面处理订单、仓库发货或客户咨询。"
         actions={<><button type="button" className="button ghost" onClick={resetAll}>恢复默认设置</button><button type="button" className="button primary" onClick={saveCurrent}>保存设置</button></>}
       />
 
@@ -239,7 +239,7 @@ export default function Settings() {
             {[
               ['emailNotice', '邮箱通知'],
               ['appealReminder', '申诉提醒'],
-              ['customerTimeoutReminder', '平台消息超时提醒'],
+              ['customerTimeoutReminder', '客户咨询超时提醒'],
               ['orderExceptionReminder', '订单异常提醒'],
               ['environmentRiskReminder', '店铺连接风险提醒'],
             ].map(([key, label]) => (
@@ -281,10 +281,10 @@ export default function Settings() {
       )}
 
       {activeTab === 'templates' && (
-        <SettingsSection title="模板设置" description="维护平台消息、申诉资料和邮件备注模板。">
+        <SettingsSection title="模板设置" description="维护客户咨询、申诉资料和邮件备注模板。">
           <div className="settings-stack">
             {[
-              ['customerReplyTemplate', '平台消息常用回复模板'],
+              ['customerReplyTemplate', '客户咨询常用回复模板'],
               ['authenticityTemplate', '正品保证说明模板'],
               ['refundTemplate', '退款说明模板'],
               ['appealDocumentTemplate', '申诉资料清单模板'],

@@ -79,8 +79,8 @@ const columns = [
   { key: 'stock', title: '当前库存' },
   { key: 'inventoryStatus', title: '库存状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'suggestion', title: '库存不足处理建议' },
-  { key: 'sourceLabel', title: '数据来源' },
-  { key: 'updatedAt', title: '最近同步' },
+  { key: 'sourceLabel', title: '记录状态' },
+  { key: 'updatedAt', title: '最近更新时间' },
 ];
 
 export default function InventoryAlerts() {
@@ -139,11 +139,11 @@ export default function InventoryAlerts() {
     <>
       <PageHeader
         title="库存预警"
-        description="按本地库存判断缺货商品、低库存商品和库存正常商品，帮助运营决定补货、下架或人工确认。"
+        description="查看缺货和低库存商品，帮助安排补货、下架或发货前确认。"
         actions={(
           <>
-            <Link className="button ghost" to="/products">跳转商品管理</Link>
-            <Link className="button primary" to="/shipping">跳转发货辅助</Link>
+            <Link className="button ghost" to="/products">查看商品</Link>
+            <Link className="button primary" to="/shipping">进入仓库发货</Link>
           </>
         )}
       />
@@ -152,14 +152,14 @@ export default function InventoryAlerts() {
         <SummaryCard title="缺货商品" value={summary.out} note="库存为 0" tone={summary.out ? 'danger' : 'success'} />
         <SummaryCard title="低库存商品" value={summary.low} note="库存 1-5 件" tone={summary.low ? 'warning' : 'success'} />
         <SummaryCard title="库存正常商品" value={summary.normal} note="库存高于预警线" tone="success" />
-        <SummaryCard title="本地库存判断" value={summary.total} note="不修改平台库存" tone="info" />
+        <SummaryCard title="已检查商品" value={summary.total} note="用于补货和发货确认" tone="info" />
       </div>
 
       <section className="content-card">
         <div className="card-title">
           <div>
             <h2>处理优先级</h2>
-            <p>先处理缺货，再处理低库存，最后观察库存正常商品。本页面只做本地库存判断，不修改平台库存。</p>
+            <p>先处理缺货，再处理低库存，最后查看库存正常商品。</p>
           </div>
         </div>
         <div className="business-capability-grid compact">
@@ -173,11 +173,11 @@ export default function InventoryAlerts() {
           </article>
           <article className="business-capability-card info">
             <div className="business-capability-head"><strong>3. 回看商品</strong><span>复核</span></div>
-            <p>处理后回到商品管理查看售价、库存、平台状态和数据来源。</p>
+            <p>处理后回到商品管理查看售价、库存和销售状态。</p>
           </article>
           <article className="business-capability-card muted">
             <div className="business-capability-head"><strong>4. 准备发货</strong><span>联动</span></div>
-            <p>库存确认后进入发货辅助，核对待发货订单和物流单号。</p>
+            <p>库存确认后进入仓库发货，核对待发货订单和物流信息。</p>
           </article>
         </div>
       </section>
@@ -212,8 +212,8 @@ export default function InventoryAlerts() {
         {!error && !loading && !rows.length ? (
           <EmptyState
             title="暂无符合条件的库存记录"
-            description="可以切换库存状态或返回商品管理查看系统已保存商品记录。"
-            actions={<Link className="button primary" to="/products">查看商品管理</Link>}
+            description="可以切换库存状态或返回商品管理查看商品记录。"
+            actions={<Link className="button primary" to="/products">查看商品</Link>}
           />
         ) : (
           <DataTable columns={columns} rows={rows} loading={loading || storeLoading} />

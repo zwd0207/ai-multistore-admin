@@ -134,10 +134,10 @@ includesAll('src/layouts/AdminLayout.jsx', [
 ]);
 
 includesAll('src/pages/Orders.jsx', [
-  '手动批量刷新',
-  '正在刷新 Naver 订单...',
-  '本地订单刷新完成',
-  '不会回填平台',
+  '更新平台订单',
+  '正在更新 Naver 订单...',
+  '订单更新完成',
+  '不会修改平台订单',
   'dataProvider.manualRefreshNaverOrders',
 ]);
 

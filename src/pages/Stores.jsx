@@ -261,8 +261,8 @@ export default function Stores() {
 
   return (
     <ResourcePage
-      title="店铺管理"
-      description="新增或编辑店铺时，可以在同一个窗口填写 Naver / Coupang API 连接资料。普通店铺信息和 API 密钥分区展示，保存后密钥不会明文回显。"
+      title="店铺与平台连接"
+      description="仅管理员维护店铺资料和平台连接。日常运营请在今日工作台、订单处理和仓库发货中完成工作。"
       resourceName="店铺"
       api={api}
       columns={columns}
