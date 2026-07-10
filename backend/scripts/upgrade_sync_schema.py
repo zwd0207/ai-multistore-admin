@@ -13,6 +13,12 @@ from app.database import Base, engine
 ORDER_COLUMNS = {
     "source_type": "VARCHAR(30) NOT NULL DEFAULT 'legacy'",
     "last_synced_at": "DATETIME",
+    "external_product_order_id": "VARCHAR(120)",
+    "buyer_phone": "VARCHAR(40)",
+    "receiver_name": "VARCHAR(120)",
+    "receiver_phone": "VARCHAR(40)",
+    "receiver_address": "VARCHAR(300)",
+    "zip_code": "VARCHAR(30)",
 }
 
 PRODUCT_COLUMNS = {

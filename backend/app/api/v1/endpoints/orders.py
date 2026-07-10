@@ -34,3 +34,13 @@ def list_orders(
             platform=normalized_platform,
         ),
     })
+
+
+@router.get("/{order_id}/logistics-trace")
+def get_order_logistics_trace(
+    order_id: int,
+    store_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    result = order_service.get_order_logistics_timeline(db, store_id=store_id, order_id=order_id)
+    return success_response(data=result, message="order logistics trace listed")

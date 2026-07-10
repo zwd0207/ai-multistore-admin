@@ -19,6 +19,7 @@ from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, get_utc_now
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.api_credential import ApiCredential
+from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
 from app.models.product import Product
@@ -58,6 +59,7 @@ NAVER_PRODUCT_PREVIEW_SOURCE_TYPE = "naver_product_preview"
 NAVER_PRODUCT_SYNC_SOURCE_TYPE = "naver_real_sync"
 NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
 NAVER_ORDER_SYNC_SOURCE_TYPE = "naver_real_order_sync"
+NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE = "naver_customer_inquiry_real_sync"
 NAVER_ORDER_TIMELINE_MAPPING_VERSION = "naver_order_status_timeline_mock_mapper_v1"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
@@ -66,6 +68,7 @@ COUPANG_ORDER_PREVIEW_MAX_DAYS = 3
 COUPANG_FINANCIAL_PREVIEW_MAX_DAYS = 7
 NAVER_ORDER_PREVIEW_MAX_DAYS = 7
 NAVER_ORDER_SINGLE_WRITE_MAX_DAYS = 1
+NAVER_ORDER_MANUAL_BATCH_MAX_COUNT = 20
 COUPANG_ORDER_PREVIEW_MAX_PAGES = 3
 COUPANG_ORDER_PREVIEW_PAGE_SIZE = 50
 COUPANG_PRODUCT_MAX_PAGES = 3
@@ -1075,6 +1078,558 @@ def sync_customer_inquiries_mock(db: Session, store_id: int, platform: str) -> d
     )
 
 
+def _default_naver_customer_inquiry_date_range(
+    start_date: date | None,
+    end_date: date | None,
+) -> tuple[date, date]:
+    safe_end = end_date or get_business_date()
+    safe_start = start_date or (safe_end - timedelta(days=7))
+    if safe_start > safe_end:
+        raise ApiError(
+            message="Naver customer inquiry start_date must be less than or equal to end_date",
+            error_code="date_range_invalid",
+            status_code=400,
+        )
+    if safe_end - safe_start > timedelta(days=31):
+        raise ApiError(
+            message="Naver customer inquiry sync window must be 31 days or less",
+            error_code="date_range_invalid",
+            status_code=400,
+            detail={"max_window_days": 31},
+        )
+    return safe_start, safe_end
+
+
+def _request_naver_customer_inquiries(
+    *,
+    api_base: str,
+    headers: dict[str, str],
+    start_date: date,
+    end_date: date,
+    answered: bool | None,
+    page: int,
+    size: int,
+) -> dict:
+    params: dict[str, str | int] = {
+        "page": int(page),
+        "size": int(size),
+        "startSearchDate": start_date.isoformat(),
+        "endSearchDate": end_date.isoformat(),
+    }
+    if answered is not None:
+        params["answered"] = "true" if answered else "false"
+    diagnostics = {
+        "endpoint": "/v1/pay-user/inquiries",
+        "query_param_keys": list(params.keys()),
+        "start_search_date": start_date.isoformat(),
+        "end_search_date": end_date.isoformat(),
+        "answered_filter_used": answered is not None,
+    }
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(
+            f"{api_base}/v1/pay-user/inquiries",
+            headers=headers,
+            params=params,
+        )
+    diagnostics["http_status"] = response.status_code
+    if response.status_code >= 400:
+        diagnostics.update(_extract_naver_error_diagnostics(response))
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": _naver_readonly_error_code(response, scope="customer_inquiry"),
+            "diagnostics": diagnostics,
+        }
+    return {
+        "success": True,
+        "http_status": response.status_code,
+        "payload": response.json(),
+        "diagnostics": diagnostics,
+    }
+
+
+def _extract_naver_customer_inquiry_items(payload: object) -> list[dict]:
+    if isinstance(payload, dict) and isinstance(payload.get("content"), list):
+        return [item for item in payload["content"] if isinstance(item, dict)]
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        return _extract_naver_customer_inquiry_items(payload["data"])
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def _split_naver_product_order_ids(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [_bounded_text(str(item).strip(), 120) for item in value if str(item or "").strip()]
+    return [
+        _bounded_text(part.strip(), 120)
+        for part in str(value).split(",")
+        if part.strip()
+    ]
+
+
+def _naver_customer_inquiry_status(item: dict) -> str:
+    if bool(item.get("answered")):
+        return "answered"
+    return "open"
+
+
+def _map_naver_customer_inquiry(item: dict) -> dict:
+    inquiry_no = _extract_scalar_by_keys(item, ("inquiryNo", "inquiry_no"))
+    registered_at = _parse_preview_iso_datetime(
+        _extract_scalar_by_keys(item, ("inquiryRegistrationDateTime", "registeredAt", "createdAt"))
+    ) or get_utc_now()
+    answered_at = _parse_preview_iso_datetime(
+        _extract_scalar_by_keys(item, ("answerRegistrationDateTime", "answeredAt"))
+    )
+    product_order_ids = _split_naver_product_order_ids(
+        item.get("productOrderIdList") or item.get("product_order_id_list")
+    )
+    answer_content = _bounded_text(_extract_scalar_by_keys(item, ("answerContent", "answer_content")), 1000)
+    return {
+        "external_inquiry_id": _bounded_text(str(inquiry_no or ""), 120) or "unknown-inquiry",
+        "inquiry_type": _bounded_text(_extract_scalar_by_keys(item, ("category", "inquiryType")), 50) or "platform_message",
+        "customer_name": _bounded_text(_extract_scalar_by_keys(item, ("customerName", "customer_name")), 120),
+        "title": _bounded_text(_extract_scalar_by_keys(item, ("title",)), 300) or "Naver customer inquiry",
+        "content": _bounded_text(_extract_scalar_by_keys(item, ("inquiryContent", "content")), 4000) or "",
+        "status": _naver_customer_inquiry_status(item),
+        "received_at": registered_at,
+        "answered_at": answered_at,
+        "raw_data": {
+            "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+            "mapping_version": "naver_customer_inquiry_v1",
+            "raw_response_saved": False,
+            "platform_write": False,
+            "technical_sensitive_fields_suppressed": True,
+            "order_id": _bounded_text(_extract_scalar_by_keys(item, ("orderId", "order_id")), 120),
+            "product_order_id_list": product_order_ids,
+            "product_no": _bounded_text(_extract_scalar_by_keys(item, ("productNo", "product_no")), 120),
+            "product_name": _bounded_text(_extract_scalar_by_keys(item, ("productName", "product_name")), 300),
+            "product_order_option": _bounded_text(_extract_scalar_by_keys(item, ("productOrderOption", "product_order_option")), 300),
+            "answered": bool(item.get("answered")),
+            "answer_content": answer_content,
+            "answer_registration_date_time": answered_at.isoformat() if answered_at else None,
+        },
+    }
+
+
+def _customer_inquiry_sync_result_from_error(
+    *,
+    store_id: int,
+    error_code: str,
+    message: str | None = None,
+) -> dict:
+    return {
+        "status": "failed",
+        "store_id": store_id,
+        "platform": "naver",
+        "resource": "customer_inquiries",
+        "message": message or _manual_batch_message_for_error("naver", error_code, "Naver 客服消息同步失败"),
+        "error_code": error_code,
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_count": 0,
+        "deleted_count": 0,
+        "platform_write": False,
+        "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+        "raw_response_saved": False,
+    }
+
+
+def sync_naver_customer_inquiries(
+    db: Session,
+    *,
+    store_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    answered: bool | None = None,
+    page: int = 1,
+    size: int = 50,
+) -> dict:
+    credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
+    safe_start, safe_end = _default_naver_customer_inquiry_date_range(start_date, end_date)
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="naver",
+        sync_type=NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+        message="naver customer inquiry sync started",
+        raw_summary={
+            "stage": "started",
+            "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+            "endpoint": "/v1/pay-user/inquiries",
+            "start_date": safe_start.isoformat(),
+            "end_date": safe_end.isoformat(),
+            "platform_write": False,
+            "raw_response_saved": False,
+        },
+    )
+    try:
+        context = _build_naver_token_context_from_credential(credential)
+        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        request_result = _request_naver_customer_inquiries(
+            api_base=context["api_base"],
+            headers={"Authorization": f"Bearer {access_token}"},
+            start_date=safe_start,
+            end_date=safe_end,
+            answered=answered,
+            page=page,
+            size=size,
+        )
+        if not request_result.get("success"):
+            error_code = str(request_result.get("error_code") or "readonly_request_failed")
+            result = _customer_inquiry_sync_result_from_error(store_id=store_id, error_code=error_code)
+            result["http_status"] = request_result.get("http_status")
+            result["sync_log"] = sync_log_service.fail_sync_log(
+                db,
+                sync_log_id=sync_log["id"],
+                message="naver customer inquiry sync failed",
+                error_detail=_mask_sensitive_text(result["message"]),
+                raw_summary={
+                    "stage": "failed",
+                    "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+                    "error_code": error_code,
+                    "http_status": request_result.get("http_status"),
+                    "platform_write": False,
+                    "raw_response_saved": False,
+                },
+            )
+            return result
+
+        items = [_map_naver_customer_inquiry(item) for item in _extract_naver_customer_inquiry_items(request_result.get("payload"))]
+        write_result = customer_inquiry_service.upsert_customer_inquiries(db, store_id, "naver", items)
+        result = {
+            "status": "success",
+            "store_id": store_id,
+            "platform": "naver",
+            "resource": "customer_inquiries",
+            "message": (
+                f"Naver 客服消息本地同步完成：新增 {int(write_result.get('created') or 0)}，"
+                f"更新 {int(write_result.get('updated') or 0)}。"
+            ),
+            "error_code": None,
+            "created_count": int(write_result.get("created") or 0),
+            "updated_count": int(write_result.get("updated") or 0),
+            "skipped_count": 0,
+            "deleted_count": 0,
+            "platform_write": False,
+            "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+            "raw_response_saved": False,
+            "token_http_status": token_status,
+            "http_status": request_result.get("http_status"),
+            "page": page,
+            "size": size,
+            "start_date": safe_start.isoformat(),
+            "end_date": safe_end.isoformat(),
+        }
+        result["sync_log"] = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver customer inquiry sync completed",
+            raw_summary={
+                "stage": "completed",
+                "status": "success",
+                "created_count": result["created_count"],
+                "updated_count": result["updated_count"],
+                "source_type": NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+                "platform_write": False,
+                "raw_response_saved": False,
+            },
+        )
+        return result
+    except api_credential_readiness_service.NaverReadonlyAuthError as exc:
+        db.rollback()
+        result = _customer_inquiry_sync_result_from_error(
+            store_id=store_id,
+            error_code=exc.error_code,
+            message=_manual_batch_message_for_error("naver", exc.error_code),
+        )
+        result["http_status"] = exc.http_status
+        result["sync_log"] = sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver customer inquiry sync auth failed",
+            error_detail=_mask_sensitive_text(result["message"]),
+            raw_summary={
+                "stage": "failed",
+                "status": "failed",
+                "error_code": exc.error_code,
+                "http_status": exc.http_status,
+                "platform_write": False,
+                "raw_response_saved": False,
+            },
+        )
+        return result
+    except Exception as exc:
+        db.rollback()
+        error_code = getattr(exc, "error_code", None) or "customer_inquiry_sync_failed"
+        result = _customer_inquiry_sync_result_from_error(
+            store_id=store_id,
+            error_code=str(error_code),
+            message=getattr(exc, "message", None) or "Naver 客服消息同步失败",
+        )
+        result["sync_log"] = sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver customer inquiry sync failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "status": "failed",
+                "error_code": str(error_code),
+                "platform_write": False,
+                "raw_response_saved": False,
+            },
+        )
+        return result
+
+
+def _find_customer_inquiry_for_reply(
+    db: Session,
+    *,
+    store_id: int,
+    inquiry_id: int | None,
+    external_inquiry_id: str | None,
+) -> CustomerInquiry:
+    statement = select(CustomerInquiry).where(
+        CustomerInquiry.store_id == store_id,
+        CustomerInquiry.platform == "naver",
+    )
+    if inquiry_id is not None:
+        statement = statement.where(CustomerInquiry.id == inquiry_id)
+    else:
+        statement = statement.where(CustomerInquiry.external_inquiry_id == str(external_inquiry_id or "").strip())
+    inquiry = db.scalar(statement)
+    if inquiry is None:
+        raise ApiError(
+            message="Naver customer inquiry is not found in local ERP",
+            error_code="customer_inquiry_not_found",
+            status_code=404,
+            detail={"store_id": store_id, "inquiry_id": inquiry_id, "external_inquiry_id": external_inquiry_id},
+        )
+    return inquiry
+
+
+def _request_naver_customer_inquiry_reply(
+    *,
+    api_base: str,
+    headers: dict[str, str],
+    inquiry_no: str,
+    answer_comment: str,
+    answer_template_id: str | None,
+) -> dict:
+    payload: dict[str, str] = {"answerComment": answer_comment}
+    if answer_template_id:
+        payload["answerTemplateId"] = answer_template_id
+    with httpx.Client(timeout=10.0) as client:
+        response = client.post(
+            f"{api_base}/v1/pay-merchant/inquiries/{inquiry_no}/answer",
+            headers={**headers, "Content-Type": "application/json"},
+            json=payload,
+        )
+    diagnostics = {
+        "endpoint": "/v1/pay-merchant/inquiries/{inquiryNo}/answer",
+        "http_status": response.status_code,
+        "body_field_keys": list(payload.keys()),
+        "answerComment": True,
+    }
+    if response.status_code >= 400:
+        diagnostics.update(_extract_naver_error_diagnostics(response))
+        text = response.text or ""
+        error_code = _naver_readonly_error_code(response, scope="customer_inquiry_reply")
+        if "ERR-NC-101010" in text:
+            error_code = "already_answered"
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": error_code,
+            "diagnostics": diagnostics,
+        }
+    return {
+        "success": True,
+        "http_status": response.status_code,
+        "diagnostics": diagnostics,
+    }
+
+
+def reply_naver_customer_inquiry(
+    db: Session,
+    *,
+    store_id: int,
+    inquiry_id: int | None = None,
+    external_inquiry_id: str | None = None,
+    answer_comment: str,
+    answer_template_id: str | None = None,
+    manual_approval: bool = False,
+    final_operator_confirmation: bool = False,
+    actor_context: dict | None = None,
+) -> dict:
+    ensure_store_exists(db, store_id)
+    safe_answer = _bounded_text(str(answer_comment or "").strip(), 4000)
+    inquiry = _find_customer_inquiry_for_reply(
+        db,
+        store_id=store_id,
+        inquiry_id=inquiry_id,
+        external_inquiry_id=external_inquiry_id,
+    )
+    base_result = {
+        "status": "blocked",
+        "store_id": store_id,
+        "platform": "naver",
+        "resource": "customer_inquiries",
+        "inquiry_id": inquiry.id,
+        "external_inquiry_id": inquiry.external_inquiry_id,
+        "message": "Naver 客服回复未提交：需要人工确认发送。",
+        "error_code": None,
+        "platform_write": False,
+        "platform_write_attempted": False,
+        "manual_approval": bool(manual_approval),
+        "final_operator_confirmation": bool(final_operator_confirmation),
+        "raw_response_saved": False,
+        "secrets_saved": False,
+        "answerComment": True,
+    }
+    if manual_approval is not True or final_operator_confirmation is not True:
+        return {**base_result, "error_code": "manual_confirmation_required"}
+    if not safe_answer:
+        return {**base_result, "error_code": "answer_comment_required", "message": "Naver 客服回复未提交：回复内容不能为空。"}
+
+    inquiry_no = str(inquiry.external_inquiry_id or "").strip()
+    if not re.fullmatch(r"\d{1,30}", inquiry_no):
+        return {**base_result, "error_code": "invalid_inquiry_no", "message": "Naver 客服回复未提交：本地消息编号不是有效的 Naver inquiryNo。"}
+
+    credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="naver",
+        sync_type="naver_customer_inquiry_reply",
+        message="naver customer inquiry reply started",
+        raw_summary={
+            "stage": "started",
+            "endpoint": "/v1/pay-merchant/inquiries/{inquiryNo}/answer",
+            "platform_write": True,
+            "manual_approval": True,
+            "final_operator_confirmation": True,
+            "raw_response_saved": False,
+        },
+    )
+    try:
+        context = _build_naver_token_context_from_credential(credential)
+        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        request_result = _request_naver_customer_inquiry_reply(
+            api_base=context["api_base"],
+            headers={"Authorization": f"Bearer {access_token}"},
+            inquiry_no=inquiry_no,
+            answer_comment=safe_answer,
+            answer_template_id=_bounded_text(answer_template_id, 120),
+        )
+        now = get_utc_now()
+        if request_result.get("success") or request_result.get("error_code") == "already_answered":
+            safe_raw = dict(inquiry.raw_data or {})
+            safe_raw.update({
+                "platform_reply_submitted": request_result.get("success") is True,
+                "platform_reply_already_existed": request_result.get("error_code") == "already_answered",
+                "platform_reply_endpoint": "/v1/pay-merchant/inquiries/{inquiryNo}/answer",
+                "platform_write": request_result.get("success") is True,
+                "manual_approval": True,
+                "final_operator_confirmation": True,
+                "answer_content": safe_answer,
+                "answer_registration_date_time": now.isoformat(),
+                "raw_response_saved": False,
+                "secrets_saved": False,
+            })
+            inquiry.status = "answered"
+            inquiry.answered_at = now
+            inquiry.raw_data = safe_raw
+            db.commit()
+            result_status = "success" if request_result.get("success") else "already_answered"
+            result = {
+                **base_result,
+                "status": result_status,
+                "message": (
+                    "Naver 客服回复已提交。"
+                    if result_status == "success"
+                    else "Naver 平台提示该消息已有回复，本地已标记为已回复。"
+                ),
+                "error_code": None if result_status == "success" else "already_answered",
+                "platform_write": result_status == "success",
+                "platform_write_attempted": True,
+                "token_http_status": token_status,
+                "http_status": request_result.get("http_status"),
+            }
+            result["sync_log"] = sync_log_service.finish_sync_log(
+                db,
+                sync_log_id=sync_log["id"],
+                message="naver customer inquiry reply completed",
+                raw_summary={
+                    "stage": "completed",
+                    "status": result_status,
+                    "platform_write": result["platform_write"],
+                    "platform_write_attempted": True,
+                    "manual_approval": True,
+                    "final_operator_confirmation": True,
+                    "raw_response_saved": False,
+                },
+            )
+            return result
+
+        error_code = str(request_result.get("error_code") or "customer_inquiry_reply_failed")
+        result = {
+            **base_result,
+            "status": "failed",
+            "message": _manual_batch_message_for_error("naver", error_code, "Naver 客服回复提交失败"),
+            "error_code": error_code,
+            "platform_write": False,
+            "platform_write_attempted": True,
+            "http_status": request_result.get("http_status"),
+        }
+        result["sync_log"] = sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver customer inquiry reply failed",
+            error_detail=_mask_sensitive_text(result["message"]),
+            raw_summary={
+                "stage": "failed",
+                "status": "failed",
+                "error_code": error_code,
+                "http_status": request_result.get("http_status"),
+                "platform_write": False,
+                "platform_write_attempted": True,
+                "raw_response_saved": False,
+            },
+        )
+        return result
+    except Exception as exc:
+        db.rollback()
+        error_code = getattr(exc, "error_code", None) or "customer_inquiry_reply_failed"
+        result = {
+            **base_result,
+            "status": "failed",
+            "message": getattr(exc, "message", None) or "Naver 客服回复提交失败",
+            "error_code": str(error_code),
+            "platform_write": False,
+            "platform_write_attempted": True,
+        }
+        result["sync_log"] = sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver customer inquiry reply failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "status": "failed",
+                "error_code": str(error_code),
+                "platform_write": False,
+                "platform_write_attempted": True,
+                "raw_response_saved": False,
+            },
+        )
+        return result
+
+
 MANUAL_BATCH_SYNC_TYPE = "manual_batch_sync"
 MANUAL_BATCH_SUPPORTED_PLATFORMS = {"naver", "coupang"}
 MANUAL_BATCH_RESOURCE_LABELS = {
@@ -1085,6 +1640,23 @@ MANUAL_BATCH_RESOURCE_LABELS = {
 MANUAL_BATCH_PLATFORM_LABELS = {
     "naver": "Naver",
     "coupang": "Coupang",
+}
+MANUAL_BATCH_CONNECTION_BLOCKER_CODES = {
+    "ip_not_allowed",
+    "auth_failed",
+    "permission_forbidden",
+    "product_api_not_allowed",
+    "order_api_not_allowed",
+    "credential_not_ready",
+    "credential_invalid",
+    "credential_not_found",
+    "channel_no_missing",
+}
+MANUAL_BATCH_READ_RESOURCES = {"products", "orders", "customer_inquiries"}
+MANUAL_BATCH_CONNECTION_BLOCKED_MESSAGES = {
+    "products": "未执行商品同步：平台连接未通过，请先重新同步验证",
+    "orders": "未执行订单同步：平台连接未通过，请先重新同步验证",
+    "customer_inquiries": "客服消息暂未接入真实平台；本次平台连接也未通过",
 }
 
 
@@ -1136,12 +1708,14 @@ def _manual_batch_item(
 def _manual_batch_message_for_error(platform: str, error_code: str | None, fallback: str | None = None) -> str:
     label = MANUAL_BATCH_PLATFORM_LABELS.get(platform, platform)
     code = str(error_code or "").lower()
-    if code in {"ip_not_allowed", "auth_failed"}:
+    if code == "ip_not_allowed":
         return f"{label}：IP 白名单未通过"
-    if code in {"permission_forbidden", "product_api_not_allowed", "order_api_not_allowed"} or "permission" in code:
+    if code in {"auth_failed", "permission_forbidden", "product_api_not_allowed", "order_api_not_allowed"} or "permission" in code:
         return f"{label}：API 权限未开通"
     if code in {"credential_not_ready", "credential_invalid", "channel_no_missing"}:
         return f"{label}：API 资料未配置完整"
+    if code == "blocked_by_connection":
+        return "未执行同步：平台连接未通过，请先重新同步验证"
     if code in {"real_api_test_disabled", "guardrail_blocked"}:
         return f"{label}：当前同步门禁未开放"
     if code == "store_platform_mismatch":
@@ -1162,6 +1736,57 @@ def _manual_batch_item_from_error(platform: str, resource: str, exc: Exception) 
         message=message,
         error_code=error_code,
     )
+
+
+def _manual_batch_is_connection_blocker(item: dict) -> bool:
+    code = str(item.get("error_code") or "").lower()
+    return code in MANUAL_BATCH_CONNECTION_BLOCKER_CODES
+
+
+def _manual_batch_connection_blocked_message(resource: str) -> str:
+    return MANUAL_BATCH_CONNECTION_BLOCKED_MESSAGES.get(
+        resource,
+        "未执行数据同步：平台连接未通过，请先重新同步验证",
+    )
+
+
+def _manual_batch_apply_connection_blockers(items: list[dict], platform: str) -> list[dict]:
+    platform_blocked = any(
+        item.get("platform") == platform and _manual_batch_is_connection_blocker(item)
+        for item in items
+    )
+    if not platform_blocked:
+        return items
+
+    normalized: list[dict] = []
+    for item in items:
+        if item.get("platform") != platform or item.get("status") == "success" or _manual_batch_is_connection_blocker(item):
+            normalized.append(item)
+            continue
+
+        resource = item.get("resource")
+        if resource in MANUAL_BATCH_READ_RESOURCES:
+            normalized.append({
+                **item,
+                "status": "failed",
+                "message": _manual_batch_connection_blocked_message(str(resource or "")),
+                "error_code": "blocked_by_connection",
+                "full_snapshot": False,
+                "delete_executed": False,
+                "platform_write": False,
+            })
+            continue
+
+        if resource == "customer_inquiries" and str(item.get("error_code") or "").lower() == "not_open":
+            normalized.append({
+                **item,
+                "message": _manual_batch_connection_blocked_message("customer_inquiries"),
+                "platform_write": False,
+            })
+            continue
+
+        normalized.append(item)
+    return normalized
 
 
 def _manual_batch_result_status(items: list[dict]) -> str:
@@ -1232,15 +1857,567 @@ def _manual_sync_naver_products(db: Session, store_id: int) -> dict:
     )
 
 
-def _manual_sync_naver_orders() -> dict:
+def _manual_sync_naver_orders(db: Session, store_id: int) -> dict:
+    end_kst = get_utc_now().astimezone(get_business_timezone())
+    start_kst = end_kst - timedelta(hours=24)
+    result = preview_naver_orders(
+        db,
+        store_id=store_id,
+        credential_id=None,
+        start_datetime=start_kst,
+        end_datetime=end_kst,
+        order_status="ALL",
+        page=1,
+        size=NAVER_ORDER_MANUAL_BATCH_MAX_COUNT,
+        real_preview=True,
+        include_detail=True,
+        complete_field_preview=False,
+        real_sync=True,
+    )
+    local_result = result.get("local_sync_result") or {}
+    if result.get("preview_status") == "failed":
+        error_code = result.get("error_code") or "readonly_request_failed"
+        return _manual_batch_item(
+            platform="naver",
+            resource="orders",
+            status="failed",
+            message=_manual_batch_message_for_error("naver", error_code),
+            error_code=error_code,
+            source_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+            raw_status=result.get("preview_status"),
+        )
+
+    local_status = str(local_result.get("status") or "").lower()
+    safe_success_statuses = {"success", "already_exists", "skipped"}
+    safe_success_reasons = {None, "", "no_changed_orders", "duplicate_external_product_order_id_hash"}
+    if result.get("preview_status") in {"success", "success_empty"} and (
+        local_status in safe_success_statuses
+        and local_result.get("skip_reason") in safe_success_reasons
+    ):
+        return _manual_batch_item(
+            platform="naver",
+            resource="orders",
+            status="success",
+            message=_manual_batch_resource_message("naver", "orders", local_result),
+            created_count=local_result.get("created_count", 0),
+            updated_count=local_result.get("updated_count", 0),
+            skipped_count=local_result.get("skipped_count", 0),
+            source_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+            raw_status=local_status or result.get("preview_status"),
+        )
+
+    error_code = local_result.get("skip_reason") or result.get("error_code") or "local_order_sync_not_ready"
     return _manual_batch_item(
         platform="naver",
         resource="orders",
         status="skipped",
-        message="Naver暂未开放批量订单同步",
-        error_code="not_open",
+        message=_manual_batch_message_for_error("naver", error_code, "Naver订单本地同步暂未完成"),
+        error_code=error_code,
+        skipped_count=local_result.get("skipped_count", 0),
         source_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+        raw_status=local_status or result.get("preview_status"),
     )
+
+
+def _naver_order_raw_text(raw_data: object, keys: tuple[str, ...]) -> str | None:
+    if not isinstance(raw_data, dict):
+        return None
+    return _extract_scalar_by_keys(raw_data, keys)
+
+
+def _naver_order_needs_detail_refresh(order: Order) -> bool:
+    raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
+    if not order.receiver_phone and not _naver_order_raw_text(raw_data, (
+        "receiver_phone",
+        "receiverPhone",
+        "receiverTelNo",
+        "receiverTelNo1",
+        "receiverTelNo2",
+        "tel1",
+        "tel2",
+    )):
+        return True
+    status_text = " ".join([
+        str(order.order_status or ""),
+        str(_naver_order_raw_text(raw_data, ("delivery_status_label_zh", "deliveryStatusLabelZh")) or ""),
+        str(_naver_order_raw_text(raw_data, ("delivery_status", "deliveryStatus")) or ""),
+    ]).upper()
+    shipped_like = any(flag in status_text for flag in (
+        "DISPATCHED",
+        "DELIVERING",
+        "DELIVERY",
+        "SHIPPING",
+        "PURCHASE_DECIDED",
+        "已发货",
+        "配送中",
+        "配送完成",
+        "已确认购买",
+    ))
+    has_tracking = bool(_naver_order_raw_text(raw_data, (
+        "tracking_number",
+        "trackingNumber",
+        "shipping_tracking_number",
+        "invoiceNo",
+        "invoiceNumber",
+        "waybillNo",
+    )))
+    return shipped_like and not has_tracking
+
+
+def _manual_refresh_existing_naver_order_details(
+    db: Session,
+    *,
+    store_id: int,
+    max_count: int,
+) -> dict:
+    result = _default_naver_order_local_sync_result(True)
+    result.update({
+        "status": "skipped",
+        "candidate_count": 0,
+        "detail_refresh_existing_local_orders": True,
+        "refresh_existing_local_orders": True,
+        "platform_write": False,
+        "platform_writes_enabled": False,
+    })
+
+    local_orders = db.scalars(
+        select(Order)
+        .where(
+            Order.store_id == store_id,
+            Order.platform == "naver",
+            Order.external_product_order_id.is_not(None),
+        )
+        .order_by(Order.updated_at.desc(), Order.id.desc())
+    ).all()
+    candidates = [order for order in local_orders if _naver_order_needs_detail_refresh(order)][:max_count]
+    result["candidate_count"] = len(candidates)
+    if not candidates:
+        result["skip_reason"] = "no_existing_orders_need_detail_refresh"
+        return result
+
+    credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
+    try:
+        context = _build_naver_token_context_from_credential(credential)
+        access_token, _token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        headers = {"Authorization": f"Bearer {access_token}"}
+        product_order_ids = [
+            str(order.external_product_order_id).strip()
+            for order in candidates
+            if str(order.external_product_order_id or "").strip()
+        ][:max_count]
+        detail_result = _request_naver_order_detail_query(
+            api_base=context["api_base"],
+            headers=headers,
+            product_order_ids=product_order_ids,
+        )
+        result["detail_http_status"] = detail_result.get("http_status")
+        if not detail_result["success"]:
+            result.update({
+                "status": "blocked",
+                "skip_reason": detail_result.get("error_code") or "detail_request_failed",
+                "error_code": detail_result.get("error_code") or "detail_request_failed",
+                "privacy_fields_redacted": True,
+                "raw_response_saved": False,
+            })
+            return result
+        detail_records = _extract_naver_order_detail_records(detail_result["payload"], product_order_ids)
+        detail_previews = [
+            _build_naver_order_detail_preview(item, store_id=store_id)
+            for item in detail_records
+        ]
+        refreshed = _sync_naver_order_detail_previews_batch(
+            db,
+            store_id=store_id,
+            detail_previews=detail_previews,
+            real_sync=True,
+        )
+        refreshed.update({
+            "detail_refresh_existing_local_orders": True,
+            "refresh_existing_local_orders": True,
+            "candidate_count": len(candidates),
+            "detail_record_count": len(detail_records),
+            "platform_write": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+        })
+        return refreshed
+    except Exception as exc:
+        error_code = getattr(exc, "error_code", None) or "existing_order_detail_refresh_failed"
+        result.update({
+            "status": "blocked",
+            "skip_reason": error_code,
+            "error_code": error_code,
+            "privacy_fields_redacted": True,
+            "raw_response_saved": False,
+        })
+        return result
+
+
+def _naver_order_detail_field_availability(detail_preview: dict | None) -> dict[str, bool]:
+    detail_preview = detail_preview if isinstance(detail_preview, dict) else {}
+    return {
+        "receiver_name": bool(detail_preview.get("receiver_name")),
+        "receiver_phone": bool(detail_preview.get("receiver_phone")),
+        "receiver_address": bool(detail_preview.get("receiver_address")),
+        "delivery_company": bool(detail_preview.get("delivery_company")),
+        "tracking_number": bool(detail_preview.get("tracking_number")),
+    }
+
+
+def refresh_single_naver_order_detail(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+) -> dict:
+    result = {
+        "status": "skipped",
+        "store_id": store_id,
+        "platform": "naver",
+        "resource": "orders",
+        "order_id": order_id,
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_count": 0,
+        "no_change_count": 0,
+        "platform_write": False,
+        "platform_writes_enabled": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "field_availability": {},
+    }
+
+    store = ensure_store_exists(db, store_id)
+    if normalize_platform(store.platform) != "naver":
+        result.update({
+            "status": "skipped",
+            "skip_reason": "STORE_PLATFORM_MISMATCH",
+            "error_code": "STORE_PLATFORM_MISMATCH",
+            "message": "当前店铺不是 Naver 店铺，无法刷新 Naver 订单详情。",
+            "skipped_count": 1,
+        })
+        return result
+
+    order = db.scalar(
+        select(Order).where(
+            Order.id == order_id,
+            Order.store_id == store_id,
+            Order.platform == "naver",
+        )
+    )
+    if order is None:
+        result.update({
+            "status": "failed",
+            "skip_reason": "order_not_found",
+            "error_code": "order_not_found",
+            "message": "订单不存在或不属于当前店铺。",
+            "skipped_count": 1,
+        })
+        return result
+
+    product_order_id = str(order.external_product_order_id or order.external_order_id or "").strip()
+    if not product_order_id:
+        result.update({
+            "status": "skipped",
+            "skip_reason": "product_order_id_missing",
+            "error_code": "product_order_id_missing",
+            "message": "本地订单缺少 Naver productOrderId，无法读取官方订单详情。",
+            "skipped_count": 1,
+        })
+        return result
+
+    try:
+        credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
+        context = _build_naver_token_context_from_credential(credential)
+        access_token, _token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        detail_result = _request_naver_order_detail_query(
+            api_base=context["api_base"],
+            headers={"Authorization": f"Bearer {access_token}"},
+            product_order_ids=[product_order_id],
+        )
+    except Exception as exc:
+        error_code = getattr(exc, "error_code", None) or "single_order_detail_refresh_failed"
+        result.update({
+            "status": "blocked",
+            "skip_reason": error_code,
+            "error_code": error_code,
+            "message": _manual_batch_message_for_error(
+                "naver",
+                error_code,
+                "Naver 订单详情刷新失败，请检查店铺 API 权限或 IP 白名单。",
+            ),
+            "skipped_count": 1,
+            "privacy_fields_redacted": True,
+        })
+        return result
+
+    result["detail_http_status"] = detail_result.get("http_status")
+    if not detail_result.get("success"):
+        error_code = detail_result.get("error_code") or "detail_request_failed"
+        result.update({
+            "status": "blocked",
+            "skip_reason": error_code,
+            "error_code": error_code,
+            "message": _manual_batch_message_for_error(
+                "naver",
+                error_code,
+                "Naver 订单详情读取失败，请检查店铺 API 权限或 IP 白名单。",
+            ),
+            "skipped_count": 1,
+            "privacy_fields_redacted": True,
+        })
+        return result
+
+    detail_records = _extract_naver_order_detail_records(detail_result.get("payload"), [product_order_id])
+    result["detail_record_count"] = len(detail_records)
+    if not detail_records:
+        result.update({
+            "status": "skipped",
+            "skip_reason": "detail_record_missing",
+            "error_code": "detail_record_missing",
+            "message": "已请求 Naver 订单详情，但本次响应未返回该订单详情记录。",
+            "skipped_count": 1,
+        })
+        return result
+
+    detail_preview = _build_naver_order_detail_preview(detail_records[0], store_id=store_id)
+    result["field_availability"] = _naver_order_detail_field_availability(detail_preview)
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+        detail_preview,
+        expected_store_id=store_id,
+    )
+    result["privacy_gate_passed"] = privacy_gate["passed"]
+    result["privacy_gate_reasons"] = privacy_gate["reasons"]
+    if not privacy_gate["passed"]:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "privacy_gate_failed",
+            "error_code": "privacy_gate_failed",
+            "message": "Naver 订单详情读取成功，但本地写入安全校验未通过。",
+            "skipped_count": 1,
+            "privacy_fields_redacted": True,
+        })
+        return result
+
+    payload = _build_naver_order_refresh_payload(detail_preview)
+    payload["external_order_id"] = order.external_order_id
+    payload["external_product_order_id"] = _bounded_text(product_order_id, 120)
+    changed_fields = _changed_naver_order_refresh_fields(order, payload)
+    result["changed_fields"] = changed_fields
+
+    if changed_fields:
+        for field, value in payload.items():
+            setattr(order, field, value)
+        db.commit()
+        db.refresh(order)
+        result.update({
+            "status": "success",
+            "updated_count": 1,
+            "message": "订单详情已读取官方 API 并刷新到本地；不会回填平台。",
+        })
+    else:
+        result.update({
+            "status": "success",
+            "no_change_count": 1,
+            "message": "已重新读取官方订单详情，本地字段没有变化。",
+        })
+
+    if not (result["field_availability"].get("receiver_phone") or result["field_availability"].get("tracking_number")):
+        result["message"] = "已读取官方订单详情，但本次平台响应未返回电话或物流单号。"
+
+    result["refreshed_order"] = order_service.serialize_order(order)
+    return result
+
+
+def _sum_naver_order_refresh_count(*results: dict, key: str) -> int:
+    return sum(int((item or {}).get(key) or 0) for item in results)
+
+
+def manual_refresh_naver_orders(
+    db: Session,
+    *,
+    store_id: int,
+    max_count: int = NAVER_ORDER_MANUAL_BATCH_MAX_COUNT,
+    hours: int = 24,
+) -> dict:
+    store = ensure_store_exists(db, store_id)
+    store_platform = normalize_platform(store.platform)
+    if store_platform != "naver":
+        return {
+            "status": "skipped",
+            "store_id": store_id,
+            "platform": "naver",
+            "resource": "orders",
+            "message": _manual_batch_message_for_error("naver", "STORE_PLATFORM_MISMATCH"),
+            "error_code": "STORE_PLATFORM_MISMATCH",
+            "created_count": 0,
+            "updated_count": 0,
+            "skipped_count": 1,
+            "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            "platform_write": False,
+            "platform_writes_enabled": False,
+        }
+
+    safe_max_count = max(1, min(int(max_count or NAVER_ORDER_MANUAL_BATCH_MAX_COUNT), NAVER_ORDER_MANUAL_BATCH_MAX_COUNT))
+    safe_hours = max(1, min(int(hours or 24), 24))
+    sync_log = sync_log_service.create_sync_log(
+        db,
+        store_id=store_id,
+        platform="naver",
+        sync_type=NAVER_ORDER_SYNC_SOURCE_TYPE,
+        message="naver manual order local refresh started",
+        raw_summary={
+            "stage": "started",
+            "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            "write_scope": "local_orders_only",
+            "platform_write": False,
+            "platform_writes_enabled": False,
+            "max_count": safe_max_count,
+            "hours": safe_hours,
+        },
+    )
+    try:
+        end_kst = get_utc_now().astimezone(get_business_timezone())
+        start_kst = end_kst - timedelta(hours=safe_hours)
+        preview_result = preview_naver_orders(
+            db,
+            store_id=store_id,
+            credential_id=None,
+            start_datetime=start_kst,
+            end_datetime=end_kst,
+            order_status="ALL",
+            page=1,
+            size=safe_max_count,
+            real_preview=True,
+            include_detail=True,
+            complete_field_preview=False,
+            real_sync=True,
+        )
+        local_result = preview_result.get("local_sync_result") or {}
+        preview_status = preview_result.get("preview_status")
+        existing_detail_result = {}
+        if preview_status != "failed":
+            existing_detail_result = _manual_refresh_existing_naver_order_details(
+                db,
+                store_id=store_id,
+                max_count=safe_max_count,
+            )
+
+        local_status = str(local_result.get("status") or "").lower()
+        existing_status = str(existing_detail_result.get("status") or "skipped").lower()
+        error_code = preview_result.get("error_code") or local_result.get("skip_reason")
+        if existing_status in {"blocked", "failed"} and not error_code:
+            error_code = existing_detail_result.get("error_code") or existing_detail_result.get("skip_reason")
+
+        safe_success_statuses = {"success", "skipped", "already_exists"}
+        recent_refresh_ok = local_status in safe_success_statuses
+        existing_refresh_ok = existing_status in safe_success_statuses
+
+        if preview_status == "failed":
+            status = "failed"
+            message = _manual_batch_message_for_error("naver", error_code)
+        elif preview_status in {"success", "success_empty"} and recent_refresh_ok and existing_refresh_ok:
+            status = "success"
+            created_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="created_count")
+            updated_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="updated_count")
+            skipped_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="skipped_count")
+            message = (
+                f"本地订单刷新完成：新增 {created_count}，更新 {updated_count}，"
+                f"跳过 {skipped_count}。已补刷已有订单详情字段，不会回填平台。"
+            )
+            error_code = None if status == "success" else error_code
+        else:
+            status = "skipped"
+            message = _manual_batch_message_for_error("naver", error_code, "Naver订单本地刷新暂未完成")
+
+        created_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="created_count")
+        updated_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="updated_count")
+        skipped_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="skipped_count")
+        no_change_count = _sum_naver_order_refresh_count(local_result, existing_detail_result, key="no_change_count")
+        sample_ids = [
+            *list(local_result.get("sample_ids") or preview_result.get("sample_ids") or []),
+            *list(existing_detail_result.get("sample_ids") or []),
+        ][:10]
+
+        result = {
+            "status": status,
+            "store_id": store_id,
+            "platform": "naver",
+            "resource": "orders",
+            "message": message,
+            "error_code": error_code,
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "no_change_count": no_change_count,
+            "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            "raw_status": local_status or existing_status or preview_status,
+            "platform_write": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": bool(local_result.get("privacy_fields_redacted") or existing_detail_result.get("privacy_fields_redacted")),
+            "business_contact_fields_saved": bool(local_result.get("business_contact_fields_saved") or existing_detail_result.get("business_contact_fields_saved")),
+            "address_saved": bool(local_result.get("address_saved") or existing_detail_result.get("address_saved")),
+            "sample_ids": sample_ids,
+            "preview_status": preview_status,
+            "existing_detail_refresh_status": existing_status,
+            "existing_detail_refresh_count": int(existing_detail_result.get("candidate_count") or 0),
+            "detail_record_count": int(existing_detail_result.get("detail_record_count") or 0),
+            "has_more": bool(preview_result.get("has_more")),
+        }
+        result["sync_log"] = sync_log_service.finish_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver manual order local refresh completed",
+            raw_summary={
+                "stage": "completed",
+                "status": status,
+                "platform_write": False,
+                "platform_writes_enabled": False,
+                "created_count": result["created_count"],
+                "updated_count": result["updated_count"],
+                "skipped_count": result["skipped_count"],
+                "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            },
+        )
+        return result
+    except Exception as exc:
+        db.rollback()
+        error_code = getattr(exc, "error_code", None) or "manual_order_refresh_failed"
+        result = {
+            "status": "failed",
+            "store_id": store_id,
+            "platform": "naver",
+            "resource": "orders",
+            "message": _manual_batch_message_for_error("naver", error_code, "Naver订单本地刷新失败"),
+            "error_code": error_code,
+            "created_count": 0,
+            "updated_count": 0,
+            "skipped_count": 0,
+            "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            "platform_write": False,
+            "platform_writes_enabled": False,
+            "raw_response_saved": False,
+            "privacy_fields_redacted": False,
+            "business_contact_fields_saved": False,
+            "address_saved": False,
+        }
+        result["sync_log"] = sync_log_service.fail_sync_log(
+            db,
+            sync_log_id=sync_log["id"],
+            message="naver manual order local refresh failed",
+            error_detail=_mask_sensitive_text(str(exc)),
+            raw_summary={
+                "stage": "failed",
+                "status": "failed",
+                "error_code": str(error_code),
+                "platform_write": False,
+                "platform_writes_enabled": False,
+                "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+            },
+        )
+        return result
 
 
 def _manual_sync_coupang_products(db: Session, store_id: int) -> dict:
@@ -1277,7 +2454,22 @@ def _manual_sync_coupang_orders(db: Session, store_id: int) -> dict:
     )
 
 
-def _manual_sync_customer_inquiries(platform: str) -> dict:
+def _manual_sync_customer_inquiries(db: Session, store_id: int, platform: str) -> dict:
+    if platform == "naver":
+        result = sync_naver_customer_inquiries(db, store_id=store_id, page=1, size=50)
+        status = result.get("status") or "skipped"
+        return _manual_batch_item(
+            platform="naver",
+            resource="customer_inquiries",
+            status="success" if status == "success" else "failed",
+            message=result.get("message") or "Naver 客服消息本地同步完成",
+            error_code=result.get("error_code"),
+            created_count=result.get("created_count", 0),
+            updated_count=result.get("updated_count", 0),
+            skipped_count=result.get("skipped_count", 0),
+            source_type=result.get("source_type") or NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE,
+            raw_status=status,
+        )
     return _manual_batch_item(
         platform=platform,
         resource="customer_inquiries",
@@ -1339,19 +2531,27 @@ def manual_batch_sync(
                 elif platform == "coupang":
                     items.append(_manual_sync_coupang_products(db, store_id))
             except Exception as exc:
+                db.rollback()
                 items.append(_manual_batch_item_from_error(platform, "products", exc))
 
         if include_orders:
             try:
                 if platform == "naver":
-                    items.append(_manual_sync_naver_orders())
+                    items.append(_manual_sync_naver_orders(db, store_id))
                 elif platform == "coupang":
                     items.append(_manual_sync_coupang_orders(db, store_id))
             except Exception as exc:
+                db.rollback()
                 items.append(_manual_batch_item_from_error(platform, "orders", exc))
 
         if include_customer_inquiries:
-            items.append(_manual_sync_customer_inquiries(platform))
+            try:
+                items.append(_manual_sync_customer_inquiries(db, store_id, platform))
+            except Exception as exc:
+                db.rollback()
+                items.append(_manual_batch_item_from_error(platform, "customer_inquiries", exc))
+
+        items = _manual_batch_apply_connection_blockers(items, platform)
 
     status = _manual_batch_result_status(items)
     result = {
@@ -1446,13 +2646,15 @@ def manual_batch_sync_all_stores(
                 "platform_write": False,
             })
         except Exception as exc:
+            db.rollback()
             items: list[dict] = []
             if include_products:
                 items.append(_manual_batch_item_from_error(store_platform, "products", exc))
             if include_orders:
                 items.append(_manual_batch_item_from_error(store_platform, "orders", exc))
             if include_customer_inquiries:
-                items.append(_manual_sync_customer_inquiries(store_platform))
+                items.append(_manual_batch_item_from_error(store_platform, "customer_inquiries", exc))
+            items = _manual_batch_apply_connection_blockers(items, store_platform)
             status = _manual_batch_result_status(items)
             store_results.append({
                 "store_id": store.id,
@@ -3561,7 +4763,7 @@ def _default_naver_order_local_sync_result(real_sync: bool = False) -> dict:
         "raw_response_saved": False,
         "privacy_fields_redacted": True,
         "address_saved": False,
-        "write_limit": 1,
+        "write_limit": NAVER_ORDER_MANUAL_BATCH_MAX_COUNT,
         "skip_reason": None,
         "sample_ids": [],
     }
@@ -3579,9 +4781,9 @@ def _ensure_naver_order_real_preview_allowed(
     real_sync: bool = False,
 ) -> None:
     settings = get_settings()
-    if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
+    if not settings.real_api_test_enabled or settings.real_api_write_enabled:
         raise ApiError(
-            message="Naver order real micro preview is guardrail blocked",
+            message="Naver order real readonly local sync is guardrail blocked",
             error_code="guardrail_blocked",
             status_code=400,
             detail={
@@ -3591,12 +4793,12 @@ def _ensure_naver_order_real_preview_allowed(
                 "real_api_write_enabled": bool(settings.real_api_write_enabled),
             },
         )
-    if page != 1 or size != 1:
+    if page != 1 or size < 1 or size > NAVER_ORDER_MANUAL_BATCH_MAX_COUNT:
         raise ApiError(
-            message="Naver order real micro preview only allows page=1 and size=1",
+            message="Naver order real readonly local sync only allows page=1 and size<=20",
             error_code="guardrail_blocked",
             status_code=400,
-            detail={"page": page, "size": size},
+            detail={"page": page, "size": size, "max_size": NAVER_ORDER_MANUAL_BATCH_MAX_COUNT},
         )
     if end_kst - start_kst > timedelta(days=NAVER_ORDER_PREVIEW_MAX_DAYS):
         raise ApiError(
@@ -3696,8 +4898,8 @@ def _run_naver_order_real_micro_preview(
                 local_sync_result=local_sync_result,
             )
         feed_payload = feed_result["payload"]
-        product_order_ids = _extract_naver_product_order_ids(feed_payload)
-        sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:1]]
+        product_order_ids = _extract_naver_product_order_ids(feed_payload)[:size]
+        sample_ids = [_mask_external_identifier(item) for item in product_order_ids[:10]]
         if not product_order_ids:
             if real_sync:
                 local_sync_result["status"] = "skipped"
@@ -3725,11 +4927,11 @@ def _run_naver_order_real_micro_preview(
             )
         if include_detail:
             field_observation["detail_called"] = True
-            field_observation["detail_limit"] = 1
+            field_observation["detail_limit"] = len(product_order_ids[:size])
             detail_result = _request_naver_order_detail_query(
                 api_base=context["api_base"],
                 headers=headers,
-                product_order_id=product_order_ids[0],
+                product_order_ids=product_order_ids[:size],
             )
             field_observation["detail_http_status"] = detail_result["http_status"]
             if not detail_result["success"]:
@@ -3757,17 +4959,27 @@ def _run_naver_order_real_micro_preview(
                     would_update=0,
                     local_sync_result=local_sync_result,
                 )
-            detail_preview = _build_naver_order_detail_preview(detail_result["payload"], store_id=store_id)
+            detail_records = _extract_naver_order_detail_records(detail_result["payload"], product_order_ids[:size])
+            detail_previews = [
+                _build_naver_order_detail_preview(item, store_id=store_id)
+                for item in detail_records
+            ]
             field_observation["detail_fields_observed"] = _summarize_naver_order_detail_fields(detail_result["payload"])
-            field_observation["detail_preview"] = detail_preview
+            field_observation["detail_preview"] = detail_previews[0] if len(detail_previews) == 1 else {
+                "batch_count": len(detail_previews),
+                "items": detail_previews[:5],
+                "raw_response_saved": False,
+                "privacy_fields_redacted": True,
+            }
             field_observation["complete_field_preview"] = _build_naver_order_complete_field_preview(
                 detail_result["payload"],
                 store_id=store_id,
                 requested=complete_field_preview,
             )
-            local_sync_result = _sync_naver_order_detail_preview(
+            local_sync_result = _sync_naver_order_detail_previews_batch(
                 db,
-                detail_preview=detail_preview,
+                store_id=store_id,
+                detail_previews=detail_previews,
                 real_sync=real_sync,
             )
             field_observation["privacy_gate"] = local_sync_result.get("privacy_gate")
@@ -3791,7 +5003,7 @@ def _run_naver_order_real_micro_preview(
             sample_ids=sample_ids,
             has_more=_naver_order_feed_has_more(feed_payload),
             would_create=int(local_sync_result.get("created_count") or 0),
-            would_update=0,
+            would_update=int(local_sync_result.get("updated_count") or 0),
             local_sync_result=local_sync_result,
         )
     except ApiError:
@@ -4023,17 +5235,32 @@ def _request_naver_order_detail_query(
     *,
     api_base: str,
     headers: dict[str, str],
-    product_order_id: str,
+    product_order_id: str | None = None,
+    product_order_ids: list[str] | tuple[str, ...] | None = None,
 ) -> dict:
+    if product_order_ids is None:
+        product_order_ids = [product_order_id] if product_order_id else []
+    safe_product_order_ids = [
+        str(item).strip()
+        for item in product_order_ids
+        if str(item or "").strip()
+    ][:NAVER_ORDER_MANUAL_BATCH_MAX_COUNT]
     diagnostics = {
-        "detail_limit": 1,
+        "detail_limit": len(safe_product_order_ids),
         "body_field_keys": ["productOrderIds"],
     }
+    if not safe_product_order_ids:
+        return {
+            "success": False,
+            "http_status": None,
+            "error_code": "detail_product_order_ids_missing",
+            "diagnostics": diagnostics,
+        }
     with httpx.Client(timeout=10.0) as client:
         response = client.post(
             f"{api_base}/v1/pay-order/seller/product-orders/query",
             headers=headers,
-            json={"productOrderIds": [product_order_id]},
+            json={"productOrderIds": safe_product_order_ids},
         )
     diagnostics["http_status"] = response.status_code
     if response.status_code >= 400:
@@ -4070,6 +5297,45 @@ def _extract_naver_product_order_ids(payload: object) -> list[str]:
             seen.add(value)
             unique.append(value)
     return unique
+
+
+def _extract_naver_order_detail_records(
+    payload: object,
+    product_order_ids: list[str] | tuple[str, ...],
+) -> list[dict]:
+    requested_ids = [str(item) for item in product_order_ids if str(item or "").strip()]
+    requested_set = set(requested_ids)
+    if not requested_set:
+        return []
+
+    candidates: list[dict] = []
+
+    def walk(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    item_ids = set(_extract_naver_product_order_ids(item))
+                    if item_ids & requested_set:
+                        candidates.append(item)
+                walk(item)
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                walk(child)
+
+    walk(payload)
+    if not candidates and isinstance(payload, dict):
+        payload_ids = set(_extract_naver_product_order_ids(payload))
+        if payload_ids & requested_set:
+            candidates.append(payload)
+
+    by_id: dict[str, dict] = {}
+    for candidate in candidates:
+        for candidate_id in _extract_naver_product_order_ids(candidate):
+            if candidate_id in requested_set and candidate_id not in by_id:
+                by_id[candidate_id] = candidate
+
+    return [by_id[item] for item in requested_ids if item in by_id]
 
 
 def _naver_order_feed_has_more(payload: object) -> bool:
@@ -4194,6 +5460,16 @@ def _safe_order_text(value: str | None, max_length: int = 120) -> str | None:
     return text or None
 
 
+def _safe_order_business_text(value: str | None, max_length: int = 160) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = re.sub(r"(?i)(authorization|bearer|client_secret|signature|access_token|refresh_token)", "[suppressed]", text)
+    return _bounded_text(text, max_length)
+
+
 def _datetime_to_iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -4237,6 +5513,67 @@ def _payload_has_key_token(payload: object, tokens: tuple[str, ...]) -> bool:
     return False
 
 
+def _extract_naver_receiver_address(payload: object) -> str | None:
+    base_address = _extract_scalar_by_keys(payload, (
+        "receiverAddress",
+        "recipientAddress",
+        "baseAddress",
+        "roadNameAddress",
+    ))
+    detail_address = _extract_scalar_by_keys(payload, (
+        "detailedAddress",
+        "detailAddress",
+    ))
+    address = _clean_joined_text(base_address, detail_address, max_length=300) or base_address or detail_address
+    return _safe_order_business_text(address, max_length=300)
+
+
+NAVER_DELIVERY_COMPANY_LABELS = {
+    "CJ": "CJ대한통운",
+    "CJGLS": "CJ대한통운",
+}
+
+
+def _display_naver_delivery_company(value: object) -> str | None:
+    text = _safe_order_business_text(value, max_length=120)
+    if not text:
+        return None
+    return NAVER_DELIVERY_COMPANY_LABELS.get(text.upper(), text)
+
+
+def _extract_naver_delivery_company(payload: object) -> str | None:
+    return _display_naver_delivery_company(_extract_scalar_by_keys(payload, (
+        "deliveryCompany",
+        "deliveryCompanyName",
+        "delivery_company",
+        "delivery_company_name",
+        "courierCompany",
+        "courier",
+        "carrier",
+    )))
+
+
+def _extract_naver_delivery_company_code(payload: object) -> str | None:
+    return _safe_order_business_text(_extract_scalar_by_keys(payload, (
+        "deliveryCompanyCode",
+        "deliveryCompanyCd",
+        "delivery_company_code",
+        "courierCode",
+        "carrierCode",
+    )), max_length=80)
+
+
+def _extract_naver_tracking_number(payload: object) -> str | None:
+    return _safe_order_business_text(_extract_scalar_by_keys(payload, (
+        "trackingNumber",
+        "tracking_number",
+        "invoiceNo",
+        "invoiceNumber",
+        "waybillNo",
+        "waybillNumber",
+    )), max_length=120)
+
+
 def _build_naver_order_detail_preview(payload: object, *, store_id: int | None = None) -> dict:
     product_order_id = _extract_scalar_by_keys(payload, ("productOrderId", "productOrderNo"))
     order_id = _extract_scalar_by_keys(payload, ("orderId", "orderNo", "orderNumber"))
@@ -4258,7 +5595,20 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
     buyer_phone = _extract_scalar_by_keys(payload, ("buyerTelNo", "buyerTelNo1", "buyerPhone", "ordererTelNo", "ordererPhone"))
     buyer_id = _extract_scalar_by_keys(payload, ("buyerId", "buyerMemberId", "ordererId", "ordererNo"))
     receiver_name = _extract_scalar_by_keys(payload, ("receiverName", "recipientName"))
-    receiver_phone = _extract_scalar_by_keys(payload, ("receiverTelNo", "receiverTelNo1", "receiverPhone", "recipientPhone"))
+    receiver_phone = _extract_scalar_by_keys(payload, (
+        "receiverTelNo",
+        "receiverTelNo1",
+        "receiverTelNo2",
+        "receiverPhone",
+        "recipientPhone",
+        "tel1",
+        "tel2",
+    ))
+    receiver_address = _extract_naver_receiver_address(payload)
+    zip_code = _extract_scalar_by_keys(payload, ("zipCode", "zipcode", "postalCode", "postal_code"))
+    delivery_company = _extract_naver_delivery_company(payload)
+    delivery_company_code = _extract_naver_delivery_company_code(payload)
+    tracking_number = _extract_naver_tracking_number(payload)
     order_summary = _order_status_summary(order_status)
     delivery_summary = _delivery_status_summary(delivery_status, order_status)
     claim_summary = _order_status_summary(claim_status)
@@ -4274,6 +5624,8 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
         "platform": "naver",
         "external_order_id_hash": order_id_hash,
         "external_product_order_id_hash": product_order_id_hash,
+        "external_order_id_full": _safe_order_business_text(order_id, max_length=120),
+        "external_product_order_id": _safe_order_business_text(product_order_id, max_length=120),
         "product_order_id_hash": product_order_id_hash,
         "order_id_hash": order_id_hash,
         "order_status": order_summary,
@@ -4292,16 +5644,27 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
         "claim_status": claim_summary,
         "claim_status_label_zh": claim_summary.get("label_zh"),
         "buyer_name_masked": _mask_person_name(buyer_name),
+        "buyer_name": _safe_order_business_text(buyer_name, max_length=120),
+        "buyer_phone": _safe_order_business_text(buyer_phone, max_length=40),
         "buyer_phone_masked": _mask_phone(buyer_phone),
         "buyer_id_hash": _mask_external_identifier(buyer_id) if buyer_id else None,
         "receiver_name_masked": _mask_person_name(receiver_name),
+        "receiver_name": _safe_order_business_text(receiver_name, max_length=120),
+        "receiver_phone": _safe_order_business_text(receiver_phone, max_length=40),
         "receiver_phone_masked": _mask_phone(receiver_phone),
+        "receiver_address": receiver_address,
+        "zip_code": _safe_order_business_text(zip_code, max_length=30),
+        "delivery_company": delivery_company,
+        "delivery_company_code": delivery_company_code,
+        "tracking_number": tracking_number,
+        "shipped_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("shippedAt", "sendDate", "dispatchDate", "dispatchedAt"))),
         "address_observed": _payload_has_key_token(payload, ("address", "zipcode", "zip_code", "postalcode", "postal_code")),
-        "address_saved": False,
+        "address_saved": bool(receiver_address or zip_code),
         "source_type": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
         "last_synced_at": get_utc_now().isoformat(),
         "raw_response_saved": False,
-        "privacy_fields_redacted": True,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
         "orders_written": False,
         "mapping_version": "naver_order_detail_preview_v1",
         "unknown_status_observed": any(item.get("unknown_status_observed") for item in (order_summary, delivery_summary, claim_summary)),
@@ -4396,7 +5759,15 @@ def _build_naver_order_complete_field_preview(
         "buyer_name": _complete_order_field_value(payload, ("buyerName", "ordererName"), 120),
         "buyer_phone": _complete_order_field_value(payload, ("buyerTelNo", "buyerTelNo1", "buyerPhone", "ordererTelNo", "ordererPhone"), 40),
         "receiver_name": _complete_order_field_value(payload, ("receiverName", "recipientName"), 120),
-        "receiver_phone": _complete_order_field_value(payload, ("receiverTelNo", "receiverTelNo1", "receiverPhone", "recipientPhone"), 40),
+        "receiver_phone": _complete_order_field_value(payload, (
+            "receiverTelNo",
+            "receiverTelNo1",
+            "receiverTelNo2",
+            "receiverPhone",
+            "recipientPhone",
+            "tel1",
+            "tel2",
+        ), 40),
         "receiver_address": _complete_order_field_value(payload, (
             "receiverAddress",
             "recipientAddress",
@@ -4406,6 +5777,10 @@ def _build_naver_order_complete_field_preview(
             "detailedAddress",
         ), 240),
         "zip_code": _complete_order_field_value(payload, ("zipCode", "zipcode", "postalCode", "postal_code"), 20),
+        "delivery_company": _extract_naver_delivery_company(payload),
+        "delivery_company_code": _extract_naver_delivery_company_code(payload),
+        "tracking_number": _extract_naver_tracking_number(payload),
+        "shipped_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("shippedAt", "sendDate", "dispatchDate", "dispatchedAt"))),
         "ordered_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("orderedAt", "orderDate", "orderedDate"))),
         "paid_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("paidAt", "paymentDate", "payDate"))),
         "last_changed_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("lastChangedAt", "lastChangedDate", "lastChangeDate"))),
@@ -4428,6 +5803,9 @@ def _build_naver_order_complete_field_preview(
                 "receiver_phone",
                 "receiver_address",
                 "zip_code",
+                "delivery_company",
+                "delivery_company_code",
+                "tracking_number",
             )
         },
     })
@@ -4467,11 +5845,15 @@ def _is_masked_phone(value: object) -> bool:
     return not text or bool(re.fullmatch(r"\*{4}\d{0,4}", text))
 
 
-def _validate_naver_order_detail_preview_for_local_write(detail_preview: dict | None) -> dict:
+def _validate_naver_order_detail_preview_for_local_write(
+    detail_preview: dict | None,
+    *,
+    expected_store_id: int = 8,
+) -> dict:
     reasons: list[str] = []
     if not isinstance(detail_preview, dict):
         return {"passed": False, "reasons": ["missing_detail_preview"]}
-    if detail_preview.get("store_id") != 8:
+    if detail_preview.get("store_id") != expected_store_id:
         reasons.append("invalid_store_id")
     if detail_preview.get("platform") != "naver":
         reasons.append("invalid_platform")
@@ -4479,25 +5861,15 @@ def _validate_naver_order_detail_preview_for_local_write(detail_preview: dict | 
         reasons.append("missing_external_product_order_id_hash")
     if not _is_hash_identifier(detail_preview.get("external_order_id_hash")):
         reasons.append("missing_external_order_id_hash")
+    if not detail_preview.get("external_product_order_id"):
+        reasons.append("missing_external_product_order_id")
     if detail_preview.get("raw_response_saved") is not False:
         reasons.append("raw_response_not_suppressed")
-    if detail_preview.get("privacy_fields_redacted") is not True:
-        reasons.append("privacy_fields_not_redacted")
-    if detail_preview.get("address_saved") is not False:
-        reasons.append("address_saved_not_allowed")
-    if not _is_masked_name(detail_preview.get("buyer_name_masked")):
-        reasons.append("buyer_name_not_masked")
-    if not _is_masked_name(detail_preview.get("receiver_name_masked")):
-        reasons.append("receiver_name_not_masked")
-    if not _is_masked_phone(detail_preview.get("buyer_phone_masked")):
-        reasons.append("buyer_phone_not_masked")
-    if not _is_masked_phone(detail_preview.get("receiver_phone_masked")):
-        reasons.append("receiver_phone_not_masked")
     if detail_preview.get("buyer_id_hash") is not None and not _is_hash_identifier(detail_preview.get("buyer_id_hash")):
         reasons.append("buyer_id_not_hashed")
 
     serialized = json.dumps(detail_preview, ensure_ascii=False, default=str).lower()
-    for forbidden in ("authorization", "client_secret", "signature", "bcrypt", "raw response"):
+    for forbidden in ("authorization", "client_secret", "signature", "bcrypt", "raw response", "access_token", "refresh_token", "bearer "):
         if forbidden in serialized:
             reasons.append(f"forbidden_text_{forbidden.replace(' ', '_')}")
     return {"passed": not reasons, "reasons": sorted(dict.fromkeys(reasons))}
@@ -4507,6 +5879,8 @@ def _naver_order_sanitized_raw_data(detail_preview: dict) -> dict:
     allowed_keys = (
         "external_order_id_hash",
         "external_product_order_id_hash",
+        "external_order_id_full",
+        "external_product_order_id",
         "order_status",
         "order_status_label_zh",
         "payment_status",
@@ -4516,10 +5890,21 @@ def _naver_order_sanitized_raw_data(detail_preview: dict) -> dict:
         "claim_status",
         "claim_status_label_zh",
         "buyer_id_hash",
+        "buyer_name",
+        "buyer_phone",
         "receiver_name_masked",
+        "receiver_name",
+        "receiver_phone",
         "receiver_phone_masked",
+        "receiver_address",
+        "zip_code",
+        "delivery_company",
+        "delivery_company_code",
+        "tracking_number",
+        "shipped_at",
         "address_observed",
         "address_saved",
+        "business_contact_fields_saved",
         "source_type",
         "last_synced_at",
         "mapping_version",
@@ -4534,8 +5919,10 @@ def _naver_order_sanitized_raw_data(detail_preview: dict) -> dict:
         "synced_from": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
         "orders_written": True,
         "raw_response_saved": False,
-        "privacy_fields_redacted": True,
-        "address_saved": False,
+        "technical_sensitive_fields_suppressed": True,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "address_saved": bool(detail_preview.get("receiver_address") or detail_preview.get("zip_code")),
     })
     return raw_data
 
@@ -4545,12 +5932,16 @@ def _sync_naver_order_detail_preview(
     *,
     detail_preview: dict | None,
     real_sync: bool,
+    store_id: int = 8,
 ) -> dict:
     result = _default_naver_order_local_sync_result(real_sync)
     if not real_sync:
         return result
 
-    privacy_gate = _validate_naver_order_detail_preview_for_local_write(detail_preview)
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+        detail_preview,
+        expected_store_id=store_id,
+    )
     result["privacy_gate"] = privacy_gate
     if not privacy_gate["passed"]:
         result["status"] = "blocked"
@@ -4558,10 +5949,10 @@ def _sync_naver_order_detail_preview(
         return result
 
     assert detail_preview is not None
-    external_order_id = str(detail_preview["external_product_order_id_hash"])
+    external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
     existing = db.scalar(
         select(Order).where(
-            Order.store_id == 8,
+            Order.store_id == store_id,
             Order.platform == "naver",
             Order.external_order_id == external_order_id,
         )
@@ -4580,11 +5971,17 @@ def _sync_naver_order_detail_preview(
     amount = _to_decimal(detail_preview.get("order_amount")) or Decimal("0")
     order_status = (detail_preview.get("order_status") or {}).get("raw") if isinstance(detail_preview.get("order_status"), dict) else None
     order = Order(
-        store_id=8,
+        store_id=store_id,
         platform="naver",
         external_order_id=external_order_id,
-        buyer_name=_bounded_text(detail_preview.get("buyer_name_masked"), 120),
+        external_product_order_id=_bounded_text(detail_preview.get("external_product_order_id"), 120),
+        buyer_name=_bounded_text(detail_preview.get("buyer_name"), 120),
+        buyer_phone=_bounded_text(detail_preview.get("buyer_phone"), 40),
         buyer_masked_phone=_bounded_text(detail_preview.get("buyer_phone_masked"), 30),
+        receiver_name=_bounded_text(detail_preview.get("receiver_name"), 120),
+        receiver_phone=_bounded_text(detail_preview.get("receiver_phone"), 40),
+        receiver_address=_bounded_text(detail_preview.get("receiver_address"), 300),
+        zip_code=_bounded_text(detail_preview.get("zip_code"), 30),
         product_name=_bounded_text(detail_preview.get("product_name"), 300) or f"Naver order {external_order_id}",
         quantity=_extract_int_by_keys(detail_preview, ("quantity",)) or 1,
         order_amount=amount,
@@ -4604,8 +6001,9 @@ def _sync_naver_order_detail_preview(
         "created_count": 1,
         "orders_written": True,
         "raw_response_saved": False,
-        "privacy_fields_redacted": True,
-        "address_saved": False,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "address_saved": bool(detail_preview.get("receiver_address") or detail_preview.get("zip_code")),
         "sample_ids": [external_order_id],
     })
     return result
@@ -4732,8 +6130,10 @@ def _naver_order_refresh_sanitized_raw_data(detail_preview: dict) -> dict:
         "orders_refreshed": True,
         "refreshed_from": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
         "raw_response_saved": False,
-        "privacy_fields_redacted": True,
-        "address_saved": False,
+        "technical_sensitive_fields_suppressed": True,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "address_saved": bool(detail_preview.get("receiver_address") or detail_preview.get("zip_code")),
     })
     return raw_data
 
@@ -4742,11 +6142,17 @@ def _build_naver_order_refresh_payload(detail_preview: dict) -> dict:
     synced_at = _parse_preview_iso_datetime(detail_preview.get("last_synced_at")) or get_utc_now()
     ordered_at = _parse_preview_iso_datetime(detail_preview.get("ordered_at")) or synced_at
     paid_at = _parse_preview_iso_datetime(detail_preview.get("paid_at"))
-    external_order_id = str(detail_preview["external_product_order_id_hash"])
+    external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
     return {
         "external_order_id": external_order_id,
-        "buyer_name": _bounded_text(detail_preview.get("buyer_name_masked"), 120),
+        "external_product_order_id": _bounded_text(detail_preview.get("external_product_order_id"), 120),
+        "buyer_name": _bounded_text(detail_preview.get("buyer_name"), 120),
+        "buyer_phone": _bounded_text(detail_preview.get("buyer_phone"), 40),
         "buyer_masked_phone": _bounded_text(detail_preview.get("buyer_phone_masked"), 30),
+        "receiver_name": _bounded_text(detail_preview.get("receiver_name"), 120),
+        "receiver_phone": _bounded_text(detail_preview.get("receiver_phone"), 40),
+        "receiver_address": _bounded_text(detail_preview.get("receiver_address"), 300),
+        "zip_code": _bounded_text(detail_preview.get("zip_code"), 30),
         "product_name": _bounded_text(detail_preview.get("product_name"), 300) or f"Naver order {external_order_id}",
         "quantity": _extract_int_by_keys(detail_preview, ("quantity",)) or 1,
         "order_amount": _to_decimal(detail_preview.get("order_amount")) or Decimal("0"),
@@ -4760,6 +6166,134 @@ def _build_naver_order_refresh_payload(detail_preview: dict) -> dict:
     }
 
 
+def _build_naver_order_create_payload(detail_preview: dict) -> dict:
+    payload = _build_naver_order_refresh_payload(detail_preview)
+    payload["raw_data"] = _naver_order_sanitized_raw_data(detail_preview)
+    return payload
+
+
+def _sync_naver_order_detail_previews_batch(
+    db: Session,
+    *,
+    store_id: int,
+    detail_previews: list[dict] | tuple[dict, ...] | None,
+    real_sync: bool,
+) -> dict:
+    result = _default_naver_order_local_sync_result(real_sync)
+    result.update({
+        "candidate_count": len(detail_previews) if isinstance(detail_previews, (list, tuple)) else 0,
+        "write_limit": NAVER_ORDER_MANUAL_BATCH_MAX_COUNT,
+        "no_change_count": 0,
+        "candidate_results": [],
+        "platform_write": False,
+        "platform_writes_enabled": False,
+    })
+    if not real_sync:
+        return result
+    if not isinstance(detail_previews, (list, tuple)) or not detail_previews:
+        result["status"] = "skipped"
+        result["skip_reason"] = "detail_previews_missing"
+        return result
+    if len(detail_previews) > NAVER_ORDER_MANUAL_BATCH_MAX_COUNT:
+        result["status"] = "blocked"
+        result["skip_reason"] = "order_batch_limit_exceeded"
+        return result
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    sample_ids: list[str] = []
+
+    for detail_preview in detail_previews:
+        safe_hash = detail_preview.get("external_product_order_id_hash") if isinstance(detail_preview, dict) else None
+        candidate_result = {
+            "safe_hash": safe_hash if _is_hash_identifier(safe_hash) else None,
+            "status": "skipped",
+            "changed_fields": [],
+            "skip_reason": None,
+        }
+        privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+            detail_preview,
+            expected_store_id=store_id,
+        )
+        candidate_result["privacy_gate_passed"] = privacy_gate["passed"]
+        candidate_result["privacy_gate_reasons"] = privacy_gate["reasons"]
+        if not privacy_gate["passed"]:
+            skipped_count += 1
+            candidate_result["skip_reason"] = "privacy_gate_failed"
+            result["candidate_results"].append(candidate_result)
+            continue
+
+        assert isinstance(detail_preview, dict)
+        external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
+        legacy_hash_id = str(detail_preview["external_product_order_id_hash"])
+        sample_ids.append(external_order_id)
+        existing = db.scalar(
+            select(Order).where(
+                Order.store_id == store_id,
+                Order.platform == "naver",
+                Order.external_order_id == external_order_id,
+            )
+        )
+        if existing is None:
+            existing = db.scalar(
+                select(Order).where(
+                    Order.store_id == store_id,
+                    Order.platform == "naver",
+                    Order.external_order_id == legacy_hash_id,
+                )
+            )
+        if existing is None:
+            payload = _build_naver_order_create_payload(detail_preview)
+            db.add(Order(store_id=store_id, platform="naver", **payload))
+            created_count += 1
+            candidate_result["status"] = "created"
+            result["candidate_results"].append(candidate_result)
+            continue
+
+        payload = _build_naver_order_refresh_payload(detail_preview)
+        changed_fields = _changed_naver_order_refresh_fields(existing, payload)
+        candidate_result["changed_fields"] = changed_fields
+        if not changed_fields:
+            skipped_count += 1
+            result["no_change_count"] += 1
+            candidate_result["status"] = "no_change"
+            candidate_result["skip_reason"] = "no_business_field_change"
+            result["candidate_results"].append(candidate_result)
+            continue
+
+        for field, value in payload.items():
+            setattr(existing, field, value)
+        updated_count += 1
+        candidate_result["status"] = "updated"
+        result["candidate_results"].append(candidate_result)
+
+    if created_count or updated_count:
+        db.commit()
+    result.update({
+        "status": "success",
+        "created_count": created_count,
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "already_exists": bool(skipped_count and not created_count and not updated_count),
+        "no_duplicate_created": True,
+        "orders_written": bool(created_count or updated_count),
+        "products_written": False,
+        "sync_log_written": False,
+        "capability_tested_success_written": False,
+        "raw_response_saved": False,
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "address_saved": any(
+            isinstance(item, dict) and bool(item.get("receiver_address") or item.get("zip_code"))
+            for item in detail_previews
+        ),
+        "source_type": NAVER_ORDER_SYNC_SOURCE_TYPE,
+        "sample_ids": sample_ids[:10],
+    })
+    return result
+
+
 def _same_naver_refresh_datetime(current: object, incoming: object) -> bool:
     if current is None or incoming is None:
         return current is incoming
@@ -4770,11 +6304,39 @@ def _same_naver_refresh_datetime(current: object, incoming: object) -> bool:
     return current.astimezone(timezone.utc) == incoming.astimezone(timezone.utc)
 
 
+def _naver_order_refresh_raw_data_changed(current: object, incoming: object) -> bool:
+    current_data = current if isinstance(current, dict) else {}
+    incoming_data = incoming if isinstance(incoming, dict) else {}
+    watched_keys = (
+        "delivery_status",
+        "delivery_status_label_zh",
+        "claim_status",
+        "claim_status_label_zh",
+        "payment_status",
+        "option_name",
+        "receiver_phone",
+        "receiver_address",
+        "zip_code",
+        "delivery_company",
+        "delivery_company_code",
+        "tracking_number",
+        "shipped_at",
+    )
+    return any(current_data.get(key) != incoming_data.get(key) for key in watched_keys)
+
+
 def _changed_naver_order_refresh_fields(order: Order, payload: dict) -> list[str]:
     changed: list[str] = []
     comparable_fields = (
+        "external_order_id",
+        "external_product_order_id",
         "buyer_name",
+        "buyer_phone",
         "buyer_masked_phone",
+        "receiver_name",
+        "receiver_phone",
+        "receiver_address",
+        "zip_code",
         "product_name",
         "quantity",
         "order_amount",
@@ -4798,6 +6360,8 @@ def _changed_naver_order_refresh_fields(order: Order, payload: dict) -> list[str
             continue
         if current != incoming:
             changed.append(field)
+    if _naver_order_refresh_raw_data_changed(getattr(order, "raw_data", None), payload.get("raw_data")):
+        changed.append("raw_data")
     return changed
 
 
@@ -11406,11 +12970,17 @@ def _build_naver_order_preview_result(
     would_update: int,
     local_sync_result: dict | None = None,
 ) -> dict:
+    safe_local_sync_result = local_sync_result or _default_naver_order_local_sync_result(False)
     safe_keyword_flags = dict(
         field_observation.get("safe_keyword_flags")
         or api_credential_readiness_service._empty_naver_safe_keyword_flags()
     )
     business_error_hint = field_observation.get("business_error_hint") or api_credential_readiness_service._naver_business_error_hint(error_code)
+    semantic_notice = (
+        "Readonly official API read with local ERP order write only. No Naver platform data was modified."
+        if safe_local_sync_result.get("orders_written")
+        else "Readonly micro preview only. No local order rows were written."
+    )
     return {
         "store_id": store_id,
         "credential_id": credential_id,
@@ -11431,7 +13001,7 @@ def _build_naver_order_preview_result(
         "has_more": has_more,
         "would_create": would_create,
         "would_update": would_update,
-        "local_sync_result": local_sync_result or _default_naver_order_local_sync_result(False),
+        "local_sync_result": safe_local_sync_result,
         "sample_ids": sample_ids,
         "field_observation": field_observation,
         "detail_preview": field_observation.get("detail_preview"),
@@ -11439,7 +13009,7 @@ def _build_naver_order_preview_result(
         or _default_naver_order_complete_field_preview(False),
         "business_message": _build_naver_order_preview_business_message(preview_status),
         "business_status_summary": _build_naver_order_preview_business_status_summary(preview_status),
-        "semantic_notice": "Readonly micro preview only. No local order rows were written.",
+        "semantic_notice": semantic_notice,
     }
 
 
@@ -12127,6 +13697,33 @@ def _bounded_text(value: str | None, max_length: int) -> str | None:
     return text[:max_length]
 
 
+def _clean_joined_text(*values: str | None, max_length: int = 300) -> str | None:
+    parts = [str(value).strip() for value in values if value is not None and str(value).strip()]
+    if not parts:
+        return None
+    return _bounded_text(re.sub(r"\s+", " ", " ".join(parts)), max_length)
+
+
+def _extract_scalar_from_named_object(payload: object, object_keys: tuple[str, ...], keys: tuple[str, ...]) -> str | None:
+    if isinstance(payload, dict):
+        for object_key in object_keys:
+            value = payload.get(object_key)
+            if isinstance(value, (dict, list)):
+                found = _extract_scalar_by_keys(value, keys)
+                if found:
+                    return found
+        for value in payload.values():
+            found = _extract_scalar_from_named_object(value, object_keys, keys)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _extract_scalar_from_named_object(item, object_keys, keys)
+            if found:
+                return found
+    return None
+
+
 def _find_existing_product_ids(
     db: Session,
     store_id: int,
@@ -12203,11 +13800,65 @@ def _to_coupang_order_payload(item: dict, synced_at: datetime) -> dict:
         ("orderedAt", "orderDate", "createdAt", "paidAt", "paymentDate", "orderedDate"),
     ) or synced_at
     paid_at = _extract_datetime_by_keys(item, ("paidAt", "paymentDate", "paidDate"))
+    receiver_object_keys = ("receiver", "receiverInfo", "recipient", "recipientInfo", "shippingAddress")
+    receiver_name = _bounded_text(
+        _extract_scalar_from_named_object(item, receiver_object_keys, ("name", "receiverName", "recipientName"))
+        or _extract_scalar_by_keys(item, ("receiverName", "recipientName")),
+        120,
+    )
+    receiver_phone = _bounded_text(
+        _extract_scalar_from_named_object(item, receiver_object_keys, (
+            "safeNumber",
+            "mobile",
+            "phone",
+            "phoneNumber",
+            "tel",
+            "receiverPhone",
+            "receiverSafeNumber",
+            "receiverNumber",
+        ))
+        or _extract_scalar_by_keys(item, ("receiverPhone", "receiverSafeNumber", "receiverNumber", "recipientPhone")),
+        40,
+    )
+    receiver_address = _clean_joined_text(
+        _extract_scalar_from_named_object(item, receiver_object_keys, ("addr1", "address1", "baseAddress", "receiverAddress1")),
+        _extract_scalar_from_named_object(item, receiver_object_keys, ("addr2", "address2", "detailAddress", "receiverAddress2")),
+        max_length=300,
+    ) or _bounded_text(_extract_scalar_by_keys(item, ("receiverAddress", "recipientAddress", "shippingAddress")), 300)
+    zip_code = _bounded_text(
+        _extract_scalar_from_named_object(item, receiver_object_keys, ("postCode", "zipCode", "zipcode", "postalCode"))
+        or _extract_scalar_by_keys(item, ("postCode", "zipCode", "zipcode", "postalCode")),
+        30,
+    )
+    delivery_company = _bounded_text(
+        _extract_scalar_by_keys(item, (
+            "deliveryCompanyName",
+            "deliveryCompany",
+            "courierCompany",
+            "courier",
+            "carrier",
+        )),
+        120,
+    )
+    delivery_company_code = _bounded_text(
+        _extract_scalar_by_keys(item, ("deliveryCompanyCode", "courierCode", "carrierCode")),
+        80,
+    )
+    tracking_number = _bounded_text(
+        _extract_scalar_by_keys(item, ("invoiceNumber", "invoiceNo", "trackingNumber", "waybillNumber")),
+        120,
+    )
+    shipment_status = _extract_scalar_by_keys(item, ("shipmentStatus", "deliveryStatus", "orderStatus", "status"))
+    delivery_summary = _delivery_status_summary(shipment_status, shipment_status)
 
     return {
         "external_order_id": external_order_id,
         "buyer_name": _extract_scalar_by_keys(item, ("buyerName", "ordererName", "receiverName")),
         "buyer_masked_phone": _mask_phone(_extract_scalar_by_keys(item, ("buyerPhone", "ordererPhone", "receiverPhone", "ordererSafeNumber", "receiverSafeNumber"))),
+        "receiver_name": receiver_name,
+        "receiver_phone": receiver_phone,
+        "receiver_address": receiver_address,
+        "zip_code": zip_code,
         "product_name": _extract_scalar_by_keys(
             item,
             ("sellerProductName", "productName", "vendorItemName", "itemName", "orderItemName"),
@@ -12225,7 +13876,18 @@ def _to_coupang_order_payload(item: dict, synced_at: datetime) -> dict:
         "ordered_at": ordered_at,
         "source_type": COUPANG_ORDER_SOURCE_TYPE,
         "last_synced_at": synced_at,
-        "raw_data": None,
+        "raw_data": {
+            "mapping_version": "coupang_order_local_summary_v2",
+            "platform_write": False,
+            "shipment_box_id": _bounded_text(_extract_scalar_by_keys(item, ("shipmentBoxId", "shipment_box_id")), 120),
+            "delivery_company": delivery_company,
+            "delivery_company_code": delivery_company_code,
+            "tracking_number": tracking_number,
+            "shipment_status": _bounded_text(shipment_status, 60),
+            "delivery_status": delivery_summary.get("raw"),
+            "delivery_status_label_zh": delivery_summary.get("label_zh"),
+            "raw_response_saved": False,
+        },
     }
 
 

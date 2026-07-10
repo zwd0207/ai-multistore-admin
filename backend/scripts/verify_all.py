@@ -4632,7 +4632,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 "credential_id": naver_credential_id,
                 "start_datetime": "2026-07-01T00:00:00+09:00",
                 "end_datetime": "2026-07-01T01:00:00+09:00",
-                "size": 2,
+                "size": 21,
                 "real_preview": True,
             })
             assert naver_order_size_too_large.status_code == 422, naver_order_size_too_large.text

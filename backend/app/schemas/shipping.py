@@ -166,6 +166,10 @@ class ShippingShipmentWritebackExecutionMockGateRequest(ShippingShipmentWritebac
     real_api_call_requested: bool = False
 
 
+class ShippingShipmentWritebackExecuteRequest(ShippingShipmentWritebackExecutionMockGateRequest):
+    pass
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int

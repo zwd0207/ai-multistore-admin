@@ -11,7 +11,11 @@ from app.schemas.sync import (
     CoupangSettlementPreviewRequest,
     ManualAllStoresSyncRequest,
     ManualBatchSyncRequest,
+    NaverCustomerInquiryReplyRequest,
+    NaverCustomerInquirySyncRequest,
+    NaverOrderManualRefreshRequest,
     NaverOrderPreviewRequest,
+    NaverOrderSingleRefreshRequest,
     NaverProductPreviewRequest,
 )
 from app.services import sync_service
@@ -221,6 +225,33 @@ def preview_naver_orders(
     return success_response(data=result, message="naver readonly order micro preview completed")
 
 
+@router.post("/orders/naver/manual-refresh")
+def manual_refresh_naver_orders(
+    payload: NaverOrderManualRefreshRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.manual_refresh_naver_orders(
+        db,
+        store_id=payload.store_id,
+        max_count=payload.max_count,
+        hours=payload.hours,
+    )
+    return success_response(data=result, message="naver order local manual refresh completed")
+
+
+@router.post("/orders/naver/refresh-one")
+def refresh_single_naver_order_detail(
+    payload: NaverOrderSingleRefreshRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.refresh_single_naver_order_detail(
+        db,
+        store_id=payload.store_id,
+        order_id=payload.order_id,
+    )
+    return success_response(data=result, message="naver single order detail refreshed")
+
+
 @router.post("/orders/coupang")
 def sync_coupang_orders(
     payload: CoupangOrderSyncRequest,
@@ -244,3 +275,39 @@ def sync_customer_inquiries_mock(
 ) -> dict:
     result = sync_service.sync_customer_inquiries_mock(db, store_id=store_id, platform=platform)
     return success_response(data=result, message="mock sync completed")
+
+
+@router.post("/customer-inquiries/naver")
+def sync_naver_customer_inquiries(
+    payload: NaverCustomerInquirySyncRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.sync_naver_customer_inquiries(
+        db,
+        store_id=payload.store_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        answered=payload.answered,
+        page=payload.page,
+        size=payload.size,
+    )
+    return success_response(data=result, message="naver customer inquiries synced")
+
+
+@router.post("/customer-inquiries/naver/reply")
+def reply_naver_customer_inquiry(
+    payload: NaverCustomerInquiryReplyRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = sync_service.reply_naver_customer_inquiry(
+        db,
+        store_id=payload.store_id,
+        inquiry_id=payload.inquiry_id,
+        external_inquiry_id=payload.external_inquiry_id,
+        answer_comment=payload.answer_comment,
+        answer_template_id=payload.answer_template_id,
+        manual_approval=payload.manual_approval,
+        final_operator_confirmation=payload.final_operator_confirmation,
+        actor_context=payload.actor_context,
+    )
+    return success_response(data=result, message="naver customer inquiry reply completed")

@@ -414,6 +414,55 @@ def _metric(value: int | None, data_status: str, reason: str = "") -> dict[str, 
     }
 
 
+OVERVIEW_CONNECTION_BLOCKER_CODES = {
+    "ip_not_allowed",
+    "auth_failed",
+    "permission_forbidden",
+    "product_api_not_allowed",
+    "order_api_not_allowed",
+    "credential_not_ready",
+    "credential_invalid",
+    "credential_not_found",
+    "channel_no_missing",
+}
+
+
+def _manual_log_connection_blocker(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next(
+        (
+            entry
+            for entry in items or []
+            if str(entry.get("error_code") or "").lower() in OVERVIEW_CONNECTION_BLOCKER_CODES
+        ),
+        None,
+    )
+
+
+def _overview_blocker_reason(error_code: str, message: str = "") -> str:
+    code = str(error_code or "").lower()
+    if code == "ip_not_allowed":
+        return "IP 白名单未通过"
+    if code in {"auth_failed", "permission_forbidden", "product_api_not_allowed", "order_api_not_allowed"} or "permission" in code:
+        return "API 权限未开通"
+    if code in {"credential_not_ready", "credential_invalid", "credential_not_found", "channel_no_missing"}:
+        return "API 资料未配置完整"
+    if code == "blocked_by_connection":
+        return "平台连接未通过"
+    if "暂未接入" in message:
+        return "暂未接入"
+    if "暂未开放" in message:
+        return "暂未开放"
+    return message or "同步状态未确认"
+
+
+def _overview_unconfirmed_reason(data_status: dict[str, Any]) -> str:
+    reason = _overview_blocker_reason(
+        str(data_status.get("error_code") or ""),
+        str(data_status.get("message") or ""),
+    )
+    return f"最近一次同步无法确认：{reason}"
+
+
 def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: str, credential: ApiCredential | None) -> dict[str, Any]:
     if credential is None:
         label = "Coupang" if platform == "coupang" else "Naver"
@@ -434,6 +483,7 @@ def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: s
 
     raw_summary = log.raw_summary or {}
     items = raw_summary.get("items") if isinstance(raw_summary, dict) else []
+    connection_blocker = _manual_log_connection_blocker(items or [])
     item = next((entry for entry in items or [] if entry.get("resource") == resource), None)
     if item is None:
         return {
@@ -454,6 +504,16 @@ def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: s
             "message": message or "本地同步完成",
             "data_status": "confirmed",
         }
+    if error_code == "blocked_by_connection" or (
+        error_code == "not_open" and resource in {"products", "orders"} and connection_blocker is not None
+    ):
+        blocker_code = str((connection_blocker or {}).get("error_code") or "blocked_by_connection").lower()
+        return {
+            "status": "failed",
+            "error_code": "blocked_by_connection",
+            "message": f"最近一次同步无法确认：{_overview_blocker_reason(blocker_code, message)}",
+            "data_status": "unknown",
+        }
     if error_code == "not_open":
         return {
             "status": "not_open",
@@ -461,25 +521,25 @@ def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: s
             "message": message or "暂未开放",
             "data_status": "not_open",
         }
-    if error_code in {"ip_not_allowed", "auth_failed"}:
+    if error_code == "ip_not_allowed":
         return {
             "status": "failed",
             "error_code": "ip_not_allowed",
-            "message": message or ("Coupang：IP 白名单未通过" if platform == "coupang" else "Naver：IP 白名单未通过"),
+            "message": "最近一次同步无法确认：IP 白名单未通过",
             "data_status": "unknown",
         }
-    if "permission" in error_code or error_code in {"product_api_not_allowed", "order_api_not_allowed"}:
+    if error_code == "auth_failed" or "permission" in error_code or error_code in {"product_api_not_allowed", "order_api_not_allowed"}:
         return {
             "status": "failed",
             "error_code": error_code,
-            "message": message or ("Coupang：API 权限未开通" if platform == "coupang" else "Naver：API 权限未开通"),
+            "message": "最近一次同步无法确认：API 权限未开通",
             "data_status": "unknown",
         }
     if error_code in {"credential_not_ready", "credential_invalid", "credential_not_found", "channel_no_missing"}:
         return {
             "status": "failed",
             "error_code": error_code,
-            "message": message or ("Coupang：API 资料未配置完整" if platform == "coupang" else "Naver：API 资料未配置完整"),
+            "message": "最近一次同步无法确认：API 资料未配置完整",
             "data_status": "unknown",
         }
 
@@ -534,7 +594,7 @@ def _order_is_abnormal(order: Order) -> bool:
 
 def _store_order_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
     if data_status["data_status"] != "confirmed":
-        reason = data_status["message"]
+        reason = _overview_unconfirmed_reason(data_status)
         return {
             "today_orders": _metric(None, data_status["data_status"], reason),
             "pending_shipments": _metric(None, data_status["data_status"], reason),
@@ -559,7 +619,7 @@ def _store_order_metrics(db: Session, store_id: int, platform: str, data_status:
 def _store_inventory_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
     if data_status["data_status"] != "confirmed":
         return {
-            "inventory_alerts": _metric(None, data_status["data_status"], data_status["message"]),
+            "inventory_alerts": _metric(None, data_status["data_status"], _overview_unconfirmed_reason(data_status)),
         }
     products = db.scalars(
         select(Product).where(Product.store_id == store_id, Product.platform == platform)
@@ -574,11 +634,15 @@ def _connection_status(resources: dict[str, dict[str, Any]], credential: ApiCred
     if credential is None:
         return {"label": "API资料未配置完整", "tone": "danger", "reason": "请先在店铺管理中填写平台 API 资料。"}
     for code, label in (
-        ("ip_not_allowed", "IP 白名单未通过"),
-        ("product_api_not_allowed", "API 权限未开通"),
-        ("order_api_not_allowed", "API 权限未开通"),
-        ("credential_not_ready", "API资料未配置完整"),
-        ("credential_invalid", "API资料未配置完整"),
+        ("ip_not_allowed", "最近一次同步：IP 白名单未通过"),
+        ("blocked_by_connection", "最近一次同步：平台连接未通过"),
+        ("auth_failed", "最近一次同步：API 权限未开通"),
+        ("product_api_not_allowed", "最近一次同步：API 权限未开通"),
+        ("order_api_not_allowed", "最近一次同步：API 权限未开通"),
+        ("credential_not_ready", "最近一次同步：API 资料未配置完整"),
+        ("credential_invalid", "最近一次同步：API 资料未配置完整"),
+        ("credential_not_found", "最近一次同步：API 资料未配置完整"),
+        ("channel_no_missing", "最近一次同步：API 资料未配置完整"),
     ):
         if any(resource.get("error_code") == code for resource in ordered_resources):
             reason = next((resource["message"] for resource in ordered_resources if resource.get("error_code") == code), label)
