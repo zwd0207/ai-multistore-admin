@@ -4518,6 +4518,7 @@ const sourceMethods = {
   importWarehouseShippingTracking: async (batchId, payload = {}) => backendApi.importWarehouseShippingTracking(batchId, payload),
   confirmWarehouseShippingBatch: async (batchId, payload = {}) => backendApi.confirmWarehouseShippingBatch(batchId, payload),
   removeWarehouseShippingRow: async (batchId, rowId, payload = {}) => backendApi.removeWarehouseShippingRow(batchId, rowId, payload),
+  confirmWarehouseShippingWriteback: async (batchId, payload = {}) => backendApi.confirmWarehouseShippingWriteback(batchId, payload),
   checkShippingLogisticsMappingWriteGate: async (payload = {}) => {
     const request = toBackendShippingMappingPayload(payload);
     if (!isBackendSource) {

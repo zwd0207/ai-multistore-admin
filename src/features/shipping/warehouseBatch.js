@@ -16,13 +16,17 @@ export function warehouseStage(status = '') {
 }
 
 export function adaptWarehouseBatch(batch = {}) {
+  const status = batch.status || 'created';
   return {
     id: batch.id,
     code: batch.batch_no || batch.batchNo || '-',
     storeId: batch.store_id ?? batch.storeId,
     platform: batch.platform || '-',
-    status: batch.status || 'created',
-    stage: warehouseStage(batch.status),
+    status,
+    stage: warehouseStage(status),
+    shippedAt: batch.warehouse_sent_at ?? batch.warehouseSentAt ?? null,
+    requiresWarehouseStop: ['warehouse_sent', 'warehouse_returned', 'ready_to_writeback', 'writeback_partial'].includes(status),
+    failed: status === 'writeback_partial' || Number(batch.counts?.failed || 0) > 0,
     rows: Array.isArray(batch.rows) ? batch.rows.map((row) => ({
       id: row.id,
       orderId: row.local_order_id ?? row.localOrderId,
@@ -34,6 +38,9 @@ export function adaptWarehouseBatch(batch = {}) {
       rowStatus: row.row_status ?? row.rowStatus ?? '-',
       failureReason: row.failure_reason ?? row.failureReason ?? '',
       carrier: row.carrier ?? '',
+      shippedAt: row.shipped_at ?? row.shippedAt ?? null,
+      isActive: row.is_active ?? row.isActive ?? true,
+      removed: row.row_status === 'removed' || row.rowStatus === 'removed' || (row.is_active ?? row.isActive) === false,
     })) : [],
     counts: batch.counts || { normal: 0, needs_confirmation: 0, blocked: 0, failed: 0 },
   };
@@ -45,5 +52,20 @@ export const warehouseRequest = {
   confirm: (rowIds) => ({ confirmed_row_ids: rowIds.map(Number), manual_approval: true }),
   remove: ({ reasonCode, warehouseStoppedShipping }) => ({ manual_approval: true, reason_code: reasonCode, warehouse_stopped_shipping: Boolean(warehouseStoppedShipping) }),
   manifest: (approvalToken) => ({ manual_approval: true, privacy_access_acknowledged: true, approval_token: approvalToken }),
-  writeback: (approvalToken) => ({ manual_approval: true, final_operator_confirmation: true, real_api_call_requested: false, approval_token: approvalToken }),
+  writeback: (approvalToken, realApiCallRequested = true) => ({ manual_approval: true, final_operator_confirmation: true, real_api_call_requested: Boolean(realApiCallRequested), approval_token: approvalToken }),
 };
+
+export function adaptWarehouseTrackingDetail(row = {}) {
+  return {
+    id: row.tracking_record_id ?? row.trackingRecordId ?? row.batch_row_id ?? row.batchRowId,
+    batchRowId: row.batch_row_id ?? row.batchRowId,
+    productOrderNo: row.product_order_reference ?? row.productOrderReference ?? '-',
+    orderNo: row.order_reference ?? row.orderReference ?? '-',
+    productName: row.product_name ?? row.productName ?? '-',
+    carrier: row.carrier ?? '-',
+    trackingNumber: row.tracking_number ?? row.trackingNumber ?? '-',
+    shippedAt: row.shipped_at ?? row.shippedAt ?? null,
+    status: row.validation_status ?? row.validationStatus ?? 'blocked',
+    reason: row.exception_reason ?? row.exceptionReason ?? '',
+  };
+}

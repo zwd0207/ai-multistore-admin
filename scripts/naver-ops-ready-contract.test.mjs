@@ -91,9 +91,9 @@ includesAll('src/pages/CustomerService.jsx', [
 
 includesAll('src/pages/ShippingAssistant.jsx', [
   '待确认平台回填',
-  '确认发货信息',
-  '我已确认店铺、订单、商品、快递公司和运单号无误。',
-  '平台提交由受控流程另行执行。',
+  '确认并回填平台',
+  '我已确认店铺、订单、商品、快递公司和物流单号无误，并同意提交到当前平台。',
+  '发货信息已成功回填平台。',
 ]);
 
 console.log('naver ops ready contract checks passed');

@@ -49,7 +49,12 @@ includesAll('src/pages/ShippingAssistant.jsx', [
 ]);
 
 const shippingText = read('src/pages/ShippingAssistant.jsx');
-assert.ok(!/\b(API|token|hash|readonly|gate|mock)\b/i.test(shippingText), 'shipping page must not expose technical terms');
+const visibleShippingText = [
+  ...[...shippingText.matchAll(/>([^<>{}]+)</g)].map((match) => match[1]),
+  ...[...shippingText.matchAll(/(?:title|description|note|placeholder|aria-label)="([^"]+)"/g)].map((match) => match[1]),
+  ...[...shippingText.matchAll(/setNotice\('([^']+)'\)/g)].map((match) => match[1]),
+].join(' ');
+assert.ok(!/\b(API|token|hash|readonly|gate|mock)\b/i.test(visibleShippingText), 'shipping page must not expose technical terms to operators');
 
 includesAll('src/pages/Dashboard.jsx', [
   '今日工作台',
