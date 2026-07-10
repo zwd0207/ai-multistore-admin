@@ -1,5 +1,9 @@
 # AI 多店铺运营与环境管理系统（Codex2）
 
+## 项目执行核心规则
+
+所有 Sol、Terra、Luna 任务在派发前必须遵守 [MODEL_TASK_ALLOCATION_RULES.md](MODEL_TASK_ALLOCATION_RULES.md)。模型按任务难度、风险和重复程度分配，优先使用能够可靠完成任务的最低等级模型，禁止重复开发和无理由浪费高等级模型算力。
+
 React + Vite 后台前端，已完成 13 个业务路由、第一至第四阶段页面，以及第五阶段 A 的 Codex1 后端接口适配准备。默认继续使用本地 mock 数据，切换后端数据源不会要求重写页面字段。
 
 ## 当前项目进度
