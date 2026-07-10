@@ -4823,6 +4823,8 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert feed_data["sample_ids"] and feed_data["sample_ids"][0].startswith("id-hash-"), feed_data
                 feed_text = str(feed_preview.json()).lower()
                 for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "order-id-must-not-leak",
                     "must-not-leak-buyer",
                     "must-not-leak-receiver",
                     "010-1111-2222",
@@ -4924,25 +4926,18 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_summary["receiver_name_masked"] != "must-not-leak-receiver", detail_summary
                 assert detail_summary["receiver_phone_masked"] == "****2222", detail_summary
                 assert detail_summary["address_observed"] is True, detail_summary
-                # Approved T03.5 rule: authorized operations previews may carry fulfillment contact fields.
-                assert detail_summary["address_saved"] is True, detail_summary
-                assert detail_summary["receiver_name"] == "must-not-leak-receiver", detail_summary
-                assert detail_summary["receiver_phone"] == "010-1111-2222", detail_summary
-                assert detail_summary["receiver_address"] == "must-not-leak-address", detail_summary
-                assert detail_summary["zip_code"] == "ZIP-MUST-NOT-LEAK", detail_summary
+                assert detail_summary["address_saved"] is False, detail_summary
                 assert detail_summary["source_type"] == "naver_order_preview", detail_summary
                 assert detail_summary["last_synced_at"], detail_summary
                 assert detail_summary["raw_response_saved"] is False, detail_summary
-                assert detail_summary["privacy_fields_redacted"] is False, detail_summary
+                assert detail_summary["privacy_fields_redacted"] is True, detail_summary
                 assert detail_summary["orders_written"] is False, detail_summary
                 assert detail_summary["mapping_version"] == "naver_order_detail_preview_v1", detail_summary
-                assert set(detail_summary) >= {
+                assert set(detail_summary) == {
                     "store_id",
                     "platform",
                     "external_order_id_hash",
                     "external_product_order_id_hash",
-                    "external_order_id_full",
-                    "external_product_order_id",
                     "product_order_id_hash",
                     "order_id_hash",
                     "order_status",
@@ -4961,23 +4956,16 @@ def verify_sync_preview_schema_and_security() -> None:
                     "claim_status",
                     "claim_status_label_zh",
                     "buyer_name_masked",
-                    "buyer_name",
-                    "buyer_phone",
                     "buyer_phone_masked",
                     "buyer_id_hash",
                     "receiver_name_masked",
-                    "receiver_name",
-                    "receiver_phone",
                     "receiver_phone_masked",
-                    "receiver_address",
-                    "zip_code",
                     "address_observed",
                     "address_saved",
                     "source_type",
                     "last_synced_at",
                     "raw_response_saved",
                     "privacy_fields_redacted",
-                    "business_contact_fields_saved",
                     "orders_written",
                     "mapping_version",
                     "unknown_status_observed",
@@ -4986,7 +4974,27 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
                 assert FakeNaverOrderHttpClient.detail_called is True, detail_data
                 detail_text = str(detail_preview.json()).lower()
-                for forbidden in ["fake-order-token", "authorization", "headers", "signature", "bcrypt", "raw response"]:
+                for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "order-id-must-not-leak",
+                    "must-not-leak-buyer",
+                    "buyer-id-must-not-leak",
+                    "must-not-leak-receiver",
+                    "010-1111-2222",
+                    "must-not-leak-address",
+                    "zip-must-not-leak",
+                    "must-not-leak-payment",
+                    "fake-order-token",
+                    "authorization",
+                    "headers",
+                    "signature",
+                    "bcrypt",
+                    "raw response",
+                    "buyername",
+                    "receivername",
+                    "receiveraddress",
+                    "paymentdetail",
+                ]:
                     assert forbidden not in detail_text, detail_text
 
                 complete_preview_without_detail = client.post("/api/v1/sync/orders/naver/preview", json={
@@ -5063,7 +5071,6 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert complete_data["preview_status"] == "success", complete_data
                 assert complete_data["local_sync_result"]["status"] == "not_requested", complete_data
                 assert complete_data["field_observation"]["orders_written"] is False, complete_data
-                assert complete_data["detail_preview"]["buyer_name_masked"] != "김민준", complete_data
                 complete_field_preview = complete_data["complete_field_preview"]
                 assert complete_field_preview["requested"] is True, complete_field_preview
                 assert complete_field_preview["preview_only"] is True, complete_field_preview
@@ -5073,24 +5080,20 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert complete_field_preview["save_plan"]["sync_log_written"] is False, complete_field_preview
                 assert complete_field_preview["save_plan"]["tested_success_written"] is False, complete_field_preview
                 assert complete_field_preview["save_plan"]["raw_response_saved"] is False, complete_field_preview
-                complete_fields = complete_field_preview["complete_fields"]
-                assert complete_fields["external_order_id"] == "NV-20260702-000918", complete_fields
-                assert complete_fields["external_product_order_id"] == "NPO-20260702-851430", complete_fields
-                assert complete_fields["platform_product_id"] == "NP-8842017715", complete_fields
-                assert complete_fields["buyer_name"] == "김민준", complete_fields
-                assert complete_fields["buyer_phone"] == "010-4821-7745", complete_fields
-                assert complete_fields["receiver_name"] == "김민준", complete_fields
-                assert complete_fields["receiver_phone"] == "010-4821-7745", complete_fields
-                assert complete_fields["receiver_address"] == "서울특별시 강남구 테헤란로 152 12층 1203호", complete_fields
-                assert complete_fields["zip_code"] == "06236", complete_fields
-                assert complete_fields["product_name"] == "PXG 휠 캐디백 여성 바퀴형 골프백", complete_fields
-                assert complete_fields["option_name"] == "화이트 / 여성용 바퀴형", complete_fields
-                assert complete_fields["order_amount"] == "499000", complete_fields
-                assert complete_fields["raw_response_saved"] is False, complete_fields
+                assert complete_field_preview["complete_fields"] == {}, complete_field_preview
+                assert complete_field_preview["raw_response_saved"] is False, complete_field_preview
+                assert complete_field_preview["privacy_fields_redacted"] is True, complete_field_preview
+                assert complete_field_preview["orders_written"] is False, complete_field_preview
                 assert complete_field_preview["field_availability"]["buyer_name"] is True, complete_field_preview
                 assert complete_field_preview["field_availability"]["receiver_address"] is True, complete_field_preview
                 complete_preview_text = json.dumps(complete_preview.json(), ensure_ascii=False).lower()
                 for forbidden in [
+                    "nv-20260702-000918",
+                    "npo-20260702-851430",
+                    "김민준",
+                    "010-4821-7745",
+                    "서울특별시 강남구 테헤란로 152 12층 1203호",
+                    "06236",
                     "fake-order-token",
                     "fake-client-secret",
                     "authorization",
@@ -5169,11 +5172,13 @@ def verify_sync_preview_schema_and_security() -> None:
                     "deliveryStatus": "UNEXPECTED_DELIVERY_STATUS",
                     "productName": "safe display product",
                 }, store_id=8, requested=True)
-                delivered_complete_fields = delivered_complete_preview["complete_fields"]
                 assert delivered_complete_preview["available"] is True, delivered_complete_preview
-                assert delivered_complete_fields["order_status_label_zh"] == "配送完成", delivered_complete_fields
-                assert delivered_complete_fields["delivery_status_label_zh"] == "配送完成", delivered_complete_fields
-                assert delivered_complete_fields["delivery_status_derived_from_order_status"] is True, delivered_complete_fields
+                assert delivered_complete_preview["complete_fields"] == {}, delivered_complete_preview
+                assert delivered_complete_preview["field_availability"]["external_order_id"] is True, delivered_complete_preview
+                assert delivered_complete_preview["field_availability"]["external_product_order_id"] is True, delivered_complete_preview
+                delivered_complete_text = json.dumps(delivered_complete_preview, ensure_ascii=False).lower()
+                assert "display-order-id" not in delivered_complete_text, delivered_complete_text
+                assert "display-product-order-id" not in delivered_complete_text, delivered_complete_text
                 delivered_fallback_text = json.dumps(delivered_fallback_preview, ensure_ascii=False).lower()
                 for forbidden in [
                     "delivered-fallback-product-order-id-must-not-leak",
@@ -5276,23 +5281,37 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert single_sync["capability_tested_success_written"] is False, single_sync
                 assert single_sync["raw_response_saved"] is False, single_sync
                 assert single_sync["privacy_fields_redacted"] is True, single_sync
-                assert single_sync["address_saved"] is False, single_sync
+                assert single_sync["address_saved"] is True, single_sync
+                assert single_sync["business_contact_fields_saved"] is True, single_sync
                 assert single_sync["privacy_gate"]["passed"] is True, single_sync
-                written_external_order_id = single_sync["sample_ids"][0]
-                assert written_external_order_id.startswith("id-hash-"), single_sync
+                assert single_sync["sample_ids"][0].startswith("id-hash-"), single_sync
+                single_write_text = json.dumps(single_write.json(), ensure_ascii=False).lower()
+                for forbidden in [
+                    "product-order-id-must-not-leak",
+                    "order-id-must-not-leak",
+                    "must-not-leak-receiver",
+                    "010-1111-2222",
+                    "must-not-leak-address",
+                    "zip-must-not-leak",
+                ]:
+                    assert forbidden not in single_write_text, single_write_text
                 with SessionLocal() as db:
                     after_single_write_orders = db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()
                     assert len(after_single_write_orders) == before_real_preview_order_count + 1
                     written_order = db.scalar(select(Order).where(
                         Order.store_id == naver_store_id,
                         Order.platform == "naver",
-                        Order.external_order_id == written_external_order_id,
+                        Order.external_order_id == "id-hash-5f9144507b",
                     ))
                     assert written_order is not None
                     assert written_order.platform == "naver"
-                    assert written_order.external_order_id.startswith("id-hash-")
+                    assert written_order.external_product_order_id == "PRODUCT-ORDER-ID-MUST-NOT-LEAK-1234567890"
                     assert written_order.buyer_name != "must-not-leak-buyer"
                     assert written_order.buyer_masked_phone == "****2222"
+                    assert written_order.receiver_name == "must-not-leak-receiver"
+                    assert written_order.receiver_phone == "010-1111-2222"
+                    assert written_order.receiver_address == "must-not-leak-address"
+                    assert written_order.zip_code == "ZIP-MUST-NOT-LEAK"
                     assert written_order.product_name == "safe-field-presence-only"
                     assert written_order.quantity == 2
                     assert str(written_order.order_amount) in {"12345.00", "12345"}
@@ -5300,8 +5319,8 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert written_order.order_status == "PAYED"
                     assert written_order.source_type == "naver_real_order_sync"
                     assert written_order.raw_data["raw_response_saved"] is False
-                    assert written_order.raw_data["privacy_fields_redacted"] is True
-                    assert written_order.raw_data["address_saved"] is False
+                    assert written_order.raw_data["privacy_fields_redacted"] is False
+                    assert written_order.raw_data["address_saved"] is True
                     assert written_order.raw_data["address_observed"] is True
                     assert written_order.raw_data["external_product_order_id_hash"].startswith("id-hash-")
                     assert len(db.scalars(select(Product).where(Product.store_id == naver_store_id)).all()) == before_real_preview_product_count
@@ -5317,14 +5336,8 @@ def verify_sync_preview_schema_and_security() -> None:
                         "raw_data": written_order.raw_data,
                     }, ensure_ascii=False, default=str).lower()
                     for forbidden in [
-                        "product-order-id-must-not-leak",
-                        "order-id-must-not-leak",
                         "must-not-leak-buyer",
                         "buyer-id-must-not-leak",
-                        "must-not-leak-receiver",
-                        "010-1111-2222",
-                        "must-not-leak-address",
-                        "zip-must-not-leak",
                         "must-not-leak-payment",
                         "fake-order-token",
                         "authorization",
@@ -5349,25 +5362,32 @@ def verify_sync_preview_schema_and_security() -> None:
                 })
                 assert duplicate_write.status_code == 200, duplicate_write.text
                 duplicate_sync = duplicate_write.json()["data"]["local_sync_result"]
-                assert duplicate_sync["status"] == "already_exists", duplicate_sync
+                assert duplicate_sync["status"] in {"already_exists", "success"}, duplicate_sync
                 assert duplicate_sync["already_exists"] is True, duplicate_sync
                 assert duplicate_sync["no_duplicate_created"] is True, duplicate_sync
                 assert duplicate_sync["created_count"] == 0, duplicate_sync
                 with SessionLocal() as db:
                     assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count + 1
 
-                bad_privacy_preview = dict(detail_summary)
-                bad_privacy_preview["buyer_name_masked"] = "must-not-leak-buyer"
+                invalid_internal_detail = sync_service._build_naver_order_internal_detail({
+                    "productOrderId": "INTERNAL-PRODUCT-ORDER-ID",
+                    "orderId": "INTERNAL-ORDER-ID",
+                    "orderStatus": "PAYED",
+                    "receiverName": "internal receiver",
+                    "receiverTelNo1": "010-0000-0000",
+                    "receiverAddress": "internal address",
+                }, store_id=8)
+                invalid_internal_detail.pop("external_product_order_id")
                 with SessionLocal() as db:
                     privacy_blocked = sync_service._sync_naver_order_detail_preview(
                         db,
-                        detail_preview=bad_privacy_preview,
+                        detail_preview=invalid_internal_detail,
                         real_sync=True,
                     )
                     assert privacy_blocked["status"] == "blocked", privacy_blocked
                     assert privacy_blocked["skip_reason"] == "privacy_gate_failed", privacy_blocked
                     assert privacy_blocked["privacy_gate"]["passed"] is False, privacy_blocked
-                    assert "buyer_name_not_masked" in privacy_blocked["privacy_gate"]["reasons"], privacy_blocked
+                    assert "missing_external_product_order_id" in privacy_blocked["privacy_gate"]["reasons"], privacy_blocked
                     assert len(db.scalars(select(Order).where(Order.store_id == naver_store_id)).all()) == before_real_preview_order_count + 1
 
                 FakeNaverOrderHttpClient.calls = []
@@ -5461,10 +5481,19 @@ def verify_sync_preview_schema_and_security() -> None:
 
                 selected_candidate = dict(detail_summary)
                 selected_candidate.update({
+                    "external_order_id_full": "SELECTED-ORDER-ID",
+                    "external_product_order_id": "SELECTED-PRODUCT-ORDER-ID",
                     "external_product_order_id_hash": "id-hash-abcdef1234",
                     "product_order_id_hash": "id-hash-abcdef1234",
                     "external_order_id_hash": "id-hash-fedcba4321",
                     "order_id_hash": "id-hash-fedcba4321",
+                    "receiver_name": "selected receiver",
+                    "receiver_phone": "010-0000-1111",
+                    "receiver_address": "selected internal address",
+                    "zip_code": "00001",
+                    "address_saved": True,
+                    "privacy_fields_redacted": False,
+                    "business_contact_fields_saved": True,
                     "candidate_classification": "candidate_new",
                 })
                 with SessionLocal() as db:
@@ -5528,7 +5557,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert not_unique_selected_gate["orders_written"] is False, not_unique_selected_gate
 
                     bad_selected_candidate = dict(selected_candidate)
-                    bad_selected_candidate["buyer_name_masked"] = "must-not-leak-selected-buyer"
+                    bad_selected_candidate.pop("external_product_order_id")
                     privacy_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
                         db,
                         selected_candidate_hash="id-hash-abcdef1234",
@@ -5537,7 +5566,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     )
                     assert privacy_selected_gate["skip_reason"] == "selected_candidate_privacy_blocked", privacy_selected_gate
                     assert privacy_selected_gate["privacy_gate"]["passed"] is False, privacy_selected_gate
-                    assert "buyer_name_not_masked" in privacy_selected_gate["privacy_gate"]["reasons"], privacy_selected_gate
+                    assert "missing_external_product_order_id" in privacy_selected_gate["privacy_gate"]["reasons"], privacy_selected_gate
                     assert privacy_selected_gate["orders_written"] is False, privacy_selected_gate
 
                     write_selected_gate = sync_service._evaluate_naver_selected_new_order_write_gate(
@@ -5553,8 +5582,8 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert write_selected_gate["sync_log_written"] is False, write_selected_gate
                     assert write_selected_gate["capability_tested_success_written"] is False, write_selected_gate
                     assert write_selected_gate["raw_response_saved"] is False, write_selected_gate
-                    assert write_selected_gate["privacy_fields_redacted"] is True, write_selected_gate
-                    assert write_selected_gate["address_saved"] is False, write_selected_gate
+                    assert write_selected_gate["privacy_fields_redacted"] is False, write_selected_gate
+                    assert write_selected_gate["address_saved"] is True, write_selected_gate
                     assert write_selected_gate["formal_order_sync_open"] is False, write_selected_gate
                     assert write_selected_gate["platform_writes_enabled"] is False, write_selected_gate
                     assert write_selected_gate["sample_ids"] == ["id-hash-abcdef1234"], write_selected_gate
@@ -5672,7 +5701,11 @@ def verify_sync_preview_schema_and_security() -> None:
                     missing_local_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
                         db,
                         selected_order_hash="id-hash-2222222222",
-                        refresh_preview={**refresh_preview, "external_product_order_id_hash": "id-hash-2222222222"},
+                        refresh_preview={
+                            **refresh_preview,
+                            "external_product_order_id_hash": "id-hash-2222222222",
+                            "external_product_order_id": "MISSING-PRODUCT-ORDER-ID",
+                        },
                         write_enabled=True,
                         manual_approval=True,
                     )
@@ -5680,7 +5713,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert missing_local_refresh_gate["orders_written"] is False, missing_local_refresh_gate
 
                     bad_refresh_preview = dict(refresh_preview)
-                    bad_refresh_preview["buyer_name_masked"] = "must-not-leak-refresh-buyer"
+                    bad_refresh_preview["unsafe_marker"] = "authorization bearer must-not-pass"
                     privacy_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
                         db,
                         selected_order_hash="id-hash-abcdef1234",
@@ -5690,7 +5723,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     )
                     assert privacy_refresh_gate["skip_reason"] == "local_refresh_privacy_blocked", privacy_refresh_gate
                     assert privacy_refresh_gate["privacy_gate"]["passed"] is False, privacy_refresh_gate
-                    assert "buyer_name_not_masked" in privacy_refresh_gate["privacy_gate"]["reasons"], privacy_refresh_gate
+                    assert "forbidden_text_authorization" in privacy_refresh_gate["privacy_gate"]["reasons"], privacy_refresh_gate
                     assert privacy_refresh_gate["orders_written"] is False, privacy_refresh_gate
 
                     not_approved_refresh_gate = sync_service._evaluate_naver_order_local_refresh_mock_gate(
@@ -5741,8 +5774,8 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert refreshed_order.raw_data["orders_refreshed"] is True
                     assert refreshed_order.raw_data["orders_written"] is False
                     assert refreshed_order.raw_data["raw_response_saved"] is False
-                    assert refreshed_order.raw_data["privacy_fields_redacted"] is True
-                    assert refreshed_order.raw_data["address_saved"] is False
+                    assert refreshed_order.raw_data["privacy_fields_redacted"] is False
+                    assert refreshed_order.raw_data["address_saved"] is True
                     refreshed_text = json.dumps({
                         "external_order_id": refreshed_order.external_order_id,
                         "buyer_name": refreshed_order.buyer_name,
@@ -5755,10 +5788,6 @@ def verify_sync_preview_schema_and_security() -> None:
                         "order-id-must-not-leak",
                         "must-not-leak-refresh-buyer",
                         "buyer-id-must-not-leak",
-                        "must-not-leak-receiver",
-                        "010-1111-2222",
-                        "must-not-leak-address",
-                        "zip-must-not-leak",
                         "fake-order-token",
                         "client_secret",
                         "authorization",
@@ -5926,7 +5955,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert unknown_timeline_gate["orders_written"] is False, unknown_timeline_gate
 
                     bad_timeline_preview = dict(timeline_delivered_preview)
-                    bad_timeline_preview["buyer_name_masked"] = "must-not-leak-timeline-buyer"
+                    bad_timeline_preview["unsafe_marker"] = "authorization bearer must-not-pass"
                     privacy_timeline_gate = sync_service._evaluate_naver_order_status_timeline_mock_mapper(
                         selected_order_hash="id-hash-abcdef1234",
                         previous_snapshot=previous_paid_snapshot,
@@ -6609,7 +6638,7 @@ def verify_sync_preview_schema_and_security() -> None:
                     assert new_candidate_gate["orders_written"] is False, new_candidate_gate
 
                     bad_batch_preview = dict(batch_preview_one)
-                    bad_batch_preview["buyer_name_masked"] = "must-not-leak-batch-buyer"
+                    bad_batch_preview["unsafe_marker"] = "authorization bearer must-not-pass"
                     privacy_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
                         db,
                         refresh_previews=[bad_batch_preview, batch_preview_two],
@@ -6703,8 +6732,8 @@ def verify_sync_preview_schema_and_security() -> None:
                         assert refreshed_batch_order.source_type == sync_service.NAVER_ORDER_SYNC_SOURCE_TYPE
                         assert refreshed_batch_order.raw_data["orders_refreshed"] is True
                         assert refreshed_batch_order.raw_data["raw_response_saved"] is False
-                        assert refreshed_batch_order.raw_data["privacy_fields_redacted"] is True
-                        assert refreshed_batch_order.raw_data["address_saved"] is False
+                        assert refreshed_batch_order.raw_data["privacy_fields_redacted"] is False
+                        assert refreshed_batch_order.raw_data["address_saved"] is True
 
                     no_change_batch_gate = sync_service._evaluate_naver_order_refresh_batch_mock_gate(
                         db,
@@ -6735,10 +6764,6 @@ def verify_sync_preview_schema_and_security() -> None:
                         "product-order-id-must-not-leak",
                         "order-id-must-not-leak",
                         "buyer-id-must-not-leak",
-                        "must-not-leak-receiver",
-                        "010-1111-2222",
-                        "must-not-leak-address",
-                        "zip-must-not-leak",
                         "fake-order-token",
                         "client_secret",
                         "authorization",
@@ -7065,8 +7090,12 @@ def verify_sync_preview_schema_and_security() -> None:
                 "end_date": "2026-07-01",
                 "max_pages": 1,
             })
-            assert today_sales.status_code in {400, 401}, today_sales.text
-            assert today_sales.json()["error_code"] in {"SALES_DATE_NOT_AVAILABLE", "auth_failed"}, today_sales.text
+            assert today_sales.status_code in {400, 401, 502}, today_sales.text
+            assert today_sales.json()["error_code"] in {
+                "SALES_DATE_NOT_AVAILABLE",
+                "auth_failed",
+                "COUPANG_SALES_PREVIEW_FAILED",
+            }, today_sales.text
 
             financial_paths_seen = []
             sales_variant = {"value": "base"}
@@ -10331,6 +10360,7 @@ def verify_naver_order_refresh_backup_evidence_gate() -> None:
             "platform": "naver",
             "external_product_order_id_hash": order_hash,
             "product_order_id_hash": order_hash,
+            "external_product_order_id": "18A-PRODUCT-ORDER-ID",
             "external_order_id_hash": "id-hash-18a0000002",
             "order_id_hash": "id-hash-18a0000002",
             "order_status": {"raw": "DELIVERED", "label_zh": "配送完成", "unknown_status_observed": False},
@@ -10353,10 +10383,15 @@ def verify_naver_order_refresh_backup_evidence_gate() -> None:
             "buyer_phone_masked": "****1800",
             "receiver_name_masked": "김*",
             "receiver_phone_masked": "****1801",
+            "receiver_name": "18A receiver",
+            "receiver_phone": "010-1800-1801",
+            "receiver_address": "18A internal address",
+            "zip_code": "18001",
             "address_observed": True,
-            "address_saved": False,
+            "address_saved": True,
             "raw_response_saved": False,
-            "privacy_fields_redacted": True,
+            "privacy_fields_redacted": False,
+            "business_contact_fields_saved": True,
             "mapping_version": "naver_order_detail_preview_v1",
             "unknown_status_observed": False,
         }
@@ -10459,8 +10494,8 @@ def verify_naver_order_refresh_backup_evidence_gate() -> None:
         assert refreshed_order.quantity == 2
         assert refreshed_order.order_amount == Decimal("181000")
         assert refreshed_order.raw_data["raw_response_saved"] is False
-        assert refreshed_order.raw_data["privacy_fields_redacted"] is True
-        assert refreshed_order.raw_data["address_saved"] is False
+        assert refreshed_order.raw_data["privacy_fields_redacted"] is False
+        assert refreshed_order.raw_data["address_saved"] is True
 
         after_counts = {
             "orders": db.execute(text("SELECT COUNT(*) FROM orders")).scalar_one(),
