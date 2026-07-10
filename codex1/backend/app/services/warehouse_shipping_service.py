@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import secrets
+from datetime import timedelta
 from datetime import timezone
 from typing import Any
 
@@ -17,6 +20,7 @@ from app.models.shipping import (
     ShippingTrackingImportRow,
     WarehouseShippingBatch,
     WarehouseShippingBatchOrder,
+    WarehouseShippingApprovalGrant,
 )
 from app.services import shipping_service
 from app.services.store_service import ensure_store_exists
@@ -49,6 +53,40 @@ def _safe_batch_row(row: WarehouseShippingBatchOrder) -> dict[str, Any]:
         "operator_note": row.operator_note,
         "is_active": row.is_active,
     }
+
+
+def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scope: str) -> dict[str, Any]:
+    batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
+    if batch is None:
+        return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
+    rows = [row.id for row in batch.rows if row.row_status in {"pending_export", "ready_for_writeback"}]
+    candidate_hash = hashlib.sha256(",".join(map(str, sorted(rows))).encode("utf-8")).hexdigest()
+    token = secrets.token_urlsafe(32)
+    now = get_utc_now()
+    db.add(WarehouseShippingApprovalGrant(
+        batch_id=batch.id, user_id=user_id, grant_scope=grant_scope,
+        token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(), batch_version=batch.version,
+        candidate_hash=candidate_hash, expires_at=now + timedelta(minutes=10),
+    ))
+    db.commit()
+    return {"status": "approval_granted", "approval_token": token, "expires_at": now + timedelta(minutes=10), "batch_version": batch.version}
+
+
+def consume_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scope: str, token: str) -> bool:
+    grant = db.scalar(select(WarehouseShippingApprovalGrant).where(
+        WarehouseShippingApprovalGrant.batch_id == batch_id,
+        WarehouseShippingApprovalGrant.user_id == user_id,
+        WarehouseShippingApprovalGrant.grant_scope == grant_scope,
+        WarehouseShippingApprovalGrant.token_hash == hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        WarehouseShippingApprovalGrant.used_at.is_(None),
+    ))
+    batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
+    expires_at = grant.expires_at.replace(tzinfo=timezone.utc) if grant is not None and grant.expires_at.tzinfo is None else (grant.expires_at if grant is not None else None)
+    if grant is None or batch is None or expires_at < get_utc_now() or grant.batch_version != batch.version:
+        return False
+    grant.used_at = get_utc_now()
+    db.commit()
+    return True
 
 
 def _serialize_batch(batch: WarehouseShippingBatch, *, include_rows: bool = True) -> dict[str, Any]:
@@ -316,6 +354,7 @@ def import_warehouse_tracking_xlsx(
     import_batch.duplicate_row_count = needs_confirmation
     import_batch.blocked_row_count = blocked
     batch.tracking_import_batch_id = import_batch.id
+    batch.version += 1
     batch.warehouse_returned_at = now
     batch.status = "warehouse_returned"
     db.commit()
@@ -370,6 +409,7 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
         db.rollback()
         return {"status": "blocked", "skip_reason": local_update.get("skip_reason") or "local_dispatch_update_failed", "local_update": local_update}
     batch.status = "ready_to_writeback"
+    batch.version += 1
     batch.operator_confirmed_at = get_utc_now()
     db.commit()
     db.refresh(batch)

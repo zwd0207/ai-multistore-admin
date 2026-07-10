@@ -712,6 +712,9 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         created_tables = create_shipping_schema(connection)
+        batch_columns = {row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batches)").fetchall()}
+        if "version" not in batch_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batches ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
         connection.commit()
         verify_shipping_schema(connection)
         return {

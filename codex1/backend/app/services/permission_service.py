@@ -32,6 +32,12 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "backup.read",
             "backup.create",
             "store_membership.assign",
+            "recipient_pii.view",
+            "recipient_pii.export",
+            "recipient_pii.cs_reveal",
+            "shipping.batch.manage",
+            "shipping.writeback.approve",
+            "recipient_pii.audit.read",
         },
         "sensitive_approval_actions": {
             "products.batch_sync_write",
@@ -40,6 +46,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "orders.refresh_batch_write",
             "backup.create",
             "store_membership.assign",
+            "shipping.writeback.approve",
         },
     },
     "operator": {
@@ -78,6 +85,12 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
         },
         "sensitive_approval_actions": set(),
     },
+    "shipping_operator": {
+        "label": "shipping_operator",
+        "store_scope": "assigned",
+        "permissions": {"orders.read", "recipient_pii.view", "recipient_pii.export", "shipping.batch.manage"},
+        "sensitive_approval_actions": set(),
+    },
 }
 
 SENSITIVE_ACTIONS = {
@@ -91,6 +104,7 @@ SENSITIVE_ACTIONS = {
     "credentials.update",
     "schema.migrate",
     "formal_sync.open",
+    "shipping.writeback.approve",
 }
 
 SENSITIVE_KEY_MARKERS = (

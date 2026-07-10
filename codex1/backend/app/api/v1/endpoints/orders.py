@@ -5,6 +5,7 @@ from app.core.responses import success_response
 from app.database import get_db
 from app.services import order_service
 from app.services.store_service import normalize_platform
+from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_store_permission
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -33,6 +34,20 @@ def list_orders(
             store_id=store_id,
             platform=normalized_platform,
         ),
+    })
+
+
+@router.get("/operations")
+def list_operations_orders(
+    store_id: int = Query(...),
+    platform: str | None = Query(default=None),
+    include_test_orders: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    require_store_permission(db, identity=identity, store_id=store_id, permission_key="recipient_pii.view")
+    return success_response(data={
+        "items": order_service.list_operations_orders(db, store_id=store_id, platform=normalize_platform(platform) if platform else None, include_test_orders=include_test_orders),
     })
 
 

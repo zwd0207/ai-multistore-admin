@@ -19,7 +19,10 @@ from app.database import SessionLocal, engine, init_db
 from app.models.order import Order
 from app.models.shipping import LogisticsInventoryMapping
 from app.models.store import Store
+from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser
 from app.services import shipping_service, warehouse_shipping_service
+from app.services.operator_access_service import OperatorIdentity, require_store_permission
+from app.services import order_service
 
 
 def xlsx(rows):
@@ -55,7 +58,29 @@ def main():
             normalized_product_name=shipping_service._normalize_key_part("PXG Bag"), normalized_option_name="",
             internal_sku="PXG-BAG-001", logistics_inventory_code="WH-PXG-001", match_priority=1, is_active=True,
         ))
+        user = ErpUser(user_key_hash="warehouse-operator-key", display_name="Warehouse Operator", status="active")
+        role = ErpRole(role_key="shipping_operator_test", role_label_zh="发货运营", role_label_en="Shipping operator")
+        db.add_all([user, role])
+        db.flush()
+        permissions = [
+            db.query(ErpPermission).filter(ErpPermission.permission_key == key).one()
+            for key in ("recipient_pii.view", "recipient_pii.export", "shipping.batch.manage")
+        ]
+        db.add_all([ErpRolePermission(role_id=role.id, permission_id=item.id) for item in permissions])
+        db.add(ErpStoreMembership(user_id=user.id, store_id=store.id, role_id=role.id, membership_status="active"))
         db.commit()
+
+        identity = OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash)
+        require_store_permission(db, identity=identity, store_id=store.id, permission_key="recipient_pii.view")
+        try:
+            require_store_permission(db, identity=identity, store_id=store.id + 999, permission_key="recipient_pii.view")
+            raise AssertionError("cross-store recipient PII access should be denied")
+        except Exception as exc:
+            assert getattr(exc, "error_code", None) == "recipient_pii_store_scope_forbidden", exc
+        summary = order_service.list_orders(db, store_id=store.id, platform="naver", include_test_orders=True)[0]
+        assert "receiver_name" not in summary and "receiver_address" not in summary and "raw_data" not in summary, summary
+        operations = order_service.list_operations_orders(db, store_id=store.id, platform="naver", include_test_orders=True)[0]
+        assert operations["receiver_name"] == "Kim Operator" and "raw_data" not in operations, operations
 
         actor = {"role": "operator", "actor_id": "warehouse-test"}
         created = warehouse_shipping_service.create_warehouse_batch(
@@ -63,6 +88,9 @@ def main():
         )
         assert created["status"] == "created", created
         batch_id = created["batch"]["id"]
+        approval = warehouse_shipping_service.issue_approval_grant(db, batch_id=batch_id, user_id=user.id, grant_scope="manifest")
+        assert warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=user.id, grant_scope="manifest", token=approval["approval_token"]) is True
+        assert warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=user.id, grant_scope="manifest", token=approval["approval_token"]) is False
         duplicate = warehouse_shipping_service.create_warehouse_batch(
             db, store_id=store.id, platform="naver", order_ids=[order.id], manual_approval=True, actor_context=actor,
         )

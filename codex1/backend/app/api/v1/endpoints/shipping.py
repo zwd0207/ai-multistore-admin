@@ -23,9 +23,11 @@ from app.schemas.shipping import (
     WarehouseShippingManifestRequest,
     WarehouseShippingTrackingImportRequest,
     WarehouseShippingWritebackRequest,
+    WarehouseShippingApprovalRequest,
 )
 from app.services import shipping_service
 from app.services import warehouse_shipping_service
+from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_store_permission
 
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
@@ -37,7 +39,9 @@ def list_warehouse_shipping_batches(
     platform: str = Query(default="naver", min_length=1, max_length=50),
     include_rows: bool = Query(default=False),
     db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    require_store_permission(db, identity=identity, store_id=store_id, permission_key="shipping.batch.manage")
     return success_response(
         data=warehouse_shipping_service.list_warehouse_batches(
             db, store_id=store_id, platform=platform, include_rows=include_rows,
@@ -47,11 +51,12 @@ def list_warehouse_shipping_batches(
 
 
 @router.post("/warehouse-batches")
-def create_warehouse_shipping_batch(payload: WarehouseShippingBatchCreateRequest, db: Session = Depends(get_db)) -> dict:
+def create_warehouse_shipping_batch(payload: WarehouseShippingBatchCreateRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity)) -> dict:
+    require_store_permission(db, identity=identity, store_id=payload.store_id, permission_key="shipping.batch.manage")
     return success_response(
         data=warehouse_shipping_service.create_warehouse_batch(
             db, store_id=payload.store_id, platform=payload.platform, order_ids=payload.order_ids,
-            manual_approval=payload.manual_approval, actor_context=payload.actor_context,
+            manual_approval=payload.manual_approval, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
         ),
         message="warehouse shipping batch created",
     )
@@ -59,12 +64,18 @@ def create_warehouse_shipping_batch(payload: WarehouseShippingBatchCreateRequest
 
 @router.post("/warehouse-batches/{batch_id}/manifest")
 def download_warehouse_shipping_manifest(
-    batch_id: int, payload: WarehouseShippingManifestRequest, db: Session = Depends(get_db),
+    batch_id: int, payload: WarehouseShippingManifestRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="recipient_pii.export")
+    if not payload.approval_token or not warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope="manifest", token=payload.approval_token):
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_token_invalid"})
     return success_response(
         data=warehouse_shipping_service.download_warehouse_manifest(
             db, batch_id=batch_id, manual_approval=payload.manual_approval,
-            privacy_access_acknowledged=payload.privacy_access_acknowledged, actor_context=payload.actor_context,
+            privacy_access_acknowledged=payload.privacy_access_acknowledged, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
         ),
         message="warehouse shipping manifest prepared",
     )
@@ -72,13 +83,17 @@ def download_warehouse_shipping_manifest(
 
 @router.post("/warehouse-batches/{batch_id}/tracking-import")
 def import_warehouse_shipping_tracking(
-    batch_id: int, payload: WarehouseShippingTrackingImportRequest, db: Session = Depends(get_db),
+    batch_id: int, payload: WarehouseShippingTrackingImportRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.batch.manage")
     return success_response(
         data=warehouse_shipping_service.import_warehouse_tracking_xlsx(
             db, batch_id=batch_id, source_file_name=payload.source_file_name,
             file_content_base64=payload.file_content_base64, manual_approval=payload.manual_approval,
-            actor_context=payload.actor_context,
+            actor_context={"role": "operator", "actor_id": identity.user_key_hash},
         ),
         message="warehouse tracking import completed",
     )
@@ -86,12 +101,16 @@ def import_warehouse_shipping_tracking(
 
 @router.post("/warehouse-batches/{batch_id}/confirm")
 def confirm_warehouse_shipping_batch(
-    batch_id: int, payload: WarehouseShippingConfirmRequest, db: Session = Depends(get_db),
+    batch_id: int, payload: WarehouseShippingConfirmRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.batch.manage")
     return success_response(
         data=warehouse_shipping_service.confirm_warehouse_batch(
             db, batch_id=batch_id, confirmed_row_ids=payload.confirmed_row_ids,
-            manual_approval=payload.manual_approval, actor_context=payload.actor_context,
+            manual_approval=payload.manual_approval, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
         ),
         message="warehouse shipping batch confirmed",
     )
@@ -99,16 +118,37 @@ def confirm_warehouse_shipping_batch(
 
 @router.post("/warehouse-batches/{batch_id}/writeback")
 def execute_warehouse_shipping_writeback(
-    batch_id: int, payload: WarehouseShippingWritebackRequest, db: Session = Depends(get_db),
+    batch_id: int, payload: WarehouseShippingWritebackRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.writeback.approve")
+    if not payload.approval_token or not warehouse_shipping_service.consume_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope="writeback", token=payload.approval_token):
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_token_invalid"})
     return success_response(
         data=warehouse_shipping_service.execute_warehouse_batch_writeback(
             db, batch_id=batch_id, manual_approval=payload.manual_approval,
             final_operator_confirmation=payload.final_operator_confirmation,
-            real_api_call_requested=payload.real_api_call_requested, actor_context=payload.actor_context,
+            real_api_call_requested=payload.real_api_call_requested, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
         ),
         message="warehouse shipping platform writeback completed",
     )
+
+
+@router.post("/warehouse-batches/{batch_id}/approval/{grant_scope}")
+def issue_warehouse_shipping_approval(
+    batch_id: int, grant_scope: str, payload: WarehouseShippingApprovalRequest,
+    db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    if grant_scope not in {"manifest", "writeback"} or not payload.confirmation:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_confirmation_required"})
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    permission = "recipient_pii.export" if grant_scope == "manifest" else "shipping.writeback.approve"
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key=permission)
+    return success_response(data=warehouse_shipping_service.issue_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope=grant_scope))
 
 
 @router.get("/logistics-mappings")

@@ -159,6 +159,13 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
     return payload
 
 
+def serialize_order_summary(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
+    payload = serialize_order(order, tracking_row)
+    for field in ("buyer_name", "buyer_phone", "receiver_name", "receiver_phone", "receiver_address", "zip_code", "raw_data"):
+        payload.pop(field, None)
+    return payload
+
+
 def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) -> dict:
     ensure_store_exists(db, store_id)
     created = 0
@@ -210,7 +217,20 @@ def list_orders(
     )
     tracking_lookup = _build_tracking_lookup(db.scalars(tracking_statement).all())
 
-    return [serialize_order(item, _tracking_row_for_order(item, tracking_lookup)) for item in orders]
+    return [serialize_order_summary(item, _tracking_row_for_order(item, tracking_lookup)) for item in orders]
+
+
+def list_operations_orders(db: Session, store_id: int, platform: str | None = None, include_test_orders: bool = False) -> list[dict]:
+    ensure_store_exists(db, store_id)
+    statement = select(Order).where(Order.store_id == store_id).order_by(Order.id.asc())
+    if platform:
+        statement = statement.where(Order.platform == platform)
+    if not include_test_orders:
+        statement = statement.where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
+    return [
+        {key: value for key, value in serialize_order(order).items() if key != "raw_data"}
+        for order in db.scalars(statement).all()
+    ]
 
 
 def count_test_orders(db: Session, store_id: int, platform: str | None = None) -> int:

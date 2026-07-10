@@ -182,6 +182,7 @@ class WarehouseShippingManifestRequest(BaseModel):
     manual_approval: bool = False
     privacy_access_acknowledged: bool = False
     actor_context: dict[str, Any] = Field(default_factory=dict)
+    approval_token: str | None = Field(default=None, min_length=20, max_length=300)
 
 
 class WarehouseShippingTrackingImportRequest(BaseModel):
@@ -202,6 +203,16 @@ class WarehouseShippingWritebackRequest(BaseModel):
     final_operator_confirmation: bool = False
     real_api_call_requested: bool = False
     actor_context: dict[str, Any] = Field(default_factory=dict)
+    approval_token: str | None = Field(default=None, min_length=20, max_length=300)
+
+
+class WarehouseShippingApprovalRequest(BaseModel):
+    confirmation: bool = False
+    warehouse_name: str | None = Field(default=None, max_length=160)
+
+
+class WarehouseShippingTokenRequest(BaseModel):
+    approval_token: str = Field(..., min_length=20, max_length=300)
 
 
 class LogisticsInventoryMappingRead(BaseModel):
