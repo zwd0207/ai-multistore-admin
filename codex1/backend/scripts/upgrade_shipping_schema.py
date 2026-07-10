@@ -17,6 +17,8 @@ SHIPPING_TABLES = {
     "shipping_export_batch_rows",
     "shipping_tracking_import_batches",
     "shipping_tracking_import_rows",
+    "warehouse_shipping_batches",
+    "warehouse_shipping_batch_orders",
 }
 
 SHIPPING_TABLE_COLUMNS = {
@@ -139,6 +141,16 @@ SHIPPING_TABLE_COLUMNS = {
         "future_write_allowed",
         "created_at",
     },
+    "warehouse_shipping_batches": {
+        "id", "batch_no", "store_id", "platform", "status", "export_batch_id", "tracking_import_batch_id",
+        "created_by_actor_hash", "warehouse_sent_at", "warehouse_returned_at", "operator_confirmed_at",
+        "completed_at", "created_at", "updated_at",
+    },
+    "warehouse_shipping_batch_orders": {
+        "id", "batch_id", "local_order_id", "store_id", "platform", "order_reference", "product_order_reference",
+        "product_name", "quantity", "internal_sku", "logistics_inventory_code", "row_status", "is_active",
+        "carrier", "tracking_number_hash", "failure_reason", "operator_note", "active_lock", "created_at", "updated_at",
+    },
 }
 
 SHIPPING_NOT_NULL_COLUMNS = {
@@ -234,6 +246,13 @@ SHIPPING_NOT_NULL_COLUMNS = {
         "row_status",
         "future_write_allowed",
         "created_at",
+    },
+    "warehouse_shipping_batches": {
+        "batch_no", "store_id", "platform", "status", "created_at", "updated_at",
+    },
+    "warehouse_shipping_batch_orders": {
+        "batch_id", "local_order_id", "store_id", "platform", "order_reference", "product_name", "quantity",
+        "row_status", "is_active", "created_at", "updated_at",
     },
 }
 
@@ -346,6 +365,31 @@ SHIPPING_INDEXES = {
     "ix_shipping_tracking_rows_tracking_number": (
         "shipping_tracking_import_rows",
         ["tracking_number"],
+        False,
+    ),
+    "uq_warehouse_shipping_batch_no": (
+        "warehouse_shipping_batches",
+        ["batch_no"],
+        True,
+    ),
+    "ix_warehouse_shipping_batches_store_platform_status": (
+        "warehouse_shipping_batches",
+        ["store_id", "platform", "status"],
+        False,
+    ),
+    "ix_warehouse_shipping_batch_orders_active_order": (
+        "warehouse_shipping_batch_orders",
+        ["local_order_id", "is_active"],
+        False,
+    ),
+    "uq_warehouse_shipping_active_order_lock": (
+        "warehouse_shipping_batch_orders",
+        ["local_order_id", "active_lock"],
+        True,
+    ),
+    "ix_warehouse_shipping_batch_orders_batch_status": (
+        "warehouse_shipping_batch_orders",
+        ["batch_id", "row_status"],
         False,
     ),
 }

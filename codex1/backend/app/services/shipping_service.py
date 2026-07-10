@@ -3244,10 +3244,14 @@ def _xlsx_cell(value: Any, row_index: int, column_index: int) -> str:
     return f'<c r="{reference}" t="inlineStr"><is><t>{text}</t></is></c>'
 
 
-def _build_xlsx_bytes(rows: list[dict[str, Any]]) -> bytes:
+def _build_xlsx_bytes(
+    rows: list[dict[str, Any]],
+    *,
+    headers: list[tuple[str, str]] | None = None,
+) -> bytes:
     from io import BytesIO
 
-    headers = [
+    headers = headers or [
         ("order_reference", "订单号"),
         ("product_name", "商品名称"),
         ("option_name", "选项名称"),

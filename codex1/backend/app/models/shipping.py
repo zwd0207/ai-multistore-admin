@@ -277,3 +277,63 @@ class ShippingTrackingImportRow(Base):
 
     import_batch = relationship("ShippingTrackingImportBatch", back_populates="rows")
     store = relationship("Store")
+
+
+class WarehouseShippingBatch(Base):
+    __tablename__ = "warehouse_shipping_batches"
+    __table_args__ = (
+        UniqueConstraint("batch_no", name="uq_warehouse_shipping_batch_no"),
+        Index("ix_warehouse_shipping_batches_store_platform_status", "store_id", "platform", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_no: Mapped[str] = mapped_column(String(80), nullable=False)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="created", server_default="created")
+    export_batch_id: Mapped[int | None] = mapped_column(ForeignKey("shipping_export_batches.id"), nullable=True)
+    tracking_import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("shipping_tracking_import_batches.id"), nullable=True)
+    created_by_actor_hash: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    warehouse_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    warehouse_returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    operator_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    store = relationship("Store")
+    rows = relationship("WarehouseShippingBatchOrder", back_populates="batch", cascade="all, delete-orphan")
+
+
+class WarehouseShippingBatchOrder(Base):
+    __tablename__ = "warehouse_shipping_batch_orders"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "local_order_id", name="uq_warehouse_shipping_batch_order"),
+        UniqueConstraint("local_order_id", "active_lock", name="uq_warehouse_shipping_active_order_lock"),
+        Index("ix_warehouse_shipping_batch_orders_active_order", "local_order_id", "is_active"),
+        Index("ix_warehouse_shipping_batch_orders_batch_status", "batch_id", "row_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("warehouse_shipping_batches.id"), nullable=False)
+    local_order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    order_reference: Mapped[str] = mapped_column(String(160), nullable=False)
+    product_order_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    internal_sku: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    logistics_inventory_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    row_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending_export", server_default="pending_export")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    active_lock: Mapped[str | None] = mapped_column(String(20), nullable=True, default="active", server_default="active")
+    carrier: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tracking_number_hash: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    batch = relationship("WarehouseShippingBatch", back_populates="rows")
+    order = relationship("Order")
