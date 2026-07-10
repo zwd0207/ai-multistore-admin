@@ -400,6 +400,42 @@ def list_warehouse_batches(db: Session, *, store_id: int, platform: str, include
     return {"status": "ready", "items": [_serialize_batch(batch, include_rows=include_rows) for batch in batches], "real_api_called": False}
 
 
+def get_warehouse_batch_tracking_details(db: Session, *, batch_id: int) -> dict[str, Any]:
+    batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
+    if batch is None:
+        return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
+    candidates, candidate_error = _writeback_execution_candidates(db, batch)
+    if candidate_error or candidates is None:
+        return {
+            "status": "blocked",
+            "skip_reason": candidate_error or "shipping_tracking_match_not_unique",
+            "batch_id": batch.id,
+        }
+    batch_rows = {row.id: row for row in batch.rows}
+    items = []
+    for candidate in candidates:
+        batch_row = batch_rows[candidate["batch_row_id"]]
+        tracking_row = db.get(ShippingTrackingImportRow, candidate["tracking_record_id"])
+        items.append({
+            "batch_id": batch.id,
+            "order_reference": candidate["order_reference"],
+            "product_order_reference": candidate["product_order_reference"],
+            "product_name": batch_row.product_name,
+            "carrier": candidate["carrier"],
+            "tracking_number": candidate["tracking_number"],
+            "shipped_at": candidate["shipped_at"],
+            "validation_status": batch_row.row_status,
+            "exception_reason": batch_row.failure_reason or (tracking_row.operator_note if tracking_row else None),
+        })
+    return {
+        "status": "ready",
+        "batch_id": batch.id,
+        "items": items,
+        "privacy_fields_included": False,
+        "source": "platform_writeback_tracking_records",
+    }
+
+
 def _warehouse_xlsx(rows: list[dict[str, Any]]) -> bytes:
     headers = [
         ("batch_no", "发货批次"), ("platform", "平台"), ("order_reference", "订单号"),

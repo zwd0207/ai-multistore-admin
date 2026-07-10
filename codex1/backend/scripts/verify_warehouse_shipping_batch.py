@@ -6,6 +6,8 @@ from pathlib import Path
 from io import BytesIO
 from zipfile import ZipFile
 
+from fastapi.testclient import TestClient
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -16,8 +18,9 @@ os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
 
 from app.database import SessionLocal, engine, init_db
+from app.main import app
 from app.models.order import Order
-from app.models.shipping import LogisticsInventoryMapping
+from app.models.shipping import LogisticsInventoryMapping, ShippingTrackingImportRow, WarehouseShippingBatch
 from app.models.store import Store
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser
 from app.services import shipping_service, warehouse_shipping_service
@@ -42,7 +45,8 @@ def main():
     init_db()
     with SessionLocal() as db:
         store = Store(name="warehouse-workflow-test", platform="naver")
-        db.add(store)
+        other_store = Store(name="warehouse-other-store-test", platform="naver")
+        db.add_all([store, other_store])
         db.flush()
         order = Order(
             store_id=store.id, platform="naver", external_order_id="warehouse-order-001",
@@ -59,8 +63,11 @@ def main():
             internal_sku="PXG-BAG-001", logistics_inventory_code="WH-PXG-001", match_priority=1, is_active=True,
         ))
         user = ErpUser(user_key_hash="warehouse-operator-key", display_name="Warehouse Operator", status="active")
+        other_user = ErpUser(user_key_hash="warehouse-other-operator-key", display_name="Other Warehouse Operator", status="active")
+        restricted_user = ErpUser(user_key_hash="warehouse-restricted-key", display_name="Restricted Warehouse User", status="active")
         role = ErpRole(role_key="shipping_operator_test", role_label_zh="发货运营", role_label_en="Shipping operator")
-        db.add_all([user, role])
+        restricted_role = ErpRole(role_key="shipping_restricted_test", role_label_zh="受限运营", role_label_en="Restricted operator")
+        db.add_all([user, other_user, restricted_user, role, restricted_role])
         db.flush()
         permissions = [
             db.query(ErpPermission).filter(ErpPermission.permission_key == key).one()
@@ -68,6 +75,8 @@ def main():
         ]
         db.add_all([ErpRolePermission(role_id=role.id, permission_id=item.id) for item in permissions])
         db.add(ErpStoreMembership(user_id=user.id, store_id=store.id, role_id=role.id, membership_status="active"))
+        db.add(ErpStoreMembership(user_id=other_user.id, store_id=other_store.id, role_id=role.id, membership_status="active"))
+        db.add(ErpStoreMembership(user_id=restricted_user.id, store_id=store.id, role_id=restricted_role.id, membership_status="active"))
         db.commit()
 
         identity = OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash)
@@ -117,6 +126,62 @@ def main():
             db, batch_id=batch_id, confirmed_row_ids=[], manual_approval=True, actor_context=actor,
         )
         assert confirmed["status"] == "ready_to_writeback", confirmed
+        actual_tracking = db.query(ShippingTrackingImportRow).filter(
+            ShippingTrackingImportRow.import_batch_id == db.get(WarehouseShippingBatch, batch_id).tracking_import_batch_id,
+        ).one()
+        actual_tracking.carrier = "LOTTE"
+        actual_tracking.tracking_number = "9876543210"
+        actual_tracking.shipped_at = "2026-07-11T11:30:00+09:00"
+        db.commit()
+        with TestClient(app) as client:
+            details_path = f"/api/v1/shipping/warehouse-batches/{batch_id}/tracking-details"
+            unauthorized = client.get(details_path)
+            assert unauthorized.status_code == 403, unauthorized.text
+            permission_denied = client.get(details_path, headers={"X-ERP-User-Key": restricted_user.user_key_hash})
+            assert permission_denied.status_code == 403, permission_denied.text
+            cross_store = client.get(details_path, headers={"X-ERP-User-Key": other_user.user_key_hash})
+            assert cross_store.status_code == 403, cross_store.text
+            response = client.get(details_path, headers={"X-ERP-User-Key": user.user_key_hash})
+            assert response.status_code == 200, response.text
+            details = response.json()["data"]
+            assert details["status"] == "ready" and details["batch_id"] == batch_id, details
+            assert details["items"] == [{
+                "batch_id": batch_id,
+                "order_reference": "warehouse-order-001",
+                "product_order_reference": "warehouse-product-order-001",
+                "product_name": "PXG Bag",
+                "carrier": "LOTTE",
+                "tracking_number": "9876543210",
+                "shipped_at": "2026-07-11T11:30:00+09:00",
+                "validation_status": "ready_for_writeback",
+                "exception_reason": None,
+            }], details
+            assert not any(field in str(details) for field in (
+                "receiver_name", "receiver_phone", "receiver_address", "Seoul Test Street 1", "010-1234-5678",
+            )), details
+
+            duplicate_tracking = ShippingTrackingImportRow(
+                import_batch_id=actual_tracking.import_batch_id,
+                store_id=store.id,
+                platform="naver",
+                order_reference=actual_tracking.order_reference,
+                product_order_reference=actual_tracking.product_order_reference,
+                logistics_inventory_code=actual_tracking.logistics_inventory_code,
+                carrier="CJ",
+                tracking_number="1111222233",
+                shipped_at="2026-07-11T11:45:00+09:00",
+                row_status="ready_for_confirmation",
+                future_write_allowed=False,
+            )
+            db.add(duplicate_tracking)
+            db.commit()
+            blocked_details = client.get(details_path, headers={"X-ERP-User-Key": user.user_key_hash})
+            assert blocked_details.status_code == 200, blocked_details.text
+            blocked_data = blocked_details.json()["data"]
+            assert blocked_data["status"] == "blocked", blocked_data
+            assert blocked_data["skip_reason"] == "shipping_tracking_product_order_match_not_unique", blocked_data
+            db.delete(duplicate_tracking)
+            db.commit()
         blocked_writeback = warehouse_shipping_service.execute_warehouse_batch_writeback(
             db, batch_id=batch_id, manual_approval=True, final_operator_confirmation=True,
             real_api_call_requested=False, actor_context=actor,
