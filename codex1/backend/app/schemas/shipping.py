@@ -201,6 +201,7 @@ class WarehouseShippingConfirmRequest(BaseModel):
 class WarehouseShippingRemoveRowRequest(BaseModel):
     manual_approval: bool = False
     reason_code: str = Field(..., min_length=1, max_length=120)
+    warehouse_stopped_shipping: bool = False
 
 
 class WarehouseShippingWritebackRequest(BaseModel):

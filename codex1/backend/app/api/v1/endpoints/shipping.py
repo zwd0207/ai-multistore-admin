@@ -130,6 +130,7 @@ def remove_warehouse_shipping_batch_row(
         return success_response(data={"status": "blocked", "skip_reason": "manual_approval_required"})
     return success_response(data=warehouse_shipping_service.remove_warehouse_batch_row(
         db, batch_id=batch_id, row_id=row_id, reason_code=payload.reason_code,
+        warehouse_stopped_shipping=payload.warehouse_stopped_shipping,
         actor_context={"role": "operator", "actor_id": identity.user_key_hash},
     ))
 

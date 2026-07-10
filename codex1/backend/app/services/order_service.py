@@ -137,6 +137,59 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
     }
 
 
+def recipient_contract(order: Order) -> dict[str, str]:
+    """Return the only recipient field set exposed to authorised operations and warehouse exports."""
+    raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
+    receiver_name = _first_text(
+        order.receiver_name,
+        _find_nested_text(raw_data, ("receiver_name", "receiverName", "recipientName", "name"), max_length=120),
+        max_length=120,
+    )
+    receiver_phone = _first_text(
+        order.receiver_phone,
+        _find_nested_text(raw_data, ("receiver_phone", "receiverPhone", "receiverTelNo", "receiverTelNo1", "tel1"), max_length=40),
+        max_length=40,
+    )
+    receiver_phone_secondary = _first_text(
+        _find_nested_text(raw_data, ("receiver_phone_secondary", "receiverPhoneSecondary", "receiverTelNo2", "tel2", "secondaryPhone"), max_length=40),
+        max_length=40,
+    )
+    zip_code = _first_text(
+        order.zip_code,
+        _find_nested_text(raw_data, ("zip_code", "zipCode", "postalCode"), max_length=30),
+        max_length=30,
+    )
+    address_line1 = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_line1", "receiverAddressLine1", "baseAddress", "roadNameAddress"), max_length=300),
+        order.receiver_address,
+        _find_nested_text(raw_data, ("receiver_address", "receiverAddress", "recipientAddress"), max_length=300),
+        max_length=300,
+    )
+    address_line2 = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_line2", "receiverAddressLine2", "detailedAddress", "detailAddress"), max_length=300),
+        max_length=300,
+    )
+    address_full = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_full", "receiverAddressFull", "fullAddress"), max_length=600),
+        " ".join(part for part in (address_line1, address_line2) if part),
+        max_length=600,
+    )
+    delivery_memo = _first_text(
+        _find_nested_text(raw_data, ("delivery_memo", "deliveryMemo", "shippingMemo", "memo"), max_length=300),
+        max_length=300,
+    )
+    return {
+        "receiver_name": receiver_name or "",
+        "receiver_phone": receiver_phone or "",
+        "receiver_phone_secondary": receiver_phone_secondary or "",
+        "zip_code": zip_code or "",
+        "receiver_address_line1": address_line1 or "",
+        "receiver_address_line2": address_line2 or "",
+        "receiver_address_full": address_full or "",
+        "delivery_memo": delivery_memo or "",
+    }
+
+
 def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
     payload = OrderRead.model_validate(order).model_dump(mode="json")
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
@@ -228,7 +281,7 @@ def list_operations_orders(db: Session, store_id: int, platform: str | None = No
     if not include_test_orders:
         statement = statement.where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
     return [
-        {key: value for key, value in serialize_order(order).items() if key != "raw_data"}
+        {key: value for key, value in serialize_order(order).items() if key != "raw_data"} | recipient_contract(order)
         for order in db.scalars(statement).all()
     ]
 

@@ -345,6 +345,7 @@ class WarehouseShippingBatchOrder(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     internal_sku: Mapped[str | None] = mapped_column(String(120), nullable=True)
     logistics_inventory_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pre_batch_order_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     row_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending_export", server_default="pending_export")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     active_lock: Mapped[str | None] = mapped_column(String(20), nullable=True, default="active", server_default="active")

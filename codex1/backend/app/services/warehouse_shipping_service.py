@@ -22,7 +22,7 @@ from app.models.shipping import (
     WarehouseShippingBatchOrder,
     WarehouseShippingApprovalGrant,
 )
-from app.services import shipping_service
+from app.services import order_service, shipping_service
 from app.services.store_service import ensure_store_exists
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 
@@ -31,6 +31,15 @@ ACTIVE_BATCH_STATUSES = {"created", "warehouse_sent", "warehouse_returned", "rea
 TERMINAL_ORDER_STATUSES = shipping_service.SHIPPING_ORDER_STATUS_TERMINAL_STATUSES
 UPDATABLE_ORDER_STATUSES = shipping_service.SHIPPING_ORDER_STATUS_UPDATABLE_STATUSES
 PRIVACY_ROLES = {"admin", "operator", "shipping_operator"}
+WAREHOUSE_STOP_CONFIRMATION_STATUSES = {"warehouse_sent", "warehouse_returned", "ready_to_writeback", "writeback_partial"}
+WAREHOUSE_BATCH_REMOVE_REASON_CODES = {
+    "address_issue",
+    "customer_request",
+    "order_cancelled",
+    "sku_mapping_error",
+    "stock_unavailable",
+    "warehouse_exception",
+}
 
 
 def _role_allowed(actor_context: dict[str, Any] | None) -> bool:
@@ -54,6 +63,36 @@ def _safe_batch_row(row: WarehouseShippingBatchOrder) -> dict[str, Any]:
         "operator_note": row.operator_note,
         "is_active": row.is_active,
     }
+
+
+def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
+    candidate_statuses = {
+        "manifest": {"pending_export"},
+        "writeback": {"ready_for_writeback"},
+    }.get(grant_scope, set())
+    candidates = []
+    for row in sorted(batch.rows, key=lambda item: item.id):
+        if not row.is_active or row.row_status not in candidate_statuses:
+            continue
+        candidates.append({
+            "id": row.id,
+            "order_id": row.local_order_id,
+            "order_reference": row.order_reference,
+            "product_order_reference": row.product_order_reference,
+            "quantity": row.quantity,
+            "internal_sku": row.internal_sku,
+            "logistics_inventory_code": row.logistics_inventory_code,
+            "row_status": row.row_status,
+            "carrier": row.carrier,
+            "tracking_number_hash": row.tracking_number_hash,
+        })
+    payload = {
+        "batch_id": batch.id,
+        "batch_version": batch.version,
+        "grant_scope": grant_scope,
+        "candidates": candidates,
+    }
+    return hashlib.sha256(repr(payload).encode("utf-8")).hexdigest()
 
 
 def _write_workflow_audit(db: Session, *, batch: WarehouseShippingBatch, actor_context: dict[str, Any] | None, action: str, row_count: int, reason_code: str) -> None:
@@ -83,8 +122,9 @@ def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scop
     batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
     if batch is None:
         return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
-    rows = [row.id for row in batch.rows if row.row_status in {"pending_export", "ready_for_writeback"}]
-    candidate_hash = hashlib.sha256(",".join(map(str, sorted(rows))).encode("utf-8")).hexdigest()
+    if grant_scope not in {"manifest", "writeback"}:
+        return {"status": "blocked", "skip_reason": "shipping_approval_scope_invalid"}
+    candidate_hash = _candidate_hash(batch, grant_scope)
     token = secrets.token_urlsafe(32)
     now = get_utc_now()
     db.add(WarehouseShippingApprovalGrant(
@@ -106,7 +146,13 @@ def consume_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_sc
     ))
     batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
     expires_at = grant.expires_at.replace(tzinfo=timezone.utc) if grant is not None and grant.expires_at.tzinfo is None else (grant.expires_at if grant is not None else None)
-    if grant is None or batch is None or expires_at < get_utc_now() or grant.batch_version != batch.version:
+    if (
+        grant is None
+        or batch is None
+        or expires_at < get_utc_now()
+        or grant.batch_version != batch.version
+        or grant.candidate_hash != _candidate_hash(batch, grant_scope)
+    ):
         return False
     grant.used_at = get_utc_now()
     db.commit()
@@ -197,6 +243,25 @@ def create_warehouse_batch(
             "existing_batch_ids": sorted({row.batch_id for row in active_rows}),
         }
 
+    completed_rows = db.scalars(
+        select(WarehouseShippingBatchOrder).where(
+            WarehouseShippingBatchOrder.local_order_id.in_(unique_ids),
+            WarehouseShippingBatchOrder.row_status == "platform_written",
+        )
+    ).all()
+    non_shippable = [
+        order.id
+        for order in orders
+        if str(order.order_status or "").upper() in TERMINAL_ORDER_STATUSES
+        or str(order.order_status or "").upper() not in UPDATABLE_ORDER_STATUSES
+    ]
+    if completed_rows or non_shippable:
+        return {
+            "status": "blocked",
+            "skip_reason": "orders_not_shippable_or_already_platform_written",
+            "order_ids": sorted(set(non_shippable + [row.local_order_id for row in completed_rows])),
+        }
+
     now = get_utc_now()
     batch_no = f"SHIP-{now.astimezone(timezone.utc):%Y%m%d%H%M%S%f}-{store_id:04d}"
     batch = WarehouseShippingBatch(
@@ -210,10 +275,7 @@ def create_warehouse_batch(
     db.flush()
     for order in orders:
         mapping = _find_mapping(db, order)
-        current_status = str(order.order_status or "").upper()
-        if current_status in TERMINAL_ORDER_STATUSES or current_status not in UPDATABLE_ORDER_STATUSES:
-            row_status, reason = "blocked", "order_status_not_shippable"
-        elif mapping is None:
+        if mapping is None:
             row_status, reason = "needs_confirmation", "sku_mapping_missing"
         else:
             row_status, reason = "pending_export", None
@@ -228,6 +290,7 @@ def create_warehouse_batch(
             quantity=order.quantity,
             internal_sku=mapping.internal_sku if mapping else None,
             logistics_inventory_code=mapping.logistics_inventory_code if mapping else None,
+            pre_batch_order_status=order.order_status,
             row_status=row_status,
             failure_reason=reason,
             active_lock="active",
@@ -258,8 +321,10 @@ def _warehouse_xlsx(rows: list[dict[str, Any]]) -> bytes:
         ("batch_no", "发货批次"), ("platform", "平台"), ("order_reference", "订单号"),
         ("product_order_reference", "商品订单号"), ("internal_sku", "内部货号"),
         ("logistics_inventory_code", "仓库货号"), ("product_name", "商品"), ("quantity", "数量"),
-        ("receiver_name", "收件人"), ("receiver_phone", "联系电话"), ("zip_code", "邮编"),
-        ("receiver_address", "地址"), ("delivery_memo", "配送备注"), ("carrier", "快递公司"),
+        ("receiver_name", "收件人"), ("receiver_phone", "主联系电话"),
+        ("receiver_phone_secondary", "备用联系电话"), ("zip_code", "邮编"),
+        ("receiver_address_line1", "基础地址"), ("receiver_address_line2", "详细地址"),
+        ("receiver_address_full", "完整地址"), ("delivery_memo", "配送备注"), ("carrier", "快递公司"),
         ("tracking_number", "物流单号"), ("warehouse_note", "仓库备注"),
     ]
     return shipping_service._build_xlsx_bytes(rows, headers=headers)
@@ -282,18 +347,18 @@ def download_warehouse_manifest(
         if item.row_status != "pending_export":
             continue
         order = item.order
+        recipient = order_service.recipient_contract(order)
         rows.append({
             "batch_no": batch.batch_no, "platform": batch.platform, "order_reference": item.order_reference,
             "product_order_reference": item.product_order_reference or "", "internal_sku": item.internal_sku or "",
             "logistics_inventory_code": item.logistics_inventory_code or "", "product_name": item.product_name,
-            "quantity": item.quantity, "receiver_name": order.receiver_name or "", "receiver_phone": order.receiver_phone or "",
-            "zip_code": order.zip_code or "", "receiver_address": order.receiver_address or "",
-            "delivery_memo": _delivery_memo(order), "carrier": "", "tracking_number": "", "warehouse_note": "",
+            "quantity": item.quantity, **recipient, "carrier": "", "tracking_number": "", "warehouse_note": "",
         })
         item.row_status = "warehouse_sent"
     if not rows:
         return {"status": "blocked", "skip_reason": "no_exportable_batch_rows"}
     batch.status = "warehouse_sent"
+    batch.version += 1
     batch.warehouse_sent_at = get_utc_now()
     db.commit()
     _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="recipient_pii_exported", row_count=len(rows), reason_code="warehouse_manifest_download")
@@ -518,13 +583,29 @@ def execute_warehouse_batch_writeback(
     return {"status": result.get("status"), "writeback": result, "batch": _serialize_batch(batch), "real_api_called": bool(result.get("real_api_called"))}
 
 
-def remove_warehouse_batch_row(db: Session, *, batch_id: int, row_id: int, reason_code: str, actor_context: dict[str, Any] | None) -> dict[str, Any]:
+def remove_warehouse_batch_row(
+    db: Session,
+    *,
+    batch_id: int,
+    row_id: int,
+    reason_code: str,
+    warehouse_stopped_shipping: bool,
+    actor_context: dict[str, Any] | None,
+) -> dict[str, Any]:
     batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
     row = db.scalar(select(WarehouseShippingBatchOrder).where(WarehouseShippingBatchOrder.id == row_id, WarehouseShippingBatchOrder.batch_id == batch_id))
     if batch is None or row is None:
         return {"status": "blocked", "skip_reason": "shipping_batch_row_not_found"}
-    if batch.status in {"completed", "cancelled"}:
+    if reason_code not in WAREHOUSE_BATCH_REMOVE_REASON_CODES:
+        return {"status": "blocked", "skip_reason": "warehouse_batch_remove_reason_invalid"}
+    if batch.status in {"completed", "cancelled"} or row.row_status == "platform_written":
         return {"status": "blocked", "skip_reason": "completed_batch_row_cannot_be_removed"}
+    if batch.status in WAREHOUSE_STOP_CONFIRMATION_STATUSES and not warehouse_stopped_shipping:
+        return {"status": "blocked", "skip_reason": "warehouse_stop_confirmation_required"}
+    if not row.is_active:
+        return {"status": "blocked", "skip_reason": "shipping_batch_row_not_active"}
+    if row.pre_batch_order_status:
+        row.order.order_status = row.pre_batch_order_status
     row.row_status = "removed"
     row.failure_reason = reason_code
     row.is_active = False
