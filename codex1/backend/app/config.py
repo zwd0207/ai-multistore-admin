@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     credential_encryption_key: str | None = None
     real_api_test_enabled: bool = False
     real_api_write_enabled: bool = False
+    allow_dev_auth: bool = False
+    session_token_pepper: str | None = None
+    session_cookie_name: str = "__Host-erp_session"
+    session_cookie_secure: bool = True
+    session_idle_minutes: int = 30
+    session_absolute_hours: int = 12
+    session_mfa_pending_minutes: int = 5
+    session_recent_auth_minutes: int = 15
     coupang_vendor_id: str | None = None
     coupang_access_key: str | None = None
     coupang_secret_key: str | None = None

@@ -3,7 +3,7 @@
 from app.models.api_credential import ApiCredential
 from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
 from app.models.appeal_case import AppealCase
-from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser
+from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpSession, ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.device_environment import DeviceEnvironment
 from app.models.email_account import EmailAccount
@@ -37,8 +37,10 @@ __all__ = [
     "ErpPermission",
     "ErpRole",
     "ErpRolePermission",
+    "ErpSession",
     "ErpStoreMembership",
     "ErpUser",
+    "ErpUserSecurity",
     "CustomerInquiry",
     "DeviceEnvironment",
     "EmailAccount",

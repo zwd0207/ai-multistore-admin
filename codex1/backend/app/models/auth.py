@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -50,6 +50,57 @@ class ErpUser(Base):
         foreign_keys="ErpStoreMembership.assigned_by_user_id",
         back_populates="assigned_by_user",
     )
+    security = relationship("ErpUserSecurity", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    sessions = relationship("ErpSession", back_populates="user", cascade="all, delete-orphan")
+
+
+class ErpUserSecurity(Base):
+    __tablename__ = "erp_user_security"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), primary_key=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_type: Mapped[str] = mapped_column(String(30), nullable=False, default="totp", server_default="totp")
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    authz_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False,
+    )
+
+    user = relationship("ErpUser", back_populates="security")
+
+
+class ErpSession(Base):
+    __tablename__ = "erp_sessions"
+    __table_args__ = (
+        Index("ix_erp_sessions_token_hash", "session_token_hash", unique=True),
+        Index("ix_erp_sessions_user_active", "user_id", "revoked_at", "absolute_expires_at"),
+        CheckConstraint("environment IN ('development', 'test', 'production')", name="ck_erp_sessions_environment"),
+        CheckConstraint("authn_level IN ('mfa_pending', 'mfa_verified')", name="ck_erp_sessions_authn_level"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), nullable=False)
+    environment: Mapped[str] = mapped_column(String(30), nullable=False)
+    authn_level: Mapped[str] = mapped_column(String(30), nullable=False)
+    session_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    authz_version_at_issue: Mapped[int] = mapped_column(Integer, nullable=False)
+    csrf_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    idle_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_reauthenticated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    user = relationship("ErpUser", back_populates="sessions")
 
 
 class ErpRole(Base):
