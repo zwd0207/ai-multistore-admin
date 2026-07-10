@@ -18,6 +18,25 @@ h1, h2, p { margin-top: 0; }
 .button.primary { background: var(--primary); border-color: var(--primary); color: white; box-shadow: 0 4px 12px #4f46e52a; }
 .button.primary:hover { background: var(--primary-dark); }
 .button.ghost { background: #fff; }
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #eef2f7; }
+.auth-panel { width: min(420px, 100%); padding: 32px; border: 1px solid #dfe5ee; border-radius: 8px; background: white; box-shadow: 0 14px 36px rgba(31, 41, 55, .1); }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; color: #263247; }
+.auth-brand span { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 7px; background: #4f46e5; color: white; font-size: 12px; font-weight: 800; }
+.auth-brand strong { font-size: 15px; }
+.auth-panel h1 { margin: 0 0 8px; font-size: 24px; letter-spacing: 0; }
+.auth-panel > p { margin-bottom: 22px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.auth-panel form { display: grid; gap: 16px; }
+.auth-panel label { display: grid; gap: 7px; color: #455064; font-size: 13px; font-weight: 600; }
+.auth-panel input { width: 100%; min-height: 42px; border: 1px solid #d7dee9; border-radius: 7px; padding: 10px 12px; outline: none; color: #253044; background: white; }
+.auth-panel input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px #4f46e515; }
+.auth-code-input { text-align: center; font-size: 22px; letter-spacing: 8px; }
+.auth-submit { width: 100%; min-height: 42px; margin-top: 4px; }
+.auth-loading { margin: 0; text-align: center; }
+@media (max-width: 600px) {
+  .auth-shell { min-width: 0; padding: 16px; }
+  .auth-panel { padding: 24px 20px; }
+  .auth-panel h1 { font-size: 21px; }
+}
 .store-selector { display: inline-flex; align-items: center; gap: 8px; color: #4a5568; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px; font-size: 12px; }
 .store-selector select { min-width: 180px; max-width: 280px; border: 0; outline: 0; background: transparent; color: #253044; font-size: 12px; }
 .store-selector.is-muted { color: #718096; background: #f8fafc; }

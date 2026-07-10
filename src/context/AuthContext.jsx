@@ -34,10 +34,16 @@ export function AuthProvider({ children }) {
     setStatus('authenticated');
   }, []);
 
-  const clearSession = useCallback((nextStatus = 'unauthenticated') => {
+  const clearSession = useCallback((nextStatus = 'unauthenticated', force = false) => {
     clearCsrfToken();
     setSession(normalizeSession(null));
-    setStatus(nextStatus);
+    setStatus((currentStatus) => {
+      const explanatoryStates = ['expired', 'forbidden', 'reauthentication_required'];
+      if (!force && nextStatus === 'unauthenticated' && explanatoryStates.includes(currentStatus)) {
+        return currentStatus;
+      }
+      return nextStatus;
+    });
   }, []);
 
   const refreshSession = useCallback(async () => {
@@ -64,7 +70,7 @@ export function AuthProvider({ children }) {
   }), [clearSession]);
 
   const login = useCallback(async ({ loginIdentifier, password }) => {
-    clearSession('mfa_required');
+    clearSession('mfa_required', true);
     const result = await backendApi.login({ login_identifier: loginIdentifier, password });
     setStatus('mfa_required');
     return result;
@@ -80,7 +86,7 @@ export function AuthProvider({ children }) {
     try {
       await backendApi.logout();
     } finally {
-      clearSession('unauthenticated');
+      clearSession('unauthenticated', true);
     }
   }, [clearSession]);
 
