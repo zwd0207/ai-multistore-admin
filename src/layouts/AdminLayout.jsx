@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
+import { useAuthContext } from '../context/AuthContext';
 
 const menuGroups = [
   {
@@ -33,6 +34,7 @@ const menuGroups = [
 ];
 
 export default function AdminLayout() {
+  const { user, logout } = useAuthContext();
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -76,9 +78,10 @@ export default function AdminLayout() {
             <span className="notification">3</span>
             <span className="avatar">运</span>
             <span>
-              <strong>运营人员</strong>
+              <strong>{user?.display_name || user?.name || user?.login_identifier_masked || '运营人员'}</strong>
               <small>日常运营</small>
             </span>
+            <button className="button ghost compact" type="button" onClick={logout}>退出</button>
           </div>
         </header>
         <main className="main-content"><Outlet /></main>
