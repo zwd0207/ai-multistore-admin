@@ -133,6 +133,73 @@ def main():
         actual_tracking.tracking_number = "9876543210"
         actual_tracking.shipped_at = "2026-07-11T11:30:00+09:00"
         db.commit()
+
+        review_orders = []
+        for suffix in ("normal", "confirm"):
+            review_order = Order(
+                store_id=store.id,
+                platform="naver",
+                external_order_id=f"warehouse-review-order-{suffix}",
+                external_product_order_id=f"warehouse-review-product-{suffix}",
+                product_name="PXG Bag",
+                quantity=1,
+                order_amount=1,
+                currency="KRW",
+                order_status="PAYED",
+                ordered_at=shipping_service.get_utc_now(),
+                source_type="verify_warehouse_review",
+            )
+            db.add(review_order)
+            review_orders.append(review_order)
+        db.commit()
+        review_batch = warehouse_shipping_service.create_warehouse_batch(
+            db,
+            store_id=store.id,
+            platform="naver",
+            order_ids=[item.id for item in review_orders],
+            manual_approval=True,
+            actor_context=actor,
+        )
+        assert review_batch["status"] == "created", review_batch
+        review_batch_id = review_batch["batch"]["id"]
+        review_manifest = warehouse_shipping_service.download_warehouse_manifest(
+            db, batch_id=review_batch_id, manual_approval=True,
+            privacy_access_acknowledged=True, actor_context=actor,
+        )
+        assert review_manifest["status"] == "warehouse_manifest_ready", review_manifest
+        review_import = warehouse_shipping_service.import_warehouse_tracking_xlsx(
+            db,
+            batch_id=review_batch_id,
+            source_file_name="warehouse-review.xlsx",
+            file_content_base64=xlsx([
+                {
+                    "order_reference": review_orders[0].external_order_id,
+                    "product_order_reference": review_orders[0].external_product_order_id,
+                    "logistics_inventory_code": "WH-PXG-001",
+                    "carrier": "CJ",
+                    "tracking_number": "5555555555",
+                },
+                {
+                    "order_reference": review_orders[1].external_order_id,
+                    "product_order_reference": review_orders[1].external_product_order_id,
+                    "logistics_inventory_code": "WH-WRONG-001",
+                    "carrier": "CJ",
+                    "tracking_number": "5555555555",
+                },
+                {
+                    "order_reference": "warehouse-review-order-unknown",
+                    "product_order_reference": "warehouse-review-product-unknown",
+                    "logistics_inventory_code": "WH-PXG-001",
+                    "carrier": "CJ",
+                    "tracking_number": "7777777777",
+                },
+            ]),
+            manual_approval=True,
+            actor_context=actor,
+        )
+        assert review_import["normal_count"] == 1, review_import
+        assert review_import["needs_confirmation_count"] == 1, review_import
+        assert review_import["blocked_count"] == 1, review_import
         with TestClient(app) as client:
             details_path = f"/api/v1/shipping/warehouse-batches/{batch_id}/tracking-details"
             unauthorized = client.get(details_path)
@@ -146,7 +213,8 @@ def main():
             details = response.json()["data"]
             assert details["status"] == "ready" and details["batch_id"] == batch_id, details
             assert details["items"] == [{
-                "batch_id": batch_id,
+                "tracking_record_id": actual_tracking.id,
+                "batch_row_id": created["batch"]["rows"][0]["id"],
                 "order_reference": "warehouse-order-001",
                 "product_order_reference": "warehouse-product-order-001",
                 "product_name": "PXG Bag",
@@ -182,6 +250,34 @@ def main():
             assert blocked_data["skip_reason"] == "shipping_tracking_product_order_match_not_unique", blocked_data
             db.delete(duplicate_tracking)
             db.commit()
+
+            review_details_path = f"/api/v1/shipping/warehouse-batches/{review_batch_id}/tracking-details"
+            review_response = client.get(review_details_path, headers={"X-ERP-User-Key": user.user_key_hash})
+            assert review_response.status_code == 200, review_response.text
+            review_details = review_response.json()["data"]
+            assert review_details["status"] == "ready", review_details
+            assert review_details["detail_mode"] == "warehouse_import_review", review_details
+            assert len(review_details["items"]) == 3, review_details
+            assert {item["validation_status"] for item in review_details["items"]} == {
+                "ready_for_confirmation", "needs_confirmation", "blocked",
+            }, review_details
+            blocked_review_rows = [item for item in review_details["items"] if item["validation_status"] == "blocked"]
+            assert len(blocked_review_rows) == 1 and blocked_review_rows[0]["batch_row_id"] is None, review_details
+            assert blocked_review_rows[0]["product_name"] is None, review_details
+            assert blocked_review_rows[0]["tracking_number"] == "7777777777", review_details
+            assert "receiver_" not in str(review_details) and "010-1234-5678" not in str(review_details), review_details
+
+            current_batch = db.get(WarehouseShippingBatch, batch_id)
+            current_batch.status = "writeback_partial"
+            current_batch.rows[0].row_status = "platform_failed"
+            current_batch.rows[0].failure_reason = "platform_writeback_partial_or_failed"
+            db.commit()
+            partial_response = client.get(details_path, headers={"X-ERP-User-Key": user.user_key_hash})
+            assert partial_response.status_code == 200, partial_response.text
+            partial_details = partial_response.json()["data"]
+            assert partial_details["status"] == "ready" and partial_details["detail_mode"] == "platform_writeback_review", partial_details
+            assert partial_details["items"][0]["validation_status"] == "platform_failed", partial_details
+            assert partial_details["items"][0]["exception_reason"] == "platform_writeback_partial_or_failed", partial_details
         blocked_writeback = warehouse_shipping_service.execute_warehouse_batch_writeback(
             db, batch_id=batch_id, manual_approval=True, final_operator_confirmation=True,
             real_api_call_requested=False, actor_context=actor,

@@ -404,35 +404,84 @@ def get_warehouse_batch_tracking_details(db: Session, *, batch_id: int) -> dict[
     batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
     if batch is None:
         return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
-    candidates, candidate_error = _writeback_execution_candidates(db, batch)
-    if candidate_error or candidates is None:
+    if batch.status not in {"warehouse_returned", "ready_to_writeback", "writeback_partial"}:
         return {
             "status": "blocked",
-            "skip_reason": candidate_error or "shipping_tracking_match_not_unique",
+            "skip_reason": "shipping_batch_status_not_supported_for_tracking_details",
             "batch_id": batch.id,
         }
-    batch_rows = {row.id: row for row in batch.rows}
-    items = []
-    for candidate in candidates:
-        batch_row = batch_rows[candidate["batch_row_id"]]
-        tracking_row = db.get(ShippingTrackingImportRow, candidate["tracking_record_id"])
-        items.append({
-            "batch_id": batch.id,
-            "order_reference": candidate["order_reference"],
-            "product_order_reference": candidate["product_order_reference"],
-            "product_name": batch_row.product_name,
-            "carrier": candidate["carrier"],
-            "tracking_number": candidate["tracking_number"],
-            "shipped_at": candidate["shipped_at"],
-            "validation_status": batch_row.row_status,
-            "exception_reason": batch_row.failure_reason or (tracking_row.operator_note if tracking_row else None),
-        })
+    if not batch.tracking_import_batch_id:
+        return {"status": "blocked", "skip_reason": "tracking_import_required", "batch_id": batch.id}
+    import_rows = db.scalars(select(ShippingTrackingImportRow).where(
+        ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
+    ).order_by(ShippingTrackingImportRow.id.asc())).all()
+    batch_rows = list(batch.rows)
+    items: list[dict[str, Any]] = []
+
+    if batch.status == "warehouse_returned":
+        for tracking_row in import_rows:
+            product_reference = str(tracking_row.product_order_reference or "").strip()
+            if product_reference:
+                matches = [row for row in batch_rows if row.product_order_reference == product_reference]
+                match_error = "shipping_tracking_product_order_match_not_unique"
+            else:
+                matches = [row for row in batch_rows if row.order_reference == tracking_row.order_reference]
+                match_error = "shipping_tracking_order_match_not_unique"
+            batch_row = matches[0] if len(matches) == 1 else None
+            items.append({
+                "tracking_record_id": tracking_row.id,
+                "batch_row_id": batch_row.id if batch_row else None,
+                "product_order_reference": tracking_row.product_order_reference,
+                "order_reference": tracking_row.order_reference,
+                "product_name": batch_row.product_name if batch_row else None,
+                "carrier": tracking_row.carrier,
+                "tracking_number": tracking_row.tracking_number,
+                "shipped_at": tracking_row.shipped_at,
+                "validation_status": tracking_row.row_status if batch_row else "blocked",
+                "exception_reason": tracking_row.operator_note or (None if batch_row else match_error),
+            })
+        detail_mode = "warehouse_import_review"
+        source = "warehouse_tracking_import_records"
+    else:
+        strict_statuses = {"ready_for_writeback"} if batch.status == "ready_to_writeback" else {
+            "ready_for_writeback", "platform_failed", "platform_written",
+        }
+        selected_tracking_ids: set[int] = set()
+        for batch_row in sorted(
+            (row for row in batch_rows if row.row_status in strict_statuses),
+            key=lambda item: item.id,
+        ):
+            tracking_row, match_error = _match_tracking_import_row(import_rows, batch_row)
+            if match_error or tracking_row is None or tracking_row.id in selected_tracking_ids:
+                return {
+                    "status": "blocked",
+                    "skip_reason": match_error or "shipping_tracking_record_reused",
+                    "batch_id": batch.id,
+                }
+            items.append({
+                "tracking_record_id": tracking_row.id,
+                "batch_row_id": batch_row.id,
+                "product_order_reference": tracking_row.product_order_reference,
+                "order_reference": tracking_row.order_reference,
+                "product_name": batch_row.product_name,
+                "carrier": tracking_row.carrier,
+                "tracking_number": tracking_row.tracking_number,
+                "shipped_at": tracking_row.shipped_at,
+                "validation_status": batch_row.row_status,
+                "exception_reason": batch_row.failure_reason or tracking_row.operator_note,
+            })
+            selected_tracking_ids.add(tracking_row.id)
+        if not items:
+            return {"status": "blocked", "skip_reason": "no_tracking_details_available", "batch_id": batch.id}
+        detail_mode = "platform_writeback_review"
+        source = "platform_writeback_tracking_records"
     return {
         "status": "ready",
         "batch_id": batch.id,
         "items": items,
         "privacy_fields_included": False,
-        "source": "platform_writeback_tracking_records",
+        "source": source,
+        "detail_mode": detail_mode,
     }
 
 
