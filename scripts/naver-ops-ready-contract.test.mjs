@@ -83,7 +83,7 @@ includesAll('src/services/dataProvider.js', [
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [
-  '已接入 Naver 官方 API 读取',
+  '更新客户咨询',
   '提交到 Naver',
   '人工确认发送',
   'answerComment',
@@ -91,7 +91,7 @@ includesAll('src/pages/CustomerService.jsx', [
 
 includesAll('src/pages/ShippingAssistant.jsx', [
   '提交 Naver 发货回填',
-  '已按官方 API 开放',
+  '提交发货信息',
   '人工确认回填',
   'dispatchProductOrders',
 ]);

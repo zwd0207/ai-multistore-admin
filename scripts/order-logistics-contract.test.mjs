@@ -79,7 +79,7 @@ includesAll('src/pages/Orders.jsx', [
   '刷新订单详情',
   'dataProvider.getOrderLogisticsTrace',
   'traceModal',
-  '实时快递轨迹暂未接入',
+  '暂未提供实时轨迹',
 ]);
 
 const backendDir = path.join(root, 'codex1', 'backend');
