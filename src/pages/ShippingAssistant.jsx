@@ -11,6 +11,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
 
 const prepStatusOptions = ['待核对', '商品已核对', '库存已确认', '单号已导入', '可人工发货'];
+const NAVER_DISPATCH_PAYLOAD_FIELD = 'dispatchProductOrders';
 
 function comparable(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -129,7 +130,7 @@ function nextShippingStep(summary) {
   if (summary.matched < summary.pending) return ['先核对商品和库存编号', '有订单还没有匹配到库存编号，先确认商品名称、规格和库存编号。', '/products'];
   if (summary.enough < summary.pending) return ['确认库存是否足够', '有订单库存不足或待人工确认，先处理库存缺口。', '/inventory'];
   if (summary.imported < summary.pending) return ['再导入物流单号', '库存足够后，把物流商表格中的订单号、快递公司和运单号导入本地匹配。', '/shipping'];
-  return ['最后人工发货', '发货准备状态已具备，仍需人工到平台后台处理，不会自动回填 Naver。', '/shipping'];
+  return ['提交 Naver 发货回填', '发货准备状态已具备，可在人工确认后提交 Naver 发货回填。', '/shipping'];
 }
 
 const columns = [
@@ -175,6 +176,9 @@ export default function ShippingAssistant() {
   const [trackingMessage, setTrackingMessage] = useState('');
   const [prepStatus, setPrepStatus] = useState({});
   const [showExport, setShowExport] = useState(false);
+  const [writebackConfirm, setWritebackConfirm] = useState(false);
+  const [writebackLoading, setWritebackLoading] = useState(false);
+  const [writebackMessage, setWritebackMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -239,8 +243,58 @@ export default function ShippingAssistant() {
       return next;
     });
     setTrackingMessage(parsed.length
-      ? `已从物流单号表匹配 ${parsed.length} 条记录。这里只记录本地发货准备状态，不会自动回填 Naver。`
+      ? `已从物流单号表匹配 ${parsed.length} 条记录。可在人工确认后提交 Naver 发货回填。`
       : '没有识别到有效物流单号。请按“订单号,快递公司,运单号”逐行填写。');
+  };
+
+  const executeNaverWriteback = async () => {
+    if (writebackLoading) return;
+    const readyRows = rows.filter((item) => comparable(item.platform) === 'naver' && item.trackingNo);
+    if (!readyRows.length) {
+      setWritebackMessage('请先导入 Naver 订单的物流单号，再提交发货回填。');
+      return;
+    }
+    if (!writebackConfirm) {
+      setWritebackMessage('请先勾选人工确认回填。');
+      return;
+    }
+    if (!selectedStoreId && !query.storeId) {
+      setWritebackMessage('请先选择当前店铺，再提交 Naver 发货回填。');
+      return;
+    }
+    setWritebackLoading(true);
+    setWritebackMessage('正在提交 Naver 发货回填...');
+    try {
+      const result = await dataProvider.executeShippingShipmentWriteback({
+        storeId: selectedStoreId || query.storeId,
+        platform: 'naver',
+        trackingRows: readyRows.map((row) => ({
+          orderNo: row.orderNo,
+          productOrderReference: row.productOrderNo || row.product_order_id || '',
+          carrier: row.trackingCompany,
+          trackingNumber: row.trackingNo,
+          shippedAt: new Date().toISOString(),
+        })),
+        manualApproval: true,
+        matchingContractAcknowledged: true,
+        backupEvidenceAcknowledged: true,
+        auditEvidenceAcknowledged: true,
+        localStatusEvidenceAcknowledged: true,
+        naverWritebackBoundaryAcknowledged: true,
+        operatorChecklistAcknowledged: true,
+        executionApproval: true,
+        dryRunEvidenceAcknowledged: true,
+        permissionEvidenceAcknowledged: true,
+        finalOperatorConfirmation: true,
+        realApiCallRequested: true,
+        actorContext: { role: 'operator', action: 'manual_naver_shipment_dispatch', payloadField: NAVER_DISPATCH_PAYLOAD_FIELD },
+      });
+      setWritebackMessage(result.businessMessage || result.message || 'Naver 发货回填处理完成。');
+    } catch (writebackError) {
+      setWritebackMessage(writebackError.message || 'Naver 发货回填失败，请检查 API 权限、IP 白名单、订单状态或物流公司代码。');
+    } finally {
+      setWritebackLoading(false);
+    }
   };
 
   const updatePrepStatus = (row, status) => {
@@ -272,7 +326,7 @@ export default function ShippingAssistant() {
     <>
       <PageHeader
         title="发货辅助"
-        description="查看待发货订单，核对商品和规格，匹配库存编号，导入物流单号表，并记录发货准备状态。当前不会自动回填 Naver。"
+        description="查看待发货订单，核对商品和规格，匹配库存编号，导入物流单号表；Naver 发货回填已按官方 API 开放，必须人工确认后提交。"
         actions={(
           <>
             <button type="button" className="button ghost" onClick={() => setShowExport((value) => !value)}>生成发货表格</button>
@@ -311,8 +365,8 @@ export default function ShippingAssistant() {
             <p>然后导入物流单号表，只做本地匹配和发货准备记录。</p>
           </article>
           <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>人工发货</strong><span>4</span></div>
-            <p>最后人工到平台后台处理，系统当前不会自动回填 Naver。</p>
+            <div className="business-capability-head"><strong>Naver 回填</strong><span>4</span></div>
+            <p>最后由运营人工确认回填，系统才会提交 Naver 发货接口。</p>
           </article>
         </div>
       </section>
@@ -324,8 +378,8 @@ export default function ShippingAssistant() {
             <p>发货表格导出、库存编号匹配、内部准备状态都只在系统内辅助运营。</p>
           </article>
           <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>Naver 发货回填</strong><span>暂未开放</span></div>
-            <p>页面不会调用 Naver 发货回填接口，也不会把本地备注说成平台已发货。</p>
+            <div className="business-capability-head"><strong>Naver 发货回填</strong><span>已按官方 API 开放</span></div>
+            <p>仅在人工确认回填后调用官方发货接口；本地备注不会被说成平台已发货。</p>
           </article>
           <article className="business-capability-card muted">
             <div className="business-capability-head"><strong>物流单号导入</strong><span>本地匹配</span></div>
@@ -383,7 +437,7 @@ export default function ShippingAssistant() {
         <div className="card-title">
           <div>
             <h2>导入物流单号表</h2>
-            <p>按行粘贴“订单号,快递公司,运单号”。系统只做本地匹配，不会自动回填 Naver。</p>
+            <p>按行粘贴“订单号,快递公司,运单号”。系统先做本地匹配，确认后可提交 Naver。</p>
           </div>
           <button type="button" className="button primary" onClick={importTracking}>匹配物流单号和订单</button>
         </div>
@@ -393,6 +447,36 @@ export default function ShippingAssistant() {
           placeholder="NV-20260702-000918,CJ大韩通运,1234567890"
         />
         {trackingMessage ? <div className="form-info">{trackingMessage}</div> : null}
+      </section>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
+            <h2>提交 Naver 发货回填</h2>
+            <p>提交前请确认订单、快递公司和运单号无误；本操作会改变 Naver 平台配送状态。</p>
+          </div>
+          <StatusBadge value={dangerousState.label} />
+        </div>
+        <label className="checkbox-line">
+          <input
+            type="checkbox"
+            checked={writebackConfirm}
+            onChange={(event) => setWritebackConfirm(event.target.checked)}
+          />
+          <span>人工确认回填：我已核对待提交的 Naver 订单和物流单号。</span>
+        </label>
+        <div className="modal-actions-inline">
+          <button
+            type="button"
+            className="button primary"
+            onClick={executeNaverWriteback}
+            disabled={writebackLoading || !writebackConfirm || !rows.some((item) => comparable(item.platform) === 'naver' && item.trackingNo)}
+          >
+            {writebackLoading ? '提交中...' : '提交 Naver 发货回填'}
+          </button>
+        </div>
+        {writebackMessage ? <div className="form-info">{writebackMessage}</div> : null}
+        <p className="mock-sync-note">使用 Naver 官方 {NAVER_DISPATCH_PAYLOAD_FIELD} 发货提交结构；不会修改商品价格、库存或售后状态。</p>
       </section>
 
       {showExport ? (

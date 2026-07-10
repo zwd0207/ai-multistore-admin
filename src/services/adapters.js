@@ -318,11 +318,18 @@ export function adaptOrder(item = {}) {
     ? naverBusinessStatusLabel(naverClaimStatus, item.claim_status_label_zh, rawData.claim_status_label_zh, naverClaimStatus)
     : item.claim_status_label_zh || rawData.claim_status_label_zh;
   const isHashOrderId = /^id-hash-[a-z0-9_-]+$/i.test(String(item.external_order_id || ''));
-  const displayOrderNo = isNaver && isHashOrderId ? '订单编号已脱敏' : item.external_order_id;
-  const displayCustomer = isNaver ? (item.buyer_name || '买家信息已脱敏') : item.buyer_name;
-  const displayPhone = isNaver && !item.buyer_masked_phone ? '未保存' : emptyText(item.buyer_masked_phone);
-  const fullOrderNo = item.external_order_id || rawData.external_order_id || '';
   const productOrderNo = item.external_product_order_id || rawData.external_product_order_id || '';
+  const fullOrderNo = item.external_order_id
+    || rawData.external_order_id_full
+    || productOrderNo
+    || rawData.external_order_id
+    || '';
+  const displayOrderNo = fullOrderNo || productOrderNo || item.id;
+  const displayCustomer = item.buyer_name || rawData.buyer_name;
+  const displayPhone = item.buyer_phone
+    || rawData.buyer_phone
+    || item.buyer_masked_phone
+    || rawData.buyer_phone_masked;
   const productOrderHash = rawData.external_product_order_id_hash || (isNaver && isHashOrderId ? item.external_order_id : null);
   const platformProductId = item.platform_product_id || item.external_product_id || rawData.platform_product_id || rawData.external_product_id || '';
   const statusEvents = item.status_events
@@ -332,6 +339,26 @@ export function adaptOrder(item = {}) {
     || rawData.status_events
     || rawData.order_status_events
     || [];
+  const deliveryCompany = item.delivery_company
+    || item.deliveryCompany
+    || rawData.delivery_company
+    || rawData.deliveryCompany
+    || rawData.deliveryCompanyName
+    || rawData.shipping_carrier_label
+    || rawData.shipping_carrier_code
+    || '';
+  const deliveryCompanyCode = item.delivery_company_code
+    || item.deliveryCompanyCode
+    || rawData.delivery_company_code
+    || rawData.deliveryCompanyCode
+    || rawData.shipping_carrier_code
+    || '';
+  const trackingNumber = item.tracking_number
+    || item.trackingNumber
+    || rawData.tracking_number
+    || rawData.trackingNumber
+    || rawData.shipping_tracking_number
+    || '';
   const statusLabel = isNaver
     ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
     : adaptStatus(item.order_status, {
@@ -366,6 +393,14 @@ export function adaptOrder(item = {}) {
     receiverPhone: item.receiver_phone || rawData.receiver_phone,
     receiverAddress: item.receiver_address || rawData.receiver_address,
     zipCode: item.zip_code || rawData.zip_code,
+    deliveryCompany,
+    deliveryCompanyCode,
+    delivery_company: deliveryCompany,
+    delivery_company_code: deliveryCompanyCode,
+    trackingNumber,
+    tracking_number: trackingNumber,
+    logisticsTraceStatus: item.logistics_trace_status || item.logisticsTraceStatus || (trackingNumber ? 'local_tracking_trace' : 'tracking_number_missing'),
+    logisticsTraceAvailable: Boolean(trackingNumber),
     quantity: item.quantity,
     amount: numberValue(item.order_amount),
     currency: item.currency,
@@ -388,6 +423,31 @@ export function adaptOrder(item = {}) {
     paidAt: item.paid_at,
     createdAt: item.ordered_at,
     updatedAt: emptyText(item.updated_at),
+  };
+}
+
+export function adaptOrderLogisticsTrace(data = {}) {
+  const events = Array.isArray(data.events) ? data.events : [];
+  return {
+    status: data.status || 'tracking_number_missing',
+    orderId: data.order_id ?? data.orderId,
+    storeId: data.store_id ?? data.storeId,
+    platform: adaptPlatform(data.platform),
+    orderNo: data.order_no || data.orderNo || '',
+    productOrderNo: data.product_order_no || data.productOrderNo || '',
+    deliveryCompany: data.delivery_company || data.deliveryCompany || '',
+    deliveryCompanyCode: data.delivery_company_code || data.deliveryCompanyCode || '',
+    trackingNumber: data.tracking_number || data.trackingNumber || '',
+    trackingSource: data.tracking_source || data.trackingSource || 'local_tracking_trace',
+    realtimeTrackingOpen: Boolean(data.realtime_tracking_open ?? data.realtimeTrackingOpen),
+    message: data.message || '',
+    events: events.map((item, index) => ({
+      id: item.id || `${data.order_id || data.orderId || 'trace'}-${index}`,
+      time: item.time || item.observed_at || item.created_at || '',
+      label: item.label || item.title || '物流轨迹记录',
+      description: item.description || item.content || '',
+      source: item.source || '',
+    })),
   };
 }
 
@@ -467,11 +527,17 @@ export function adaptNaverOrderCompletePreview(data = {}) {
 }
 
 export function adaptCustomerInquiry(item = {}) {
+  const rawData = item.raw_data || {};
+  const productOrderIds = Array.isArray(rawData.product_order_id_list) ? rawData.product_order_id_list : [];
+  const orderNo = item.order_no || rawData.order_id || productOrderIds[0] || '';
+  const productName = item.product_name || rawData.product_name || '';
   return {
     id: item.id,
     storeId: item.store_id,
     platform: adaptPlatform(item.platform),
+    rawPlatform: normalizePlatform(item.platform),
     ticketNo: item.external_inquiry_id,
+    externalInquiryId: item.external_inquiry_id,
     type: item.inquiry_type,
     inquiryType: item.inquiry_type,
     customer: item.customer_name,
@@ -483,27 +549,33 @@ export function adaptCustomerInquiry(item = {}) {
     status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
     priority: item.priority || '일반',
     store: item.store_name || `店铺 #${item.store_id}`,
-    orderNo: emptyText(item.order_no),
-    productName: emptyText(item.product_name),
+    orderNo: emptyText(orderNo),
+    productName: emptyText(productName),
+    productOrderIds,
+    answerContent: rawData.answer_content || '',
+    platformReplySubmitted: Boolean(rawData.platform_reply_submitted),
+    platformReplyAlreadyExisted: Boolean(rawData.platform_reply_already_existed),
+    rawResponseSaved: Boolean(rawData.raw_response_saved),
+    sourceType: rawData.source_type || '',
     receivedAt: item.received_at,
     createdAt: item.received_at,
     answeredAt: item.answered_at,
     lastReplyAt: emptyText(item.answered_at),
     updatedAt: emptyText(item.updated_at),
     orderInfo: {
-      orderNo: emptyText(item.order_no),
+      orderNo: emptyText(orderNo),
       paymentMethod: '—',
       receiver: emptyText(item.customer_name),
       amount: 0,
       address: '—',
     },
     productInfo: {
-      productName: emptyText(item.product_name),
+      productName: emptyText(productName),
       sku: '—',
       quantity: 0,
       store: item.store_name || `店铺 #${item.store_id}`,
     },
-    replies: [],
+    replies: rawData.answer_content ? [{ content: rawData.answer_content, createdAt: item.answered_at }] : [],
   };
 }
 
@@ -1484,12 +1556,36 @@ const manualSyncResourceLabels = {
   customer_inquiries: '客服消息',
 };
 
+const manualSyncConnectionErrorCodes = new Set([
+  'ip_not_allowed',
+  'auth_failed',
+  'permission_forbidden',
+  'product_api_not_allowed',
+  'order_api_not_allowed',
+  'credential_not_ready',
+  'credential_invalid',
+  'credential_not_found',
+  'channel_no_missing',
+  'blocked_by_connection',
+]);
+
+function manualSyncConnectionIssue(items = []) {
+  return items.find((item) => manualSyncConnectionErrorCodes.has(String(item.errorCode || '').toLowerCase())
+    || String(item.message || '').includes('平台连接未通过'));
+}
+
 function manualSyncStatusLabel(status, items = []) {
   const ipBlocked = items.find((item) => item.errorCode === 'ip_not_allowed' || String(item.message || '').includes('IP 白名单未通过'));
-  if (ipBlocked) return ipBlocked.message || `${ipBlocked.platform}：IP 白名单未通过`;
+  if (ipBlocked) return '最近一次同步：IP 白名单未通过';
 
-  const permissionBlocked = items.find((item) => String(item.message || '').includes('API 权限未开通'));
-  if (permissionBlocked) return permissionBlocked.message;
+  const permissionBlocked = items.find((item) => String(item.message || '').includes('API 权限未开通')
+    || ['auth_failed', 'permission_forbidden', 'product_api_not_allowed', 'order_api_not_allowed'].includes(String(item.errorCode || '').toLowerCase()));
+  if (permissionBlocked) return '最近一次同步：API 权限未开通';
+
+  const credentialBlocked = items.find((item) => ['credential_not_ready', 'credential_invalid', 'credential_not_found', 'channel_no_missing'].includes(String(item.errorCode || '').toLowerCase()));
+  if (credentialBlocked) return '最近一次同步：API 资料未配置完整';
+
+  if (manualSyncConnectionIssue(items)) return '最近一次同步：平台连接未通过';
 
   if (status === 'success') return '本地同步完成';
   if (status === 'partial_success') return '部分同步完成';
@@ -1504,6 +1600,13 @@ function manualSyncStatusLabel(status, items = []) {
   if (skipped) return skipped.message || '待同步';
 
   return '待同步';
+}
+
+function manualSyncModalTitle(status, items = []) {
+  if (manualSyncConnectionIssue(items)) return '平台连接未通过（本次手动同步结果）';
+  if (status === 'success') return '手动同步结果';
+  if (status === 'partial_success') return '手动同步结果';
+  return '手动同步结果';
 }
 
 function adaptManualBatchSyncItem(item = {}) {
@@ -1533,6 +1636,8 @@ export function manualBatchSyncResult(data = {}) {
   return {
     status: data.status || 'skipped',
     statusLabel: manualSyncStatusLabel(data.status, items),
+    modalTitle: manualSyncModalTitle(data.status, items),
+    connectionBlocked: Boolean(manualSyncConnectionIssue(items)),
     storeId: data.store_id,
     storePlatform: data.store_platform,
     requestedPlatforms: data.requested_platforms || [],
@@ -1548,6 +1653,44 @@ export function manualBatchSyncResult(data = {}) {
       updatedCount: numberValue(summary.updated_count),
       deletedCount: numberValue(summary.deleted_count),
     },
+    syncLog: data.sync_log ? {
+      id: data.sync_log.id,
+      status: data.sync_log.status,
+      message: data.sync_log.message,
+    } : null,
+  };
+}
+
+export function manualNaverOrderRefreshResult(data = {}) {
+  const status = data.status || 'skipped';
+  const createdCount = numberValue(data.created_count ?? data.createdCount);
+  const updatedCount = numberValue(data.updated_count ?? data.updatedCount);
+  const skippedCount = numberValue(data.skipped_count ?? data.skippedCount);
+  const message = data.message || (
+    status === 'success'
+      ? `本地订单刷新完成：新增 ${createdCount}，更新 ${updatedCount}，跳过 ${skippedCount}。不会回填平台。`
+      : 'Naver 订单本地刷新暂未完成'
+  );
+  return {
+    status,
+    statusLabel: status === 'success' ? '本地订单刷新完成' : message,
+    storeId: data.store_id ?? data.storeId,
+    platform: adaptPlatform(data.platform || 'naver'),
+    resource: data.resource || 'orders',
+    message,
+    errorCode: data.error_code || data.errorCode || null,
+    createdCount,
+    updatedCount,
+    skippedCount,
+    noChangeCount: numberValue(data.no_change_count ?? data.noChangeCount),
+    platformWrite: Boolean(data.platform_write ?? data.platformWrite),
+    platformWritesEnabled: Boolean(data.platform_writes_enabled ?? data.platformWritesEnabled),
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    privacyFieldsRedacted: Boolean(data.privacy_fields_redacted ?? data.privacyFieldsRedacted ?? true),
+    addressSaved: Boolean(data.address_saved ?? data.addressSaved),
+    sourceType: data.source_type || data.sourceType || '',
+    rawStatus: data.raw_status || data.rawStatus || '',
+    sampleIds: data.sample_ids || data.sampleIds || [],
     syncLog: data.sync_log ? {
       id: data.sync_log.id,
       status: data.sync_log.status,
@@ -1574,6 +1717,7 @@ export const adapters = {
   store: adaptStore,
   product: adaptProduct,
   order: adaptOrder,
+  orderLogisticsTrace: adaptOrderLogisticsTrace,
   customerInquiry: adaptCustomerInquiry,
   syncLog: adaptSyncLog,
   deviceEnvironment: adaptDeviceEnvironment,
@@ -1596,6 +1740,7 @@ export const adapters = {
   storeOverview: adaptStoreOverview,
   metricDisplayValue,
   manualBatchSyncResult,
+  manualNaverOrderRefreshResult,
   coupangOrderSyncResult: adaptCoupangOrderSyncResult,
   coupangProductSyncResult: adaptCoupangProductSyncResult,
   coupangFinancialPreviewResult: adaptCoupangFinancialPreviewResult,

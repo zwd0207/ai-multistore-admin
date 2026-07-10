@@ -81,7 +81,7 @@ function MetricCell({ metric }) {
 }
 
 function unknownNote(count, label) {
-  return count ? `${count} 个店铺${label}无法确认` : '已确认店铺本地统计';
+  return count ? `${count} 个店铺${label}最近一次同步无法确认` : '已确认店铺本地统计';
 }
 
 const storeOverviewColumns = [
@@ -312,7 +312,7 @@ export default function Dashboard() {
         <div className="card-title">
           <div>
             <h2>全店铺运营总览</h2>
-            <p>连接状态和核心指标放在同一张表；无法确认时显示“?”，避免把 IP 白名单、权限或未接入造成的未知误判为 0。</p>
+            <p>连接状态和核心指标放在同一张表；无法确认时显示“?”，原因标注“最近一次同步无法确认”，避免把 IP 白名单、权限或未接入造成的未知误判为 0。</p>
           </div>
           <div className="overview-actions">
             <button type="button" className="button primary" onClick={runAllStoreSync} disabled={overviewAction.running}>

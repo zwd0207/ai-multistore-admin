@@ -16,6 +16,7 @@ import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 10;
+const NAVER_REPLY_BODY_FIELD = 'answerComment';
 const statusOptions = ['待处理', '处理中', '已记录', '需人工处理'];
 const priorityOptions = ['普通', '重要', '紧急'];
 const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
@@ -110,6 +111,8 @@ export default function CustomerService() {
   const [syncMessage, setSyncMessage] = useState('');
   const [activeMessage, setActiveMessage] = useState(null);
   const [draftModal, setDraftModal] = useState({ open: false, message: null, content: '' });
+  const [replyConfirm, setReplyConfirm] = useState(false);
+  const [replySubmitting, setReplySubmitting] = useState(false);
   const [draftReplies, setDraftReplies] = useState({});
 
   const load = async (nextQuery = query) => {
@@ -148,10 +151,22 @@ export default function CustomerService() {
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
 
   const syncPlatformMessages = async () => {
-    const latestRows = await load(query);
-    setSyncMessage(latestRows.length
-      ? `同步按钮已检查本地保存记录，当前显示 ${latestRows.length} 条消息；暂未接入真实平台消息深度同步。`
-      : '同步按钮已检查，本地暂无平台消息；暂未接入真实平台消息。');
+    if (!selectedStoreId) {
+      setSyncMessage('请先选择 Naver 店铺，再同步客服消息。');
+      window.setTimeout(() => setSyncMessage(''), 3200);
+      return;
+    }
+    try {
+      const syncResult = await dataProvider.syncNaverCustomerInquiries({
+        storeId: selectedStoreId,
+        page: 1,
+        size: 50,
+      });
+      const latestRows = await load(query);
+      setSyncMessage(syncResult.message || `已接入 Naver 官方 API 读取，当前显示 ${latestRows.length} 条消息。`);
+    } catch (syncError) {
+      setSyncMessage(syncError.message || 'Naver 客服消息同步失败，请检查店铺 API 权限或 IP 白名单。');
+    }
     window.setTimeout(() => setSyncMessage(''), 3200);
   };
 
@@ -161,6 +176,7 @@ export default function CustomerService() {
       message,
       content: draftReplies[message.ticketNo] || '',
     });
+    setReplyConfirm(false);
   };
 
   const saveDraft = () => {
@@ -171,6 +187,31 @@ export default function CustomerService() {
       }));
     }
     setDraftModal({ open: false, message: null, content: '' });
+  };
+
+  const submitNaverReply = async () => {
+    if (!draftModal.message || replySubmitting) return;
+    setReplySubmitting(true);
+    try {
+      const result = await dataProvider.replyNaverCustomerInquiry({
+        storeId: selectedStoreId,
+        inquiryId: draftModal.message.id,
+        externalInquiryId: draftModal.message.externalInquiryId || draftModal.message.ticketNo,
+        [NAVER_REPLY_BODY_FIELD]: draftModal.content,
+        manualApproval: true,
+        finalOperatorConfirmation: replyConfirm,
+        actorContext: { role: 'operator', action: 'manual_naver_customer_reply' },
+      });
+      setSyncMessage(result.message || 'Naver 客服回复处理完成。');
+      setDraftModal({ open: false, message: null, content: '' });
+      setReplyConfirm(false);
+      await load(query);
+    } catch (replyError) {
+      setSyncMessage(replyError.message || 'Naver 客服回复提交失败，请检查 API 权限或消息状态。');
+    } finally {
+      setReplySubmitting(false);
+      window.setTimeout(() => setSyncMessage(''), 3600);
+    }
   };
 
   const search = () => setQuery({ ...draft, page: 1 });
@@ -184,7 +225,7 @@ export default function CustomerService() {
     <>
       <PageHeader
         title="平台消息"
-        description="当前先做平台消息入口和基础管理，暂未接入真实平台消息深度同步；回复只保存为本地草稿，需人工到平台后台处理。"
+        description="已接入 Naver 官方 API 读取；Coupang / Gmarket 消息仍作为本地入口。回复必须由运营人工确认后提交。"
         actions={(
           <>
             <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
@@ -204,12 +245,12 @@ export default function CustomerService() {
       <section className="content-card">
         <div className="business-capability-grid compact">
           <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>真实平台消息</strong><span>暂未接入</span></div>
-            <p>当前页面展示系统已保存记录和本地管理入口，不宣称已经完成平台消息真实同步。</p>
+            <div className="business-capability-head"><strong>Naver 客服消息</strong><span>已接入读取</span></div>
+            <p>已接入 Naver 官方 API 读取，写入本地 ERP；Coupang / Gmarket 暂未接入真实平台消息。</p>
           </article>
           <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>回复草稿</strong><span>本地辅助</span></div>
-            <p>回复内容只保存为本地草稿，不会发送到 Naver / Coupang / Gmarket。</p>
+            <div className="business-capability-head"><strong>回复处理</strong><span>人工确认</span></div>
+            <p>Naver 回复可以在人工确认发送后提交到平台；本地草稿仍可单独保存。</p>
           </article>
           <article className="business-capability-card muted">
             <div className="business-capability-head"><strong>自动回复客户</strong><span>{dangerousState.label}</span></div>
@@ -247,7 +288,7 @@ export default function CustomerService() {
         {!error && !loading && !rows.length ? (
           <EmptyState
             title="当前没有平台消息"
-            description="暂未接入真实平台消息。可以检查店铺连接或邮箱连接，后续接入官方 API 后再读取真实消息。"
+            description="可以同步 Naver 客服消息；如果仍为空，请检查店铺连接、API 权限或 IP 白名单。"
             actions={(
               <>
                 <button type="button" className="button primary" onClick={syncPlatformMessages}>同步平台消息</button>
@@ -265,7 +306,7 @@ export default function CustomerService() {
               renderActions={(row) => (
                 <>
                   <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
-                  <button type="button" onClick={() => openDraft(row)}>回复草稿</button>
+                  <button type="button" onClick={() => openDraft(row)}>回复</button>
                   <button type="button" disabled title="需人工到平台后台处理">平台后台处理</button>
                 </>
               )}
@@ -301,7 +342,7 @@ export default function CustomerService() {
             </section>
             <section className="detail-section">
               <h3>处理边界</h3>
-              <p>回复、退款、换货和投诉处理需人工到平台后台处理；系统当前只提供查看和回复草稿。</p>
+              <p>Naver 客服回复支持人工确认后提交；退款、换货、投诉处理仍需人工到平台后台处理。</p>
             </section>
           </>
         ) : <EmptyState title="暂无消息详情" description="请选择消息查看详情。" />}
@@ -309,20 +350,32 @@ export default function CustomerService() {
 
       <Modal
         open={draftModal.open}
-        title={draftModal.message ? `回复草稿 · ${draftModal.message.ticketNo}` : '回复草稿'}
+        title={draftModal.message ? `回复 · ${draftModal.message.ticketNo}` : '回复'}
         onClose={() => setDraftModal({ open: false, message: null, content: '' })}
-        onConfirm={saveDraft}
-        confirmText="保存本地草稿"
+        onConfirm={submitNaverReply}
+        confirmText={replySubmitting ? '提交中...' : '提交到 Naver'}
+        confirmDisabled={replySubmitting || !replyConfirm || !draftModal.content.trim()}
         width="min(860px, 94vw)"
       >
         <FormField label="草稿内容">
           <textarea
             value={draftModal.content}
             onChange={(event) => setDraftModal({ ...draftModal, content: event.target.value })}
-            placeholder="这里只保存本地草稿，不会发送给客户。"
+            placeholder="填写给客户的回复内容。提交到 Naver 前请再次核对。"
           />
         </FormField>
-        <p className="mock-sync-note">回复草稿是本地辅助功能。正式回复需人工到平台后台处理。</p>
+        <label className="checkbox-line">
+          <input
+            type="checkbox"
+            checked={replyConfirm}
+            onChange={(event) => setReplyConfirm(event.target.checked)}
+          />
+          <span>人工确认发送：我已核对回复内容，并确认提交到 Naver。</span>
+        </label>
+        <div className="modal-actions-inline">
+          <button type="button" className="button ghost" onClick={saveDraft} disabled={replySubmitting}>保存本地草稿</button>
+        </div>
+        <p className="mock-sync-note">自动回复客户仍未开放；这里只允许运营人工确认后提交单条 Naver 回复。</p>
       </Modal>
     </>
   );

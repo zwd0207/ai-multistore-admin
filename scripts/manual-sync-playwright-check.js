@@ -30,7 +30,7 @@ async (page) => {
   return {
     statusText,
     modalHasLocalOnlyNotice: modalText.includes('只写入本地 ERP'),
-    modalHasCustomerNotice: modalText.includes('客服消息暂未接入'),
+    modalHasCustomerResult: modalText.includes('客服消息'),
     consoleMessages,
     pageErrors,
     failedRequests,

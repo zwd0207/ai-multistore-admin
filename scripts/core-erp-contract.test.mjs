@@ -27,7 +27,7 @@ assert.equal(
 
 assert.equal(
   getCoreApiCapability('naver', 'shipment_writeback').currentPhase,
-  '本阶段关闭',
+  '人工确认后开放',
 );
 
 assert.equal(
@@ -41,6 +41,15 @@ assert.deepEqual(
     enabled: false,
     label: '暂未开放',
     note: '平台写入动作本阶段保持关闭，必须单独审批后才能开启。',
+  },
+);
+
+assert.deepEqual(
+  getDangerousActionState('shipment_writeback'),
+  {
+    enabled: true,
+    label: '人工确认后开放',
+    note: 'Naver 发货回填已按官方 API 开放；每次提交都需要预检、人工确认和操作日志。',
   },
 );
 

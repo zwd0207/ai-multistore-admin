@@ -49,7 +49,9 @@ function Wait-HttpOk($url, $label) {
 }
 
 Write-Host "Starting $phase"
-Assert-ContainsLine $backendEnv "REAL_API_WRITE_ENABLED=false" "Platform writes must remain closed"
+Assert-ContainsLine $backendEnv "REAL_API_WRITE_ENABLED=false" "Generic platform writes must remain closed"
+# Controlled Naver platform writes stay on operation gates:
+# shipment dispatch and customer inquiry replies require explicit operator confirmation.
 Assert-ContainsLine $frontendEnv "VITE_DATA_SOURCE=backend" "Operator trial must use backend data source"
 
 Stop-LocalPort $backendPort @("python", "python3")

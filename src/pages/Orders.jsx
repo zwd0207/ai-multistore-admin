@@ -37,6 +37,8 @@ function normalizedOrder(row = {}) {
   const product = row.product || row.productName || row.product_name || row.name || '-';
   const option = row.option || row.optionName || row.option_name || row.spec || '-';
   const shippingStatus = row.deliveryStatusLabelZh || row.delivery_status_label_zh || row.shippingStatus || row.delivery_status || '-';
+  const deliveryCompany = row.deliveryCompany || row.delivery_company || row.logisticsCompany || row.courier || '';
+  const trackingNumber = row.trackingNumber || row.tracking_number || row.trackingNo || row.invoiceNo || '';
   return {
     ...row,
     orderNo: row.orderNo || row.external_order_id || row.order_id || row.id,
@@ -48,14 +50,23 @@ function normalizedOrder(row = {}) {
     amount: row.amount ?? row.order_amount ?? row.totalAmount ?? 0,
     statusText: statusText || '-',
     shippingStatus,
-    logisticsCompany: row.logisticsCompany || row.deliveryCompany || row.delivery_company || row.courier || '-',
-    trackingNo: row.trackingNo || row.trackingNumber || row.tracking_number || row.invoiceNo || '-',
+    deliveryCompany,
+    deliveryCompanyCode: row.deliveryCompanyCode || row.delivery_company_code || '',
+    trackingNumber,
+    logisticsTraceStatus: row.logisticsTraceStatus || row.logistics_trace_status || (trackingNumber ? 'local_tracking_trace' : 'tracking_number_missing'),
+    logisticsCompany: deliveryCompany || '-',
+    trackingNo: trackingNumber || '-',
     createdAt: row.createdAt || row.ordered_at || row.orderDate || row.paid_at || '',
     receiverName: row.receiverName || row.receiver_name || row.customer || row.buyer_name || '',
     receiverPhone: row.receiverPhone || row.receiver_phone || row.phone || row.buyer_phone || '',
     receiverAddress: row.receiverAddress || row.receiver_address || row.address || '',
     sourceInfo: classifyCoreDataSource(row),
   };
+}
+
+function hasDisplayValue(value) {
+  const text = String(value || '').trim();
+  return Boolean(text && text !== '-');
 }
 
 function matchesStatus(row, statusKey) {
@@ -126,6 +137,14 @@ export default function Orders() {
   const [noteModal, setNoteModal] = useState({ open: false, order: null });
   const [notes, setNotes] = useState({});
   const [copyMessage, setCopyMessage] = useState('');
+  const [refreshingOrders, setRefreshingOrders] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState('');
+  const [detailRefreshing, setDetailRefreshing] = useState(false);
+  const [detailRefreshNotice, setDetailRefreshNotice] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [traceModal, setTraceModal] = useState({ open: false, order: null, trace: null });
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +179,7 @@ export default function Orders() {
     }
     load();
     return () => { cancelled = true; };
-  }, [query, selectedStoreId, storeLoading, stores]);
+  }, [query, selectedStoreId, storeLoading, stores, refreshKey]);
 
   const summary = useMemo(() => ({
     total: rows.length,
@@ -192,21 +211,107 @@ export default function Orders() {
     setTimeout(() => setCopyMessage(''), 2400);
   };
 
+  const closeTraceModal = () => {
+    setTraceModal({ open: false, order: null, trace: null });
+    setTraceError('');
+    setTraceLoading(false);
+  };
+
+  const openLogisticsTrace = async (order) => {
+    setTraceModal({ open: true, order, trace: null });
+    setTraceLoading(true);
+    setTraceError('');
+    try {
+      const trace = await dataProvider.getOrderLogisticsTrace(order);
+      setTraceModal({ open: true, order, trace });
+    } catch (traceLoadError) {
+      setTraceError(traceLoadError.message || '物流轨迹查询失败，请稍后重试。');
+    } finally {
+      setTraceLoading(false);
+    }
+  };
+
+  const handleManualOrderRefresh = async () => {
+    const storeId = query.storeId || selectedStoreId;
+    if (!storeId) {
+      setRefreshNotice('请先选择当前店铺，再手动批量刷新 Naver 订单。');
+      return;
+    }
+    setRefreshingOrders(true);
+    setRefreshNotice('正在刷新 Naver 订单...');
+    try {
+      const result = await dataProvider.manualRefreshNaverOrders({
+        storeId,
+        maxCount: 20,
+        hours: 24,
+      });
+      const fallback = `本地订单刷新完成：新增 ${result.createdCount}，更新 ${result.updatedCount}，跳过 ${result.skippedCount}。不会回填平台。`;
+      setRefreshNotice(result.message || fallback);
+      setRefreshKey((current) => current + 1);
+    } catch (refreshError) {
+      setRefreshNotice(refreshError.message || 'Naver 订单本地刷新失败，请检查店铺 API 权限、IP 白名单或连接资料。');
+    } finally {
+      setRefreshingOrders(false);
+    }
+  };
+
+  const handleSingleOrderDetailRefresh = async (order) => {
+    if (!order) return;
+    const platform = String(order.rawPlatform || order.platform || '').toLowerCase();
+    if (platform !== 'naver') {
+      setDetailRefreshNotice('当前只支持 Naver 订单读取官方详情刷新。');
+      return;
+    }
+    setDetailRefreshing(true);
+    setDetailRefreshNotice('正在读取 Naver 官方订单详情...');
+    try {
+      const result = await dataProvider.refreshSingleNaverOrderDetail(order);
+      const refreshedOrder = result.order ? normalizedOrder(result.order) : null;
+      if (refreshedOrder) {
+        setRows((current) => current.map((item) => (String(item.id) === String(refreshedOrder.id) ? refreshedOrder : item)));
+        setActiveOrder(refreshedOrder);
+      } else {
+        setRefreshKey((current) => current + 1);
+      }
+      setDetailRefreshNotice(result.message || '订单详情已刷新到本地；不会回填平台。');
+    } catch (singleRefreshError) {
+      setDetailRefreshNotice(singleRefreshError.message || '订单详情刷新失败，请检查店铺 API 权限、IP 白名单或连接资料。');
+    } finally {
+      setDetailRefreshing(false);
+    }
+  };
+
   const dangerousState = getDangerousActionState('shipment_writeback');
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
+  const renderTrackingDetail = (order) => {
+    if (!hasDisplayValue(order?.trackingNo)) return <span>-</span>;
+    return (
+      <span className="inline-action-group">
+        <span>{order.trackingNo}</span>
+        <button className="button ghost compact" type="button" onClick={() => openLogisticsTrace(order)}>
+          查询物流轨迹
+        </button>
+      </span>
+    );
+  };
 
   return (
     <>
       <PageHeader
         title="订单管理"
-        description="搜索、筛选和查看订单详情。本阶段不执行平台取消、退货、换货或发货回填。"
+        description="搜索、筛选和查看订单详情。订单页不直接执行平台取消、退货或换货；Naver 发货回填请到发货辅助人工确认后提交。"
         actions={(
           <>
+            <button className="button primary" type="button" onClick={handleManualOrderRefresh} disabled={refreshingOrders}>
+              {refreshingOrders ? '正在刷新' : '手动批量刷新'}
+            </button>
             <Link className="button ghost" to="/shipping">跳转发货辅助</Link>
             <span className="period-chip">{dangerousState.label}</span>
           </>
         )}
       />
+
+      {refreshNotice ? <div className="form-info">{refreshNotice}</div> : null}
 
       <div className="summary-grid">
         <SummaryCard title="订单列表" value={summary.total} note="当前筛选结果" tone="info" />
@@ -293,7 +398,10 @@ export default function Orders() {
       <DetailModal
         open={Boolean(activeOrder)}
         title={activeOrder ? `订单详情 · ${activeOrder.orderNo}` : '订单详情'}
-        onClose={() => setActiveOrder(null)}
+        onClose={() => {
+          setActiveOrder(null);
+          setDetailRefreshNotice('');
+        }}
         width="min(980px, 94vw)"
       >
         {activeOrder ? (
@@ -309,7 +417,7 @@ export default function Orders() {
                 ['订单状态', <StatusBadge value={activeOrder.statusText} />],
                 ['发货状态', <StatusBadge value={activeOrder.shippingStatus} />],
                 ['快递公司', activeOrder.logisticsCompany],
-                ['运单号', activeOrder.trackingNo],
+                ['运单号', renderTrackingDetail(activeOrder)],
                 ['数据来源', activeOrder.sourceInfo.label],
                 ['内部备注', notes[activeOrder.orderNo] || '暂无'],
               ].map(([label, value]) => (
@@ -321,19 +429,74 @@ export default function Orders() {
             </div>
             <section className="content-card">
               <h3>收件信息</h3>
-              <p className="mock-sync-note">复制只发生在本地剪贴板，不会回写平台。</p>
+              <p className="mock-sync-note">复制只发生在本地剪贴板；刷新只读取官方订单详情并写入本地 ERP，不会回填平台。</p>
               <pre className="readonly-code">{copyReceiverText(activeOrder)}</pre>
-              <button className="button ghost" type="button" onClick={() => handleCopy(activeOrder)}>复制收件信息</button>
+              {detailRefreshNotice ? <div className="form-info">{detailRefreshNotice}</div> : null}
+              <div className="inline-action-group">
+                <button className="button ghost" type="button" onClick={() => handleCopy(activeOrder)}>复制收件信息</button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => handleSingleOrderDetailRefresh(activeOrder)}
+                  disabled={detailRefreshing}
+                >
+                  {detailRefreshing ? '正在刷新详情' : '刷新订单详情'}
+                </button>
+              </div>
             </section>
             <section className="content-card">
               <h3>暂未开放操作</h3>
-              <p>{dangerousState.note} 取消订单、退货订单、换货订单和发货回填需后续单独审批。</p>
+              <p>取消订单、退货订单、换货订单仍需人工到平台后台处理；Naver 发货回填请到发货辅助核对物流单号并人工确认后提交。</p>
             </section>
           </>
         ) : (
           <EmptyState title="暂无订单详情" description="请选择一条订单查看详情。" />
         )}
       </DetailModal>
+
+      <Modal
+        open={traceModal.open}
+        title={traceModal.order ? `物流轨迹 · ${traceModal.order.trackingNo || traceModal.order.orderNo}` : '物流轨迹'}
+        onClose={closeTraceModal}
+        showFooter={false}
+        width="min(720px, 92vw)"
+      >
+        {traceLoading ? <div className="table-state"><span className="spinner" />正在查询物流轨迹...</div> : null}
+        {!traceLoading && traceError ? <EmptyState title="物流轨迹查询失败" description={traceError} /> : null}
+        {!traceLoading && !traceError && traceModal.trace ? (
+          <div className="trace-panel">
+            <div className="detail-grid">
+              {[
+                ['快递公司', traceModal.trace.deliveryCompany || traceModal.order?.logisticsCompany || '-'],
+                ['运单号', traceModal.trace.trackingNumber || traceModal.order?.trackingNo || '-'],
+                ['数据来源', traceModal.trace.trackingSource === 'shipping_tracking_import_rows' ? '本地物流单号导入记录' : '本地订单记录'],
+                ['实时轨迹', traceModal.trace.realtimeTrackingOpen ? '已接入' : '实时快递轨迹暂未接入'],
+              ].map(([label, value]) => (
+                <div className="detail-item" key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+            <p className="mock-sync-note">{traceModal.trace.message || '实时快递轨迹暂未接入；当前显示本地记录。'}</p>
+            <div className="timeline">
+              {(traceModal.trace.events || []).map((event) => (
+                <div className="timeline-item" key={event.id || `${event.time}-${event.label}`}>
+                  <span className="timeline-dot" />
+                  <div className="timeline-content">
+                    <div className="timeline-head">
+                      <strong>{event.label}</strong>
+                      {event.time ? <time>{event.time}</time> : null}
+                    </div>
+                    <p>{event.description}</p>
+                    {event.source ? <span className="period-chip">{event.source}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={noteModal.open}

@@ -24,7 +24,7 @@ async (page) => {
   return {
     readinessTabVisible: pageText.includes('运营试用交付检查'),
     dataSourceVisible: pageText.includes('当前数据源'),
-    writeClosedVisible: pageText.includes('平台写入关闭'),
+    controlledWriteVisible: pageText.includes('受控平台写入') || pageText.includes('Naver 受控开放'),
     sopVisible: pageText.includes('运营 SOP'),
     questionMarkRuleVisible: pageText.includes('不是 0'),
     backupVisible: pageText.includes('备份状态'),

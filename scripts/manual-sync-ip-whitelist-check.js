@@ -158,11 +158,14 @@ async (page) => {
   const platformWrites = (manualSyncResponse?.items || []).filter((item) => item.platform_write !== false);
   const deletes = (manualSyncResponse?.items || []).filter((item) => item.deleted_count !== 0 || item.delete_executed !== false);
 
-  if (!statusText.includes('Coupang：IP 白名单未通过')) {
+  if (!statusText.includes('最近一次同步：IP 白名单未通过')) {
     throw new Error(`Expected whitelist status chip, received: ${statusText}`);
   }
   if (!modalText.includes('Coupang：IP 白名单未通过')) {
     throw new Error('Expected whitelist message in result modal');
+  }
+  if (!modalText.includes('本次重新验证仍未通过') || !modalText.includes('服务器出口 IP')) {
+    throw new Error('Expected recheck guidance in result modal');
   }
   if (!manualSyncPayload || Number(manualSyncPayload.store_id) !== 101) {
     throw new Error(`Expected manual sync to target store 101, received: ${JSON.stringify(manualSyncPayload)}`);
@@ -174,6 +177,7 @@ async (page) => {
   return {
     statusText,
     modalHasIpNotice: modalText.includes('Coupang：IP 白名单未通过'),
+    modalHasRecheckGuidance: modalText.includes('本次重新验证仍未通过') && modalText.includes('服务器出口 IP'),
     modalHasLocalOnlyNotice: modalText.includes('只写入本地 ERP'),
     modalHasCustomerNotice: modalText.includes('客服消息暂未接入'),
     manualSyncPayload,

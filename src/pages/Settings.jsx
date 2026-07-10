@@ -301,7 +301,7 @@ export default function Settings() {
       {activeTab === 'readiness' && (
         <SettingsSection
           title="运营试用交付检查"
-          description="给运营人员使用前先看这里：确认后端服务、数据源、平台写入关闭、店铺连接和备份状态。"
+          description="给运营人员使用前先看这里：确认后端服务、数据源、受控平台写入、店铺连接和备份状态。"
           actions={<button type="button" className="button ghost" onClick={refreshOperatorReadiness}>刷新检查</button>}
         >
           {readinessError ? (
@@ -324,9 +324,9 @@ export default function Settings() {
               <p>出现 IP 白名单未通过时，需要到对应平台后台或开放平台处理。</p>
             </article>
             <article className="readiness-card">
-              <span>平台写入关闭</span>
-              <strong>{operatorReadiness?.platformWriteClosed ? '已关闭' : '需要立即检查'}</strong>
-              <p>本阶段不允许发货回填、改价、改库存、自动回复或自动提交申诉。</p>
+              <span>平台写入边界</span>
+              <strong>Naver 受控开放</strong>
+              <p>仅 Naver 发货回填和人工客服回复开放；改价、改库存、自动回复和自动提交申诉仍关闭。</p>
             </article>
           </div>
 
@@ -348,7 +348,7 @@ export default function Settings() {
               <li>每天先看首页“全店铺运营总览”，优先处理待发货、异常订单和库存预警。</li>
               <li>看到“?”时表示系统无法确认平台真实数据，不要当作 0。</li>
               <li>看到 IP 白名单或 API 资料问题时，先到“店铺管理”补资料或联系平台处理。</li>
-              <li>发货辅助只帮助人工核对和导出表格，不会自动回填 Naver / Coupang。</li>
+              <li>Naver 发货回填必须人工确认后提交；Coupang 回填、改价、改库存和自动回复仍不开放。</li>
               <li>交接或大批量手动同步前，先运行 scripts/operator-db-backup.ps1 创建本地备份。</li>
             </ol>
             <p>详细说明见 PHASE_CORE_ERP_OPERATOR_READY_1.md。</p>

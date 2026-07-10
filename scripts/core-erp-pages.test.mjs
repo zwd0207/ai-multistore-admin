@@ -37,12 +37,13 @@ includesAll('src/pages/InventoryAlerts.jsx', [
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
-  '不会自动回填 Naver',
+  '提交 Naver 发货回填',
+  '人工确认回填',
   '下一步',
   '发货处理顺序',
   '生成发货表格',
   '导入物流单号表',
-  '记录发货准备状态',
+  '已按官方 API 开放',
 ]);
 
 includesAll('src/pages/Dashboard.jsx', [
@@ -58,10 +59,26 @@ includesAll('src/pages/Orders.jsx', [
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [
-  '暂未接入真实平台消息',
-  '回复草稿',
-  '需人工到平台后台处理',
+  '已接入 Naver 官方 API 读取',
+  '提交到 Naver',
+  '人工确认发送',
 ]);
+
+includesAll('src/components/common/Modal.jsx', [
+  '<button type="button" className="modal-close" onClick={onClose} aria-label="关闭">',
+  '<button type="button" className="button ghost" onClick={onClose}>取消</button>',
+  '<button type="button" className="button primary" onClick={onConfirm} disabled={confirmDisabled}>',
+]);
+
+const modalText = read('src/components/common/Modal.jsx');
+assert.ok(
+  !modalText.includes('className="modal-close" onClick={onClose} disabled={confirmDisabled}'),
+  'modal close button must remain clickable when confirm action is disabled',
+);
+assert.ok(
+  !modalText.includes('className="button ghost" onClick={onClose} disabled={confirmDisabled}'),
+  'modal cancel button must remain clickable when confirm action is disabled',
+);
 
 includesAll('src/pages/Appeals.jsx', [
   '正品审核',

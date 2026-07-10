@@ -81,14 +81,14 @@ const NAVER_ORDER_PREVIEW_STATUS = {
 
 const NAVER_ORDER_DETAIL_STATUS = {
   statusLabel: '受控写入测试已完成',
-  reason: '已完成受控 Naver 订单本地写入测试，订单详情只保存业务字段和脱敏信息。',
-  nextAction: '当前只是受控小批量验证，不会自动扩大为订单批量同步。',
+  reason: '已完成受控 Naver 订单本地写入测试，订单详情保存履约所需业务字段，不保存令牌、签名或平台原始响应。',
+  nextAction: '当前已开放手动批量刷新；不会改写 Naver 平台订单。',
 };
 
 const NAVER_SYNC_PROTECTION_STATUS = {
-  statusLabel: '正式批量同步未开放',
-  reason: '当前不会批量写入商品或订单，也不会保存平台原始响应。',
-  nextAction: '批量同步必须单独确认后才会执行。',
+  statusLabel: '手动批量同步已开放',
+  reason: 'Naver 商品和订单可手动读取并写入本地 ERP；不会保存平台原始响应。',
+  nextAction: '发货回填和客服回复必须人工确认；改价、改库存和自动处理仍关闭。',
 };
 
 const NAVER_ERROR_PRESENTATIONS = {

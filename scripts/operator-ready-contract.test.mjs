@@ -29,6 +29,7 @@ includesAll('scripts/operator-start.ps1', [
   'dashboard/store-overview',
   'sync/manual-batch/all',
   'REAL_API_WRITE_ENABLED=false',
+  'Controlled Naver platform writes stay on operation gates',
 ]);
 
 includesAll('scripts/operator-db-backup.ps1', [
@@ -39,7 +40,8 @@ includesAll('scripts/operator-db-backup.ps1', [
 
 includesAll('scripts/operator-readiness-check.mjs', [
   'operator_readiness',
-  'platform_write_closed',
+  'controlled_platform_write_ready',
+  'generic_platform_write_closed',
   '/dashboard/store-overview',
   '/backups/local-report/summary',
 ]);
@@ -47,7 +49,8 @@ includesAll('scripts/operator-readiness-check.mjs', [
 includesAll('src/pages/Settings.jsx', [
   '交付检查',
   '后端服务',
-  '平台写入关闭',
+  '平台写入边界',
+  'Naver 受控开放',
   '当前数据源',
   '备份状态',
   '运营 SOP',
@@ -55,7 +58,7 @@ includesAll('src/pages/Settings.jsx', [
 
 includesAll('src/services/dataProvider.js', [
   'getOperatorReadiness',
-  'platformWriteClosed',
+  'controlledPlatformWriteReady',
   'unknownStoreCount',
 ]);
 
@@ -67,14 +70,20 @@ includesAll('src/services/backendApi.js', [
 includesAll('codex1/backend/app/api/v1/endpoints/health.py', [
   'real_api_write_enabled',
   'platform_write_closed',
+  'controlled_platform_writes_enabled',
+  'approved_platform_write_operations',
 ]);
 
 includesAll('PHASE_CORE_ERP_OPERATOR_READY_1.md', [
   '运营试用交付',
+  'Naver 订单模块',
+  '手动批量刷新',
+  'Naver 客服消息模块',
+  '同步平台消息',
   '不是 0',
   'IP 白名单',
-  '不会自动回填平台',
-  '平台写入保持关闭',
+  'Naver 发货回填',
+  '受控平台写入',
 ]);
 
 console.log('operator ready contract checks passed');

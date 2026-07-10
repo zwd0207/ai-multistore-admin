@@ -156,6 +156,80 @@ function overviewMetric(value, dataStatus = 'confirmed', reason = '') {
   };
 }
 
+function mockManualNaverOrderRefreshResult(payload = {}) {
+  return {
+    status: 'success',
+    store_id: payload.store_id ?? payload.storeId,
+    platform: 'naver',
+    resource: 'orders',
+    message: '本地订单刷新完成：新增 0，更新 0，跳过 0。不会回填平台。',
+    created_count: 0,
+    updated_count: 0,
+    skipped_count: 0,
+    no_change_count: 0,
+    source_type: 'mock',
+    platform_write: false,
+    platform_writes_enabled: false,
+    raw_response_saved: false,
+    privacy_fields_redacted: true,
+    address_saved: false,
+  };
+}
+
+function mockOrderLogisticsTrace(order = {}) {
+  const trackingNumber = order.trackingNumber || order.tracking_number || order.trackingNo || '';
+  const deliveryCompany = order.deliveryCompany || order.delivery_company || order.logisticsCompany || '';
+  return {
+    status: trackingNumber ? 'local_tracking_trace' : 'tracking_number_missing',
+    order_id: order.id,
+    store_id: order.storeId || order.store_id,
+    platform: order.rawPlatform || order.platform || 'naver',
+    order_no: order.orderNo || order.external_order_id || '',
+    product_order_no: order.productOrderNo || order.external_product_order_id || '',
+    delivery_company: deliveryCompany,
+    tracking_number: trackingNumber,
+    tracking_source: 'mock_order_detail',
+    realtime_tracking_open: false,
+    message: trackingNumber
+      ? '实时快递轨迹暂未接入；当前显示本地订单同步、物流单号导入和发货状态记录。'
+      : '该订单本地还没有快递单号，无法查询物流轨迹。',
+    events: [
+      {
+        time: order.createdAt || order.ordered_at || '',
+        label: '订单已创建',
+        description: '订单已保存到本地 ERP。',
+        source: 'orders',
+      },
+      trackingNumber ? {
+        time: order.updatedAt || order.lastSyncedAt || '',
+        label: '物流单号已记录',
+        description: `${deliveryCompany || '快递公司未记录'} / ${trackingNumber}`,
+        source: 'local_tracking_trace',
+      } : null,
+    ].filter(Boolean),
+  };
+}
+
+function mockSingleNaverOrderDetailRefresh(order = {}) {
+  return {
+    status: 'success',
+    storeId: order.storeId || order.store_id,
+    platform: 'naver',
+    resource: 'orders',
+    orderId: order.id,
+    message: 'mock 模式已模拟读取订单详情；不会回填平台。',
+    updatedCount: 0,
+    noChangeCount: 1,
+    platformWrite: false,
+    fieldAvailability: {
+      receiverPhone: Boolean(order.receiverPhone || order.receiver_phone),
+      deliveryCompany: Boolean(order.deliveryCompany || order.delivery_company || order.logisticsCompany),
+      trackingNumber: Boolean(order.trackingNumber || order.tracking_number || order.trackingNo),
+    },
+    order,
+  };
+}
+
 function mockStoreOverview() {
   const stores = [
     {
@@ -165,20 +239,20 @@ function mockStoreOverview() {
       platform: 'naver',
       owner_name: '运营',
       store_status: 'active',
-      connection_status: '商品可读，订单暂未开放',
+      connection_status: '商品和订单可读',
       connection_tone: 'warning',
-      connection_reason: 'Naver暂未开放批量订单同步',
+      connection_reason: 'Naver 商品和订单可读取并写入本地 ERP；平台写入仍关闭。',
       last_sync_at: '2026-07-08T09:10:00+09:00',
       latest_manual_sync_status: 'partial_success',
       resources: {
         products: { status: 'success', error_code: '', message: 'Naver商品本地同步完成', data_status: 'confirmed' },
-        orders: { status: 'not_open', error_code: 'not_open', message: 'Naver暂未开放批量订单同步', data_status: 'not_open' },
+        orders: { status: 'success', error_code: '', message: 'Naver订单本地同步完成', data_status: 'confirmed' },
         customer_inquiries: { status: 'not_open', error_code: 'not_open', message: '客服消息暂未接入真实平台', data_status: 'not_open' },
       },
       metrics: {
-        today_orders: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
-        pending_shipments: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
-        abnormal_orders: overviewMetric(null, 'not_open', 'Naver暂未开放批量订单同步'),
+        today_orders: overviewMetric(3, 'confirmed'),
+        pending_shipments: overviewMetric(1, 'confirmed'),
+        abnormal_orders: overviewMetric(0, 'confirmed'),
         inventory_alerts: overviewMetric(4, 'confirmed'),
       },
     },
@@ -189,21 +263,21 @@ function mockStoreOverview() {
       platform: 'coupang',
       owner_name: '运营',
       store_status: 'active',
-      connection_status: 'IP 白名单未通过',
+      connection_status: '最近一次同步：IP 白名单未通过',
       connection_tone: 'danger',
-      connection_reason: 'Coupang：IP 白名单未通过',
+      connection_reason: '最近一次同步无法确认：IP 白名单未通过',
       last_sync_at: '2026-07-08T09:05:00+09:00',
       latest_manual_sync_status: 'failed',
       resources: {
-        products: { status: 'failed', error_code: 'ip_not_allowed', message: 'Coupang：IP 白名单未通过', data_status: 'unknown' },
-        orders: { status: 'failed', error_code: 'ip_not_allowed', message: 'Coupang：IP 白名单未通过', data_status: 'unknown' },
+        products: { status: 'failed', error_code: 'ip_not_allowed', message: '最近一次同步无法确认：IP 白名单未通过', data_status: 'unknown' },
+        orders: { status: 'failed', error_code: 'ip_not_allowed', message: '最近一次同步无法确认：IP 白名单未通过', data_status: 'unknown' },
         customer_inquiries: { status: 'not_open', error_code: 'not_open', message: '客服消息暂未接入真实平台', data_status: 'not_open' },
       },
       metrics: {
-        today_orders: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
-        pending_shipments: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
-        abnormal_orders: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
-        inventory_alerts: overviewMetric(null, 'unknown', 'Coupang：IP 白名单未通过'),
+        today_orders: overviewMetric(null, 'unknown', '最近一次同步无法确认：IP 白名单未通过'),
+        pending_shipments: overviewMetric(null, 'unknown', '最近一次同步无法确认：IP 白名单未通过'),
+        abnormal_orders: overviewMetric(null, 'unknown', '最近一次同步无法确认：IP 白名单未通过'),
+        inventory_alerts: overviewMetric(null, 'unknown', '最近一次同步无法确认：IP 白名单未通过'),
       },
     },
     {
@@ -1893,6 +1967,28 @@ function adaptShippingShipmentWritebackExecutionMockGateResult(data = {}) {
     formalOrderSyncOpen: Boolean(data.formal_order_sync_open ?? data.formalOrderSyncOpen),
     realDatabaseWritten: Boolean(data.real_database_written ?? data.realDatabaseWritten),
     realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+  };
+}
+
+function adaptShippingShipmentWritebackExecuteResult(data = {}) {
+  return {
+    ...adaptShippingShipmentWritebackExecutionMockGateResult(data),
+    phase: data.phase || 'Shipping-10A',
+    status: data.status || 'blocked',
+    skipReason: data.skip_reason ?? data.skipReason ?? null,
+    businessMessage: data.business_message ?? data.businessMessage ?? '',
+    shipmentWritebackExecute: Boolean(data.shipment_writeback_execute ?? data.shipmentWritebackExecute ?? true),
+    platformWrite: Boolean(data.platform_write ?? data.platformWrite),
+    platformWriteAttempted: Boolean(data.platform_write_attempted ?? data.platformWriteAttempted),
+    dispatchCandidateCount: Number(data.dispatch_candidate_count ?? data.dispatchCandidateCount ?? 0),
+    successCount: Number(data.success_count ?? data.successCount ?? 0),
+    failedCount: Number(data.failed_count ?? data.failedCount ?? 0),
+    updatedOrderCount: Number(data.updated_order_count ?? data.updatedOrderCount ?? 0),
+    operationAuditLogId: data.operation_audit_log_id ?? data.operationAuditLogId ?? null,
+    rawResponseSaved: Boolean(data.raw_response_saved ?? data.rawResponseSaved),
+    secretsSaved: Boolean(data.secrets_saved ?? data.secretsSaved),
+    realApiCalled: Boolean(data.real_api_called ?? data.realApiCalled),
+    shipmentWritebackCalled: Boolean(data.shipment_writeback_called ?? data.shipmentWritebackCalled),
   };
 }
 
@@ -3970,7 +4066,7 @@ function mockNaverBatchExecutionApprovalReadonly(payload = {}, kind = 'order') {
     business_message: ready
       ? (isProduct
         ? 'Naver 商品批量执行审批只读材料已可用于人工复核；当前不开放商品批量写入。'
-        : 'Naver 订单批量执行审批只读材料已可用于人工复核；当前不开放订单批量写入。')
+        : 'Naver 订单手动批量刷新已在订单页开放；该旧审批只读页不执行同步。')
       : '批量执行审批只读材料尚未齐备；请先补齐折叠详情中的门禁项。',
     next_action: '任何正式批量写入都必须另开明确执行阶段并重新确认备份、审计、回读和敏感扫描。',
   }, kind);
@@ -4359,6 +4455,31 @@ const sourceMethods = {
       ...queryBackendRows(rows, params),
       includeTestOrders: adapted.includeTestOrders,
       testOrdersExcluded: adapted.testOrdersExcluded,
+    };
+  },
+  getOrderLogisticsTrace: async (order = {}) => {
+    if (!isBackendSource) return adapters.orderLogisticsTrace(mockOrderLogisticsTrace(order));
+    const { store } = await resolveBackendStore({ storeId: order.storeId || order.store_id });
+    return adapters.orderLogisticsTrace(await backendApi.getOrderLogisticsTrace(order.id, { storeId: store.id }));
+  },
+  refreshSingleNaverOrderDetail: async (order = {}) => {
+    if (!isBackendSource) return mockSingleNaverOrderDetailRefresh(order);
+    const { store } = await resolveBackendStore({ storeId: order.storeId || order.store_id });
+    const result = await backendApi.refreshSingleNaverOrderDetail({
+      store_id: Number(store.id),
+      order_id: Number(order.id),
+    });
+    const refreshedOrder = result.refreshed_order || result.refreshedOrder || null;
+    return {
+      status: result.status || '',
+      message: result.message || '',
+      errorCode: result.error_code || result.errorCode || '',
+      updatedCount: Number(result.updated_count || result.updatedCount || 0),
+      noChangeCount: Number(result.no_change_count || result.noChangeCount || 0),
+      skippedCount: Number(result.skipped_count || result.skippedCount || 0),
+      platformWrite: Boolean(result.platform_write || result.platformWrite),
+      fieldAvailability: result.field_availability || result.fieldAvailability || {},
+      order: refreshedOrder ? adapters.order(refreshedOrder) : null,
     };
   },
   getShippingLogisticsMappings: async (params = {}) => {
@@ -5229,6 +5350,34 @@ const sourceMethods = {
       }),
     );
   },
+  executeShippingShipmentWriteback: async (payload = {}) => {
+    const request = {
+      ...toBackendShippingShipmentWritebackExecutionMockGatePayload(payload),
+      real_api_call_requested: Boolean(payload.realApiCallRequested ?? payload.real_api_call_requested),
+    };
+    if (!isBackendSource) {
+      return adaptShippingShipmentWritebackExecuteResult({
+        phase: 'Shipping-10A',
+        status: 'blocked',
+        skip_reason: 'demo_source_no_platform_write',
+        business_message: '演示数据源不会调用 Naver 发货回填。',
+        shipment_writeback_execute: true,
+        platform_write: false,
+        platform_write_attempted: false,
+        real_api_called: false,
+        shipment_writeback_called: false,
+        raw_response_saved: false,
+        secrets_saved: false,
+      });
+    }
+    const { store } = await resolveBackendStore({ storeId: request.store_id });
+    return adaptShippingShipmentWritebackExecuteResult(
+      await backendApi.executeShippingShipmentWriteback({
+        ...request,
+        store_id: Number(store.id),
+      }),
+    );
+  },
   getRolePermissionInventory: async () => {
     if (!isBackendSource) {
       return {
@@ -5485,6 +5634,65 @@ const sourceMethods = {
     const rows = withStoreName(adapters.list(result, adapters.customerInquiry).data, stores);
     return queryBackendRows(rows, params);
   },
+  syncNaverCustomerInquiries: async (payload = {}) => {
+    const request = {
+      store_id: Number(payload.storeId || payload.store_id),
+      start_date: payload.startDate || payload.start_date || undefined,
+      end_date: payload.endDate || payload.end_date || undefined,
+      answered: payload.answered ?? undefined,
+      page: Number(payload.page || 1),
+      size: Number(payload.size || 50),
+    };
+    if (!isBackendSource) {
+      return {
+        status: 'skipped',
+        message: '演示数据源不会调用 Naver 客服消息 API。',
+        platformWrite: false,
+        createdCount: 0,
+        updatedCount: 0,
+      };
+    }
+    const { store } = await resolveBackendStore(payload);
+    const result = await backendApi.syncNaverCustomerInquiries({ ...request, store_id: Number(store.id) });
+    return {
+      status: result.status || 'skipped',
+      message: result.message || '',
+      errorCode: result.error_code || null,
+      createdCount: Number(result.created_count || 0),
+      updatedCount: Number(result.updated_count || 0),
+      platformWrite: Boolean(result.platform_write),
+      rawResponseSaved: Boolean(result.raw_response_saved),
+    };
+  },
+  replyNaverCustomerInquiry: async (payload = {}) => {
+    const request = {
+      store_id: Number(payload.storeId || payload.store_id),
+      inquiry_id: payload.inquiryId || payload.inquiry_id || undefined,
+      external_inquiry_id: payload.externalInquiryId || payload.external_inquiry_id || undefined,
+      answer_comment: payload.answerComment || payload.answer_comment || '',
+      answer_template_id: payload.answerTemplateId || payload.answer_template_id || undefined,
+      manual_approval: Boolean(payload.manualApproval || payload.manual_approval),
+      final_operator_confirmation: Boolean(payload.finalOperatorConfirmation || payload.final_operator_confirmation),
+      actor_context: payload.actorContext || payload.actor_context || { role: 'operator' },
+    };
+    if (!isBackendSource) {
+      return {
+        status: 'blocked',
+        message: '演示数据源不会提交 Naver 客服回复。',
+        platformWrite: false,
+      };
+    }
+    const { store } = await resolveBackendStore(payload);
+    const result = await backendApi.replyNaverCustomerInquiry({ ...request, store_id: Number(store.id) });
+    return {
+      status: result.status || 'blocked',
+      message: result.message || '',
+      errorCode: result.error_code || null,
+      platformWrite: Boolean(result.platform_write),
+      platformWriteAttempted: Boolean(result.platform_write_attempted),
+      rawResponseSaved: Boolean(result.raw_response_saved),
+    };
+  },
   syncProductsMock: async (payload) => {
     if (!isBackendSource) return mockSyncResult('products', payload);
     const { store } = await resolveBackendStore(payload);
@@ -5515,6 +5723,19 @@ const sourceMethods = {
     if (!isBackendSource) return adapters.manualBatchSyncResult(mockManualBatchSyncResult(request));
     const { store } = await resolveBackendStore(payload);
     return adapters.manualBatchSyncResult(await backendApi.runManualStoreSync({
+      ...request,
+      store_id: Number(store.id),
+    }));
+  },
+  manualRefreshNaverOrders: async (payload = {}) => {
+    const request = {
+      store_id: Number(payload.storeId || payload.store_id),
+      max_count: Number(payload.maxCount || payload.max_count || 20),
+      hours: Number(payload.hours || 24),
+    };
+    if (!isBackendSource) return adapters.manualNaverOrderRefreshResult(mockManualNaverOrderRefreshResult(request));
+    const { store } = await resolveBackendStore(payload);
+    return adapters.manualNaverOrderRefreshResult(await backendApi.manualRefreshNaverOrders({
       ...request,
       store_id: Number(store.id),
     }));
@@ -5841,6 +6062,9 @@ const sourceMethods = {
         environment: 'mock',
         api_version: 'local',
         real_api_write_enabled: false,
+        controlled_platform_writes_enabled: true,
+        generic_platform_write_closed: true,
+        platform_write_mode: 'controlled_naver_official_writes',
         platform_write_closed: true,
       };
     const overview = isBackendSource
@@ -5870,9 +6094,13 @@ const sourceMethods = {
       Number(overviewSummary.ordersUnknownStoreCount || 0),
       Number(overviewSummary.inventoryUnknownStoreCount || 0),
     );
-    const platformWriteClosed = Boolean(
+    const genericPlatformWriteClosed = Boolean(
       health.platform_write_closed ?? health.platformWriteClosed ?? health.real_api_write_enabled === false,
-    ) && backup.platformWritesEnabled !== true && backup.formalSyncOpen !== true;
+    );
+    const controlledPlatformWritesEnabled = Boolean(
+      health.controlled_platform_writes_enabled ?? health.controlledPlatformWritesEnabled ?? true,
+    );
+    const controlledPlatformWriteReady = controlledPlatformWritesEnabled && genericPlatformWriteClosed;
     const checks = [
       {
         key: 'backend',
@@ -5882,11 +6110,13 @@ const sourceMethods = {
         tone: health.status === 'ok' || health.status === 'mock' ? 'success' : 'danger',
       },
       {
-        key: 'platform_write_closed',
-        label: '平台写入关闭',
-        status: platformWriteClosed ? '通过' : '禁止交付',
-        detail: platformWriteClosed ? 'Naver / Coupang 写入、回填、改价、改库存仍保持关闭。' : '检测到平台写入或正式同步开关打开，请先关闭。',
-        tone: platformWriteClosed ? 'success' : 'danger',
+        key: 'controlled_platform_write',
+        label: '受控平台写入',
+        status: controlledPlatformWriteReady ? 'Naver 受控开放' : '需要检查',
+        detail: controlledPlatformWriteReady
+          ? '仅 Naver 发货回填和人工客服回复开放；通用平台写入、改价、改库存、自动回复和 Coupang 写入仍关闭。'
+          : '通用平台写入开关或受控写入边界异常，请确认只保留 Naver 官方写入入口。',
+        tone: controlledPlatformWriteReady ? 'success' : 'danger',
       },
       {
         key: 'store_overview',
@@ -5914,7 +6144,11 @@ const sourceMethods = {
       status: 'operator_readiness',
       dataSource: DATA_SOURCE,
       backendOnline: health.status === 'ok' || health.status === 'mock',
-      platformWriteClosed,
+      platformWriteClosed: genericPlatformWriteClosed,
+      genericPlatformWriteClosed,
+      controlledPlatformWritesEnabled,
+      controlledPlatformWriteReady,
+      platformWriteMode: health.platform_write_mode || health.platformWriteMode || 'controlled_naver_official_writes',
       unknownStoreCount,
       ipBlockedStoreCount: Number(overviewSummary.ipBlockedStoreCount || 0),
       storeCount: overview.stores.length,

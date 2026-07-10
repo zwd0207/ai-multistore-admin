@@ -24,13 +24,13 @@ export default function Modal({
       <section className="modal-card" role="dialog" aria-modal="true" style={width ? { width } : undefined}>
         <header>
           <h2>{title}</h2>
-          <button className="modal-close" onClick={onClose} disabled={confirmDisabled} aria-label="关闭">×</button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">×</button>
         </header>
         <div className="modal-body">{children}</div>
         {showFooter && (
           <footer>
-            <button className="button ghost" onClick={onClose} disabled={confirmDisabled}>取消</button>
-            <button className="button primary" onClick={onConfirm} disabled={confirmDisabled}>{confirmText}</button>
+            <button type="button" className="button ghost" onClick={onClose}>取消</button>
+            <button type="button" className="button primary" onClick={onConfirm} disabled={confirmDisabled}>{confirmText}</button>
           </footer>
         )}
       </section>

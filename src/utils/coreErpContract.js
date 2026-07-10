@@ -98,8 +98,8 @@ export const CORE_API_CAPABILITY_MATRIX = [
     feature: 'shipment_writeback',
     category: 'A',
     apiDirection: '写入',
-    currentPhase: '本阶段关闭',
-    permission: '发货/配送相关 API 权限，接口级别需再次核对',
+    currentPhase: '人工确认后开放',
+    permission: '发货/配送相关 API 权限，需人工确认和日志',
     risk: '会改变平台配送数据',
     humanConfirm: true,
     label: 'Naver 发货回填',
@@ -120,7 +120,7 @@ export const CORE_API_CAPABILITY_MATRIX = [
     feature: 'customer_message',
     category: 'A',
     apiDirection: '读取/写入',
-    currentPhase: '先做入口和本地管理',
+    currentPhase: '读取已接入，回复需人工确认',
     permission: '客户咨询 API 权限',
     risk: '回复会改变平台客服记录',
     humanConfirm: true,
@@ -273,7 +273,13 @@ export function getCoreApiCapability(platform, feature) {
 }
 
 export function getDangerousActionState(actionKey) {
-  void actionKey;
+  if (actionKey === 'shipment_writeback') {
+    return {
+      enabled: true,
+      label: '人工确认后开放',
+      note: 'Naver 发货回填已按官方 API 开放；每次提交都需要预检、人工确认和操作日志。',
+    };
+  }
   return {
     enabled: false,
     label: '暂未开放',

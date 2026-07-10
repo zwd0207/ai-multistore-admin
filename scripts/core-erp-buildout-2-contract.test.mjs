@@ -28,6 +28,8 @@ includesAll('codex1/backend/app/services/stats_service.py', [
   'display_value": "?"',
   'ip_not_allowed',
   'manual_batch_sync',
+  '最近一次同步无法确认',
+  '最近一次同步：IP 白名单未通过',
   'orders_unknown_store_count',
 ]);
 
@@ -70,6 +72,7 @@ includesAll('src/pages/Dashboard.jsx', [
   '同步全部可用店铺',
   'metricDisplayValue',
   '无法确认时显示“?”',
+  '最近一次同步无法确认',
 ]);
 
 console.log('core ERP buildout 2 contract checks passed');
