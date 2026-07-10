@@ -68,10 +68,10 @@ includesAll('src/services/adapters.js', [
 ]);
 
 includesAll('src/pages/Dashboard.jsx', [
-  '全店铺运营总览',
-  '同步全部可用店铺',
+  '按店铺查看',
+  '更新全部店铺数据',
   'metricDisplayValue',
-  '无法确认时显示“?”',
+  '“待更新”表示需要管理员检查店铺连接',
   '最近一次同步无法确认',
 ]);
 

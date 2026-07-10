@@ -16,11 +16,23 @@ import Settings from '../pages/Settings';
 import Logs from '../pages/Logs';
 import ApiCapabilities from '../pages/ApiCapabilities';
 import ShippingAssistant from '../pages/ShippingAssistant';
+import { AuthPage, AuthStatePage } from '../pages/AuthPages';
+import { useAuthContext } from '../context/AuthContext';
+
+function RequireAuth({ children }) {
+  const { status, isAuthenticated, stores } = useAuthContext();
+  if (['unauthenticated', 'mfa_required'].includes(status)) return <AuthPage />;
+  if (status === 'checking') return <AuthPage />;
+  if (status === 'expired') return <AuthStatePage type="expired" />;
+  if (status === 'reauthentication_required') return <AuthStatePage type="reauthentication_required" />;
+  if (status === 'forbidden' || (isAuthenticated && !stores.length)) return <AuthStatePage type="forbidden" />;
+  return children;
+}
 
 export default function AppRoutes() {
   return (
     <Routes>
-      <Route element={<AdminLayout />}>
+      <Route element={<RequireAuth><AdminLayout /></RequireAuth>}>
         <Route index element={<Navigate to="/workbench" replace />} />
         <Route path="workbench" element={<Dashboard />} />
         <Route path="dashboard" element={<Dashboard />} />

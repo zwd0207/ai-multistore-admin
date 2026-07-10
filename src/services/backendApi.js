@@ -46,6 +46,10 @@ async function sendData(method, path, body, params) {
 }
 
 export const backendApi = {
+  login: (payload) => sendData('post', '/auth/login', payload),
+  verifyMfa: (payload) => sendData('post', '/auth/mfa/verify', payload),
+  getSession: () => getData('/auth/session'),
+  logout: () => sendData('post', '/auth/logout'),
   healthCheck: () => getData('/health'),
   getStores: (params) => getData('/stores', params),
   createStore: (payload) => sendData('post', '/stores', payload),
@@ -57,6 +61,15 @@ export const backendApi = {
   getOrders: (params) => getData('/orders', params),
   getOrderLogisticsTrace: (orderId, params) => getData(`/orders/${orderId}/logistics-trace`, params),
   getShippingLogisticsMappings: (params) => getData('/shipping/logistics-mappings', params),
+  getWarehouseShippingBatches: (params) => getData('/shipping/warehouse-batches', params),
+  getWarehouseShippingTrackingDetails: (batchId) => getData(`/shipping/warehouse-batches/${batchId}/tracking-details`),
+  createWarehouseShippingBatch: (payload) => sendData('post', '/shipping/warehouse-batches', payload),
+  requestWarehouseShippingApproval: (batchId, scope, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/approval/${scope}`, payload),
+  downloadWarehouseShippingManifest: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/manifest`, payload),
+  importWarehouseShippingTracking: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/tracking-import`, payload),
+  confirmWarehouseShippingBatch: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/confirm`, payload),
+  removeWarehouseShippingRow: (batchId, rowId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/rows/${rowId}/remove`, payload),
+  confirmWarehouseShippingWriteback: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/writeback`, payload),
   checkShippingLogisticsMappingWriteGate: (payload) => sendData('post', '/shipping/logistics-mappings/write-gate', payload),
   writeShippingLogisticsMappings: (payload) => sendData('post', '/shipping/logistics-mappings', payload),
   generateShippingExcelExport: (payload) => sendData('post', '/shipping/export-excel', payload),

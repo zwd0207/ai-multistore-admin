@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     api_capabilities,
     api_credential_readiness,
     appeal_cases,
+    auth,
     batch,
     backups,
     credentials,
@@ -28,6 +29,7 @@ from app.api.v1.endpoints import (
 
 
 api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(auth.router)
 api_router.include_router(health.router)
 api_router.include_router(stats.router)
 api_router.include_router(dashboard.router)

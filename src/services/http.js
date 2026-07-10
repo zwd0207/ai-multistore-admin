@@ -4,6 +4,25 @@ const shouldUseLocalDevProxy = import.meta.env?.DEV
   && /^https?:\/\/(?:127\.0\.0\.1|localhost):8012\/api\/v1$/i.test(configuredApiBaseUrl);
 const API_BASE_URL = import.meta.env?.PROD || shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl;
 const SENSITIVE_KEY_PATTERN = /(?:access[_-]?key|secret[_-]?key|password|token|credential|proxy[_-]?password|remote[_-]?desktop[_-]?password)/i;
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+let csrfToken = null;
+let sessionFailureHandler = null;
+
+export function setCsrfToken(nextToken) {
+  csrfToken = typeof nextToken === 'string' && nextToken ? nextToken : null;
+}
+
+export function clearCsrfToken() {
+  csrfToken = null;
+}
+
+export function setSessionFailureHandler(handler) {
+  sessionFailureHandler = typeof handler === 'function' ? handler : null;
+  return () => {
+    if (sessionFailureHandler === handler) sessionFailureHandler = null;
+  };
+}
 
 function businessHttpMessage(status) {
   if (status === 401 || status === 403) {
@@ -51,7 +70,7 @@ function buildUrl(path, params) {
 
 async function request(path, options = {}) {
   const { params, timeout = 10000, headers, body, ...fetchOptions } = options;
-  const token = typeof localStorage === 'undefined' ? null : localStorage.getItem('access_token');
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -61,11 +80,12 @@ async function request(path, options = {}) {
       headers: {
         Accept: 'application/json',
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(UNSAFE_METHODS.has(method) && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         ...headers,
       },
       body: body !== undefined && typeof body !== 'string' ? JSON.stringify(body) : body,
       signal: options.signal || controller.signal,
+      credentials: 'include',
     });
 
     let result = null;
@@ -81,6 +101,9 @@ async function request(path, options = {}) {
       error.status = response.status;
       error.errorCode = result?.error_code || 'HTTP_ERROR';
       error.data = sanitizeForError(result);
+      if (error.status === 401 && sessionFailureHandler) {
+        sessionFailureHandler({ status: error.status, errorCode: error.errorCode });
+      }
       throw error;
     }
 
@@ -109,6 +132,7 @@ export const http = {
   get: (path, options) => request(path, { ...options, method: 'GET' }),
   post: (path, body, options) => request(path, { ...options, method: 'POST', body }),
   put: (path, body, options) => request(path, { ...options, method: 'PUT', body }),
+  patch: (path, body, options) => request(path, { ...options, method: 'PATCH', body }),
   delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
 };
 

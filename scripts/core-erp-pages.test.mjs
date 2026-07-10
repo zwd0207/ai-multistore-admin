@@ -37,14 +37,24 @@ includesAll('src/pages/InventoryAlerts.jsx', [
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
-  '提交 Naver 发货回填',
-  '人工确认',
-  '下一步',
-  '发货处理顺序',
-  '准备仓库发货表',
-  '导入仓库回传表',
+  '待生成发货批次',
+  '已发仓库，等待回传',
+  '仓库表导入与异常校验',
+  '待确认平台回填',
+  '已完成与失败',
+  '创建发货批次',
+  '下载仓库发货表',
+  '上传仓库回传表',
   '仓库发货',
 ]);
+
+const shippingText = read('src/pages/ShippingAssistant.jsx');
+const visibleShippingText = [
+  ...[...shippingText.matchAll(/>([^<>{}]+)</g)].map((match) => match[1]),
+  ...[...shippingText.matchAll(/(?:title|description|note|placeholder|aria-label)="([^"]+)"/g)].map((match) => match[1]),
+  ...[...shippingText.matchAll(/setNotice\('([^']+)'\)/g)].map((match) => match[1]),
+].join(' ');
+assert.ok(!/\b(API|token|hash|readonly|gate|mock)\b/i.test(visibleShippingText), 'shipping page must not expose technical terms to operators');
 
 includesAll('src/pages/Dashboard.jsx', [
   '今日工作台',

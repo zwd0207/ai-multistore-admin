@@ -83,17 +83,17 @@ includesAll('src/services/dataProvider.js', [
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [
-  '已接入 Naver 官方 API 读取',
+  '更新客户咨询',
   '提交到 Naver',
   '人工确认发送',
   'answerComment',
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
-  '提交 Naver 发货回填',
-  '已按官方 API 开放',
-  '人工确认回填',
-  'dispatchProductOrders',
+  '待确认平台回填',
+  '确认并回填平台',
+  '我已确认店铺、订单、商品、快递公司和物流单号无误，并同意提交到当前平台。',
+  '发货信息已成功回填平台。',
 ]);
 
 console.log('naver ops ready contract checks passed');

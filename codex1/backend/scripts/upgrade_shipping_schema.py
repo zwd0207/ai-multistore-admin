@@ -149,7 +149,7 @@ SHIPPING_TABLE_COLUMNS = {
     "warehouse_shipping_batch_orders": {
         "id", "batch_id", "local_order_id", "store_id", "platform", "order_reference", "product_order_reference",
         "product_name", "quantity", "internal_sku", "logistics_inventory_code", "row_status", "is_active",
-        "carrier", "tracking_number_hash", "failure_reason", "operator_note", "active_lock", "created_at", "updated_at",
+        "carrier", "tracking_number_hash", "shipped_at", "failure_reason", "operator_note", "active_lock", "pre_batch_order_status", "created_at", "updated_at",
     },
 }
 
@@ -712,6 +712,14 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         created_tables = create_shipping_schema(connection)
+        batch_columns = {row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batches)").fetchall()}
+        if "version" not in batch_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batches ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+        batch_order_columns = {row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batch_orders)").fetchall()}
+        if "pre_batch_order_status" not in batch_order_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN pre_batch_order_status VARCHAR(30)")
+        if "shipped_at" not in batch_order_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN shipped_at VARCHAR(80)")
         connection.commit()
         verify_shipping_schema(connection)
         return {

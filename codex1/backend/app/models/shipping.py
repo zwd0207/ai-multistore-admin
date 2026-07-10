@@ -291,6 +291,7 @@ class WarehouseShippingBatch(Base):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="created", server_default="created")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     export_batch_id: Mapped[int | None] = mapped_column(ForeignKey("shipping_export_batches.id"), nullable=True)
     tracking_import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("shipping_tracking_import_batches.id"), nullable=True)
     created_by_actor_hash: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -303,6 +304,25 @@ class WarehouseShippingBatch(Base):
 
     store = relationship("Store")
     rows = relationship("WarehouseShippingBatchOrder", back_populates="batch", cascade="all, delete-orphan")
+
+
+class WarehouseShippingApprovalGrant(Base):
+    __tablename__ = "warehouse_shipping_approval_grants"
+    __table_args__ = (
+        Index("ix_warehouse_shipping_grants_batch_scope", "batch_id", "grant_scope"),
+        Index("ix_warehouse_shipping_grants_token_hash", "token_hash", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("warehouse_shipping_batches.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), nullable=False)
+    grant_scope: Mapped[str] = mapped_column(String(40), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    batch_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class WarehouseShippingBatchOrder(Base):
@@ -325,11 +345,13 @@ class WarehouseShippingBatchOrder(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     internal_sku: Mapped[str | None] = mapped_column(String(120), nullable=True)
     logistics_inventory_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pre_batch_order_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     row_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending_export", server_default="pending_export")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     active_lock: Mapped[str | None] = mapped_column(String(20), nullable=True, default="active", server_default="active")
     carrier: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tracking_number_hash: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    shipped_at: Mapped[str | None] = mapped_column(String(80), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
     operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
