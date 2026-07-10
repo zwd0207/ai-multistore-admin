@@ -17,6 +17,8 @@ assert.match(authContext, /session_expired/, 'expired sessions need an explicit 
 assert.match(authContext, /reauthentication_required/, 'recent-auth failures need an explicit state');
 assert.match(authContext, /permission_forbidden/, 'permission failures need an explicit state');
 assert.match(authContext, /getRequestState/, 'consumers need explicit request failure classification');
+assert.match(authContext, /unavailable/, 'session service failures must have a blocked state');
+assert.match(await readFile(new URL('../src/routes/index.jsx', import.meta.url), 'utf8'), /type="unavailable"/, 'unavailable sessions must not render operator routes');
 for (const endpoint of ['login:', 'verifyMfa:', 'getSession:', 'logout:']) {
   assert.match(backendApi, new RegExp(endpoint), `missing auth API wrapper: ${endpoint}`);
 }

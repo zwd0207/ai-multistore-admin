@@ -23,10 +23,11 @@ function RequireAuth({ children }) {
   const { status, isAuthenticated, stores } = useAuthContext();
   if (['unauthenticated', 'mfa_required'].includes(status)) return <AuthPage />;
   if (status === 'checking') return <AuthPage />;
+  if (status === 'unavailable') return <AuthStatePage type="unavailable" />;
   if (status === 'expired') return <AuthStatePage type="expired" />;
   if (status === 'reauthentication_required') return <AuthStatePage type="reauthentication_required" />;
   if (status === 'forbidden' || (isAuthenticated && !stores.length)) return <AuthStatePage type="forbidden" />;
-  return children;
+  return isAuthenticated ? children : <AuthPage />;
 }
 
 export default function AppRoutes() {

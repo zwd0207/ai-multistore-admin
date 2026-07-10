@@ -7,8 +7,9 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.config import get_settings
+from app.core.exceptions import ApiError
 from app.core.handlers import register_exception_handlers
-from app.database import init_db
+from app.database import SessionLocal, init_db
 from app.routers import health
 
 
@@ -69,6 +70,14 @@ def create_app() -> FastAPI:
                 status_code=401,
                 content={"success": False, "message": "login session is required", "error_code": "session_required", "detail": None},
             )
+        if _requires_write_protection(request):
+            try:
+                await _enforce_write_protection(request)
+            except ApiError as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"success": False, "message": exc.message, "error_code": exc.error_code, "detail": None},
+                )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -93,3 +102,101 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def _requires_write_protection(request: Request) -> bool:
+    return (
+        settings.app_env != "development"
+        and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path.startswith("/api/v1/")
+        and not request.url.path.startswith("/api/v1/auth/")
+        and _write_permission_for_path(request.url.path) is not None
+    )
+
+
+def _write_permission_for_path(path: str) -> str | None:
+    if path.startswith("/api/v1/shipping/"):
+        return "shipping.writeback.approve" if "writeback" in path else "shipping.batch.manage"
+    if path.startswith("/api/v1/sync/"):
+        return "customer.inquiries.reply" if path.endswith("/reply") else "platform.sync"
+    if path.startswith("/api/v1/stores"):
+        return "store.manage"
+    if path.startswith(("/api/v1/credentials", "/api/v1/platform-logins", "/api/v1/api-credentials")):
+        return "credentials.manage"
+    if path.startswith(("/api/v1/device-environments", "/api/v1/email-accounts", "/api/v1/important-emails", "/api/v1/appeal-cases")):
+        return "store.manage"
+    if path.startswith("/api/v1/api-capabilities"):
+        return "system.configure"
+    return None
+
+
+def _request_store_id(request: Request, body: dict, db) -> int | None:
+    candidate = body.get("store_id", body.get("storeId", request.query_params.get("store_id")))
+    if candidate is not None:
+        try:
+            return int(candidate)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("store scope is required", "store_scope_forbidden", 403) from exc
+    parts = [part for part in request.url.path.split("/") if part]
+    if len(parts) >= 4 and parts[2] == "stores":
+        try:
+            return int(parts[3])
+        except ValueError:
+            return None
+    if len(parts) >= 4:
+        try:
+            resource_id = int(parts[3])
+        except ValueError:
+            return None
+        from app.models.api_credential import ApiCredential
+        from app.models.appeal_case import AppealCase
+        from app.models.device_environment import DeviceEnvironment
+        from app.models.email_account import EmailAccount
+        from app.models.important_email import ImportantEmail
+        from app.models.platform_login_credential import PlatformLoginCredential
+
+        model_by_prefix = {
+            "credentials": ApiCredential,
+            "device-environments": DeviceEnvironment,
+            "email-accounts": EmailAccount,
+            "important-emails": ImportantEmail,
+            "appeal-cases": AppealCase,
+            "platform-logins": PlatformLoginCredential,
+        }
+        model = model_by_prefix.get(parts[2])
+        record = db.get(model, resource_id) if model else None
+        if record is not None:
+            return record.store_id
+    return None
+
+
+async def _enforce_write_protection(request: Request) -> None:
+    # Validate before routing so a rejected request cannot invoke a business service or external platform.
+    import json
+
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except (UnicodeDecodeError, ValueError):
+        body = {}
+    from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_permission
+    from app.services.session_service import require_csrf, require_session
+
+    db = SessionLocal()
+    try:
+        principal = require_session(request, db)
+        require_csrf(request, db, principal)
+        identity = OperatorIdentity(
+            user_id=principal.user_id,
+            user_key_hash=principal.user_key_hash,
+            session_id=principal.session_id,
+            last_reauthenticated_at=principal.last_reauthenticated_at,
+        )
+        permission_key = _write_permission_for_path(request.url.path)
+        store_id = _request_store_id(request, body, db)
+        if store_id is None:
+            require_any_store_permission(db, identity=identity, permission_key=permission_key)
+        else:
+            require_store_permission(db, identity=identity, store_id=store_id, permission_key=permission_key)
+    finally:
+        db.close()

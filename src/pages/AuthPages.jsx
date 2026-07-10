@@ -32,6 +32,7 @@ export function AuthPage() {
 }
 
 export function AuthStatePage({ type }) {
+  if (type === 'unavailable') return <AuthShell><h1>系统暂时无法登录</h1></AuthShell>;
   const { logout } = useAuthContext();
   const text = type === 'forbidden' ? '当前账号没有可操作店铺，请联系管理员' : type === 'expired' ? '登录已过期，请重新登录' : '需要重新验证身份，请重新登录';
   return <AuthShell><h1>{text}</h1><button className="button primary auth-submit" onClick={() => logout()}>重新登录</button></AuthShell>;

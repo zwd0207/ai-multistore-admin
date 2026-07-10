@@ -108,6 +108,12 @@ def main() -> None:
     with TestClient(app, base_url=ORIGIN) as client:
         missing = client.get("/api/v1/shipping/warehouse-batches", params={"store_id": 1})
         assert missing.status_code == 401 and missing.json()["error_code"] == "session_required", missing.text
+        with SessionLocal() as db:
+            store_count_before = db.query(Store).count()
+        rejected_store_create = client.post("/api/v1/stores", json={"name": "Rejected Store", "platform": "naver"})
+        assert rejected_store_create.status_code == 401, rejected_store_create.text
+        with SessionLocal() as db:
+            assert db.query(Store).count() == store_count_before
         forged = client.get(
             "/api/v1/shipping/warehouse-batches",
             params={"store_id": 1},
@@ -128,6 +134,20 @@ def main() -> None:
         assert forbidden.status_code == 403, forbidden.text
         no_csrf = client.post("/api/v1/shipping/warehouse-batches/1/approval/writeback", json={"confirmation": True})
         assert no_csrf.status_code == 403 and no_csrf.json()["error_code"] == "csrf_validation_failed", no_csrf.text
+        denied_store_create = client.post(
+            "/api/v1/stores",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={"name": "Denied Store", "platform": "naver"},
+        )
+        assert denied_store_create.status_code == 403, denied_store_create.text
+        cross_store_write = client.post(
+            "/api/v1/shipping/warehouse-batches",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={"store_id": 2, "platform": "naver", "order_ids": [], "manual_approval": True},
+        )
+        assert cross_store_write.status_code == 403, cross_store_write.text
+        with SessionLocal() as db:
+            assert db.query(Store).count() == store_count_before
         writeback_permission = client.post(
             "/api/v1/shipping/warehouse-batches/1/approval/writeback",
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},

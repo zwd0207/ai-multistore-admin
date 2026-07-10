@@ -84,5 +84,25 @@ def require_store_permission(db: Session, *, identity: OperatorIdentity, store_i
         raise ApiError("operator does not have this permission", code, 403)
 
 
+def require_any_store_permission(db: Session, *, identity: OperatorIdentity, permission_key: str) -> None:
+    granted = db.scalars(
+        select(ErpPermission.permission_key)
+        .select_from(ErpStoreMembership)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .join(ErpRolePermission, ErpRolePermission.role_id == ErpStoreMembership.role_id)
+        .join(ErpPermission, ErpPermission.id == ErpRolePermission.permission_id)
+        .join(Store, Store.id == ErpStoreMembership.store_id)
+        .where(
+            ErpStoreMembership.user_id == identity.user_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+            Store.status == "active",
+            ErpPermission.status == "active",
+        )
+    ).all()
+    if permission_key not in granted and "*" not in granted:
+        raise ApiError("operator does not have this permission", f"{permission_key.replace('.', '_')}_forbidden", 403)
+
+
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
