@@ -4511,6 +4511,7 @@ const sourceMethods = {
     }));
   },
   getWarehouseShippingBatches: async (params = {}) => backendApi.getWarehouseShippingBatches({ ...params, includeRows: true }),
+  getWarehouseShippingTrackingDetails: async (batchId) => backendApi.getWarehouseShippingTrackingDetails(batchId),
   createWarehouseShippingBatch: async (payload = {}) => backendApi.createWarehouseShippingBatch(payload),
   requestWarehouseShippingApproval: async (batchId, scope, payload = {}) => backendApi.requestWarehouseShippingApproval(batchId, scope, payload),
   downloadWarehouseShippingManifest: async (batchId, payload = {}) => backendApi.downloadWarehouseShippingManifest(batchId, payload),

@@ -44,4 +44,6 @@ export const warehouseRequest = {
   importSheet: ({ fileName, fileContentBase64 }) => ({ source_file_name: fileName, file_content_base64: fileContentBase64, manual_approval: true }),
   confirm: (rowIds) => ({ confirmed_row_ids: rowIds.map(Number), manual_approval: true }),
   remove: ({ reasonCode, warehouseStoppedShipping }) => ({ manual_approval: true, reason_code: reasonCode, warehouse_stopped_shipping: Boolean(warehouseStoppedShipping) }),
+  manifest: (approvalToken) => ({ manual_approval: true, privacy_access_acknowledged: true, approval_token: approvalToken }),
+  writeback: (approvalToken) => ({ manual_approval: true, final_operator_confirmation: true, real_api_call_requested: false, approval_token: approvalToken }),
 };
