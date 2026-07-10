@@ -3255,7 +3255,7 @@ def _ensure_naver_product_real_preview_allowed(
     actor_context: dict | None = None,
 ) -> None:
     settings = get_settings()
-    if not settings.real_api_test_enabled or settings.real_api_write_enabled or store_id != 8 or credential_id != 7:
+    if not settings.real_api_test_enabled or settings.real_api_write_enabled:
         raise ApiError(
             message="Naver product real micro preview is guardrail blocked",
             error_code="guardrail_blocked",
