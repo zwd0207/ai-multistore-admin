@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import DataTable from '../components/common/DataTable';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import PageHeader from '../components/common/PageHeader';
@@ -8,492 +7,212 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
 
-const prepStatusOptions = ['待核对', '商品已核对', '库存已确认', '单号已导入', '可人工发货'];
-const NAVER_DISPATCH_PAYLOAD_FIELD = 'dispatchProductOrders';
+const STAGES = [
+  ['prepare', '待生成发货批次'],
+  ['warehouse', '已发仓库，等待回传'],
+  ['review', '仓库表导入与异常校验'],
+  ['confirm', '待确认平台回填'],
+  ['result', '已完成与失败'],
+];
 
-function comparable(value) {
-  return String(value ?? '').trim().toLowerCase();
+const REMOVE_REASONS = ['订单已取消', '客户修改订单', '商品缺货', '收件信息需要修改', '其他原因'];
+
+const text = (value, fallback = '-') => String(value ?? '').trim() || fallback;
+const same = (left, right) => String(left ?? '').trim().toLowerCase() === String(right ?? '').trim().toLowerCase();
+
+function isPending(row = {}) {
+  const value = [row.status, row.order_status, row.delivery_status, row.delivery_status_label_zh].join(' ').toLowerCase();
+  return ['待发货', '新订单', '已付款', 'ready', 'payed', 'delivery_ready', 'place_product_order'].some((item) => value.includes(item.toLowerCase()));
 }
 
-function money(value, currency = 'KRW') {
-  return `${Number(value || 0).toLocaleString()} ${currency || 'KRW'}`;
-}
-
-function text(value, fallback = '-') {
-  const next = String(value ?? '').trim();
-  return next || fallback;
-}
-
-function orderNo(row = {}) {
-  return row.orderNo || row.external_order_id || row.order_id || row.id;
-}
-
-function isPendingShipment(row = {}) {
-  const statusText = [
-    row.status,
-    row.order_status,
-    row.delivery_status,
-    row.delivery_status_label_zh,
-    row.shippingStatus,
-  ].map(comparable).join(' ');
-  return ['待发货', '新订单', '已付款', 'ready', 'payed', 'delivery_ready', 'place_product_order'].some((flag) => statusText.includes(comparable(flag)));
-}
-
-function normalizeProduct(row = {}) {
+function normalizeOrder(row = {}) {
   return {
-    ...row,
-    name: text(row.name || row.productName || row.product_name),
-    optionName: text(row.optionName || row.option_name || row.option, ''),
+    id: String(row.id || row.product_order_id || row.external_product_order_id || row.external_order_id),
+    orderId: row.id,
+    orderNo: text(row.external_order_id || row.orderNo || row.order_id),
+    productOrderNo: text(row.external_product_order_id || row.product_order_id || row.productOrderNo || row.external_order_id),
     platform: text(row.platform || row.rawPlatform),
-    storeId: row.storeId || row.store_id,
+    store: text(row.store || row.store_name || row.storeName),
+    storeId: row.store_id || row.storeId,
+    productName: text(row.product_name || row.productName || row.product),
+    optionName: text(row.option_name || row.optionName || row.option, '无规格'),
+    quantity: Number(row.quantity || row.qty || 1),
+    receiver: text(row.receiver_name || row.receiverName || row.buyer_name, '待确认'),
+    phone: text(row.receiver_phone || row.receiverPhone, '待确认'),
+    address: text(row.receiver_address || row.receiverAddress, '待确认'),
+    inventoryCode: text(row.inventory_code || row.inventoryCode || row.sku, '待确认'),
     stock: Number(row.stock ?? row.stock_quantity ?? 0),
-    inventoryCode: text(row.inventoryCode || row.sku || row.externalId, '待维护'),
   };
 }
 
-function findInventory(order, products = []) {
-  const productName = comparable(order.productName);
-  const optionName = comparable(order.optionName);
-  return products.find((item) => {
-    if (order.storeId && item.storeId && String(order.storeId) !== String(item.storeId)) return false;
-    if (comparable(item.platform) !== comparable(order.platform)) return false;
-    const sameProduct = comparable(item.name) === productName || comparable(item.name).includes(productName) || productName.includes(comparable(item.name));
-    const sameOption = !optionName || !item.optionName || comparable(item.optionName) === optionName;
-    return sameProduct && sameOption;
-  }) || null;
-}
-
-function normalizeOrder(row = {}, products = []) {
-  const quantity = Number(row.quantity || row.qty || 1);
-  const base = {
-    ...row,
-    id: row.id || orderNo(row),
-    orderNo: orderNo(row),
-    platform: text(row.platform || row.rawPlatform),
-    store: text(row.store || row.storeName || row.store_name),
-    storeId: row.storeId || row.store_id,
-    productName: text(row.product || row.productName || row.product_name || row.name),
-    optionName: text(row.option || row.optionName || row.option_name || row.spec, '无规格'),
-    quantity,
-    amount: Number(row.amount ?? row.order_amount ?? row.totalAmount ?? 0),
-    currency: row.currency || 'KRW',
-    orderedAt: row.createdAt || row.ordered_at || row.paid_at || '',
-    statusText: text(row.delivery_status_label_zh || row.status || row.order_status),
-    sourceInfo: classifyCoreDataSource(row),
-  };
-  const inventory = findInventory(base, products);
-  const stock = Number(inventory?.stock ?? 0);
-  const stockEnough = inventory ? stock >= quantity : false;
-  return {
-    ...base,
-    inventoryCode: inventory?.inventoryCode || '待匹配',
-    inventoryStock: inventory ? stock : null,
-    stockStatus: inventory ? (stockEnough ? '库存足够' : '库存不足') : '待人工确认',
-    stockEnough,
-    trackingCompany: '',
-    trackingNo: '',
-  };
-}
-
-function parseTrackingText(value = '') {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [order, company, tracking] = line.split(/[,，\t]/).map((part) => part?.trim());
-      return {
-        orderNo: order || '',
-        company: company || '',
-        trackingNo: tracking || '',
-      };
-    })
-    .filter((item) => item.orderNo && item.trackingNo);
-}
-
-function buildShippingRows(rows = [], prepStatus = {}, trackingMap = {}) {
-  return rows.map((row) => {
-    const tracking = trackingMap[row.orderNo] || {};
+function parseReturnSheet(content, rows) {
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const values = lines.map((line) => line.split(/[,，\t]/).map((part) => part.trim()));
+  const start = values[0]?.some((cell) => /订单|运单|快递/.test(cell)) ? 1 : 0;
+  return values.slice(start).map((cells, index) => {
+    const [productOrderNo, company, trackingNo, quantity] = cells;
+    const row = rows.find((item) => item.productOrderNo === productOrderNo || item.orderNo === productOrderNo);
+    const problems = [];
+    if (!row) problems.push('找不到对应商品订单');
+    if (!company) problems.push('缺少快递公司');
+    if (!trackingNo) problems.push('缺少运单号');
+    if (quantity && row && Number(quantity) !== row.quantity) problems.push('发货数量与订单不一致');
+    const duplicate = trackingNo && values.slice(start).filter((other) => other[2] === trackingNo).length > 1;
+    if (duplicate) problems.push('运单号重复');
     return {
-      ...row,
-      trackingCompany: tracking.company || row.trackingCompany || '',
-      trackingNo: tracking.trackingNo || row.trackingNo || '',
-      prepStatus: prepStatus[row.orderNo] || '待核对',
+      id: `${productOrderNo || index}-${index}`,
+      rowId: row?.id,
+      productOrderNo: productOrderNo || '未填写',
+      productName: row?.productName || '-',
+      company: company || '-',
+      trackingNo: trackingNo || '-',
+      quantity: quantity || String(row?.quantity || ''),
+      result: problems.length ? (problems.some((item) => item === '找不到对应商品订单' || item.startsWith('缺少')) ? '无法处理' : '需要人工确认') : '可以正常处理',
+      reason: problems.join('；'),
     };
   });
 }
 
-function nextShippingStep(summary) {
-  if (!summary.pending) return ['暂无待发货订单', '回到订单管理确认订单状态，或等待新订单进入待发货。', '/orders'];
-  if (summary.matched < summary.pending) return ['先核对商品和库存编号', '有订单还没有匹配到库存编号，先确认商品名称、规格和库存编号。', '/products'];
-  if (summary.enough < summary.pending) return ['确认库存是否足够', '有订单库存不足或待人工确认，先处理库存缺口。', '/inventory'];
-  if (summary.imported < summary.pending) return ['再导入物流单号', '库存足够后，把物流商表格中的订单号、快递公司和运单号导入本地匹配。', '/shipping'];
-  return ['提交 Naver 发货回填', '发货准备状态已具备，可在人工确认后提交 Naver 发货回填。', '/shipping'];
+function downloadCsv(batch) {
+  const header = ['商品订单号', '订单号', '商品', '规格', '数量', '仓库货号', '收件人', '联系电话', '收件地址', '快递公司', '运单号'];
+  const rows = batch.rows.map((row) => [row.productOrderNo, row.orderNo, row.productName, row.optionName, row.quantity, row.inventoryCode, row.receiver, row.phone, row.address, '', '']);
+  const blob = new Blob([[header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${batch.code}-仓库发货表.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
-const columns = [
-  { key: 'orderNo', title: '订单号', render: (value) => <strong>{value}</strong> },
-  { key: 'platform', title: '平台' },
-  { key: 'store', title: '店铺' },
-  {
-    key: 'productName',
-    title: '商品和规格',
-    render: (value, row) => (
-      <div>
-        <strong>{value}</strong>
-        <small className="cell-subtitle">{row.optionName}</small>
-      </div>
-    ),
-  },
-  { key: 'quantity', title: '数量' },
-  { key: 'inventoryCode', title: '库存编号' },
-  {
-    key: 'inventoryStock',
-    title: '库存是否足够',
-    render: (value, row) => <StatusBadge value={`${row.stockStatus}${value === null ? '' : `：${value} 件`}`} />,
-  },
-  { key: 'trackingCompany', title: '快递公司', render: (value) => value || '待导入' },
-  { key: 'trackingNo', title: '运单号', render: (value) => value || '待导入' },
-  { key: 'prepStatus', title: '发货准备状态', render: (value) => <StatusBadge value={value} /> },
-];
-
 export default function ShippingAssistant() {
-  const {
-    stores,
-    selectedStoreId,
-    loading: storeLoading,
-    error: storeError,
-  } = useStoreContext();
+  const { stores, selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
+  const fileInput = useRef(null);
   const [query, setQuery] = useState({ keyword: '', platform: '', storeId: '' });
   const [draft, setDraft] = useState(query);
   const [orders, setOrders] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [activeStage, setActiveStage] = useState('prepare');
+  const [activeBatchId, setActiveBatchId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [trackingText, setTrackingText] = useState('');
-  const [trackingMap, setTrackingMap] = useState({});
-  const [trackingMessage, setTrackingMessage] = useState('');
-  const [prepStatus, setPrepStatus] = useState({});
-  const [showExport, setShowExport] = useState(false);
+  const [downloadConfirm, setDownloadConfirm] = useState(false);
+  const [removeRow, setRemoveRow] = useState(null);
+  const [removeReason, setRemoveReason] = useState('');
+  const [warehouseStopped, setWarehouseStopped] = useState(false);
   const [writebackConfirm, setWritebackConfirm] = useState(false);
-  const [writebackLoading, setWritebackLoading] = useState(false);
-  const [writebackMessage, setWritebackMessage] = useState('');
+  const [approvalExpired, setApprovalExpired] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (storeLoading) return;
-      setLoading(true);
-      setError('');
+      setLoading(true); setError('');
       try {
         const params = { page: 1, pageSize: 200 };
         if (isBackendSource && (query.storeId || selectedStoreId)) params.storeId = query.storeId || selectedStoreId;
-        const [orderResult, productResult] = await Promise.all([
-          dataProvider.getOrders(params),
-          dataProvider.getProducts(params),
-        ]);
-        const products = (productResult.data || productResult.items || []).map(normalizeProduct);
-        const nextOrders = (orderResult.data || orderResult.items || [])
-          .filter(isPendingShipment)
-          .map((item) => normalizeOrder(item, products))
-          .filter((item) => {
-            const keyword = comparable(query.keyword);
-            const haystack = [item.orderNo, item.productName, item.optionName, item.store, item.platform, item.inventoryCode].map(comparable).join(' ');
-            if (keyword && !haystack.includes(keyword)) return false;
-            if (query.platform && comparable(item.platform) !== comparable(query.platform)) return false;
-            if (query.storeId && String(item.storeId || '') !== String(query.storeId)) return false;
-            return true;
-          });
-        if (!cancelled) setOrders(nextOrders);
-      } catch (requestError) {
-        if (!cancelled) {
-          setOrders([]);
-          setError(requestError.message || '待发货订单加载失败');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+        const result = await dataProvider.getOrders(params);
+        const next = (result.data || result.items || []).filter(isPending).map(normalizeOrder).filter((row) => {
+          const haystack = [row.orderNo, row.productOrderNo, row.productName, row.optionName, row.store].join(' ').toLowerCase();
+          return (!query.keyword || haystack.includes(query.keyword.toLowerCase()))
+            && (!query.platform || same(row.platform, query.platform))
+            && (!query.storeId || String(row.storeId) === String(query.storeId));
+        });
+        if (!cancelled) setOrders(next);
+      } catch (requestError) { if (!cancelled) setError(requestError.message || '待发货订单加载失败，请稍后重试。'); }
+      finally { if (!cancelled) setLoading(false); }
     }
-    load();
-    return () => { cancelled = true; };
+    load(); return () => { cancelled = true; };
   }, [query, selectedStoreId, storeLoading]);
 
-  const rows = useMemo(() => buildShippingRows(orders, prepStatus, trackingMap), [orders, prepStatus, trackingMap]);
-  const summary = useMemo(() => ({
-    pending: rows.length,
-    matched: rows.filter((item) => item.inventoryCode !== '待匹配').length,
-    enough: rows.filter((item) => item.stockEnough).length,
-    imported: rows.filter((item) => item.trackingNo).length,
-    ready: rows.filter((item) => item.stockEnough && item.trackingNo && ['单号已导入', '可人工发货'].includes(item.prepStatus)).length,
-  }), [rows]);
+  const assigned = useMemo(() => new Set(batches.flatMap((batch) => batch.rows.filter((row) => !row.removed).map((row) => row.id))), [batches]);
+  const pendingRows = orders.filter((row) => !assigned.has(row.id));
+  const activeBatch = batches.find((batch) => String(batch.id) === String(activeBatchId)) || batches[0] || null;
+  const stageBatches = useMemo(() => ({
+    prepare: pendingRows,
+    warehouse: batches.filter((batch) => batch.sent && !batch.imported && !batch.completed),
+    review: batches.filter((batch) => batch.imported && !batch.confirmed && !batch.completed),
+    confirm: batches.filter((batch) => batch.confirmed && !batch.completed),
+    result: batches.filter((batch) => batch.completed || batch.failed),
+  }), [batches, pendingRows]);
 
-  const dangerousState = getDangerousActionState('shipment_writeback');
-  const [nextTitle, nextDescription] = nextShippingStep(summary);
-
-  const importTracking = () => {
-    const parsed = parseTrackingText(trackingText);
-    const nextMap = Object.fromEntries(parsed.map((item) => [item.orderNo, item]));
-    setTrackingMap(nextMap);
-    setPrepStatus((current) => {
-      const next = { ...current };
-      for (const row of rows) {
-        if (nextMap[row.orderNo]) next[row.orderNo] = '单号已导入';
-      }
-      return next;
-    });
-    setTrackingMessage(parsed.length
-      ? `已从物流单号表匹配 ${parsed.length} 条记录。可在人工确认后提交 Naver 发货回填。`
-      : '没有识别到有效物流单号。请按“订单号,快递公司,运单号”逐行填写。');
+  const createBatch = () => {
+    const rows = pendingRows.filter((row) => selected.includes(row.id));
+    if (!rows.length) return setNotice('请先勾选要发给仓库的商品订单。');
+    if (new Set(rows.map((row) => `${row.storeId}|${row.platform}`)).size > 1) return setNotice('一个发货批次只能包含同一店铺、同一平台的订单，请重新选择。');
+    const batch = { id: Date.now(), code: `SHIP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${String(batches.length + 1).padStart(2, '0')}`, store: rows[0].store, storeId: rows[0].storeId, platform: rows[0].platform, rows, sent: false, imported: false, confirmed: false, completed: false, failed: false, imports: [] };
+    setBatches((current) => [batch, ...current]); setActiveBatchId(batch.id); setSelected([]); setActiveStage('warehouse'); setNotice(`已创建 ${batch.code}，请确认影响范围后下载仓库发货表。`);
   };
 
-  const executeNaverWriteback = async () => {
-    if (writebackLoading) return;
-    const readyRows = rows.filter((item) => comparable(item.platform) === 'naver' && item.trackingNo);
-    if (!readyRows.length) {
-      setWritebackMessage('请先导入 Naver 订单的物流单号，再提交发货回填。');
-      return;
-    }
-    if (!writebackConfirm) {
-      setWritebackMessage('请先勾选人工确认回填。');
-      return;
-    }
-    if (!selectedStoreId && !query.storeId) {
-      setWritebackMessage('请先选择当前店铺，再提交 Naver 发货回填。');
-      return;
-    }
-    setWritebackLoading(true);
-    setWritebackMessage('正在提交 Naver 发货回填...');
-    try {
-      const result = await dataProvider.executeShippingShipmentWriteback({
-        storeId: selectedStoreId || query.storeId,
-        platform: 'naver',
-        trackingRows: readyRows.map((row) => ({
-          orderNo: row.orderNo,
-          productOrderReference: row.productOrderNo || row.product_order_id || '',
-          carrier: row.trackingCompany,
-          trackingNumber: row.trackingNo,
-          shippedAt: new Date().toISOString(),
-        })),
-        manualApproval: true,
-        matchingContractAcknowledged: true,
-        backupEvidenceAcknowledged: true,
-        auditEvidenceAcknowledged: true,
-        localStatusEvidenceAcknowledged: true,
-        naverWritebackBoundaryAcknowledged: true,
-        operatorChecklistAcknowledged: true,
-        executionApproval: true,
-        dryRunEvidenceAcknowledged: true,
-        permissionEvidenceAcknowledged: true,
-        finalOperatorConfirmation: true,
-        realApiCallRequested: true,
-        actorContext: { role: 'operator', action: 'manual_naver_shipment_dispatch', payloadField: NAVER_DISPATCH_PAYLOAD_FIELD },
-      });
-      setWritebackMessage(result.businessMessage || result.message || 'Naver 发货回填处理完成。');
-    } catch (writebackError) {
-      setWritebackMessage(writebackError.message || '发货信息提交失败，请确认订单状态、快递公司和运单号；仍无法处理时联系管理员。');
-    } finally {
-      setWritebackLoading(false);
-    }
+  const changeBatch = (update) => {
+    if (!activeBatch) return;
+    setBatches((current) => current.map((batch) => batch.id === activeBatch.id ? { ...batch, ...update } : batch));
+    setWritebackConfirm(false); setApprovalExpired(true);
   };
 
-  const updatePrepStatus = (row, status) => {
-    setPrepStatus((current) => ({ ...current, [row.orderNo]: status }));
+  const onFile = (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !activeBatch) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const imports = parseReturnSheet(String(reader.result || ''), activeBatch.rows.filter((row) => !row.removed));
+      changeBatch({ imported: true, imports }); setActiveStage('review'); setNotice(`已读取 ${file.name}，请先处理异常行。`);
+    };
+    reader.readAsText(file, 'utf-8');
   };
 
-  const exportRows = rows.filter((item) => item.stockEnough);
-  const exportText = exportRows.map((item) => [
-    item.orderNo,
-    item.platform,
-    item.store,
-    item.productName,
-    item.optionName,
-    item.quantity,
-    item.inventoryCode,
-    item.trackingCompany || '',
-    item.trackingNo || '',
-    item.prepStatus,
-  ].join(',')).join('\n');
-
-  const search = () => setQuery({ ...draft });
-  const reset = () => {
-    const clean = { keyword: '', platform: '', storeId: '' };
-    setDraft(clean);
-    setQuery(clean);
+  const confirmImport = () => {
+    if (!activeBatch) return;
+    const blocked = activeBatch.imports.filter((row) => row.result === '无法处理');
+    if (blocked.length) return setNotice('仍有无法处理的记录，请修正仓库回传表后重新上传。');
+    changeBatch({ confirmed: true }); setApprovalExpired(false); setActiveStage('confirm'); setNotice('物流信息已确认，请逐条核对后再确认提交。');
   };
 
-  return (
-    <>
-      <PageHeader
-        title="仓库发货"
-        description="核对待发货订单，准备仓库表，导入仓库回传的物流信息，并在确认后提交发货信息。"
-        actions={(
-          <>
-            <button type="button" className="button ghost" onClick={() => setShowExport((value) => !value)}>准备仓库发货表</button>
-          </>
-        )}
-      />
+  const submitWriteback = () => {
+    if (!activeBatch) return;
+    if (approvalExpired || !writebackConfirm) return setNotice('物流信息已变化或尚未确认，请重新核对并勾选确认后再提交。');
+    changeBatch({ completed: true }); setApprovalExpired(false); setActiveStage('result'); setNotice('发货信息已完成确认，已从待办中移除。平台提交由受控流程另行执行。');
+  };
 
-      <div className="summary-grid shipping-summary-grid">
-        <SummaryCard title="待发货订单" value={summary.pending} note="等待安排仓库发货" tone="info" />
-        <SummaryCard title="已匹配仓库货号" value={summary.matched} note="商品和规格已确认" tone={summary.matched ? 'success' : 'warning'} />
-        <SummaryCard title="库存足够" value={summary.enough} note="可进入发货表格" tone={summary.enough ? 'success' : 'warning'} />
-        <SummaryCard title="已导入物流信息" value={summary.imported} note="等待核对" tone={summary.imported ? 'success' : 'default'} />
-        <SummaryCard title="可提交发货信息" value={summary.ready} note="请人工确认后提交" tone={summary.ready ? 'success' : 'default'} />
-      </div>
+  const removeFromBatch = () => {
+    if (!activeBatch || !removeRow || !removeReason) return setNotice('移出前必须选择原因。');
+    if (activeBatch.sent && !warehouseStopped) return setNotice('该批次已发给仓库，请先确认仓库已经停止发货。');
+    changeBatch({ rows: activeBatch.rows.map((row) => row.id === removeRow.id ? { ...row, removed: true, removeReason } : row) });
+    setRemoveRow(null); setRemoveReason(''); setWarehouseStopped(false); setNotice('该商品订单已移出发货批次。');
+  };
 
-      <section className="content-card">
-        <div className="card-title">
-          <div>
-            <h2>下一步</h2>
-            <p>{nextDescription}</p>
-          </div>
-          <StatusBadge value={nextTitle} />
-        </div>
-        <div className="business-capability-grid compact">
-          <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>发货处理顺序</strong><span>1</span></div>
-            <p>先核对商品和规格，确认订单商品与仓库货号一致。</p>
-          </article>
-          <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>确认库存</strong><span>2</span></div>
-            <p>再看库存是否足够，库存不足时回到库存预警处理。</p>
-          </article>
-          <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>导入物流单号</strong><span>3</span></div>
-            <p>然后导入仓库回传表，核对快递公司和运单号。</p>
-          </article>
-          <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>Naver 回填</strong><span>4</span></div>
-            <p>最后由运营人员确认，系统才会提交发货信息到平台。</p>
-          </article>
-        </div>
-      </section>
+  const summary = { pending: pendingRows.length, warehouse: stageBatches.warehouse.length, review: stageBatches.review.length, confirm: stageBatches.confirm.length, result: stageBatches.result.length };
+  const rowsForStage = activeStage === 'prepare' ? pendingRows : activeBatch?.rows.filter((row) => !row.removed) || [];
 
-      <section className="content-card">
-        <div className="business-capability-grid compact">
-          <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>仓库准备</strong><span>先核对</span></div>
-            <p>先确认商品货号和库存，再准备交给仓库的发货表。</p>
-          </article>
-          <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>提交发货信息</strong><span>人工确认</span></div>
-            <p>物流信息核对无误后，由运营人员确认提交到平台。</p>
-          </article>
-          <article className="business-capability-card muted">
-            <div className="business-capability-head"><strong>导入仓库回传表</strong><span>等待核对</span></div>
-            <p>系统会将快递公司和运单号对应到订单，请先检查再提交。</p>
-          </article>
-          <article className="business-capability-card success">
-            <div className="business-capability-head"><strong>提交前确认</strong><span>避免错发</span></div>
-            <p>提交前请核对店铺、订单、快递公司和运单号，确认后不能随意撤回。</p>
-          </article>
-        </div>
-      </section>
+  return <>
+    <PageHeader title="仓库发货" description="先处理待发货订单，再按批次发送仓库、导入物流信息并确认发货结果。" />
+    {notice ? <div className="form-info">{notice}</div> : null}
+    {error || storeError ? <EmptyState title="仓库发货暂时无法加载" description={error || storeError} /> : null}
+    <div className="summary-grid shipping-summary-grid">
+      <SummaryCard title="待生成批次" value={summary.pending} note="先选择商品订单" tone="warning" />
+      <SummaryCard title="等待仓库回传" value={summary.warehouse} note="已发给仓库" tone="info" />
+      <SummaryCard title="等待检查" value={summary.review} note="仓库表已导入" tone="warning" />
+      <SummaryCard title="待确认提交" value={summary.confirm} note="逐条核对物流信息" tone="warning" />
+      <SummaryCard title="已完成或失败" value={summary.result} note="查看处理结果" tone="success" />
+    </div>
+    <div className="tab-row" aria-label="发货阶段">
+      {STAGES.map(([key, label], index) => <button type="button" key={key} className={activeStage === key ? 'active' : ''} onClick={() => setActiveStage(key)}>{index + 1}. {label}</button>)}
+    </div>
 
-      <FilterPanel>
-        <SearchBar
-          value={draft.keyword}
-          onChange={(keyword) => setDraft({ ...draft, keyword })}
-          onSearch={search}
-          onReset={reset}
-          placeholder="搜索订单号、商品、规格或库存编号"
-        >
-          <select value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value })}>
-            <option value="">全部平台</option>
-            <option value="Naver">Naver</option>
-            <option value="Coupang">Coupang</option>
-            <option value="Gmarket">Gmarket/ESM</option>
-          </select>
-          <select value={draft.storeId} onChange={(event) => setDraft({ ...draft, storeId: event.target.value })}>
-            <option value="">全部店铺</option>
-            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
-          </select>
-        </SearchBar>
-      </FilterPanel>
-
-      <section className="content-card">
-        {storeError ? <EmptyState title="店铺信息不可用" description={storeError} /> : null}
-        {error ? <EmptyState title="待发货订单加载失败" description={error} /> : null}
-        {!error && !loading && !rows.length ? (
-          <EmptyState title="暂无待发货订单" description="当前筛选条件下没有待发货订单。可以返回订单管理确认订单状态。" />
-        ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            loading={loading || storeLoading}
-            rowKey="id"
-            renderActions={(row) => (
-              <select value={row.prepStatus} onChange={(event) => updatePrepStatus(row, event.target.value)}>
-                {prepStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
-            )}
-          />
-        )}
-      </section>
-
-      <section className="content-card">
-        <div className="card-title">
-          <div>
-            <h2>导入物流单号表</h2>
-            <p>按行粘贴“订单号,快递公司,运单号”。系统会先对应订单，确认后再提交发货信息。</p>
-          </div>
-          <button type="button" className="button primary" onClick={importTracking}>匹配物流单号和订单</button>
-        </div>
-        <textarea
-          value={trackingText}
-          onChange={(event) => setTrackingText(event.target.value)}
-          placeholder="NV-20260702-000918,CJ大韩通运,1234567890"
-        />
-        {trackingMessage ? <div className="form-info">{trackingMessage}</div> : null}
-      </section>
-
-      <section className="content-card">
-        <div className="card-title">
-          <div>
-            <h2>提交 Naver 发货回填</h2>
-            <p>提交前请确认订单、快递公司和运单号无误；本操作会改变 Naver 平台配送状态。</p>
-          </div>
-          <StatusBadge value={dangerousState.label} />
-        </div>
-        <label className="checkbox-line">
-          <input
-            type="checkbox"
-            checked={writebackConfirm}
-            onChange={(event) => setWritebackConfirm(event.target.checked)}
-          />
-          <span>人工确认回填：我已核对待提交的 Naver 订单和物流单号。</span>
-        </label>
-        <div className="modal-actions-inline">
-          <button
-            type="button"
-            className="button primary"
-            onClick={executeNaverWriteback}
-            disabled={writebackLoading || !writebackConfirm || !rows.some((item) => comparable(item.platform) === 'naver' && item.trackingNo)}
-          >
-            {writebackLoading ? '提交中...' : '提交 Naver 发货回填'}
-          </button>
-        </div>
-        {writebackMessage ? <div className="form-info">{writebackMessage}</div> : null}
-        <p className="mock-sync-note">使用 Naver 官方 {NAVER_DISPATCH_PAYLOAD_FIELD} 发货提交结构；不会修改商品价格、库存或售后状态。</p>
-      </section>
-
-      {showExport ? (
-        <section className="content-card">
-          <div className="card-title">
-            <div>
-              <h2>生成发货表格</h2>
-              <p>以下内容可用于人工发货准备；发货完成仍需人工到平台后台处理。</p>
-            </div>
-            <StatusBadge value="记录发货准备状态" />
-          </div>
-          {exportRows.length ? (
-            <pre className="readonly-code">{`订单号,平台,店铺,商品,规格,数量,库存编号,快递公司,运单号,准备状态\n${exportText}`}</pre>
-          ) : (
-            <EmptyState title="还不能生成发货表格" description="请先确认库存编号匹配且库存足够。" />
-          )}
-        </section>
-      ) : null}
-    </>
-  );
+    {activeStage === 'prepare' ? <>
+      <FilterPanel><SearchBar value={draft.keyword} onChange={(keyword) => setDraft({ ...draft, keyword })} onSearch={() => setQuery({ ...draft })} onReset={() => { const clean = { keyword: '', platform: '', storeId: '' }; setDraft(clean); setQuery(clean); }} placeholder="搜索订单号、商品或规格"><select value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value })}><option value="">全部平台</option><option value="Naver">Naver</option><option value="Coupang">Coupang</option></select><select value={draft.storeId} onChange={(event) => setDraft({ ...draft, storeId: event.target.value })}><option value="">全部店铺</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></SearchBar></FilterPanel>
+      <section className="content-card"><div className="card-title"><div><h2>待发给仓库</h2><p>已选择 {selected.length} 个商品订单。一个批次只能选择同一店铺、同一平台。</p></div><button className="button primary" type="button" onClick={createBatch}>创建发货批次</button></div>{!loading && !rowsForStage.length ? <EmptyState title="没有待处理的发货订单" description="新订单进入待发货后会显示在这里。" /> : <table className="data-table"><thead><tr><th><input aria-label="选择全部" type="checkbox" checked={rowsForStage.length > 0 && selected.length === rowsForStage.length} onChange={(event) => setSelected(event.target.checked ? rowsForStage.map((row) => row.id) : [])} /></th><th>商品订单号</th><th>店铺</th><th>商品和规格</th><th>数量</th><th>仓库货号</th><th>收件信息</th></tr></thead><tbody>{rowsForStage.map((row) => <tr key={row.id}><td><input aria-label={`选择 ${row.productOrderNo}`} type="checkbox" checked={selected.includes(row.id)} onChange={() => setSelected((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td><td><strong>{row.productOrderNo}</strong><small className="cell-subtitle">订单 {row.orderNo}</small></td><td>{row.store}</td><td>{row.productName}<small className="cell-subtitle">{row.optionName}</small></td><td>{row.quantity}</td><td>{row.inventoryCode}</td><td>{row.receiver}<small className="cell-subtitle">{row.phone} · {row.address}</small></td></tr>)}</tbody></table>}</section>
+    </> : <section className="content-card">
+      {!activeBatch ? <EmptyState title="当前阶段没有发货批次" description="请先在第一阶段创建发货批次。" /> : <>
+        <div className="card-title"><div><h2>{activeBatch.code}</h2><p>{activeBatch.store} · {activeBatch.platform} · {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单 · {activeBatch.rows.filter((row) => !row.removed).reduce((sum, row) => sum + row.quantity, 0)} 件商品</p></div><select value={activeBatch.id} onChange={(event) => setActiveBatchId(event.target.value)}>{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.code} · {batch.store}</option>)}</select></div>
+        {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出 {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单的完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={() => { downloadCsv(activeBatch); changeBatch({ sent: true }); setApprovalExpired(false); setNotice('仓库发货表已下载。发送给仓库后，请等待回传表。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".csv,.txt" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
+        {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.imports.filter((row) => row.result === '可以正常处理').length} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.imports.filter((row) => row.result === '需要人工确认').length} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.imports.filter((row) => row.result === '无法处理').length} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>结果</th><th>原因</th></tr></thead><tbody>{activeBatch.imports.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.company}</td><td>{row.trackingNo}</td><td><StatusBadge value={row.result} /></td><td>{row.reason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
+        {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>处理</th></tr></thead><tbody>{activeBatch.imports.filter((item) => item.result !== '无法处理').map((item) => <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.company}</td><td>{item.trackingNo}</td><td><button type="button" onClick={() => setRemoveRow(activeBatch.rows.find((row) => row.id === item.rowId))}>移出批次</button></td></tr>)}</tbody></table>{approvalExpired ? <div className="form-error">物流信息已变化，请重新核对后再确认。</div> : null}<label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品、快递公司和运单号无误。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认发货信息</button></> : null}
+        {activeStage === 'result' ? <EmptyState title={activeBatch.failed ? '发货信息处理失败' : '发货批次已完成'} description={activeBatch.failed ? '请查看失败原因并修正后重新处理。' : '该批次已从当前待办中移除。'} /> : null}
+      </>}
+    </section>}
+    {removeRow ? <section className="content-card"><h2>移出商品订单</h2><p>商品订单 {removeRow.productOrderNo} 将从 {activeBatch?.code} 移出。</p><select value={removeReason} onChange={(event) => setRemoveReason(event.target.value)}><option value="">选择移出原因</option>{REMOVE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}</select>{activeBatch?.sent ? <label className="checkbox-line"><input type="checkbox" checked={warehouseStopped} onChange={(event) => setWarehouseStopped(event.target.checked)} /><span>我已确认仓库已经停止发货。</span></label> : null}<div className="modal-actions-inline"><button type="button" className="button ghost" onClick={() => setRemoveRow(null)}>取消</button><button type="button" className="button danger" onClick={removeFromBatch}>确认移出</button></div></section> : null}
+  </>;
 }

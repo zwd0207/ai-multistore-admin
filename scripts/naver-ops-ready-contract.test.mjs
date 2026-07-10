@@ -90,10 +90,10 @@ includesAll('src/pages/CustomerService.jsx', [
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
-  '提交 Naver 发货回填',
-  '提交发货信息',
-  '人工确认回填',
-  'dispatchProductOrders',
+  '待确认平台回填',
+  '确认发货信息',
+  '我已确认店铺、订单、商品、快递公司和运单号无误。',
+  '平台提交由受控流程另行执行。',
 ]);
 
 console.log('naver ops ready contract checks passed');
