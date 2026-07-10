@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
 from app.database import get_db
+from app.models.shipping import WarehouseShippingBatch
 from app.schemas.shipping import (
     ShippingExcelExportRequest,
     ShippingMappingWriteGateRequest,
@@ -48,6 +49,22 @@ def list_warehouse_shipping_batches(
             db, store_id=store_id, platform=platform, include_rows=include_rows,
         ),
         message="warehouse shipping batches listed",
+    )
+
+
+@router.get("/warehouse-batches/{batch_id}/tracking-details")
+def get_warehouse_shipping_tracking_details(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    batch = db.get(WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.batch.manage")
+    return success_response(
+        data=warehouse_shipping_service.get_warehouse_batch_tracking_details(db, batch_id=batch_id),
+        message="warehouse shipping tracking details listed",
     )
 
 
