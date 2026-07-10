@@ -6,6 +6,8 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
+from sqlalchemy import select
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -18,7 +20,8 @@ os.environ["REAL_API_WRITE_ENABLED"] = "false"
 
 from app.database import SessionLocal, engine, init_db
 from app.models.order import Order
-from app.models.shipping import LogisticsInventoryMapping, WarehouseShippingBatch, WarehouseShippingBatchOrder
+from app.models.order_status_event import OrderStatusEvent
+from app.models.shipping import LogisticsInventoryMapping, ShippingTrackingImportRow, WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.models.store import Store
 from app.services import order_service, shipping_service, warehouse_shipping_service
 
@@ -162,6 +165,10 @@ def main():
         )
         assert confirmed["status"] == "ready_to_writeback", confirmed
         assert db.get(Order, order.id).order_status == "DISPATCHED"
+        displayed_before_release = order_service.list_orders(
+            db, store_id=store.id, platform="naver", include_test_orders=True,
+        )[0]
+        assert displayed_before_release["tracking_number"] == "1234567890", displayed_before_release
 
         blocked_release = warehouse_shipping_service.remove_warehouse_batch_row(
             db,
@@ -182,8 +189,48 @@ def main():
         )
         assert released["status"] == "removed", released
         assert db.get(Order, order.id).order_status == "PAYED"
+        displayed_after_release = order_service.list_orders(
+            db, store_id=store.id, platform="naver", include_test_orders=True,
+        )[0]
+        assert displayed_after_release["tracking_number"] is None, displayed_after_release
+        assert displayed_after_release["delivery_company"] is None, displayed_after_release
+        assert db.scalars(select(ShippingTrackingImportRow).where(
+            ShippingTrackingImportRow.order_reference == order.external_order_id,
+        )).first() is None
+        assert db.get(WarehouseShippingBatch, first_batch_id).tracking_import_batch_id is None
+        assert db.scalars(select(OrderStatusEvent).where(
+            OrderStatusEvent.order_id == order.id,
+            OrderStatusEvent.source_type == shipping_service.SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE,
+        )).first() is None
+        release_raw_data = db.get(Order, order.id).raw_data or {}
+        assert not {
+            "shipping_status_update_source",
+            "shipping_status_update_phase",
+            "shipping_status_update_correlation_id",
+            "shipping_status_previous_status",
+            "shipping_status_current_status",
+            "shipping_tracking_hash",
+            "shipping_carrier_label",
+            "shipping_tracking_import_batch_id",
+        } & set(release_raw_data), release_raw_data
         reprocessed = create_batch(db, store.id, order.id)
         assert reprocessed["status"] == "created", reprocessed
+
+        legacy_order = add_order(db, store.id, "legacy")
+        db.commit()
+        legacy_batch = create_batch(db, store.id, legacy_order.id)
+        legacy_row_id = legacy_batch["batch"]["rows"][0]["id"]
+        db.get(WarehouseShippingBatchOrder, legacy_row_id).pre_batch_order_status = None
+        db.commit()
+        legacy_release = warehouse_shipping_service.remove_warehouse_batch_row(
+            db,
+            batch_id=legacy_batch["batch"]["id"],
+            row_id=legacy_row_id,
+            reason_code="warehouse_exception",
+            warehouse_stopped_shipping=False,
+            actor_context=ACTOR,
+        )
+        assert legacy_release["skip_reason"] == "pre_batch_order_status_missing_manual_resolution_required", legacy_release
 
         stale_order = add_order(db, store.id, "stale")
         db.commit()
@@ -198,6 +245,37 @@ def main():
         assert warehouse_shipping_service.consume_approval_grant(
             db, batch_id=stale_batch_id, user_id=77, grant_scope="manifest", token=stale_grant["approval_token"],
         ) is False
+
+        recipient_order = add_order(db, store.id, "recipient", {"delivery_memo": "Original memo"})
+        db.commit()
+        recipient_batch = create_batch(db, store.id, recipient_order.id)
+        recipient_grant = warehouse_shipping_service.issue_approval_grant(
+            db, batch_id=recipient_batch["batch"]["id"], user_id=78, grant_scope="manifest",
+        )
+        recipient_order.raw_data = {"delivery_memo": "Changed memo"}
+        db.commit()
+        assert warehouse_shipping_service.consume_approval_grant(
+            db, batch_id=recipient_batch["batch"]["id"], user_id=78, grant_scope="manifest", token=recipient_grant["approval_token"],
+        ) is False
+
+        product_order = add_order(db, store.id, "product")
+        db.commit()
+        product_batch = create_batch(db, store.id, product_order.id)
+        product_batch_id = product_batch["batch"]["id"]
+        product_grant = warehouse_shipping_service.issue_approval_grant(
+            db, batch_id=product_batch_id, user_id=79, grant_scope="manifest",
+        )
+        db.get(WarehouseShippingBatchOrder, product_batch["batch"]["rows"][0]["id"]).product_name = "Changed warehouse product"
+        db.commit()
+        assert warehouse_shipping_service.consume_approval_grant(
+            db, batch_id=product_batch_id, user_id=79, grant_scope="manifest", token=product_grant["approval_token"],
+        ) is False
+
+        generic_name_order = add_order(db, store.id, "generic-name", {"name": "Warehouse Test Bag"})
+        generic_name_order.receiver_name = None
+        db.commit()
+        generic_contract = order_service.recipient_contract(generic_name_order)
+        assert generic_contract["receiver_name"] == "", generic_contract
 
         completed_order = add_order(db, store.id, "completed")
         db.commit()

@@ -142,7 +142,7 @@ def recipient_contract(order: Order) -> dict[str, str]:
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
     receiver_name = _first_text(
         order.receiver_name,
-        _find_nested_text(raw_data, ("receiver_name", "receiverName", "recipientName", "name"), max_length=120),
+        _find_nested_text(raw_data, ("receiver_name", "receiverName", "recipientName"), max_length=120),
         max_length=120,
     )
     receiver_phone = _first_text(
@@ -200,7 +200,7 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
     )
     payload["receiver_name"] = payload.get("receiver_name") or _find_nested_text(
         raw_data,
-        ("receiver_name", "receiverName", "recipientName", "name"),
+        ("receiver_name", "receiverName", "recipientName"),
         max_length=120,
     )
     payload["receiver_address"] = payload.get("receiver_address") or _find_nested_text(

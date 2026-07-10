@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import secrets
 from datetime import timedelta
 from datetime import timezone
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timezone import get_utc_now
 from app.models.order import Order
+from app.models.order_status_event import OrderStatusEvent
 from app.models.shipping import (
     LogisticsInventoryMapping,
     ShippingTrackingImportBatch,
@@ -79,12 +81,14 @@ def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
             "order_id": row.local_order_id,
             "order_reference": row.order_reference,
             "product_order_reference": row.product_order_reference,
+            "product_name": row.product_name,
             "quantity": row.quantity,
             "internal_sku": row.internal_sku,
             "logistics_inventory_code": row.logistics_inventory_code,
             "row_status": row.row_status,
             "carrier": row.carrier,
             "tracking_number_hash": row.tracking_number_hash,
+            "recipient": order_service.recipient_contract(row.order),
         })
     payload = {
         "batch_id": batch.id,
@@ -92,7 +96,9 @@ def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
         "grant_scope": grant_scope,
         "candidates": candidates,
     }
-    return hashlib.sha256(repr(payload).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def _write_workflow_audit(db: Session, *, batch: WarehouseShippingBatch, actor_context: dict[str, Any] | None, action: str, row_count: int, reason_code: str) -> None:
@@ -489,6 +495,7 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
             }
             for row in import_rows if row.order_reference in ready_references
         ],
+        import_batch_id=batch.tracking_import_batch_id,
         manual_approval=True,
         matching_contract_acknowledged=True,
         backup_evidence_acknowledged=True,
@@ -604,8 +611,47 @@ def remove_warehouse_batch_row(
         return {"status": "blocked", "skip_reason": "warehouse_stop_confirmation_required"}
     if not row.is_active:
         return {"status": "blocked", "skip_reason": "shipping_batch_row_not_active"}
-    if row.pre_batch_order_status:
-        row.order.order_status = row.pre_batch_order_status
+    if not row.pre_batch_order_status:
+        return {"status": "blocked", "skip_reason": "pre_batch_order_status_missing_manual_resolution_required"}
+
+    tracking_import_batch_id = batch.tracking_import_batch_id
+    if tracking_import_batch_id:
+        import_batch = db.get(ShippingTrackingImportBatch, tracking_import_batch_id)
+        if import_batch is not None:
+            for import_row in list(import_batch.rows):
+                if (
+                    import_row.order_reference == row.order_reference
+                    or import_row.product_order_reference == row.product_order_reference
+                ):
+                    db.delete(import_row)
+            db.flush()
+            remaining_import_rows = db.scalars(select(ShippingTrackingImportRow).where(
+                ShippingTrackingImportRow.import_batch_id == import_batch.id,
+            )).all()
+            if not remaining_import_rows:
+                db.expire(import_batch, ["rows"])
+                db.delete(import_batch)
+                batch.tracking_import_batch_id = None
+    for status_event in db.scalars(select(OrderStatusEvent).where(
+        OrderStatusEvent.order_id == row.local_order_id,
+        OrderStatusEvent.platform == batch.platform,
+        OrderStatusEvent.source_type == shipping_service.SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE,
+    )).all():
+        db.delete(status_event)
+    safe_metadata = dict(row.order.raw_data or {})
+    for key in (
+        "shipping_status_update_source",
+        "shipping_status_update_phase",
+        "shipping_status_update_correlation_id",
+        "shipping_status_previous_status",
+        "shipping_status_current_status",
+        "shipping_tracking_hash",
+        "shipping_carrier_label",
+        "shipping_tracking_import_batch_id",
+    ):
+        safe_metadata.pop(key, None)
+    row.order.raw_data = safe_metadata or None
+    row.order.order_status = row.pre_batch_order_status
     row.row_status = "removed"
     row.failure_reason = reason_code
     row.is_active = False
