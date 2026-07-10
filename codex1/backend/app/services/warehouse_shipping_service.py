@@ -24,6 +24,7 @@ from app.models.shipping import (
 )
 from app.services import shipping_service
 from app.services.store_service import ensure_store_exists
+from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 
 
 ACTIVE_BATCH_STATUSES = {"created", "warehouse_sent", "warehouse_returned", "ready_to_writeback", "writeback_partial"}
@@ -53,6 +54,29 @@ def _safe_batch_row(row: WarehouseShippingBatchOrder) -> dict[str, Any]:
         "operator_note": row.operator_note,
         "is_active": row.is_active,
     }
+
+
+def _write_workflow_audit(db: Session, *, batch: WarehouseShippingBatch, actor_context: dict[str, Any] | None, action: str, row_count: int, reason_code: str) -> None:
+    now = get_utc_now()
+    correlation = f"warehouse-{action}-{batch.id}-{now:%Y%m%d%H%M%S%f}"
+    write_operation_audit_log_local(db, {
+        "created_at": now, "updated_at": now, "store_id": batch.store_id, "platform": batch.platform,
+        "environment": "local", "actor_type": "human", "actor_id": shipping_service._actor_hash(actor_context) or "actor-hash-warehouse",
+        "actor_label": "Operator", "actor_role": "operator", "action": action, "operation_phase": "Warehouse-R2",
+        "correlation_id": correlation, "request_id": correlation, "status": "success", "reason_code": reason_code,
+        "target_type": "shipping_batch", "target_id": str(batch.id), "target_hash": f"id-hash-{hashlib.sha256(batch.batch_no.encode()).hexdigest()[:16]}",
+        "target_label": "Warehouse shipping batch", "changed_field_names": ["warehouse_shipping_batches"],
+        "before_summary": {}, "after_summary": {"batch_id": batch.id, "row_count": row_count},
+        "counts_summary": {"shipping_batch_rows": row_count},
+        "safety_flags": {"privacy_fields_redacted": True, "real_api_called": False}, "sensitive_scan_passed": True,
+        "raw_response_saved": False, "secrets_saved": False, "privacy_fields_redacted": True,
+        "notes": "No recipient fields, tracking number, or file content recorded.",
+    }, write_enabled=True, manual_approval=True, local_write_scope=LOCAL_WRITER_SCOPE)
+
+
+def write_recipient_view_audit(db: Session, *, store_id: int, platform: str, user_key_hash: str, row_count: int) -> None:
+    batch = WarehouseShippingBatch(batch_no="operations-view", store_id=store_id, platform=platform)
+    _write_workflow_audit(db, batch=batch, actor_context={"actor_id": user_key_hash}, action="recipient_pii_viewed", row_count=row_count, reason_code="authorized_operations_view")
 
 
 def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scope: str) -> dict[str, Any]:
@@ -272,6 +296,7 @@ def download_warehouse_manifest(
     batch.status = "warehouse_sent"
     batch.warehouse_sent_at = get_utc_now()
     db.commit()
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="recipient_pii_exported", row_count=len(rows), reason_code="warehouse_manifest_download")
     content = _warehouse_xlsx(rows)
     return {
         "status": "warehouse_manifest_ready", "batch_id": batch.id, "file_name": f"{batch.batch_no}-warehouse.xlsx",
@@ -358,6 +383,7 @@ def import_warehouse_tracking_xlsx(
     batch.warehouse_returned_at = now
     batch.status = "warehouse_returned"
     db.commit()
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="warehouse_tracking_imported", row_count=len(normalized), reason_code="warehouse_return_import")
     db.refresh(batch)
     return {"status": "warehouse_return_imported", "batch": _serialize_batch(batch), "normal_count": normal, "needs_confirmation_count": needs_confirmation, "blocked_count": blocked, "real_api_called": False}
 
@@ -412,6 +438,7 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
     batch.version += 1
     batch.operator_confirmed_at = get_utc_now()
     db.commit()
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="shipping_batch_confirmed", row_count=ready, reason_code="operator_confirmed_tracking")
     db.refresh(batch)
     return {"status": "ready_to_writeback", "batch": _serialize_batch(batch), "local_update": local_update, "real_api_called": False}
 
@@ -486,5 +513,24 @@ def execute_warehouse_batch_writeback(
             if row.row_status == "ready_for_writeback":
                 row.failure_reason = result.get("skip_reason") or "platform_writeback_failed"
     db.commit()
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="platform_writeback_recorded", row_count=len(ready_refs), reason_code=str(result.get("status") or "failed"))
     db.refresh(batch)
     return {"status": result.get("status"), "writeback": result, "batch": _serialize_batch(batch), "real_api_called": bool(result.get("real_api_called"))}
+
+
+def remove_warehouse_batch_row(db: Session, *, batch_id: int, row_id: int, reason_code: str, actor_context: dict[str, Any] | None) -> dict[str, Any]:
+    batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
+    row = db.scalar(select(WarehouseShippingBatchOrder).where(WarehouseShippingBatchOrder.id == row_id, WarehouseShippingBatchOrder.batch_id == batch_id))
+    if batch is None or row is None:
+        return {"status": "blocked", "skip_reason": "shipping_batch_row_not_found"}
+    if batch.status in {"completed", "cancelled"}:
+        return {"status": "blocked", "skip_reason": "completed_batch_row_cannot_be_removed"}
+    row.row_status = "removed"
+    row.failure_reason = reason_code
+    row.is_active = False
+    row.active_lock = None
+    batch.version += 1
+    db.commit()
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="shipping_batch_row_removed", row_count=1, reason_code=reason_code)
+    db.refresh(batch)
+    return {"status": "removed", "batch": _serialize_batch(batch), "real_api_called": False}

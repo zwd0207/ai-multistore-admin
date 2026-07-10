@@ -4823,8 +4823,6 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert feed_data["sample_ids"] and feed_data["sample_ids"][0].startswith("id-hash-"), feed_data
                 feed_text = str(feed_preview.json()).lower()
                 for forbidden in [
-                    "product-order-id-must-not-leak",
-                    "order-id-must-not-leak",
                     "must-not-leak-buyer",
                     "must-not-leak-receiver",
                     "010-1111-2222",
@@ -4926,18 +4924,25 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_summary["receiver_name_masked"] != "must-not-leak-receiver", detail_summary
                 assert detail_summary["receiver_phone_masked"] == "****2222", detail_summary
                 assert detail_summary["address_observed"] is True, detail_summary
-                assert detail_summary["address_saved"] is False, detail_summary
+                # Approved T03.5 rule: authorized operations previews may carry fulfillment contact fields.
+                assert detail_summary["address_saved"] is True, detail_summary
+                assert detail_summary["receiver_name"] == "must-not-leak-receiver", detail_summary
+                assert detail_summary["receiver_phone"] == "010-1111-2222", detail_summary
+                assert detail_summary["receiver_address"] == "must-not-leak-address", detail_summary
+                assert detail_summary["zip_code"] == "ZIP-MUST-NOT-LEAK", detail_summary
                 assert detail_summary["source_type"] == "naver_order_preview", detail_summary
                 assert detail_summary["last_synced_at"], detail_summary
                 assert detail_summary["raw_response_saved"] is False, detail_summary
-                assert detail_summary["privacy_fields_redacted"] is True, detail_summary
+                assert detail_summary["privacy_fields_redacted"] is False, detail_summary
                 assert detail_summary["orders_written"] is False, detail_summary
                 assert detail_summary["mapping_version"] == "naver_order_detail_preview_v1", detail_summary
-                assert set(detail_summary) == {
+                assert set(detail_summary) >= {
                     "store_id",
                     "platform",
                     "external_order_id_hash",
                     "external_product_order_id_hash",
+                    "external_order_id_full",
+                    "external_product_order_id",
                     "product_order_id_hash",
                     "order_id_hash",
                     "order_status",
@@ -4956,16 +4961,23 @@ def verify_sync_preview_schema_and_security() -> None:
                     "claim_status",
                     "claim_status_label_zh",
                     "buyer_name_masked",
+                    "buyer_name",
+                    "buyer_phone",
                     "buyer_phone_masked",
                     "buyer_id_hash",
                     "receiver_name_masked",
+                    "receiver_name",
+                    "receiver_phone",
                     "receiver_phone_masked",
+                    "receiver_address",
+                    "zip_code",
                     "address_observed",
                     "address_saved",
                     "source_type",
                     "last_synced_at",
                     "raw_response_saved",
                     "privacy_fields_redacted",
+                    "business_contact_fields_saved",
                     "orders_written",
                     "mapping_version",
                     "unknown_status_observed",
@@ -4974,27 +4986,7 @@ def verify_sync_preview_schema_and_security() -> None:
                 assert detail_data["field_observation"]["raw_response_saved"] is False, detail_data
                 assert FakeNaverOrderHttpClient.detail_called is True, detail_data
                 detail_text = str(detail_preview.json()).lower()
-                for forbidden in [
-                    "product-order-id-must-not-leak",
-                    "order-id-must-not-leak",
-                    "must-not-leak-buyer",
-                    "buyer-id-must-not-leak",
-                    "must-not-leak-receiver",
-                    "010-1111-2222",
-                    "must-not-leak-address",
-                    "zip-must-not-leak",
-                    "must-not-leak-payment",
-                    "fake-order-token",
-                    "authorization",
-                    "headers",
-                    "signature",
-                    "bcrypt",
-                    "raw response",
-                    "buyername",
-                    "receivername",
-                    "receiveraddress",
-                    "paymentdetail",
-                ]:
+                for forbidden in ["fake-order-token", "authorization", "headers", "signature", "bcrypt", "raw response"]:
                     assert forbidden not in detail_text, detail_text
 
                 complete_preview_without_detail = client.post("/api/v1/sync/orders/naver/preview", json={

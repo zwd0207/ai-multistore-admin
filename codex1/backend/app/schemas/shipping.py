@@ -198,6 +198,11 @@ class WarehouseShippingConfirmRequest(BaseModel):
     actor_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class WarehouseShippingRemoveRowRequest(BaseModel):
+    manual_approval: bool = False
+    reason_code: str = Field(..., min_length=1, max_length=120)
+
+
 class WarehouseShippingWritebackRequest(BaseModel):
     manual_approval: bool = False
     final_operator_confirmation: bool = False

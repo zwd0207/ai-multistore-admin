@@ -23,6 +23,7 @@ from app.schemas.shipping import (
     WarehouseShippingManifestRequest,
     WarehouseShippingTrackingImportRequest,
     WarehouseShippingWritebackRequest,
+    WarehouseShippingRemoveRowRequest,
     WarehouseShippingApprovalRequest,
 )
 from app.services import shipping_service
@@ -114,6 +115,23 @@ def confirm_warehouse_shipping_batch(
         ),
         message="warehouse shipping batch confirmed",
     )
+
+
+@router.post("/warehouse-batches/{batch_id}/rows/{row_id}/remove")
+def remove_warehouse_shipping_batch_row(
+    batch_id: int, row_id: int, payload: WarehouseShippingRemoveRowRequest,
+    db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
+    if batch is None:
+        return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
+    require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.batch.manage")
+    if not payload.manual_approval:
+        return success_response(data={"status": "blocked", "skip_reason": "manual_approval_required"})
+    return success_response(data=warehouse_shipping_service.remove_warehouse_batch_row(
+        db, batch_id=batch_id, row_id=row_id, reason_code=payload.reason_code,
+        actor_context={"role": "operator", "actor_id": identity.user_key_hash},
+    ))
 
 
 @router.post("/warehouse-batches/{batch_id}/writeback")
