@@ -74,17 +74,6 @@ function parseReturnSheet(content, rows) {
   });
 }
 
-function downloadCsv(batch) {
-  const header = ['商品订单号', '订单号', '商品', '规格', '数量', '仓库货号', '收件人', '联系电话', '收件地址', '快递公司', '运单号'];
-  const rows = batch.rows.map((row) => [row.productOrderNo, row.orderNo, row.productName, row.optionName, row.quantity, row.inventoryCode, row.receiver, row.phone, row.address, '', '']);
-  const blob = new Blob([[header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${batch.code}-仓库发货表.csv`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
 export default function ShippingAssistant() {
   const { stores, selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const fileInput = useRef(null);
@@ -105,6 +94,13 @@ export default function ShippingAssistant() {
   const [writebackConfirm, setWritebackConfirm] = useState(false);
   const [approvalExpired, setApprovalExpired] = useState(false);
 
+  const refreshBatches = async () => {
+    const storeId = query.storeId || selectedStoreId;
+    if (!storeId) return;
+    const result = await dataProvider.getWarehouseShippingBatches({ storeId, platform: query.platform || 'naver' });
+    setBatches(result.items || []);
+  };
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -120,7 +116,7 @@ export default function ShippingAssistant() {
             && (!query.platform || same(row.platform, query.platform))
             && (!query.storeId || String(row.storeId) === String(query.storeId));
         });
-        if (!cancelled) setOrders(next);
+        if (!cancelled) { setOrders(next); await refreshBatches(); }
       } catch (requestError) { if (!cancelled) setError(requestError.message || '待发货订单加载失败，请稍后重试。'); }
       finally { if (!cancelled) setLoading(false); }
     }
@@ -138,49 +134,51 @@ export default function ShippingAssistant() {
     result: batches.filter((batch) => batch.completed || batch.failed),
   }), [batches, pendingRows]);
 
-  const createBatch = () => {
+  const createBatch = async () => {
     const rows = pendingRows.filter((row) => selected.includes(row.id));
     if (!rows.length) return setNotice('请先勾选要发给仓库的商品订单。');
     if (new Set(rows.map((row) => `${row.storeId}|${row.platform}`)).size > 1) return setNotice('一个发货批次只能包含同一店铺、同一平台的订单，请重新选择。');
-    const batch = { id: Date.now(), code: `SHIP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${String(batches.length + 1).padStart(2, '0')}`, store: rows[0].store, storeId: rows[0].storeId, platform: rows[0].platform, rows, sent: false, imported: false, confirmed: false, completed: false, failed: false, imports: [] };
-    setBatches((current) => [batch, ...current]); setActiveBatchId(batch.id); setSelected([]); setActiveStage('warehouse'); setNotice(`已创建 ${batch.code}，请确认影响范围后下载仓库发货表。`);
+    const result = await dataProvider.createWarehouseShippingBatch({ storeId: rows[0].storeId, platform: rows[0].platform, orderIds: rows.map((row) => row.orderId), manualApproval: true });
+    if (result.status !== 'created') return setNotice('无法创建批次，请检查订单状态后重新选择。');
+    await refreshBatches(); setActiveBatchId(result.batch.id); setSelected([]); setActiveStage('warehouse'); setNotice(`已创建 ${result.batch.batch_no}，请确认影响范围后下载仓库发货表。`);
   };
 
-  const changeBatch = (update) => {
-    if (!activeBatch) return;
-    setBatches((current) => current.map((batch) => batch.id === activeBatch.id ? { ...batch, ...update } : batch));
-    setWritebackConfirm(false); setApprovalExpired(true);
-  };
 
   const onFile = (event) => {
     const file = event.target.files?.[0];
     if (!file || !activeBatch) return;
+    if (!file.name.toLowerCase().endsWith('.xlsx')) { setNotice('请选择仓库回传的 XLSX 文件。'); return; }
     const reader = new FileReader();
-    reader.onload = () => {
-      const imports = parseReturnSheet(String(reader.result || ''), activeBatch.rows.filter((row) => !row.removed));
-      changeBatch({ imported: true, imports }); setActiveStage('review'); setNotice(`已读取 ${file.name}，请先处理异常行。`);
+    reader.onload = async () => {
+      const content = String(reader.result || '').split(',')[1] || '';
+      const result = await dataProvider.importWarehouseShippingTracking(activeBatch.id, { sourceFileName: file.name, fileContentBase64: content, manualApproval: true });
+      if (result.status !== 'warehouse_return_imported') { setNotice('信息已变化，请重新确认。'); return; }
+      await refreshBatches(); setActiveStage('review'); setNotice(`已读取 ${file.name}，请先处理异常行。`);
     };
-    reader.readAsText(file, 'utf-8');
+    reader.readAsDataURL(file);
   };
 
-  const confirmImport = () => {
+  const confirmImport = async () => {
     if (!activeBatch) return;
-    const blocked = activeBatch.imports.filter((row) => row.result === '无法处理');
-    if (blocked.length) return setNotice('仍有无法处理的记录，请修正仓库回传表后重新上传。');
-    changeBatch({ confirmed: true }); setApprovalExpired(false); setActiveStage('confirm'); setNotice('物流信息已确认，请逐条核对后再确认提交。');
+    const confirmIds = activeBatch.rows.filter((row) => row.row_status === 'needs_confirmation').map((row) => row.id);
+    const result = await dataProvider.confirmWarehouseShippingBatch(activeBatch.id, { confirmedRowIds: confirmIds, manualApproval: true });
+    if (result.status !== 'ready_to_writeback') return setNotice('信息已变化，请重新确认。');
+    await refreshBatches(); setApprovalExpired(false); setActiveStage('confirm'); setNotice('物流信息已确认，请逐条核对后再确认提交。');
   };
 
   const submitWriteback = () => {
     if (!activeBatch) return;
     if (approvalExpired || !writebackConfirm) return setNotice('物流信息已变化或尚未确认，请重新核对并勾选确认后再提交。');
-    changeBatch({ completed: true }); setApprovalExpired(false); setActiveStage('result'); setNotice('发货信息已完成确认，已从待办中移除。平台提交由受控流程另行执行。');
+    setNotice('平台回填需要单独的后端审批；本页面不会触发真实平台写入。');
   };
 
-  const removeFromBatch = () => {
+  const removeFromBatch = async () => {
     if (!activeBatch || !removeRow || !removeReason) return setNotice('移出前必须选择原因。');
     if (activeBatch.sent && !warehouseStopped) return setNotice('该批次已发给仓库，请先确认仓库已经停止发货。');
-    changeBatch({ rows: activeBatch.rows.map((row) => row.id === removeRow.id ? { ...row, removed: true, removeReason } : row) });
-    setRemoveRow(null); setRemoveReason(''); setWarehouseStopped(false); setNotice('该商品订单已移出发货批次。');
+    const reasonMap = { '订单已取消': 'order_cancelled', '客户修改订单': 'customer_changed_order', '商品缺货': 'out_of_stock', '收件信息需要修改': 'address_change', '其他原因': 'other' };
+    const result = await dataProvider.removeWarehouseShippingRow(activeBatch.id, removeRow.id, { manualApproval: true, reasonCode: reasonMap[removeReason] || 'other', warehouseStoppedShipping: warehouseStopped });
+    if (result.status !== 'removed') return setNotice('信息已变化，请重新确认。');
+    await refreshBatches(); setRemoveRow(null); setRemoveReason(''); setWarehouseStopped(false); setNotice('该商品订单已移出发货批次。');
   };
 
   const summary = { pending: pendingRows.length, warehouse: stageBatches.warehouse.length, review: stageBatches.review.length, confirm: stageBatches.confirm.length, result: stageBatches.result.length };
@@ -207,7 +205,7 @@ export default function ShippingAssistant() {
     </> : <section className="content-card">
       {!activeBatch ? <EmptyState title="当前阶段没有发货批次" description="请先在第一阶段创建发货批次。" /> : <>
         <div className="card-title"><div><h2>{activeBatch.code}</h2><p>{activeBatch.store} · {activeBatch.platform} · {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单 · {activeBatch.rows.filter((row) => !row.removed).reduce((sum, row) => sum + row.quantity, 0)} 件商品</p></div><select value={activeBatch.id} onChange={(event) => setActiveBatchId(event.target.value)}>{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.code} · {batch.store}</option>)}</select></div>
-        {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出 {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单的完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={() => { downloadCsv(activeBatch); changeBatch({ sent: true }); setApprovalExpired(false); setNotice('仓库发货表已下载。发送给仓库后，请等待回传表。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".csv,.txt" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
+        {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={async () => { const approval = await dataProvider.requestWarehouseShippingApproval(activeBatch.id, 'manifest', { confirmation: true }); const result = await dataProvider.downloadWarehouseShippingManifest(activeBatch.id, { manualApproval: true, privacyAccessAcknowledged: true, approvalToken: approval.approval_token || approval.token }); if (result.status !== 'warehouse_manifest_ready') return setNotice('信息已变化，请重新确认。'); const link = document.createElement('a'); link.href = `data:${result.content_type};base64,${result.file_content_base64}`; link.download = result.file_name; link.click(); await refreshBatches(); setNotice('仓库发货表已下载。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".xlsx" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
         {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.imports.filter((row) => row.result === '可以正常处理').length} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.imports.filter((row) => row.result === '需要人工确认').length} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.imports.filter((row) => row.result === '无法处理').length} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>结果</th><th>原因</th></tr></thead><tbody>{activeBatch.imports.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.company}</td><td>{row.trackingNo}</td><td><StatusBadge value={row.result} /></td><td>{row.reason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
         {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>处理</th></tr></thead><tbody>{activeBatch.imports.filter((item) => item.result !== '无法处理').map((item) => <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.company}</td><td>{item.trackingNo}</td><td><button type="button" onClick={() => setRemoveRow(activeBatch.rows.find((row) => row.id === item.rowId))}>移出批次</button></td></tr>)}</tbody></table>{approvalExpired ? <div className="form-error">物流信息已变化，请重新核对后再确认。</div> : null}<label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品、快递公司和运单号无误。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认发货信息</button></> : null}
         {activeStage === 'result' ? <EmptyState title={activeBatch.failed ? '发货信息处理失败' : '发货批次已完成'} description={activeBatch.failed ? '请查看失败原因并修正后重新处理。' : '该批次已从当前待办中移除。'} /> : null}
