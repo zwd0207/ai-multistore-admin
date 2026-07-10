@@ -4,17 +4,32 @@ import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 
-const menuItems = [
-  ['⌂', '首页工作台', '/workbench'],
-  ['⇄', '订单管理', '/orders'],
-  ['▣', '发货辅助', '/shipping'],
-  ['◇', '商品管理', '/products'],
-  ['!', '库存预警', '/inventory'],
-  ['□', '店铺管理', '/stores'],
-  ['✉', '平台消息', '/customer-service'],
-  ['§', '申诉中心', '/appeals'],
-  ['@', '邮箱中心', '/emails'],
-  ['⚙', '系统设置', '/settings'],
+const menuGroups = [
+  {
+    label: '每日运营',
+    items: [
+      ['⌂', '今日工作台', '/workbench'],
+      ['⇄', '订单处理', '/orders'],
+      ['▣', '仓库发货', '/shipping'],
+      ['✉', '客户咨询', '/customer-service'],
+      ['§', '售后异常', '/appeals'],
+    ],
+  },
+  {
+    label: '经营管理',
+    items: [
+      ['◇', '商品管理', '/products'],
+      ['!', '库存预警', '/inventory'],
+    ],
+  },
+  {
+    label: '管理员',
+    items: [
+      ['□', '店铺与平台连接', '/stores'],
+      ['@', '邮箱与平台通知', '/emails'],
+      ['⚙', '管理员设置', '/settings'],
+    ],
+  },
 ];
 
 export default function AdminLayout() {
@@ -27,17 +42,22 @@ export default function AdminLayout() {
           <span className="brand-mark">ERP</span>
           {!collapsed && (
             <span>
-              <strong>多店铺电商管理后台</strong>
-              <small>韩国平台日常运营</small>
+              <strong>多店铺运营中心</strong>
+              <small>订单、仓库和客户服务</small>
             </span>
           )}
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
-          {menuItems.map(([icon, label, path]) => (
-            <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')} title={label}>
-              <span className="menu-icon">{icon}</span>
-              {!collapsed && <span>{label}</span>}
-            </NavLink>
+          {menuGroups.map((group) => (
+            <section className="nav-group" key={group.label}>
+              {!collapsed && <h2>{group.label}</h2>}
+              {group.items.map(([icon, label, path]) => (
+                <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')} title={label}>
+                  <span className="menu-icon">{icon}</span>
+                  {!collapsed && <span>{label}</span>}
+                </NavLink>
+              ))}
+            </section>
           ))}
         </nav>
         <button className="collapse-button" type="button" onClick={() => setCollapsed((value) => !value)}>
@@ -47,9 +67,8 @@ export default function AdminLayout() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <strong>多店铺电商管理后台</strong>
-            <span className="environment-chip">内部试用</span>
-            <span className="environment-chip">时间 {BUSINESS_TIME_LABEL}</span>
+            <strong>多店铺运营中心</strong>
+            <span className="environment-chip">韩国时间 {BUSINESS_TIME_LABEL}</span>
             <StoreSelector />
             <ManualStoreSyncButton />
           </div>
@@ -57,8 +76,8 @@ export default function AdminLayout() {
             <span className="notification">3</span>
             <span className="avatar">运</span>
             <span>
-              <strong>运营管理员</strong>
-              <small>普通运营视图</small>
+              <strong>运营人员</strong>
+              <small>日常运营</small>
             </span>
           </div>
         </header>

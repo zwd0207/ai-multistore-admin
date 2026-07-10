@@ -19,10 +19,10 @@ function includesAll(file, phrases) {
 }
 
 includesAll('src/pages/Products.jsx', [
-  '系统已保存商品记录',
+  '商品记录',
   '暂不支持在线编辑',
   '运营建议',
-  '跳转发货辅助',
+  '进入仓库发货',
   '修改平台库存暂未开放',
   '删除真实平台商品暂未开放',
 ]);
@@ -33,23 +33,23 @@ includesAll('src/pages/InventoryAlerts.jsx', [
   '库存正常商品',
   '处理优先级',
   '先处理缺货',
-  '本地库存判断',
+  '已检查商品',
 ]);
 
 includesAll('src/pages/ShippingAssistant.jsx', [
   '提交 Naver 发货回填',
-  '人工确认回填',
+  '人工确认',
   '下一步',
   '发货处理顺序',
-  '生成发货表格',
-  '导入物流单号表',
-  '已按官方 API 开放',
+  '准备仓库发货表',
+  '导入仓库回传表',
+  '仓库发货',
 ]);
 
 includesAll('src/pages/Dashboard.jsx', [
-  '核心运营工作台',
+  '今日工作台',
   '今天先处理什么',
-  '只打磨核心运营链路',
+  '常用任务集中在这里',
 ]);
 
 includesAll('src/pages/Orders.jsx', [
@@ -59,7 +59,8 @@ includesAll('src/pages/Orders.jsx', [
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [
-  '已接入 Naver 官方 API 读取',
+  '客户咨询',
+  '更新客户咨询',
   '提交到 Naver',
   '人工确认发送',
 ]);
@@ -94,22 +95,22 @@ includesAll('src/pages/Emails.jsx', [
 ]);
 
 includesAll('src/pages/Settings.jsx', [
-  '多店铺电商管理后台',
+  '管理员设置',
   '韩国时间（KST',
   '韩元（KRW',
 ]);
 
 includesAll('src/layouts/AdminLayout.jsx', [
-  '首页工作台',
-  '订单管理',
-  '发货辅助',
+  '今日工作台',
+  '订单处理',
+  '仓库发货',
   '商品管理',
   '库存预警',
-  '店铺管理',
-  '平台消息',
-  '申诉中心',
-  '邮箱中心',
-  '系统设置',
+  '店铺与平台连接',
+  '客户咨询',
+  '售后异常',
+  '邮箱与平台通知',
+  '管理员设置',
 ]);
 
 console.log('core ERP page contract checks passed');

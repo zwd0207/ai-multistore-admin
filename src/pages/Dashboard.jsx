@@ -7,8 +7,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import { metricDisplayValue } from '../services/adapters';
-import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
-import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
+import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { getKstTodayString } from '../utils/time';
 
 const money = (value, currency = 'KRW') => `${Number(value || 0).toLocaleString()} ${currency}`;
@@ -142,7 +141,6 @@ function PriorityCard({
 
 export default function Dashboard() {
   const {
-    selectedStore,
     selectedStoreId,
     setSelectedStoreId,
     loading: storeLoading,
@@ -222,8 +220,6 @@ export default function Dashboard() {
     };
   }, [state]);
 
-  const sourceInfo = classifyCoreDataSource({ source_type: DATA_SOURCE === 'backend' ? 'local_saved' : 'mock' });
-  const dangerousState = getDangerousActionState('shipment_writeback');
   const overviewSummary = state.overview?.summary || {};
   const overviewRows = state.overview?.stores || [];
   const hasOverview = overviewRows.length > 0;
@@ -242,7 +238,7 @@ export default function Dashboard() {
 
   const runAllStoreSync = async () => {
     if (overviewAction.running) return;
-    setOverviewAction({ running: true, message: '全店铺同步中...' });
+    setOverviewAction({ running: true, message: '正在更新全部店铺数据...' });
     try {
       const result = await dataProvider.runManualAllStoresSync({
         includeProducts: true,
@@ -255,18 +251,18 @@ export default function Dashboard() {
       setOverviewAction({
         running: false,
         message: failed
-          ? `全店铺同步完成，${failed} 个店铺需要处理连接状态`
-          : `全店铺同步完成，跳过 ${skipped} 个暂未开放项`,
+          ? `店铺数据更新完成，${failed} 个店铺需要管理员检查连接`
+          : `店铺数据更新完成，${skipped} 个店铺暂时无法更新`,
       });
       setRefreshKey((current) => current + 1);
     } catch (error) {
-      setOverviewAction({ running: false, message: error.message || '全店铺同步失败' });
+      setOverviewAction({ running: false, message: error.message || '店铺数据更新失败，请联系管理员检查连接。' });
     }
   };
 
   const runSingleStoreSync = async (row) => {
     if (overviewAction.running) return;
-    setOverviewAction({ running: true, message: `${row.storeName} 同步中...` });
+    setOverviewAction({ running: true, message: `${row.storeName} 正在更新...` });
     try {
       const result = await dataProvider.runManualStoreSync({
         storeId: row.storeId,
@@ -275,10 +271,10 @@ export default function Dashboard() {
         includeOrders: true,
         includeCustomerInquiries: true,
       });
-      setOverviewAction({ running: false, message: `${row.storeName}：${result.statusLabel || '同步完成'}` });
+      setOverviewAction({ running: false, message: `${row.storeName}：${result.statusLabel || '更新完成'}` });
       setRefreshKey((current) => current + 1);
     } catch (error) {
-      setOverviewAction({ running: false, message: `${row.storeName}：${error.message || '同步失败'}` });
+      setOverviewAction({ running: false, message: `${row.storeName}：${error.message || '更新失败，请联系管理员检查连接。'}` });
     }
   };
 
@@ -287,21 +283,15 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        title="核心运营工作台"
-        description="全店铺先看连接与数据可信状态，再进入当前店铺处理订单、发货、商品和库存。"
-        actions={(
-          <>
-            <span className="period-chip">{sourceInfo.label}</span>
-            <span className="period-chip">KST / KRW</span>
-          </>
-        )}
+        title="今日工作台"
+        description="先处理今天的发货、异常订单、客户咨询和库存问题。"
       />
 
       {state.error ? <EmptyState title="首页数据加载失败" description={state.error} /> : null}
 
       <div className="summary-grid">
         <SummaryCard title="今日订单" value={todayOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '订单') : '按韩国业务日期统计'} tone="info" />
-        <SummaryCard title="待发货" value={pendingShipmentValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '待发货') : '建议先进入发货辅助核对'} tone={String(pendingShipmentValue).includes('?') || metrics.pendingShipment.length ? 'warning' : 'success'} />
+        <SummaryCard title="待发货" value={pendingShipmentValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '待发货') : '进入仓库发货核对'} tone={String(pendingShipmentValue).includes('?') || metrics.pendingShipment.length ? 'warning' : 'success'} />
         <SummaryCard title="异常订单" value={abnormalOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '异常订单') : '取消/退货/换货/退款仅提醒'} tone={String(abnormalOrderValue).includes('?') || metrics.abnormalOrders.length ? 'danger' : 'success'} />
         <SummaryCard title="库存预警" value={inventoryAlertValue} note={hasOverview ? unknownNote(overviewSummary.inventoryUnknownStoreCount, '库存') : '缺货和低库存商品'} tone={String(inventoryAlertValue).includes('?') || metrics.inventoryAlerts.length ? 'warning' : 'success'} />
         <SummaryCard title="缺货商品" value={metrics.outOfStock.length} note="先确认补货或人工下架" tone={metrics.outOfStock.length ? 'danger' : 'success'} />
@@ -311,12 +301,12 @@ export default function Dashboard() {
       <section className="content-card">
         <div className="card-title">
           <div>
-            <h2>全店铺运营总览</h2>
-            <p>连接状态和核心指标放在同一张表；无法确认时显示“?”，原因标注“最近一次同步无法确认”，避免把 IP 白名单、权限或未接入造成的未知误判为 0。</p>
+            <h2>按店铺查看</h2>
+            <p>选择店铺后，可继续处理该店铺的订单、仓库发货和客户咨询。“待更新”表示需要管理员检查店铺连接。</p>
           </div>
           <div className="overview-actions">
             <button type="button" className="button primary" onClick={runAllStoreSync} disabled={overviewAction.running}>
-              {overviewAction.running ? '同步中...' : '同步全部可用店铺'}
+              {overviewAction.running ? '更新中...' : '更新全部店铺数据'}
             </button>
             {overviewAction.message ? <span>{overviewAction.message}</span> : null}
           </div>
@@ -327,7 +317,7 @@ export default function Dashboard() {
           renderActions={(row) => (
             <>
               <button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button>
-              <button type="button" onClick={() => runSingleStoreSync(row)}>同步</button>
+              <button type="button" onClick={() => runSingleStoreSync(row)}>更新数据</button>
               <Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link>
               <Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link>
             </>
@@ -346,7 +336,7 @@ export default function Dashboard() {
           <PriorityCard
             title="1. 处理待发货"
             count={`${metrics.pendingShipment.length} 单`}
-            note="先核对商品规格、库存编号和物流单号，避免漏发或错发。"
+            note="先核对商品规格、仓库货号和物流信息，避免漏发或错发。"
             to="/shipping"
             tone={metrics.pendingShipment.length ? 'warning' : 'success'}
           />
@@ -364,14 +354,13 @@ export default function Dashboard() {
             to="/inventory"
             tone={metrics.inventoryAlerts.length ? 'warning' : 'success'}
           />
-          <article className="business-capability-card muted">
-            <div className="business-capability-head">
-              <strong>平台写入边界</strong>
-              <span>{dangerousState.label}</span>
-            </div>
-            <p>{dangerousState.note}</p>
-            <small>{selectedStore?.name || '当前店铺'} · {sourceInfo.label}</small>
-          </article>
+          <PriorityCard
+            title="4. 回复客户咨询"
+            count="查看"
+            note="先确认订单和物流进度，再准备回复客户。"
+            to="/customer-service"
+            tone="info"
+          />
         </div>
       </section>
 
@@ -379,13 +368,13 @@ export default function Dashboard() {
         <div className="card-title">
           <div>
             <h2>核心快捷入口</h2>
-            <p>只打磨核心运营链路，其他模块先保持入口状态。</p>
+            <p>常用任务集中在这里，方便快速开始当天工作。</p>
           </div>
         </div>
         <div className="business-capability-grid compact">
           <QuickLink to="/orders" title="处理订单" note="搜索订单、查看详情、复制收件信息。" />
-          <QuickLink to="/shipping" title="准备发货" note="核对规格、匹配库存编号、生成发货表格。" />
-          <QuickLink to="/products" title="查看商品" note="检查售价、库存、平台状态和数据来源。" />
+          <QuickLink to="/shipping" title="仓库发货" note="核对规格、仓库货号和物流信息。" />
+          <QuickLink to="/customer-service" title="客户咨询" note="查看客户问题并准备回复。" />
           <QuickLink to="/inventory" title="库存预警" note="确认缺货、低库存和补货建议。" />
         </div>
       </section>

@@ -291,7 +291,7 @@ export default function ShippingAssistant() {
       });
       setWritebackMessage(result.businessMessage || result.message || 'Naver 发货回填处理完成。');
     } catch (writebackError) {
-      setWritebackMessage(writebackError.message || 'Naver 发货回填失败，请检查 API 权限、IP 白名单、订单状态或物流公司代码。');
+      setWritebackMessage(writebackError.message || '发货信息提交失败，请确认订单状态、快递公司和运单号；仍无法处理时联系管理员。');
     } finally {
       setWritebackLoading(false);
     }
@@ -325,22 +325,21 @@ export default function ShippingAssistant() {
   return (
     <>
       <PageHeader
-        title="发货辅助"
-        description="查看待发货订单，核对商品和规格，匹配库存编号，导入物流单号表；Naver 发货回填已按官方 API 开放，必须人工确认后提交。"
+        title="仓库发货"
+        description="核对待发货订单，准备仓库表，导入仓库回传的物流信息，并在确认后提交发货信息。"
         actions={(
           <>
-            <button type="button" className="button ghost" onClick={() => setShowExport((value) => !value)}>生成发货表格</button>
-            <span className="period-chip">{dangerousState.label}</span>
+            <button type="button" className="button ghost" onClick={() => setShowExport((value) => !value)}>准备仓库发货表</button>
           </>
         )}
       />
 
       <div className="summary-grid shipping-summary-grid">
-        <SummaryCard title="待发货订单" value={summary.pending} note="本地可见候选" tone="info" />
-        <SummaryCard title="已匹配库存编号" value={summary.matched} note="按商品和规格匹配" tone={summary.matched ? 'success' : 'warning'} />
+        <SummaryCard title="待发货订单" value={summary.pending} note="等待安排仓库发货" tone="info" />
+        <SummaryCard title="已匹配仓库货号" value={summary.matched} note="商品和规格已确认" tone={summary.matched ? 'success' : 'warning'} />
         <SummaryCard title="库存足够" value={summary.enough} note="可进入发货表格" tone={summary.enough ? 'success' : 'warning'} />
-        <SummaryCard title="已导入物流单号" value={summary.imported} note="本地匹配结果" tone={summary.imported ? 'success' : 'default'} />
-        <SummaryCard title="可人工发货" value={summary.ready} note="需人工到平台后台处理" tone={summary.ready ? 'success' : 'default'} />
+        <SummaryCard title="已导入物流信息" value={summary.imported} note="等待核对" tone={summary.imported ? 'success' : 'default'} />
+        <SummaryCard title="可提交发货信息" value={summary.ready} note="请人工确认后提交" tone={summary.ready ? 'success' : 'default'} />
       </div>
 
       <section className="content-card">
@@ -354,7 +353,7 @@ export default function ShippingAssistant() {
         <div className="business-capability-grid compact">
           <article className="business-capability-card info">
             <div className="business-capability-head"><strong>发货处理顺序</strong><span>1</span></div>
-            <p>先核对商品和规格，确认订单商品与库存编号匹配。</p>
+            <p>先核对商品和规格，确认订单商品与仓库货号一致。</p>
           </article>
           <article className="business-capability-card info">
             <div className="business-capability-head"><strong>确认库存</strong><span>2</span></div>
@@ -362,11 +361,11 @@ export default function ShippingAssistant() {
           </article>
           <article className="business-capability-card info">
             <div className="business-capability-head"><strong>导入物流单号</strong><span>3</span></div>
-            <p>然后导入物流单号表，只做本地匹配和发货准备记录。</p>
+            <p>然后导入仓库回传表，核对快递公司和运单号。</p>
           </article>
           <article className="business-capability-card warning">
             <div className="business-capability-head"><strong>Naver 回填</strong><span>4</span></div>
-            <p>最后由运营人工确认回填，系统才会提交 Naver 发货接口。</p>
+            <p>最后由运营人员确认，系统才会提交发货信息到平台。</p>
           </article>
         </div>
       </section>
@@ -374,20 +373,20 @@ export default function ShippingAssistant() {
       <section className="content-card">
         <div className="business-capability-grid compact">
           <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>本地辅助功能</strong><span>人工发货</span></div>
-            <p>发货表格导出、库存编号匹配、内部准备状态都只在系统内辅助运营。</p>
+            <div className="business-capability-head"><strong>仓库准备</strong><span>先核对</span></div>
+            <p>先确认商品货号和库存，再准备交给仓库的发货表。</p>
           </article>
           <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>Naver 发货回填</strong><span>已按官方 API 开放</span></div>
-            <p>仅在人工确认回填后调用官方发货接口；本地备注不会被说成平台已发货。</p>
+            <div className="business-capability-head"><strong>提交发货信息</strong><span>人工确认</span></div>
+            <p>物流信息核对无误后，由运营人员确认提交到平台。</p>
           </article>
           <article className="business-capability-card muted">
-            <div className="business-capability-head"><strong>物流单号导入</strong><span>本地匹配</span></div>
-            <p>导入物流单号表只用于匹配订单和准备人工发货，不自动写入平台。</p>
+            <div className="business-capability-head"><strong>导入仓库回传表</strong><span>等待核对</span></div>
+            <p>系统会将快递公司和运单号对应到订单，请先检查再提交。</p>
           </article>
           <article className="business-capability-card success">
-            <div className="business-capability-head"><strong>处理边界</strong><span>清楚可见</span></div>
-            <p>{dangerousState.note}</p>
+            <div className="business-capability-head"><strong>提交前确认</strong><span>避免错发</span></div>
+            <p>提交前请核对店铺、订单、快递公司和运单号，确认后不能随意撤回。</p>
           </article>
         </div>
       </section>
@@ -437,7 +436,7 @@ export default function ShippingAssistant() {
         <div className="card-title">
           <div>
             <h2>导入物流单号表</h2>
-            <p>按行粘贴“订单号,快递公司,运单号”。系统先做本地匹配，确认后可提交 Naver。</p>
+            <p>按行粘贴“订单号,快递公司,运单号”。系统会先对应订单，确认后再提交发货信息。</p>
           </div>
           <button type="button" className="button primary" onClick={importTracking}>匹配物流单号和订单</button>
         </div>

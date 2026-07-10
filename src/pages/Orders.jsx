@@ -13,7 +13,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import { classifyCoreDataSource, getDangerousActionState } from '../utils/coreErpContract';
+import { classifyCoreDataSource } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 20;
 
@@ -234,22 +234,22 @@ export default function Orders() {
   const handleManualOrderRefresh = async () => {
     const storeId = query.storeId || selectedStoreId;
     if (!storeId) {
-      setRefreshNotice('请先选择当前店铺，再手动批量刷新 Naver 订单。');
+      setRefreshNotice('请先选择当前店铺，再更新 Naver 订单。');
       return;
     }
     setRefreshingOrders(true);
-    setRefreshNotice('正在刷新 Naver 订单...');
+    setRefreshNotice('正在更新 Naver 订单...');
     try {
       const result = await dataProvider.manualRefreshNaverOrders({
         storeId,
         maxCount: 20,
         hours: 24,
       });
-      const fallback = `本地订单刷新完成：新增 ${result.createdCount}，更新 ${result.updatedCount}，跳过 ${result.skippedCount}。不会回填平台。`;
+      const fallback = `订单更新完成：新增 ${result.createdCount}，更新 ${result.updatedCount}，跳过 ${result.skippedCount}。不会修改平台订单。`;
       setRefreshNotice(result.message || fallback);
       setRefreshKey((current) => current + 1);
     } catch (refreshError) {
-      setRefreshNotice(refreshError.message || 'Naver 订单本地刷新失败，请检查店铺 API 权限、IP 白名单或连接资料。');
+      setRefreshNotice(refreshError.message || 'Naver 订单更新失败，请联系管理员检查店铺连接。');
     } finally {
       setRefreshingOrders(false);
     }
@@ -273,15 +273,14 @@ export default function Orders() {
       } else {
         setRefreshKey((current) => current + 1);
       }
-      setDetailRefreshNotice(result.message || '订单详情已刷新到本地；不会回填平台。');
+      setDetailRefreshNotice(result.message || '订单详情已更新；不会修改平台订单。');
     } catch (singleRefreshError) {
-      setDetailRefreshNotice(singleRefreshError.message || '订单详情刷新失败，请检查店铺 API 权限、IP 白名单或连接资料。');
+      setDetailRefreshNotice(singleRefreshError.message || '订单详情更新失败，请联系管理员检查店铺连接。');
     } finally {
       setDetailRefreshing(false);
     }
   };
 
-  const dangerousState = getDangerousActionState('shipment_writeback');
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
   const renderTrackingDetail = (order) => {
     if (!hasDisplayValue(order?.trackingNo)) return <span>-</span>;
@@ -299,14 +298,13 @@ export default function Orders() {
     <>
       <PageHeader
         title="订单管理"
-        description="搜索、筛选和查看订单详情。订单页不直接执行平台取消、退货或换货；Naver 发货回填请到发货辅助人工确认后提交。"
+        description="搜索、筛选和查看订单详情。需要发货时，请进入仓库发货核对并提交物流信息。"
         actions={(
           <>
             <button className="button primary" type="button" onClick={handleManualOrderRefresh} disabled={refreshingOrders}>
-              {refreshingOrders ? '正在刷新' : '手动批量刷新'}
+              {refreshingOrders ? '正在更新' : '更新平台订单'}
             </button>
-            <Link className="button ghost" to="/shipping">跳转发货辅助</Link>
-            <span className="period-chip">{dangerousState.label}</span>
+            <Link className="button ghost" to="/shipping">进入仓库发货</Link>
           </>
         )}
       />
@@ -315,8 +313,8 @@ export default function Orders() {
 
       <div className="summary-grid">
         <SummaryCard title="订单列表" value={summary.total} note="当前筛选结果" tone="info" />
-        <SummaryCard title="待发货" value={summary.pending} note="进入发货辅助人工处理" tone={summary.pending ? 'warning' : 'success'} />
-        <SummaryCard title="已发货" value={summary.shipped} note="来自本地保存记录" tone="success" />
+        <SummaryCard title="待发货" value={summary.pending} note="进入仓库发货处理" tone={summary.pending ? 'warning' : 'success'} />
+        <SummaryCard title="已发货" value={summary.shipped} note="系统已保存发货记录" tone="success" />
         <SummaryCard title="异常订单" value={summary.abnormal} note="取消/退货/换货只做提醒" tone={summary.abnormal ? 'danger' : 'success'} />
       </div>
 
@@ -379,7 +377,7 @@ export default function Orders() {
             <>
               <button type="button" onClick={() => setActiveOrder(row)}>详情</button>
               <button type="button" onClick={() => handleCopy(row)}>复制收件信息</button>
-              <Link to="/shipping">发货辅助</Link>
+              <Link to="/shipping">仓库发货</Link>
               <button type="button" onClick={() => openNote(row)}>内部备注</button>
               <button type="button" disabled title="暂未开放">平台处理暂未开放</button>
             </>
@@ -418,7 +416,7 @@ export default function Orders() {
                 ['发货状态', <StatusBadge value={activeOrder.shippingStatus} />],
                 ['快递公司', activeOrder.logisticsCompany],
                 ['运单号', renderTrackingDetail(activeOrder)],
-                ['数据来源', activeOrder.sourceInfo.label],
+                ['记录状态', activeOrder.sourceInfo.label],
                 ['内部备注', notes[activeOrder.orderNo] || '暂无'],
               ].map(([label, value]) => (
                 <div className="detail-item" key={label}>
@@ -429,7 +427,7 @@ export default function Orders() {
             </div>
             <section className="content-card">
               <h3>收件信息</h3>
-              <p className="mock-sync-note">复制只发生在本地剪贴板；刷新只读取官方订单详情并写入本地 ERP，不会回填平台。</p>
+              <p className="mock-sync-note">复制收件信息仅用于发货准备；更新订单详情不会修改平台订单。</p>
               <pre className="readonly-code">{copyReceiverText(activeOrder)}</pre>
               {detailRefreshNotice ? <div className="form-info">{detailRefreshNotice}</div> : null}
               <div className="inline-action-group">
@@ -446,7 +444,7 @@ export default function Orders() {
             </section>
             <section className="content-card">
               <h3>暂未开放操作</h3>
-              <p>取消订单、退货订单、换货订单仍需人工到平台后台处理；Naver 发货回填请到发货辅助核对物流单号并人工确认后提交。</p>
+              <p>取消、退货和换货需要在平台后台处理；发货请进入仓库发货，核对物流信息后人工确认提交。</p>
             </section>
           </>
         ) : (
@@ -469,8 +467,8 @@ export default function Orders() {
               {[
                 ['快递公司', traceModal.trace.deliveryCompany || traceModal.order?.logisticsCompany || '-'],
                 ['运单号', traceModal.trace.trackingNumber || traceModal.order?.trackingNo || '-'],
-                ['数据来源', traceModal.trace.trackingSource === 'shipping_tracking_import_rows' ? '本地物流单号导入记录' : '本地订单记录'],
-                ['实时轨迹', traceModal.trace.realtimeTrackingOpen ? '已接入' : '实时快递轨迹暂未接入'],
+                ['记录状态', traceModal.trace.trackingSource === 'shipping_tracking_import_rows' ? '仓库回传的物流信息' : '订单物流信息'],
+                ['实时轨迹', traceModal.trace.realtimeTrackingOpen ? '可查询' : '暂未提供实时轨迹'],
               ].map(([label, value]) => (
                 <div className="detail-item" key={label}>
                   <span>{label}</span>
@@ -478,7 +476,7 @@ export default function Orders() {
                 </div>
               ))}
             </div>
-            <p className="mock-sync-note">{traceModal.trace.message || '实时快递轨迹暂未接入；当前显示本地记录。'}</p>
+            <p className="mock-sync-note">{traceModal.trace.message || '暂未提供实时快递轨迹，当前显示已保存的物流信息。'}</p>
             <div className="timeline">
               {(traceModal.trace.events || []).map((event) => (
                 <div className="timeline-item" key={event.id || `${event.time}-${event.label}`}>
@@ -503,16 +501,16 @@ export default function Orders() {
         title={noteModal.order ? `内部备注 · ${noteModal.order.orderNo}` : '内部备注'}
         onClose={() => setNoteModal({ open: false, order: null, note: '' })}
         onConfirm={saveNote}
-        confirmText="保存本地备注"
+        confirmText="保存内部备注"
       >
         <FormField label="备注内容">
           <input
             value={noteModal.note ?? notes[noteModal.order?.orderNo] ?? ''}
             onChange={(event) => setNoteModal({ ...noteModal, note: event.target.value })}
-            placeholder="仅保存在系统本地，不回写平台"
+            placeholder="仅供内部查看，不会修改平台订单"
           />
         </FormField>
-        <p className="mock-sync-note">内部备注是本地辅助功能，不会同步到 Naver / Coupang / Gmarket。</p>
+        <p className="mock-sync-note">内部备注仅供团队查看，不会修改平台订单。</p>
       </Modal>
     </>
   );
