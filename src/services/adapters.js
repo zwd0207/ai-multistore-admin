@@ -1566,6 +1566,7 @@ const manualSyncConnectionErrorCodes = new Set([
   'credential_invalid',
   'credential_not_found',
   'channel_no_missing',
+  'channel_selection_required',
   'blocked_by_connection',
 ]);
 
@@ -1582,7 +1583,10 @@ function manualSyncStatusLabel(status, items = []) {
     || ['auth_failed', 'permission_forbidden', 'product_api_not_allowed', 'order_api_not_allowed'].includes(String(item.errorCode || '').toLowerCase()));
   if (permissionBlocked) return '最近一次同步：API 权限未开通';
 
-  const credentialBlocked = items.find((item) => ['credential_not_ready', 'credential_invalid', 'credential_not_found', 'channel_no_missing'].includes(String(item.errorCode || '').toLowerCase()));
+  const channelBlocked = items.find((item) => ['channel_no_missing', 'channel_selection_required'].includes(String(item.errorCode || '').toLowerCase()));
+  if (channelBlocked) return '最近一次同步：店铺频道未确认';
+
+  const credentialBlocked = items.find((item) => ['credential_not_ready', 'credential_invalid', 'credential_not_found'].includes(String(item.errorCode || '').toLowerCase()));
   if (credentialBlocked) return '最近一次同步：API 资料未配置完整';
 
   if (manualSyncConnectionIssue(items)) return '最近一次同步：平台连接未通过';

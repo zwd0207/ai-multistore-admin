@@ -1651,6 +1651,7 @@ MANUAL_BATCH_CONNECTION_BLOCKER_CODES = {
     "credential_invalid",
     "credential_not_found",
     "channel_no_missing",
+    "channel_selection_required",
 }
 MANUAL_BATCH_READ_RESOURCES = {"products", "orders", "customer_inquiries"}
 MANUAL_BATCH_CONNECTION_BLOCKED_MESSAGES = {
@@ -1712,7 +1713,11 @@ def _manual_batch_message_for_error(platform: str, error_code: str | None, fallb
         return f"{label}：IP 白名单未通过"
     if code in {"auth_failed", "permission_forbidden", "product_api_not_allowed", "order_api_not_allowed"} or "permission" in code:
         return f"{label}：API 权限未开通"
-    if code in {"credential_not_ready", "credential_invalid", "channel_no_missing"}:
+    if code == "channel_no_missing":
+        return f"{label}：未识别到店铺频道编号，请重新同步自动识别"
+    if code == "channel_selection_required":
+        return f"{label}：识别到多个店铺频道，请先选择当前店铺对应的频道"
+    if code in {"credential_not_ready", "credential_invalid"}:
         return f"{label}：API 资料未配置完整"
     if code == "blocked_by_connection":
         return "未执行同步：平台连接未通过，请先重新同步验证"
@@ -1808,6 +1813,40 @@ def _manual_batch_resource_message(platform: str, resource: str, result: dict) -
     created = int(result.get("created_count") or 0)
     updated = int(result.get("updated_count") or 0)
     return f"{label}{resource_label}本地同步完成：新增 {created}，更新 {updated}"
+
+
+def _ensure_naver_manual_sync_channel_no(db: Session, store_id: int) -> None:
+    credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
+    if _naver_channel_no_configured(credential.extra_config):
+        return
+
+    smoke_result = api_credential_readiness_service.run_api_credential_smoke_test(
+        db=db,
+        platform="naver",
+        mode="readonly",
+        store_id=store_id,
+        credential_id=credential.id,
+        capability_scope="seller_channels",
+        persist_channel_no=True,
+    )
+    result = (smoke_result.get("results") or [{}])[0]
+    refreshed = db.get(ApiCredential, credential.id)
+    if refreshed is not None and _naver_channel_no_configured(refreshed.extra_config):
+        return
+
+    if result.get("multiple_channels_observed"):
+        raise ApiError(
+            message="Multiple Naver seller channels require an explicit channel selection",
+            error_code="channel_selection_required",
+            status_code=400,
+            detail={"store_id": store_id, "credential_id": credential.id},
+        )
+    raise ApiError(
+        message="Naver seller channel could not be detected for manual sync",
+        error_code=result.get("error_code") or "channel_no_missing",
+        status_code=400,
+        detail={"store_id": store_id, "credential_id": credential.id},
+    )
 
 
 def _manual_sync_naver_products(db: Session, store_id: int) -> dict:
@@ -2524,25 +2563,39 @@ def manual_batch_sync(
                     ))
             continue
 
-        if include_products:
+        naver_preflight_error: Exception | None = None
+        if platform == "naver" and (include_products or include_orders):
             try:
-                if platform == "naver":
-                    items.append(_manual_sync_naver_products(db, store_id))
-                elif platform == "coupang":
-                    items.append(_manual_sync_coupang_products(db, store_id))
+                _ensure_naver_manual_sync_channel_no(db, store_id)
             except Exception as exc:
                 db.rollback()
-                items.append(_manual_batch_item_from_error(platform, "products", exc))
+                naver_preflight_error = exc
+
+        if include_products:
+            if platform == "naver" and naver_preflight_error is not None:
+                items.append(_manual_batch_item_from_error(platform, "products", naver_preflight_error))
+            else:
+                try:
+                    if platform == "naver":
+                        items.append(_manual_sync_naver_products(db, store_id))
+                    elif platform == "coupang":
+                        items.append(_manual_sync_coupang_products(db, store_id))
+                except Exception as exc:
+                    db.rollback()
+                    items.append(_manual_batch_item_from_error(platform, "products", exc))
 
         if include_orders:
-            try:
-                if platform == "naver":
-                    items.append(_manual_sync_naver_orders(db, store_id))
-                elif platform == "coupang":
-                    items.append(_manual_sync_coupang_orders(db, store_id))
-            except Exception as exc:
-                db.rollback()
-                items.append(_manual_batch_item_from_error(platform, "orders", exc))
+            if platform == "naver" and naver_preflight_error is not None:
+                items.append(_manual_batch_item_from_error(platform, "orders", naver_preflight_error))
+            else:
+                try:
+                    if platform == "naver":
+                        items.append(_manual_sync_naver_orders(db, store_id))
+                    elif platform == "coupang":
+                        items.append(_manual_sync_coupang_orders(db, store_id))
+                except Exception as exc:
+                    db.rollback()
+                    items.append(_manual_batch_item_from_error(platform, "orders", exc))
 
         if include_customer_inquiries:
             try:

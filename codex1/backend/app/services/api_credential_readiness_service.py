@@ -1432,6 +1432,7 @@ def _persist_naver_channel_no(db: Session, context: dict, channel_no: str) -> No
     extra_config = dict(credential.extra_config or {})
     extra_config["channel_no"] = channel_no.strip()
     credential.extra_config = extra_config
+    credential.auth_status = "test_passed"
     db.flush()
 
 

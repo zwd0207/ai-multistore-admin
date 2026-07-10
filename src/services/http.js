@@ -1,8 +1,8 @@
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
+const DEFAULT_API_BASE_URL = '/api/v1';
 const configuredApiBaseUrl = (import.meta.env?.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 const shouldUseLocalDevProxy = import.meta.env?.DEV
   && /^https?:\/\/(?:127\.0\.0\.1|localhost):8012\/api\/v1$/i.test(configuredApiBaseUrl);
-const API_BASE_URL = shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl;
+const API_BASE_URL = import.meta.env?.PROD || shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl;
 const SENSITIVE_KEY_PATTERN = /(?:access[_-]?key|secret[_-]?key|password|token|credential|proxy[_-]?password|remote[_-]?desktop[_-]?password)/i;
 
 function businessHttpMessage(status) {

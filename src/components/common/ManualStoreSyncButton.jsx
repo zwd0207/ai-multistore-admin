@@ -17,6 +17,7 @@ const connectionBlockedErrorCodes = new Set([
   'credential_invalid',
   'credential_not_found',
   'channel_no_missing',
+  'channel_selection_required',
   'blocked_by_connection',
 ]);
 

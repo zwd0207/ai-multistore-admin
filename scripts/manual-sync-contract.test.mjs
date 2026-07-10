@@ -46,6 +46,10 @@ includesAll('codex1/backend/app/services/sync_service.py', [
   'ip_not_allowed',
   'blocked_by_connection',
   '_manual_batch_apply_connection_blockers',
+  'def _ensure_naver_manual_sync_channel_no(db: Session, store_id: int) -> None',
+  'capability_scope="seller_channels"',
+  'persist_channel_no=True',
+  'channel_selection_required',
   '未执行订单同步：平台连接未通过，请先重新同步验证',
   '本次平台连接也未通过',
   'def _manual_sync_naver_orders(db: Session, store_id: int) -> dict',
@@ -85,6 +89,11 @@ includesAll('src/services/backendApi.js', [
   "'/sync/orders/naver/manual-refresh'",
 ]);
 
+includesAll('src/services/http.js', [
+  "const DEFAULT_API_BASE_URL = '/api/v1';",
+  "import.meta.env?.PROD || shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl",
+]);
+
 includesAll('src/services/dataProvider.js', [
   'runManualStoreSync',
   'manualRefreshNaverOrders',
@@ -99,6 +108,7 @@ includesAll('src/services/adapters.js', [
   'receiverAddress',
   'IP 白名单未通过',
   'blocked_by_connection',
+  '最近一次同步：店铺频道未确认',
   '最近一次同步：IP 白名单未通过',
   '平台连接未通过（本次手动同步结果）',
 ]);
