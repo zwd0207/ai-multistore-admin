@@ -7,6 +7,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
+import { adaptWarehouseBatch, REMOVE_REASON_CODES, warehouseRequest } from '../features/shipping/warehouseBatch';
 
 const STAGES = [
   ['prepare', '待生成发货批次'],
@@ -16,7 +17,7 @@ const STAGES = [
   ['result', '已完成与失败'],
 ];
 
-const REMOVE_REASONS = ['订单已取消', '客户修改订单', '商品缺货', '收件信息需要修改', '其他原因'];
+const REMOVE_REASONS = ['收件信息需要修改', '客户要求取消', '订单已取消', '商品货号有误', '商品缺货', '仓库异常'];
 
 const text = (value, fallback = '-') => String(value ?? '').trim() || fallback;
 const same = (left, right) => String(left ?? '').trim().toLowerCase() === String(right ?? '').trim().toLowerCase();
@@ -98,7 +99,7 @@ export default function ShippingAssistant() {
     const storeId = query.storeId || selectedStoreId;
     if (!storeId) return;
     const result = await dataProvider.getWarehouseShippingBatches({ storeId, platform: query.platform || 'naver' });
-    setBatches(result.items || []);
+    setBatches((result.items || []).map(adaptWarehouseBatch));
   };
 
   useEffect(() => {
@@ -128,17 +129,17 @@ export default function ShippingAssistant() {
   const activeBatch = batches.find((batch) => String(batch.id) === String(activeBatchId)) || batches[0] || null;
   const stageBatches = useMemo(() => ({
     prepare: pendingRows,
-    warehouse: batches.filter((batch) => batch.sent && !batch.imported && !batch.completed),
-    review: batches.filter((batch) => batch.imported && !batch.confirmed && !batch.completed),
-    confirm: batches.filter((batch) => batch.confirmed && !batch.completed),
-    result: batches.filter((batch) => batch.completed || batch.failed),
+    warehouse: batches.filter((batch) => batch.stage === 'warehouse'),
+    review: batches.filter((batch) => batch.stage === 'review'),
+    confirm: batches.filter((batch) => batch.stage === 'confirm'),
+    result: batches.filter((batch) => batch.stage === 'result'),
   }), [batches, pendingRows]);
 
   const createBatch = async () => {
     const rows = pendingRows.filter((row) => selected.includes(row.id));
     if (!rows.length) return setNotice('请先勾选要发给仓库的商品订单。');
     if (new Set(rows.map((row) => `${row.storeId}|${row.platform}`)).size > 1) return setNotice('一个发货批次只能包含同一店铺、同一平台的订单，请重新选择。');
-    const result = await dataProvider.createWarehouseShippingBatch({ storeId: rows[0].storeId, platform: rows[0].platform, orderIds: rows.map((row) => row.orderId), manualApproval: true });
+    const result = await dataProvider.createWarehouseShippingBatch(warehouseRequest.create({ storeId: rows[0].storeId, platform: rows[0].platform, orderIds: rows.map((row) => row.orderId) }));
     if (result.status !== 'created') return setNotice('无法创建批次，请检查订单状态后重新选择。');
     await refreshBatches(); setActiveBatchId(result.batch.id); setSelected([]); setActiveStage('warehouse'); setNotice(`已创建 ${result.batch.batch_no}，请确认影响范围后下载仓库发货表。`);
   };
@@ -175,8 +176,7 @@ export default function ShippingAssistant() {
   const removeFromBatch = async () => {
     if (!activeBatch || !removeRow || !removeReason) return setNotice('移出前必须选择原因。');
     if (activeBatch.sent && !warehouseStopped) return setNotice('该批次已发给仓库，请先确认仓库已经停止发货。');
-    const reasonMap = { '订单已取消': 'order_cancelled', '客户修改订单': 'customer_changed_order', '商品缺货': 'out_of_stock', '收件信息需要修改': 'address_change', '其他原因': 'other' };
-    const result = await dataProvider.removeWarehouseShippingRow(activeBatch.id, removeRow.id, { manualApproval: true, reasonCode: reasonMap[removeReason] || 'other', warehouseStoppedShipping: warehouseStopped });
+    const result = await dataProvider.removeWarehouseShippingRow(activeBatch.id, removeRow.id, warehouseRequest.remove({ reasonCode: REMOVE_REASON_CODES[removeReason], warehouseStoppedShipping: warehouseStopped }));
     if (result.status !== 'removed') return setNotice('信息已变化，请重新确认。');
     await refreshBatches(); setRemoveRow(null); setRemoveReason(''); setWarehouseStopped(false); setNotice('该商品订单已移出发货批次。');
   };
@@ -206,8 +206,8 @@ export default function ShippingAssistant() {
       {!activeBatch ? <EmptyState title="当前阶段没有发货批次" description="请先在第一阶段创建发货批次。" /> : <>
         <div className="card-title"><div><h2>{activeBatch.code}</h2><p>{activeBatch.store} · {activeBatch.platform} · {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单 · {activeBatch.rows.filter((row) => !row.removed).reduce((sum, row) => sum + row.quantity, 0)} 件商品</p></div><select value={activeBatch.id} onChange={(event) => setActiveBatchId(event.target.value)}>{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.code} · {batch.store}</option>)}</select></div>
         {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={async () => { const approval = await dataProvider.requestWarehouseShippingApproval(activeBatch.id, 'manifest', { confirmation: true }); const result = await dataProvider.downloadWarehouseShippingManifest(activeBatch.id, { manualApproval: true, privacyAccessAcknowledged: true, approvalToken: approval.approval_token || approval.token }); if (result.status !== 'warehouse_manifest_ready') return setNotice('信息已变化，请重新确认。'); const link = document.createElement('a'); link.href = `data:${result.content_type};base64,${result.file_content_base64}`; link.download = result.file_name; link.click(); await refreshBatches(); setNotice('仓库发货表已下载。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".xlsx" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
-        {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.imports.filter((row) => row.result === '可以正常处理').length} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.imports.filter((row) => row.result === '需要人工确认').length} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.imports.filter((row) => row.result === '无法处理').length} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>结果</th><th>原因</th></tr></thead><tbody>{activeBatch.imports.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.company}</td><td>{row.trackingNo}</td><td><StatusBadge value={row.result} /></td><td>{row.reason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
-        {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>运单号</th><th>处理</th></tr></thead><tbody>{activeBatch.imports.filter((item) => item.result !== '无法处理').map((item) => <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.company}</td><td>{item.trackingNo}</td><td><button type="button" onClick={() => setRemoveRow(activeBatch.rows.find((row) => row.id === item.rowId))}>移出批次</button></td></tr>)}</tbody></table>{approvalExpired ? <div className="form-error">物流信息已变化，请重新核对后再确认。</div> : null}<label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品、快递公司和运单号无误。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认发货信息</button></> : null}
+        {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.counts.normal} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.counts.needs_confirmation} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.counts.blocked} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>结果</th><th>原因</th></tr></thead><tbody>{activeBatch.rows.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.carrier || '-'}</td><td><StatusBadge value={row.rowStatus} /></td><td>{row.failureReason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
+        {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>处理</th></tr></thead><tbody>{activeBatch.rows.filter((item) => item.rowStatus === 'ready_for_writeback').map((item) => <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.carrier || '-'}</td><td><button type="button" onClick={() => setRemoveRow(item)}>移出批次</button></td></tr>)}</tbody></table>{approvalExpired ? <div className="form-error">物流信息已变化，请重新确认。</div> : null}<label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品和快递公司无误。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认发货信息</button></> : null}
         {activeStage === 'result' ? <EmptyState title={activeBatch.failed ? '发货信息处理失败' : '发货批次已完成'} description={activeBatch.failed ? '请查看失败原因并修正后重新处理。' : '该批次已从当前待办中移除。'} /> : null}
       </>}
     </section>}

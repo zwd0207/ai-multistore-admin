@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { adaptWarehouseBatch, warehouseRequest, warehouseStage } from '../src/features/shipping/warehouseBatch.js';
+assert.equal(warehouseStage('created'), 'warehouse');
+assert.equal(warehouseStage('warehouse_returned'), 'review');
+assert.equal(warehouseStage('ready_to_writeback'), 'confirm');
+assert.equal(warehouseStage('completed'), 'result');
+const batch = adaptWarehouseBatch({ id: 2, batch_no: 'SHIP-2', status: 'warehouse_returned', rows: [{ id: 9, local_order_id: 8, order_reference: 'O-1', product_order_reference: 'P-1', row_status: 'blocked' }] });
+assert.equal(batch.stage, 'review'); assert.equal(batch.rows[0].productOrderNo, 'P-1');
+assert.deepEqual(warehouseRequest.create({ storeId: '1', platform: 'naver', orderIds: ['4'] }), { store_id: 1, platform: 'naver', order_ids: [4], manual_approval: true });
+console.log('warehouse batch contract checks passed');
