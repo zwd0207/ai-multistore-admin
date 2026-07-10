@@ -68,26 +68,30 @@ def _order_reference_keys(order: Order) -> list[str]:
     return [str(item).strip() for item in keys if str(item or "").strip()]
 
 
-def _build_tracking_lookup(rows: list[ShippingTrackingImportRow]) -> dict[str, ShippingTrackingImportRow]:
-    lookup: dict[str, ShippingTrackingImportRow] = {}
+def _build_tracking_lookup(rows: list[ShippingTrackingImportRow]) -> dict[str, list[ShippingTrackingImportRow]]:
+    lookup: dict[str, list[ShippingTrackingImportRow]] = {}
     for row in rows:
-        for key in (row.order_reference, row.product_order_reference):
+        for kind, key in (("order", row.order_reference), ("product", row.product_order_reference)):
             text = str(key or "").strip()
-            if text and text not in lookup:
-                lookup[text] = row
+            if text:
+                lookup.setdefault(f"{kind}:{text}", []).append(row)
     return lookup
 
 
 def _tracking_row_for_order(
     order: Order,
-    lookup: dict[str, ShippingTrackingImportRow] | None,
+    lookup: dict[str, list[ShippingTrackingImportRow]] | None,
 ) -> ShippingTrackingImportRow | None:
     if not lookup:
         return None
-    for key in _order_reference_keys(order):
-        row = lookup.get(key)
-        if row is not None:
-            return row
+    product_order_reference = str(order.external_product_order_id or "").strip()
+    if product_order_reference:
+        matches = lookup.get(f"product:{product_order_reference}", [])
+        return matches[0] if len(matches) == 1 else None
+    order_reference = str(order.external_order_id or "").strip()
+    matches = lookup.get(f"order:{order_reference}", [])
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 

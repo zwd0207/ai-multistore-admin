@@ -61,6 +61,7 @@ def _safe_batch_row(row: WarehouseShippingBatchOrder) -> dict[str, Any]:
         "row_status": row.row_status,
         "carrier": row.carrier,
         "tracking_number_hash": row.tracking_number_hash,
+        "shipped_at": row.shipped_at,
         "failure_reason": row.failure_reason,
         "operator_note": row.operator_note,
         "is_active": row.is_active,
@@ -88,6 +89,7 @@ def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
             "row_status": row.row_status,
             "carrier": row.carrier,
             "tracking_number_hash": row.tracking_number_hash,
+            "shipped_at": row.shipped_at,
             "recipient": order_service.recipient_contract(row.order),
         })
     payload = {
@@ -99,6 +101,26 @@ def _candidate_hash(batch: WarehouseShippingBatch, grant_scope: str) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+
+
+def _tracking_rows_for_batch_rows(
+    import_rows: list[ShippingTrackingImportRow],
+    batch_rows: list[WarehouseShippingBatchOrder],
+) -> list[ShippingTrackingImportRow]:
+    selected: list[ShippingTrackingImportRow] = []
+    selected_ids: set[int] = set()
+    for batch_row in batch_rows:
+        product_reference = str(batch_row.product_order_reference or "").strip()
+        if product_reference:
+            matches = [item for item in import_rows if item.product_order_reference == product_reference]
+        else:
+            matches = [item for item in import_rows if item.order_reference == batch_row.order_reference]
+            if len(matches) != 1:
+                continue
+        if len(matches) == 1 and matches[0].id not in selected_ids:
+            selected.append(matches[0])
+            selected_ids.add(matches[0].id)
+    return selected
 
 
 def _write_workflow_audit(db: Session, *, batch: WarehouseShippingBatch, actor_context: dict[str, Any] | None, action: str, row_count: int, reason_code: str) -> None:
@@ -414,26 +436,40 @@ def import_warehouse_tracking_xlsx(
     )
     db.add(import_batch)
     db.flush()
-    batch_rows_by_ref = {row.order_reference: row for row in batch.rows}
+    batch_rows_by_ref: dict[str, list[WarehouseShippingBatchOrder]] = {}
+    for batch_row in batch.rows:
+        batch_rows_by_ref.setdefault(batch_row.order_reference, []).append(batch_row)
     batch_rows_by_product_ref = {row.product_order_reference: row for row in batch.rows if row.product_order_reference}
     seen_tracking: set[str] = set()
     normal = needs_confirmation = blocked = 0
     for row in normalized:
-        item = batch_rows_by_ref.get(row["order_reference"]) or batch_rows_by_product_ref.get(row["product_order_reference"])
+        product_order_reference = str(row.get("product_order_reference") or "").strip()
+        order_reference_matches = batch_rows_by_ref.get(row["order_reference"], [])
+        item = batch_rows_by_product_ref.get(product_order_reference) if product_order_reference else None
         tracking_hash = shipping_service._safe_hash_identifier(row["tracking_number"])
         status, reason = "ready_for_confirmation", None
-        if item is None:
+        if item is None and product_order_reference:
+            status, reason = "blocked", "product_order_not_in_shipping_batch"
+        elif item is None and len(order_reference_matches) == 1:
+            item = order_reference_matches[0]
+        elif item is None and len(order_reference_matches) > 1:
+            status, reason = "blocked", "product_order_reference_required_for_multi_item_order"
+        elif item is None:
             status, reason = "blocked", "order_not_in_shipping_batch"
-        elif item.order.order_status.upper() in TERMINAL_ORDER_STATUSES:
-            status, reason = "blocked", "order_status_not_shippable"
-        elif tracking_hash in seen_tracking:
-            status, reason = "needs_confirmation", "duplicate_tracking_number_in_upload"
-        elif row.get("logistics_inventory_code") and item.logistics_inventory_code and row["logistics_inventory_code"] != item.logistics_inventory_code:
-            status, reason = "needs_confirmation", "warehouse_sku_mismatch"
+        if item is not None and status != "blocked":
+            if item.order_reference != row["order_reference"]:
+                status, reason = "blocked", "product_order_order_reference_mismatch"
+            elif item.order.order_status.upper() in TERMINAL_ORDER_STATUSES:
+                status, reason = "blocked", "order_status_not_shippable"
+            elif tracking_hash in seen_tracking:
+                status, reason = "needs_confirmation", "duplicate_tracking_number_in_upload"
+            elif row.get("logistics_inventory_code") and item.logistics_inventory_code and row["logistics_inventory_code"] != item.logistics_inventory_code:
+                status, reason = "needs_confirmation", "warehouse_sku_mismatch"
         seen_tracking.add(tracking_hash)
         if item is not None:
             item.carrier = row["carrier"]
             item.tracking_number_hash = tracking_hash
+            item.shipped_at = row["shipped_at"]
             item.row_status = status
             item.failure_reason = reason
         if status == "ready_for_confirmation": normal += 1
@@ -480,7 +516,8 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
     import_rows = db.scalars(select(ShippingTrackingImportRow).where(
         ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
     )).all()
-    ready_references = {row.order_reference for row in batch.rows if row.row_status == "ready_for_writeback"}
+    ready_batch_rows = [row for row in batch.rows if row.row_status == "ready_for_writeback"]
+    ready_import_rows = _tracking_rows_for_batch_rows(import_rows, ready_batch_rows)
     local_update = shipping_service.write_tracking_order_status_local_update(
         db,
         store_id=batch.store_id,
@@ -493,7 +530,7 @@ def confirm_warehouse_batch(db: Session, *, batch_id: int, confirmed_row_ids: li
                 "tracking_number": row.tracking_number,
                 "shipped_at": row.shipped_at,
             }
-            for row in import_rows if row.order_reference in ready_references
+            for row in ready_import_rows
         ],
         import_batch_id=batch.tracking_import_batch_id,
         manual_approval=True,
@@ -531,7 +568,8 @@ def execute_warehouse_batch_writeback(
     import_rows = db.scalars(select(ShippingTrackingImportRow).where(
         ShippingTrackingImportRow.import_batch_id == batch.tracking_import_batch_id,
     )).all()
-    ready_refs = {row.order_reference for row in batch.rows if row.row_status == "ready_for_writeback"}
+    ready_batch_rows = [row for row in batch.rows if row.row_status == "ready_for_writeback"]
+    ready_import_rows = _tracking_rows_for_batch_rows(import_rows, ready_batch_rows)
     tracking_rows = [
         {
             "order_reference": row.order_reference,
@@ -540,7 +578,7 @@ def execute_warehouse_batch_writeback(
             "tracking_number": row.tracking_number,
             "shipped_at": row.shipped_at,
         }
-        for row in import_rows if row.order_reference in ready_refs
+        for row in ready_import_rows
     ]
     if not tracking_rows:
         return {"status": "blocked", "skip_reason": "no_confirmed_tracking_rows", "real_api_called": False}
@@ -585,7 +623,7 @@ def execute_warehouse_batch_writeback(
             if row.row_status == "ready_for_writeback":
                 row.failure_reason = result.get("skip_reason") or "platform_writeback_failed"
     db.commit()
-    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="platform_writeback_recorded", row_count=len(ready_refs), reason_code=str(result.get("status") or "failed"))
+    _write_workflow_audit(db, batch=batch, actor_context=actor_context, action="platform_writeback_recorded", row_count=len(ready_import_rows), reason_code=str(result.get("status") or "failed"))
     db.refresh(batch)
     return {"status": result.get("status"), "writeback": result, "batch": _serialize_batch(batch), "real_api_called": bool(result.get("real_api_called"))}
 
@@ -618,12 +656,26 @@ def remove_warehouse_batch_row(
     if tracking_import_batch_id:
         import_batch = db.get(ShippingTrackingImportBatch, tracking_import_batch_id)
         if import_batch is not None:
-            for import_row in list(import_batch.rows):
-                if (
-                    import_row.order_reference == row.order_reference
-                    or import_row.product_order_reference == row.product_order_reference
-                ):
-                    db.delete(import_row)
+            related_import_rows = [
+                import_row for import_row in import_batch.rows
+                if import_row.order_reference == row.order_reference
+            ]
+            product_order_reference = str(row.product_order_reference or "").strip()
+            if product_order_reference:
+                matched_import_rows = [
+                    import_row for import_row in related_import_rows
+                    if import_row.product_order_reference == product_order_reference
+                ]
+                if not matched_import_rows:
+                    if len(related_import_rows) != 1:
+                        return {"status": "blocked", "skip_reason": "shipping_tracking_cleanup_ambiguous_manual_resolution_required"}
+                    matched_import_rows = related_import_rows
+            else:
+                if len(related_import_rows) != 1:
+                    return {"status": "blocked", "skip_reason": "shipping_tracking_cleanup_ambiguous_manual_resolution_required"}
+                matched_import_rows = related_import_rows
+            for import_row in matched_import_rows:
+                db.delete(import_row)
             db.flush()
             remaining_import_rows = db.scalars(select(ShippingTrackingImportRow).where(
                 ShippingTrackingImportRow.import_batch_id == import_batch.id,
@@ -632,6 +684,11 @@ def remove_warehouse_batch_row(
                 db.expire(import_batch, ["rows"])
                 db.delete(import_batch)
                 batch.tracking_import_batch_id = None
+            else:
+                import_batch.row_count = len(remaining_import_rows)
+                import_batch.ready_row_count = sum(item.row_status == "ready_for_confirmation" for item in remaining_import_rows)
+                import_batch.duplicate_row_count = sum(item.row_status == "needs_confirmation" for item in remaining_import_rows)
+                import_batch.blocked_row_count = sum(item.row_status == "blocked" for item in remaining_import_rows)
     for status_event in db.scalars(select(OrderStatusEvent).where(
         OrderStatusEvent.order_id == row.local_order_id,
         OrderStatusEvent.platform == batch.platform,
@@ -653,6 +710,9 @@ def remove_warehouse_batch_row(
     row.order.raw_data = safe_metadata or None
     row.order.order_status = row.pre_batch_order_status
     row.row_status = "removed"
+    row.carrier = None
+    row.tracking_number_hash = None
+    row.shipped_at = None
     row.failure_reason = reason_code
     row.is_active = False
     row.active_lock = None

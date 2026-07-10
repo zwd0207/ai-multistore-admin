@@ -21,7 +21,7 @@ os.environ["REAL_API_WRITE_ENABLED"] = "false"
 from app.database import SessionLocal, engine, init_db
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
-from app.models.shipping import LogisticsInventoryMapping, ShippingTrackingImportRow, WarehouseShippingBatch, WarehouseShippingBatchOrder
+from app.models.shipping import LogisticsInventoryMapping, ShippingTrackingImportBatch, ShippingTrackingImportRow, WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.models.store import Store
 from app.services import order_service, shipping_service, warehouse_shipping_service
 
@@ -36,6 +36,7 @@ def tracking_xlsx(rows):
         ("logistics_inventory_code", "Warehouse SKU"),
         ("carrier", "Carrier"),
         ("tracking_number", "Tracking number"),
+        ("shipped_at", "Shipped at"),
     ]
     return base64.b64encode(shipping_service._build_xlsx_bytes(rows, headers=headers)).decode("ascii")
 
@@ -216,6 +217,101 @@ def main():
         reprocessed = create_batch(db, store.id, order.id)
         assert reprocessed["status"] == "created", reprocessed
 
+        sibling_one = add_order(db, store.id, "sibling-one")
+        sibling_two = add_order(db, store.id, "sibling-two")
+        db.commit()
+        sibling_batch = warehouse_shipping_service.create_warehouse_batch(
+            db,
+            store_id=store.id,
+            platform="naver",
+            order_ids=[sibling_one.id, sibling_two.id],
+            manual_approval=True,
+            actor_context=ACTOR,
+        )
+        assert sibling_batch["status"] == "created", sibling_batch
+        sibling_batch_id = sibling_batch["batch"]["id"]
+        sibling_rows = {
+            item.local_order_id: item
+            for item in db.scalars(select(WarehouseShippingBatchOrder).where(
+                WarehouseShippingBatchOrder.batch_id == sibling_batch_id,
+            )).all()
+        }
+        sibling_one_row = sibling_rows[sibling_one.id]
+        sibling_two_row = sibling_rows[sibling_two.id]
+        shared_order_reference = "shared-platform-order"
+        sibling_one_row.order_reference = shared_order_reference
+        sibling_two_row.order_reference = shared_order_reference
+        db.commit()
+        sibling_manifest = warehouse_shipping_service.download_warehouse_manifest(
+            db,
+            batch_id=sibling_batch_id,
+            manual_approval=True,
+            privacy_access_acknowledged=True,
+            actor_context=ACTOR,
+        )
+        assert sibling_manifest["status"] == "warehouse_manifest_ready", sibling_manifest
+        sibling_import = warehouse_shipping_service.import_warehouse_tracking_xlsx(
+            db,
+            batch_id=sibling_batch_id,
+            source_file_name="siblings-return.xlsx",
+            file_content_base64=tracking_xlsx([
+                {
+                    "order_reference": shared_order_reference,
+                    "product_order_reference": sibling_one.external_product_order_id,
+                    "logistics_inventory_code": "WH-TEST-001",
+                    "carrier": "CJ",
+                    "tracking_number": "1111111111",
+                    "shipped_at": "2026-07-11T09:00:00+09:00",
+                },
+                {
+                    "order_reference": shared_order_reference,
+                    "product_order_reference": sibling_two.external_product_order_id,
+                    "logistics_inventory_code": "WH-TEST-001",
+                    "carrier": "CJ",
+                    "tracking_number": "2222222222",
+                    "shipped_at": "2026-07-11T09:05:00+09:00",
+                },
+            ]),
+            manual_approval=True,
+            actor_context=ACTOR,
+        )
+        assert sibling_import["normal_count"] == 2, sibling_import
+        sibling_import_batch_id = db.get(WarehouseShippingBatch, sibling_batch_id).tracking_import_batch_id
+        sibling_one_row.product_order_reference = None
+        db.commit()
+        ambiguous_release = warehouse_shipping_service.remove_warehouse_batch_row(
+            db,
+            batch_id=sibling_batch_id,
+            row_id=sibling_one_row.id,
+            reason_code="warehouse_exception",
+            warehouse_stopped_shipping=True,
+            actor_context=ACTOR,
+        )
+        assert ambiguous_release["skip_reason"] == "shipping_tracking_cleanup_ambiguous_manual_resolution_required", ambiguous_release
+        assert sibling_one_row.tracking_number_hash is not None
+        sibling_one_row.product_order_reference = sibling_one.external_product_order_id
+        db.commit()
+        sibling_release = warehouse_shipping_service.remove_warehouse_batch_row(
+            db,
+            batch_id=sibling_batch_id,
+            row_id=sibling_one_row.id,
+            reason_code="warehouse_exception",
+            warehouse_stopped_shipping=True,
+            actor_context=ACTOR,
+        )
+        assert sibling_release["status"] == "removed", sibling_release
+        db.refresh(sibling_one_row)
+        db.refresh(sibling_two_row)
+        assert sibling_one_row.carrier is None and sibling_one_row.tracking_number_hash is None and sibling_one_row.shipped_at is None
+        assert sibling_two_row.carrier == "CJ" and sibling_two_row.tracking_number_hash is not None
+        sibling_import_rows = db.scalars(select(ShippingTrackingImportRow).where(
+            ShippingTrackingImportRow.import_batch_id == sibling_import_batch_id,
+        )).all()
+        assert len(sibling_import_rows) == 1 and sibling_import_rows[0].product_order_reference == sibling_two.external_product_order_id
+        sibling_import_batch = db.get(ShippingTrackingImportBatch, sibling_import_batch_id)
+        assert sibling_import_batch.row_count == 1 and sibling_import_batch.ready_row_count == 1
+        assert sibling_import_batch.duplicate_row_count == 0 and sibling_import_batch.blocked_row_count == 0
+
         legacy_order = add_order(db, store.id, "legacy")
         db.commit()
         legacy_batch = create_batch(db, store.id, legacy_order.id)
@@ -244,6 +340,27 @@ def main():
         db.commit()
         assert warehouse_shipping_service.consume_approval_grant(
             db, batch_id=stale_batch_id, user_id=77, grant_scope="manifest", token=stale_grant["approval_token"],
+        ) is False
+
+        writeback_order = add_order(db, store.id, "writeback-approval")
+        db.commit()
+        writeback_batch = create_batch(db, store.id, writeback_order.id)
+        writeback_batch_id = writeback_batch["batch"]["id"]
+        writeback_row = db.get(WarehouseShippingBatchOrder, writeback_batch["batch"]["rows"][0]["id"])
+        writeback_row.row_status = "ready_for_writeback"
+        writeback_row.carrier = "CJ"
+        writeback_row.tracking_number_hash = shipping_service._safe_hash_identifier("3333333333")
+        writeback_row.shipped_at = "2026-07-11T10:00:00+09:00"
+        db.commit()
+        writeback_grant = warehouse_shipping_service.issue_approval_grant(
+            db, batch_id=writeback_batch_id, user_id=80, grant_scope="writeback",
+        )
+        writeback_row.carrier = "LOTTE"
+        writeback_row.tracking_number_hash = shipping_service._safe_hash_identifier("4444444444")
+        writeback_row.shipped_at = "2026-07-11T10:30:00+09:00"
+        db.commit()
+        assert warehouse_shipping_service.consume_approval_grant(
+            db, batch_id=writeback_batch_id, user_id=80, grant_scope="writeback", token=writeback_grant["approval_token"],
         ) is False
 
         recipient_order = add_order(db, store.id, "recipient", {"delivery_memo": "Original memo"})

@@ -351,6 +351,7 @@ class WarehouseShippingBatchOrder(Base):
     active_lock: Mapped[str | None] = mapped_column(String(20), nullable=True, default="active", server_default="active")
     carrier: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tracking_number_hash: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    shipped_at: Mapped[str | None] = mapped_column(String(80), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)
     operator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
