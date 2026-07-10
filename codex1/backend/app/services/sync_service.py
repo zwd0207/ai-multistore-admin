@@ -2061,7 +2061,7 @@ def _manual_refresh_existing_naver_order_details(
             return result
         detail_records = _extract_naver_order_detail_records(detail_result["payload"], product_order_ids)
         detail_previews = [
-            _build_naver_order_detail_preview(item, store_id=store_id)
+            _build_naver_order_internal_detail(item, store_id=store_id)
             for item in detail_records
         ]
         refreshed = _sync_naver_order_detail_previews_batch(
@@ -2220,7 +2220,7 @@ def refresh_single_naver_order_detail(
         })
         return result
 
-    detail_preview = _build_naver_order_detail_preview(detail_records[0], store_id=store_id)
+    detail_preview = _build_naver_order_internal_detail(detail_records[0], store_id=store_id)
     result["field_availability"] = _naver_order_detail_field_availability(detail_preview)
     privacy_gate = _validate_naver_order_detail_preview_for_local_write(
         detail_preview,
@@ -5013,6 +5013,10 @@ def _run_naver_order_real_micro_preview(
                     local_sync_result=local_sync_result,
                 )
             detail_records = _extract_naver_order_detail_records(detail_result["payload"], product_order_ids[:size])
+            internal_details = [
+                _build_naver_order_internal_detail(item, store_id=store_id)
+                for item in detail_records
+            ]
             detail_previews = [
                 _build_naver_order_detail_preview(item, store_id=store_id)
                 for item in detail_records
@@ -5032,7 +5036,7 @@ def _run_naver_order_real_micro_preview(
             local_sync_result = _sync_naver_order_detail_previews_batch(
                 db,
                 store_id=store_id,
-                detail_previews=detail_previews,
+                detail_previews=internal_details,
                 real_sync=real_sync,
             )
             field_observation["privacy_gate"] = local_sync_result.get("privacy_gate")
@@ -5677,8 +5681,6 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
         "platform": "naver",
         "external_order_id_hash": order_id_hash,
         "external_product_order_id_hash": product_order_id_hash,
-        "external_order_id_full": _safe_order_business_text(order_id, max_length=120),
-        "external_product_order_id": _safe_order_business_text(product_order_id, max_length=120),
         "product_order_id_hash": product_order_id_hash,
         "order_id_hash": order_id_hash,
         "order_status": order_summary,
@@ -5697,32 +5699,57 @@ def _build_naver_order_detail_preview(payload: object, *, store_id: int | None =
         "claim_status": claim_summary,
         "claim_status_label_zh": claim_summary.get("label_zh"),
         "buyer_name_masked": _mask_person_name(buyer_name),
-        "buyer_name": _safe_order_business_text(buyer_name, max_length=120),
-        "buyer_phone": _safe_order_business_text(buyer_phone, max_length=40),
         "buyer_phone_masked": _mask_phone(buyer_phone),
         "buyer_id_hash": _mask_external_identifier(buyer_id) if buyer_id else None,
         "receiver_name_masked": _mask_person_name(receiver_name),
-        "receiver_name": _safe_order_business_text(receiver_name, max_length=120),
-        "receiver_phone": _safe_order_business_text(receiver_phone, max_length=40),
         "receiver_phone_masked": _mask_phone(receiver_phone),
-        "receiver_address": receiver_address,
-        "zip_code": _safe_order_business_text(zip_code, max_length=30),
-        "delivery_company": delivery_company,
-        "delivery_company_code": delivery_company_code,
-        "tracking_number": tracking_number,
-        "shipped_at": _datetime_to_iso(_extract_datetime_by_keys(payload, ("shippedAt", "sendDate", "dispatchDate", "dispatchedAt"))),
         "address_observed": _payload_has_key_token(payload, ("address", "zipcode", "zip_code", "postalcode", "postal_code")),
-        "address_saved": bool(receiver_address or zip_code),
+        "address_saved": False,
         "source_type": NAVER_ORDER_PREVIEW_SOURCE_TYPE,
         "last_synced_at": get_utc_now().isoformat(),
         "raw_response_saved": False,
-        "privacy_fields_redacted": False,
-        "business_contact_fields_saved": True,
+        "privacy_fields_redacted": True,
         "orders_written": False,
         "mapping_version": "naver_order_detail_preview_v1",
         "unknown_status_observed": any(item.get("unknown_status_observed") for item in (order_summary, delivery_summary, claim_summary)),
         "safe_status_samples": sorted(dict.fromkeys(safe_status_samples)),
     }
+
+
+def _build_naver_order_internal_detail(payload: object, *, store_id: int | None = None) -> dict:
+    detail = _build_naver_order_detail_preview(payload, store_id=store_id)
+    receiver_address = _extract_naver_receiver_address(payload)
+    zip_code = _extract_scalar_by_keys(payload, ("zipCode", "zipcode", "postalCode", "postal_code"))
+    detail.update({
+        "external_order_id_full": _safe_order_business_text(
+            _extract_scalar_by_keys(payload, ("orderId", "orderNo", "orderNumber")), max_length=120,
+        ),
+        "external_product_order_id": _safe_order_business_text(
+            _extract_scalar_by_keys(payload, ("productOrderId", "productOrderNo")), max_length=120,
+        ),
+        "receiver_name": _safe_order_business_text(
+            _extract_scalar_by_keys(payload, ("receiverName", "recipientName")), max_length=120,
+        ),
+        "receiver_phone": _safe_order_business_text(
+            _extract_scalar_by_keys(payload, (
+                "receiverTelNo", "receiverTelNo1", "receiverTelNo2", "receiverPhone", "recipientPhone", "tel1", "tel2",
+            )),
+            max_length=40,
+        ),
+        "receiver_address": receiver_address,
+        "zip_code": _safe_order_business_text(zip_code, max_length=30),
+        "delivery_company": _extract_naver_delivery_company(payload),
+        "delivery_company_code": _extract_naver_delivery_company_code(payload),
+        "tracking_number": _extract_naver_tracking_number(payload),
+        "shipped_at": _datetime_to_iso(_extract_datetime_by_keys(
+            payload, ("shippedAt", "sendDate", "dispatchDate", "dispatchedAt"),
+        )),
+        "address_saved": bool(receiver_address or zip_code),
+        "privacy_fields_redacted": False,
+        "business_contact_fields_saved": True,
+        "mapping_version": "naver_order_internal_fulfillment_v1",
+    })
+    return detail
 
 
 def _complete_order_field_value(payload: object, keys: tuple[str, ...], max_length: int = 160) -> str | None:
@@ -5737,6 +5764,9 @@ def _default_naver_order_complete_field_preview(requested: bool = False) -> dict
         "available": False,
         "complete_fields": {},
         "field_availability": {},
+        "raw_response_saved": False,
+        "privacy_fields_redacted": True,
+        "orders_written": False,
         "save_plan": {
             "phase": "Naver-ERP-5D",
             "codex1_schema_write_enabled": False,
@@ -5843,7 +5873,7 @@ def _build_naver_order_complete_field_preview(
     complete_fields = {key: value for key, value in complete_fields.items() if value is not None}
     preview.update({
         "available": bool(complete_fields.get("external_order_id") or complete_fields.get("external_product_order_id")),
-        "complete_fields": complete_fields,
+        "complete_fields": {},
         "field_availability": {
             key: key in complete_fields and complete_fields.get(key) not in {None, ""}
             for key in (
@@ -5902,6 +5932,7 @@ def _validate_naver_order_detail_preview_for_local_write(
     detail_preview: dict | None,
     *,
     expected_store_id: int = 8,
+    require_external_product_order_id: bool = True,
 ) -> dict:
     reasons: list[str] = []
     if not isinstance(detail_preview, dict):
@@ -5914,7 +5945,7 @@ def _validate_naver_order_detail_preview_for_local_write(
         reasons.append("missing_external_product_order_id_hash")
     if not _is_hash_identifier(detail_preview.get("external_order_id_hash")):
         reasons.append("missing_external_order_id_hash")
-    if not detail_preview.get("external_product_order_id"):
+    if require_external_product_order_id and not detail_preview.get("external_product_order_id"):
         reasons.append("missing_external_product_order_id")
     if detail_preview.get("raw_response_saved") is not False:
         reasons.append("raw_response_not_suppressed")
@@ -6002,7 +6033,7 @@ def _sync_naver_order_detail_preview(
         return result
 
     assert detail_preview is not None
-    external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
+    external_order_id = str(detail_preview["external_product_order_id_hash"])
     existing = db.scalar(
         select(Order).where(
             Order.store_id == store_id,
@@ -6195,7 +6226,7 @@ def _build_naver_order_refresh_payload(detail_preview: dict) -> dict:
     synced_at = _parse_preview_iso_datetime(detail_preview.get("last_synced_at")) or get_utc_now()
     ordered_at = _parse_preview_iso_datetime(detail_preview.get("ordered_at")) or synced_at
     paid_at = _parse_preview_iso_datetime(detail_preview.get("paid_at"))
-    external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
+    external_order_id = str(detail_preview["external_product_order_id_hash"])
     return {
         "external_order_id": external_order_id,
         "external_product_order_id": _bounded_text(detail_preview.get("external_product_order_id"), 120),
@@ -6278,7 +6309,7 @@ def _sync_naver_order_detail_previews_batch(
             continue
 
         assert isinstance(detail_preview, dict)
-        external_order_id = str(detail_preview.get("external_product_order_id") or detail_preview["external_product_order_id_hash"])
+        external_order_id = str(detail_preview["external_product_order_id_hash"])
         legacy_hash_id = str(detail_preview["external_product_order_id_hash"])
         sample_ids.append(external_order_id)
         existing = db.scalar(
@@ -6485,7 +6516,10 @@ def _evaluate_naver_order_local_refresh_mock_gate(
         result["skip_reason"] = "local_order_not_unique"
         return result
 
-    privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+        refresh_preview,
+        require_external_product_order_id=write_enabled,
+    )
     result["privacy_gate"] = privacy_gate
     if not privacy_gate["passed"]:
         result["skip_reason"] = "local_refresh_privacy_blocked"
@@ -6529,6 +6563,7 @@ def _naver_order_refresh_batch_forbidden_field_names(payload: object) -> list[st
     allowed_names = {
         "addressobserved",
         "addresssaved",
+        "businesscontactfieldssaved",
         "buyeridhash",
         "buyerid_hash",
         "buyerphonemasked",
@@ -6537,8 +6572,10 @@ def _naver_order_refresh_batch_forbidden_field_names(payload: object) -> list[st
         "buyer_name_masked",
         "externalorderidhash",
         "external_order_id_hash",
+        "externalorderidfull",
         "externalproductorderidhash",
         "external_product_order_id_hash",
+        "externalproductorderid",
         "orderidhash",
         "order_id_hash",
         "privacyfieldsredacted",
@@ -6549,8 +6586,16 @@ def _naver_order_refresh_batch_forbidden_field_names(payload: object) -> list[st
         "raw_response_saved",
         "receivernamemasked",
         "receiver_name_masked",
+        "receivername",
         "receiverphonemasked",
         "receiver_phone_masked",
+        "receiverphone",
+        "receiveraddress",
+        "zipcode",
+        "deliverycompany",
+        "deliverycompanycode",
+        "trackingnumber",
+        "shippedat",
     }
     forbidden_fragments = {
         "authorization",
@@ -12337,7 +12382,10 @@ def _evaluate_naver_order_refresh_batch_mock_gate(
             result["skip_reason"] = "batch_refresh_local_order_not_unique"
             return result
 
-        privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+        privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+            refresh_preview,
+            require_external_product_order_id=write_enabled,
+        )
         candidate_result["privacy_gate_passed"] = privacy_gate["passed"]
         candidate_result["privacy_gate_reasons"] = privacy_gate["reasons"]
         if not privacy_gate["passed"]:
@@ -12606,7 +12654,10 @@ def _evaluate_naver_order_status_timeline_mock_mapper(
         result["skip_reason"] = "timeline_identity_mismatch"
         return result
 
-    privacy_gate = _validate_naver_order_detail_preview_for_local_write(refresh_preview)
+    privacy_gate = _validate_naver_order_detail_preview_for_local_write(
+        refresh_preview,
+        require_external_product_order_id=False,
+    )
     result["privacy_gate"] = privacy_gate
     if not privacy_gate["passed"]:
         result["skip_reason"] = "timeline_privacy_gate_failed"
@@ -13023,7 +13074,26 @@ def _build_naver_order_preview_result(
     would_update: int,
     local_sync_result: dict | None = None,
 ) -> dict:
-    safe_local_sync_result = local_sync_result or _default_naver_order_local_sync_result(False)
+    safe_local_sync_result = dict(local_sync_result or _default_naver_order_local_sync_result(False))
+    safe_local_sync_result["sample_ids"] = [
+        value if _is_hash_identifier(value) else _mask_external_identifier(value)
+        for value in (safe_local_sync_result.get("sample_ids") or [])
+        if value
+    ]
+    candidate_results = [
+        item for item in (safe_local_sync_result.get("candidate_results") or [])
+        if isinstance(item, dict)
+    ]
+    safe_local_sync_result["privacy_gate"] = {
+        "passed": bool(candidate_results) and all(item.get("privacy_gate_passed") is True for item in candidate_results),
+        "reasons": sorted({
+            reason
+            for item in candidate_results
+            for reason in (item.get("privacy_gate_reasons") or [])
+            if isinstance(reason, str)
+        }),
+    }
+    safe_local_sync_result["privacy_fields_redacted"] = True
     safe_keyword_flags = dict(
         field_observation.get("safe_keyword_flags")
         or api_credential_readiness_service._empty_naver_safe_keyword_flags()

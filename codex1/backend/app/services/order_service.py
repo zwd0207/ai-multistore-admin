@@ -68,26 +68,30 @@ def _order_reference_keys(order: Order) -> list[str]:
     return [str(item).strip() for item in keys if str(item or "").strip()]
 
 
-def _build_tracking_lookup(rows: list[ShippingTrackingImportRow]) -> dict[str, ShippingTrackingImportRow]:
-    lookup: dict[str, ShippingTrackingImportRow] = {}
+def _build_tracking_lookup(rows: list[ShippingTrackingImportRow]) -> dict[str, list[ShippingTrackingImportRow]]:
+    lookup: dict[str, list[ShippingTrackingImportRow]] = {}
     for row in rows:
-        for key in (row.order_reference, row.product_order_reference):
+        for kind, key in (("order", row.order_reference), ("product", row.product_order_reference)):
             text = str(key or "").strip()
-            if text and text not in lookup:
-                lookup[text] = row
+            if text:
+                lookup.setdefault(f"{kind}:{text}", []).append(row)
     return lookup
 
 
 def _tracking_row_for_order(
     order: Order,
-    lookup: dict[str, ShippingTrackingImportRow] | None,
+    lookup: dict[str, list[ShippingTrackingImportRow]] | None,
 ) -> ShippingTrackingImportRow | None:
     if not lookup:
         return None
-    for key in _order_reference_keys(order):
-        row = lookup.get(key)
-        if row is not None:
-            return row
+    product_order_reference = str(order.external_product_order_id or "").strip()
+    if product_order_reference:
+        matches = lookup.get(f"product:{product_order_reference}", [])
+        return matches[0] if len(matches) == 1 else None
+    order_reference = str(order.external_order_id or "").strip()
+    matches = lookup.get(f"order:{order_reference}", [])
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -137,6 +141,59 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
     }
 
 
+def recipient_contract(order: Order) -> dict[str, str]:
+    """Return the only recipient field set exposed to authorised operations and warehouse exports."""
+    raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
+    receiver_name = _first_text(
+        order.receiver_name,
+        _find_nested_text(raw_data, ("receiver_name", "receiverName", "recipientName"), max_length=120),
+        max_length=120,
+    )
+    receiver_phone = _first_text(
+        order.receiver_phone,
+        _find_nested_text(raw_data, ("receiver_phone", "receiverPhone", "receiverTelNo", "receiverTelNo1", "tel1"), max_length=40),
+        max_length=40,
+    )
+    receiver_phone_secondary = _first_text(
+        _find_nested_text(raw_data, ("receiver_phone_secondary", "receiverPhoneSecondary", "receiverTelNo2", "tel2", "secondaryPhone"), max_length=40),
+        max_length=40,
+    )
+    zip_code = _first_text(
+        order.zip_code,
+        _find_nested_text(raw_data, ("zip_code", "zipCode", "postalCode"), max_length=30),
+        max_length=30,
+    )
+    address_line1 = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_line1", "receiverAddressLine1", "baseAddress", "roadNameAddress"), max_length=300),
+        order.receiver_address,
+        _find_nested_text(raw_data, ("receiver_address", "receiverAddress", "recipientAddress"), max_length=300),
+        max_length=300,
+    )
+    address_line2 = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_line2", "receiverAddressLine2", "detailedAddress", "detailAddress"), max_length=300),
+        max_length=300,
+    )
+    address_full = _first_text(
+        _find_nested_text(raw_data, ("receiver_address_full", "receiverAddressFull", "fullAddress"), max_length=600),
+        " ".join(part for part in (address_line1, address_line2) if part),
+        max_length=600,
+    )
+    delivery_memo = _first_text(
+        _find_nested_text(raw_data, ("delivery_memo", "deliveryMemo", "shippingMemo", "memo"), max_length=300),
+        max_length=300,
+    )
+    return {
+        "receiver_name": receiver_name or "",
+        "receiver_phone": receiver_phone or "",
+        "receiver_phone_secondary": receiver_phone_secondary or "",
+        "zip_code": zip_code or "",
+        "receiver_address_line1": address_line1 or "",
+        "receiver_address_line2": address_line2 or "",
+        "receiver_address_full": address_full or "",
+        "delivery_memo": delivery_memo or "",
+    }
+
+
 def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
     payload = OrderRead.model_validate(order).model_dump(mode="json")
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
@@ -147,7 +204,7 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
     )
     payload["receiver_name"] = payload.get("receiver_name") or _find_nested_text(
         raw_data,
-        ("receiver_name", "receiverName", "recipientName", "name"),
+        ("receiver_name", "receiverName", "recipientName"),
         max_length=120,
     )
     payload["receiver_address"] = payload.get("receiver_address") or _find_nested_text(
@@ -156,6 +213,13 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
         max_length=300,
     )
     payload.update(_order_delivery_fields(order, tracking_row))
+    return payload
+
+
+def serialize_order_summary(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
+    payload = serialize_order(order, tracking_row)
+    for field in ("buyer_name", "buyer_phone", "receiver_name", "receiver_phone", "receiver_address", "zip_code", "raw_data"):
+        payload.pop(field, None)
     return payload
 
 
@@ -210,7 +274,20 @@ def list_orders(
     )
     tracking_lookup = _build_tracking_lookup(db.scalars(tracking_statement).all())
 
-    return [serialize_order(item, _tracking_row_for_order(item, tracking_lookup)) for item in orders]
+    return [serialize_order_summary(item, _tracking_row_for_order(item, tracking_lookup)) for item in orders]
+
+
+def list_operations_orders(db: Session, store_id: int, platform: str | None = None, include_test_orders: bool = False) -> list[dict]:
+    ensure_store_exists(db, store_id)
+    statement = select(Order).where(Order.store_id == store_id).order_by(Order.id.asc())
+    if platform:
+        statement = statement.where(Order.platform == platform)
+    if not include_test_orders:
+        statement = statement.where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
+    return [
+        {key: value for key, value in serialize_order(order).items() if key != "raw_data"} | recipient_contract(order)
+        for order in db.scalars(statement).all()
+    ]
 
 
 def count_test_orders(db: Session, store_id: int, platform: str | None = None) -> int:

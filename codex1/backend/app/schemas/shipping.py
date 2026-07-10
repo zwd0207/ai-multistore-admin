@@ -170,6 +170,57 @@ class ShippingShipmentWritebackExecuteRequest(ShippingShipmentWritebackExecution
     pass
 
 
+class WarehouseShippingBatchCreateRequest(BaseModel):
+    store_id: int = Field(..., ge=1)
+    platform: str = Field(default="naver", min_length=1, max_length=50)
+    order_ids: list[int] = Field(..., min_length=1, max_length=200)
+    manual_approval: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class WarehouseShippingManifestRequest(BaseModel):
+    manual_approval: bool = False
+    privacy_access_acknowledged: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+    approval_token: str | None = Field(default=None, min_length=20, max_length=300)
+
+
+class WarehouseShippingTrackingImportRequest(BaseModel):
+    source_file_name: str = Field(..., min_length=1, max_length=255)
+    file_content_base64: str = Field(..., min_length=1)
+    manual_approval: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class WarehouseShippingConfirmRequest(BaseModel):
+    confirmed_row_ids: list[int] = Field(default_factory=list, max_length=200)
+    manual_approval: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class WarehouseShippingRemoveRowRequest(BaseModel):
+    manual_approval: bool = False
+    reason_code: str = Field(..., min_length=1, max_length=120)
+    warehouse_stopped_shipping: bool = False
+
+
+class WarehouseShippingWritebackRequest(BaseModel):
+    manual_approval: bool = False
+    final_operator_confirmation: bool = False
+    real_api_call_requested: bool = False
+    actor_context: dict[str, Any] = Field(default_factory=dict)
+    approval_token: str | None = Field(default=None, min_length=20, max_length=300)
+
+
+class WarehouseShippingApprovalRequest(BaseModel):
+    confirmation: bool = False
+    warehouse_name: str | None = Field(default=None, max_length=160)
+
+
+class WarehouseShippingTokenRequest(BaseModel):
+    approval_token: str = Field(..., min_length=20, max_length=300)
+
+
 class LogisticsInventoryMappingRead(BaseModel):
     id: int
     store_id: int
