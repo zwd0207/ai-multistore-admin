@@ -21,6 +21,8 @@ from app.models.shipping import (
     ShippingExportBatchRow,
     ShippingTrackingImportBatch,
     ShippingTrackingImportRow,
+    WarehouseShippingBatch,
+    WarehouseShippingBatchOrder,
 )
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.store import Store
@@ -53,6 +55,8 @@ __all__ = [
     "ShippingExportBatchRow",
     "ShippingTrackingImportBatch",
     "ShippingTrackingImportRow",
+    "WarehouseShippingBatch",
+    "WarehouseShippingBatchOrder",
     "SyncCheckpoint",
     "Store",
     "SyncLog",
