@@ -1112,9 +1112,9 @@ def _request_naver_customer_inquiries(
 ) -> dict:
     params: dict[str, str | int] = {
         "page": int(page),
-        "size": int(size),
-        "fromDate": start_date.isoformat(),
-        "toDate": end_date.isoformat(),
+        "size": max(10, min(int(size), 200)),
+        "startSearchDate": start_date.isoformat(),
+        "endSearchDate": end_date.isoformat(),
     }
     if answered is not None:
         params["answered"] = "true" if answered else "false"

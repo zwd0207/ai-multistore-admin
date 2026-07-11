@@ -56,7 +56,7 @@ def _customer_inquiry_result_for_request_error(db):
         "error_code": "raw-error-must-not-return",
         "safe_error": {
             "platform_error_code": "INVALID_DATE_PARAMETER",
-            "platform_error_fields": ["fromDate", "toDate", "customerName"],
+            "platform_error_fields": ["startSearchDate", "endSearchDate", "customerName"],
         },
     }
     try:
@@ -139,7 +139,7 @@ def main() -> None:
             "success": False,
             "http_status": 403,
             "error_code": "secret-platform-message-must-not-return",
-            "safe_error": {"platform_error_code": "NOT_AUTHORIZED", "platform_error_fields": ["fromDate"]},
+            "safe_error": {"platform_error_code": "NOT_AUTHORIZED", "platform_error_fields": ["startSearchDate"]},
             "diagnostics": {"customerContent": "private-content-must-not-return"},
         }
         try:
@@ -160,7 +160,7 @@ def main() -> None:
             "http_status": 403,
             "platform_error_category": "platform_not_authorized",
             "platform_error_code": "NOT_AUTHORIZED",
-            "platform_error_fields": ["fromDate"],
+            "platform_error_fields": ["startSearchDate"],
         }
         unavailable_serialized = json.dumps(unavailable_result, ensure_ascii=False).lower()
         assert "secret-platform-message" not in unavailable_serialized
@@ -174,7 +174,7 @@ def main() -> None:
             "http_status": 400,
             "platform_error_category": "request_error",
             "platform_error_code": "INVALID_DATE_PARAMETER",
-            "platform_error_fields": ["fromDate", "toDate"],
+            "platform_error_fields": ["startSearchDate", "endSearchDate"],
         }
     engine.dispose()
     if TEMP_DB.exists():

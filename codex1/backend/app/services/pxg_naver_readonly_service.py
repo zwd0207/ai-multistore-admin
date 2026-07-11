@@ -99,7 +99,7 @@ def _customer_inquiry_capability_result(request_result: dict, inquiry_count: int
         "platform_error_code": safe_error.get("platform_error_code"),
         "platform_error_fields": [
             field for field in safe_error.get("platform_error_fields", [])
-            if field in {"fromDate", "toDate", "page", "size", "answered"}
+            if field in {"startSearchDate", "endSearchDate", "page", "size", "answered"}
         ][:5],
     }
 
@@ -165,7 +165,7 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
         end_date=now.date(),
         answered=None,
         page=1,
-        size=3,
+        size=10,
     )
     inquiry_count = 0
     if inquiry_result.get("success"):
