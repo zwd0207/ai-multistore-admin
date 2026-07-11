@@ -82,7 +82,9 @@ def main() -> None:
             assert b"PXG Fictional Bag" not in Path(backup.encrypted_path).read_bytes()
             if os.name == "nt":
                 acl = subprocess.run(["icacls", str(backup_root)], capture_output=True, text=True, check=False)
-                assert acl.returncode == 0 and getpass.getuser().lower() in acl.stdout.lower(), acl.stdout
+                output = acl.stdout.lower()
+                assert acl.returncode == 0 and getpass.getuser().lower() in output and "(i)" not in output, acl.stdout
+                assert all(group not in output for group in ("everyone:", "builtin\\users:", "authenticated users:")), acl.stdout
             original_ciphertext = Path(backup.encrypted_path).read_bytes()
             Path(backup.encrypted_path).write_bytes(original_ciphertext + b"tampered")
             try:
@@ -142,10 +144,12 @@ def main() -> None:
             from app.models.pxg_naver_readonly import PxgNaverOrderRecipientSecureRecord
             privacy_record = PxgNaverOrderRecipientSecureRecord(
                 order_id=protected_order.id, store_id=store.id, platform="naver", encrypted_recipient_payload="ciphertext",
-                recipient_payload_hash="a" * 64, source_updated_at=get_utc_now() - timedelta(days=29),
-                source_observed_at=get_utc_now() - timedelta(days=29), expires_at=get_utc_now(), is_stale=True,
+                recipient_payload_hash="a" * 64, source_updated_at=get_utc_now(),
+                source_observed_at=get_utc_now(), expires_at=get_utc_now(), is_stale=True,
             )
             db.add(privacy_record)
+            protected_order.order_status = "DELIVERED"
+            protected_order.updated_at = get_utc_now() - timedelta(days=6)
             db.commit()
             assert _privacy_backup_expiry(db, store_id=store.id, now=get_utc_now()) < get_utc_now() + timedelta(days=2)
             sent_batch = WarehouseShippingBatch(batch_no="T09-R2-PROTECTED", store_id=store.id, platform="naver", status="warehouse_sent")

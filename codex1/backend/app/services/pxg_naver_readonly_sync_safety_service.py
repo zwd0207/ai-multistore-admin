@@ -122,7 +122,17 @@ def _backup_root(settings: Settings, requested_root: Path) -> Path:
             root.chmod(0o700)
     except OSError as exc:
         raise ApiError("PXG/Naver backup directory permissions cannot be set", "readonly_backup_acl_failed", 409) from exc
+    _verify_windows_acl(root)
     return root
+
+
+def _verify_windows_acl(path: Path) -> None:
+    if os.name != "nt":
+        return
+    result = subprocess.run(["icacls", str(path)], capture_output=True, text=True, check=False)
+    output = result.stdout.lower()
+    if result.returncode != 0 or "(i)" in output or any(group in output for group in ("everyone:", "builtin\\users:", "authenticated users:")):
+        raise ApiError("PXG/Naver backup ACL verification failed", "readonly_backup_acl_failed", 409)
 
 
 def _restrict_backup_file(path: Path) -> None:
@@ -138,6 +148,7 @@ def _restrict_backup_file(path: Path) -> None:
             path.chmod(0o600)
     except OSError as exc:
         raise ApiError("PXG/Naver backup file permissions cannot be set", "readonly_backup_acl_failed", 409) from exc
+    _verify_windows_acl(path)
 
 
 def _assert_inside_root(path: Path, root: Path) -> Path:
@@ -178,6 +189,9 @@ def _privacy_backup_expiry(db: Session, *, store_id: int, now: datetime) -> date
     deadlines = [now + timedelta(days=BACKUP_RETENTION_DAYS)]
     for record in db.scalars(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.store_id == store_id)).all():
         deadlines.append(_utc(record.source_observed_at) + timedelta(days=30))
+        order = db.get(Order, record.order_id)
+        if order is not None and str(order.order_status or "").upper() in {"DELIVERED", "DELIVERY_COMPLETED", "CANCELLED", "CANCELED", "RETURNED"}:
+            deadlines.append(_utc(order.updated_at) + timedelta(days=7))
     for record in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
         PxgNaverReadonlyLogisticsRecord.store_id == store_id,
         PxgNaverReadonlyLogisticsRecord.encrypted_tracking_number != "",
