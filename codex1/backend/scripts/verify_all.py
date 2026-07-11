@@ -83,6 +83,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/pxg-naver-readonly/local-summary",
+    "/api/v1/pxg-naver-readonly/activation-check",
     "/api/v1/pxg-naver-readonly/refresh",
     "/api/v1/shipping/logistics-mappings",
     "/api/v1/shipping/logistics-mappings/write-gate",
@@ -1529,6 +1530,7 @@ def verify_stage_scripts() -> None:
         "verify_stage_1e.py",
         "verify_stage_1f.py",
         "verify_pxg_naver_readonly_persistence.py",
+        "verify_pxg_naver_readonly_activation.py",
         "verify_production_sessions.py",
     ]:
         print(f"running {script}")
@@ -1610,6 +1612,7 @@ def verify_openapi() -> None:
         assert methods == expected_methods, {shipping_path: methods}
     readonly_persistence_methods = {
         "/api/v1/pxg-naver-readonly/local-summary": {"get"},
+        "/api/v1/pxg-naver-readonly/activation-check": {"get"},
         "/api/v1/pxg-naver-readonly/refresh": {"post"},
     }
     for readonly_path, expected_methods in readonly_persistence_methods.items():
@@ -19978,6 +19981,7 @@ def verify_git_tracking() -> None:
         " M backend/scripts/upgrade_sync_schema.py",
         " M backend/scripts/upgrade_pxg_naver_readonly_schema.py",
         " M backend/scripts/verify_pxg_naver_readonly_persistence.py",
+        "?? backend/scripts/verify_pxg_naver_readonly_activation.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
@@ -20014,6 +20018,7 @@ def verify_git_tracking() -> None:
         "?? backend/app/schemas/pxg_naver_readonly.py",
         "?? backend/app/services/platform_login_service.py",
         "?? backend/app/services/pxg_naver_readonly_persistence_service.py",
+        "?? backend/app/services/pxg_naver_readonly_activation_service.py",
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
         "?? backend/scripts/upgrade_auth_schema.py",

@@ -102,6 +102,7 @@ def _recipient_payload(candidate: PxgNaverReadonlyOrderCandidate) -> dict[str, s
 
 
 def _assert_persistence_enabled(
+    db: Session,
     settings: Settings,
     batch: PxgNaverReadonlyAdapterBatch,
     *,
@@ -127,6 +128,9 @@ def _assert_persistence_enabled(
                 "readonly_real_source_disabled",
                 403,
             )
+        from app.services.pxg_naver_readonly_activation_service import assert_real_persistence_activation_ready
+
+        assert_real_persistence_activation_ready(db, settings=settings, batch=batch)
         return
     if settings.app_env not in {"development", "test"}:
         raise ApiError(
@@ -785,7 +789,7 @@ def persist_pxg_naver_readonly_adapter_batch(
 
     if not isinstance(batch, PxgNaverReadonlyAdapterBatch):
         raise ApiError("readonly adapter batch is required", "readonly_adapter_batch_required", 400)
-    _assert_persistence_enabled(settings, batch, manual_approval=manual_approval)
+    _assert_persistence_enabled(db, settings, batch, manual_approval=manual_approval)
     store = _resolve_selected_store(db, batch)
     observed_at = get_utc_now()
     counts: dict[str, dict[str, int]] = {

@@ -13,11 +13,25 @@ from app.services.pxg_naver_readonly_persistence_service import (
     readonly_local_summary,
     retention_cleanup_status,
 )
+from app.services.pxg_naver_readonly_activation_service import readonly_activation_precheck
 from app.services.pxg_naver_readonly_service import collect_pxg_naver_readonly_adapter_batch
 from app.services.operator_trial_service import resolve_trial_store
 
 
 router = APIRouter(prefix="/pxg-naver-readonly", tags=["pxg-naver-readonly"])
+
+
+@router.get("/activation-check")
+def get_pxg_naver_readonly_activation_check(
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    store = resolve_trial_store(db)
+    require_store_permission(db, identity=identity, store_id=store.id, permission_key="platform.readonly.persist")
+    return success_response(
+        data=readonly_activation_precheck(db, settings=get_settings()),
+        message="PXG Naver readonly activation check listed",
+    )
 
 
 @router.get("/local-summary")
