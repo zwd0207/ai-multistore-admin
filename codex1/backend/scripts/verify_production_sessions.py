@@ -39,6 +39,9 @@ from app.models.auth import (
 )
 from app.models.shipping import WarehouseShippingBatch
 from app.models.store import Store
+from app.models.operation_audit_log import OperationAuditLog
+from app.models.sync_log import SyncLog
+from app.services import shipping_service, sync_service
 from app.services.encryption import encrypt_value
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
@@ -65,6 +68,8 @@ def seed() -> None:
         permissions = [
             ErpPermission(permission_key="shipping.batch.manage", permission_group="shipping", permission_label_zh="test"),
             ErpPermission(permission_key="shipping.writeback.approve", permission_group="shipping", permission_label_zh="test", sensitive_action=True),
+            ErpPermission(permission_key="platform.sync", permission_group="sync", permission_label_zh="test"),
+            ErpPermission(permission_key="customer.inquiries.reply", permission_group="customer", permission_label_zh="test"),
         ]
         db.add_all([store1, store2, user, role, *permissions])
         db.flush()
@@ -108,6 +113,16 @@ def main() -> None:
     with TestClient(app, base_url=ORIGIN) as client:
         missing = client.get("/api/v1/shipping/warehouse-batches", params={"store_id": 1})
         assert missing.status_code == 401 and missing.json()["error_code"] == "session_required", missing.text
+        for protected_read in (
+            "/api/v1/stores",
+            "/api/v1/products?store_id=1",
+            "/api/v1/orders?store_id=1",
+            "/api/v1/customer-inquiries?store_id=1",
+            "/api/v1/dashboard/summary?store_id=1",
+            "/api/v1/sync-logs?store_id=1",
+        ):
+            response = client.get(protected_read)
+            assert response.status_code == 401 and response.json()["error_code"] == "session_required", response.text
         with SessionLocal() as db:
             store_count_before = db.query(Store).count()
         rejected_store_create = client.post("/api/v1/stores", json={"name": "Rejected Store", "platform": "naver"})
@@ -132,10 +147,15 @@ def main() -> None:
         assert invalid.status_code == 401 and invalid.json()["error_code"] == "invalid_credentials", invalid.text
 
         csrf = authenticate(client)
+        visible_stores = client.get("/api/v1/stores")
+        assert visible_stores.status_code == 200, visible_stores.text
+        assert [item["id"] for item in visible_stores.json()["data"]["items"]] == [1], visible_stores.text
         allowed = client.get("/api/v1/shipping/warehouse-batches", params={"store_id": 1})
         assert allowed.status_code == 200, allowed.text
         forbidden = client.get("/api/v1/shipping/warehouse-batches", params={"store_id": 2})
         assert forbidden.status_code == 403, forbidden.text
+        cross_store_read = client.get("/api/v1/products", params={"store_id": 2})
+        assert cross_store_read.status_code == 403 and cross_store_read.json()["error_code"] == "store_scope_forbidden", cross_store_read.text
         no_csrf = client.post("/api/v1/shipping/warehouse-batches/1/approval/writeback", json={"confirmation": True})
         assert no_csrf.status_code == 403 and no_csrf.json()["error_code"] == "csrf_validation_failed", no_csrf.text
         unknown_without_csrf = client.post("/api/v1/future-unknown-write", json={"store_id": 1})
@@ -165,7 +185,41 @@ def main() -> None:
         )
         assert cross_store_write.status_code == 403, cross_store_write.text
         with SessionLocal() as db:
+            audit_count_before_rejections = db.query(OperationAuditLog).count()
+            sync_log_count_before_rejections = db.query(SyncLog).count()
+        all_store_sync = client.post(
+            "/api/v1/sync/manual-batch/all",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={},
+        )
+        assert all_store_sync.status_code == 403 and all_store_sync.json()["error_code"] == "system_configure_forbidden", all_store_sync.text
+        original_shipping_write = shipping_service.execute_naver_shipment_writeback
+        original_customer_reply = sync_service.reply_naver_customer_inquiry
+        def unexpected_platform_call(*_args, **_kwargs):
+            raise AssertionError("a disabled legacy route reached its platform service")
+        shipping_service.execute_naver_shipment_writeback = unexpected_platform_call
+        sync_service.reply_naver_customer_inquiry = unexpected_platform_call
+        try:
+            legacy_shipping = client.post(
+                "/api/v1/shipping/shipment-writeback/execute",
+                headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+                json={"store_id": 1},
+            )
+            assert legacy_shipping.status_code == 403 and legacy_shipping.json()["error_code"] == "legacy_platform_write_disabled", legacy_shipping.text
+            direct_customer_reply = client.post(
+                "/api/v1/sync/customer-inquiries/naver/reply",
+                headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+                json={"store_id": 1},
+            )
+            assert direct_customer_reply.status_code == 403 and direct_customer_reply.json()["error_code"] == "legacy_platform_write_disabled", direct_customer_reply.text
+        finally:
+            shipping_service.execute_naver_shipment_writeback = original_shipping_write
+            sync_service.reply_naver_customer_inquiry = original_customer_reply
+        with SessionLocal() as db:
             assert db.query(Store).count() == store_count_before
+            assert db.query(WarehouseShippingBatch).count() == 1
+            assert db.query(OperationAuditLog).count() == audit_count_before_rejections
+            assert db.query(SyncLog).count() == sync_log_count_before_rejections
         writeback_permission = client.post(
             "/api/v1/shipping/warehouse-batches/1/approval/writeback",
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
