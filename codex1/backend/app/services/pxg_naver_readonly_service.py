@@ -22,6 +22,7 @@ from app.services.operator_trial_service import assert_trial_runtime_closed, res
 
 
 MAX_REAL_ORDER_PREVIEW = 3
+CUSTOMER_INQUIRY_ENDPOINT = "/v1/pay-user/inquiries"
 
 
 def _resolve_unique_active_credential(db: Session, store_id: int) -> ApiCredential:
@@ -64,6 +65,31 @@ def _business_counts(db: Session, store_id: int) -> dict[str, int]:
     return counts
 
 
+def _customer_inquiry_capability_result(request_result: dict, inquiry_count: int) -> dict:
+    if request_result.get("success"):
+        return {
+            "status": "available" if inquiry_count else "available_empty",
+            "endpoint": CUSTOMER_INQUIRY_ENDPOINT,
+            "http_status": request_result.get("http_status"),
+            "platform_error_category": None,
+        }
+    http_status = request_result.get("http_status")
+    if http_status in {401, 403}:
+        category = "platform_not_authorized"
+    elif http_status == 404:
+        category = "capability_unavailable"
+    elif isinstance(http_status, int) and http_status >= 500:
+        category = "platform_temporarily_unavailable"
+    else:
+        category = "capability_unavailable"
+    return {
+        "status": "platform_not_authorized_or_unavailable",
+        "endpoint": CUSTOMER_INQUIRY_ENDPOINT,
+        "http_status": http_status if isinstance(http_status, int) else None,
+        "platform_error_category": category,
+    }
+
+
 def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
     assert_trial_runtime_closed(settings)
     if not settings.operator_trial_real_read_enabled:
@@ -97,6 +123,24 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
         complete_field_preview=False,
         real_sync=False,
     )
+    order_window_days = 7
+    if orders.get("preview_status") in {"success", "success_empty"} and not (orders.get("sample_ids") or []):
+        orders = sync_service.preview_naver_orders(
+            db,
+            store_id=store.id,
+            credential_id=credential.id,
+            start_datetime=now - timedelta(days=30),
+            end_datetime=now,
+            order_status="ALL",
+            page=1,
+            size=MAX_REAL_ORDER_PREVIEW,
+            real_preview=True,
+            include_detail=True,
+            complete_field_preview=False,
+            real_sync=False,
+            readonly_window_max_days=30,
+        )
+        order_window_days = 30
 
     context = sync_service._build_naver_token_context_from_credential(credential)
     access_token, _token_status = api_credential_readiness_service._request_naver_token_from_context(context)
@@ -110,12 +154,9 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
         size=3,
     )
     inquiry_count = 0
-    inquiry_status = "failed"
-    inquiry_error_code = str(inquiry_result.get("error_code") or "readonly_request_failed")
     if inquiry_result.get("success"):
         inquiry_count = len(sync_service._extract_naver_customer_inquiry_items(inquiry_result.get("payload")))
-        inquiry_status = "success" if inquiry_count else "success_empty"
-        inquiry_error_code = None
+    inquiry_capability = _customer_inquiry_capability_result(inquiry_result, inquiry_count)
 
     db.rollback()
     counts_after = _business_counts(db, store.id)
@@ -124,23 +165,30 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
 
     order_fields = orders.get("field_observation") if isinstance(orders, dict) else {}
     order_fields = order_fields if isinstance(order_fields, dict) else {}
+    order_count = min(MAX_REAL_ORDER_PREVIEW, len(orders.get("sample_ids") or []))
+    order_status = orders.get("preview_status")
+    if order_status in {"success", "success_empty"} and order_count == 0:
+        order_status = "current_no_orders"
+    logistics_status = "not_required" if order_count == 0 else (
+        "observed_in_masked_order_details" if order_fields.get("detail_called") else "not_observed"
+    )
     result = {
-        "status": "completed" if inquiry_status != "failed" else "partial",
+        "status": "completed",
         "store": {"name": store.name, "platform": "Naver"},
-        "limits": {"max_real_orders": MAX_REAL_ORDER_PREVIEW},
+        "limits": {"max_real_orders": MAX_REAL_ORDER_PREVIEW, "order_window_days": order_window_days},
         "counts": {
             "products": min(3, len(products.get("sample_ids") or [])),
-            "orders": len(orders.get("sample_ids") or []),
+            "orders": order_count,
             "customer_inquiries": inquiry_count,
             "logistics_order_details": int(order_fields.get("detail_limit") or 0),
         },
         "reads": {
             "products": products.get("preview_status"),
-            "orders": orders.get("preview_status"),
-            "customer_inquiries": inquiry_status,
-            "logistics": "observed_in_masked_order_details" if order_fields.get("detail_called") else "not_observed",
+            "orders": order_status,
+            "customer_inquiries": inquiry_capability["status"],
+            "logistics": logistics_status,
         },
-        "safe_error_codes": {"customer_inquiries": inquiry_error_code},
+        "customer_inquiry_result": inquiry_capability,
         "privacy": {
             "ordinary_order_list_redacted": True,
             "complete_recipient_returned": False,

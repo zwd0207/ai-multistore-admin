@@ -2872,9 +2872,14 @@ def preview_naver_orders(
     include_detail: bool = False,
     complete_field_preview: bool = False,
     real_sync: bool = False,
+    readonly_window_max_days: int = NAVER_ORDER_PREVIEW_MAX_DAYS,
 ) -> dict:
     normalized_status = _resolve_naver_order_preview_status(order_status)
-    start_kst, end_kst = _resolve_naver_order_preview_window(start_datetime, end_datetime)
+    start_kst, end_kst = _resolve_naver_order_preview_window(
+        start_datetime,
+        end_datetime,
+        max_window_days=readonly_window_max_days,
+    )
     credential = _ensure_naver_product_preview_credential(
         db,
         store_id=store_id,
@@ -2935,6 +2940,7 @@ def preview_naver_orders(
         end_kst=end_kst,
         field_observation=field_observation,
         real_sync=real_sync,
+        readonly_window_max_days=readonly_window_max_days,
     )
     return _run_naver_order_real_micro_preview(
         db=db,
@@ -4755,7 +4761,12 @@ def _resolve_naver_order_preview_status(order_status: str | None) -> str:
     )
 
 
-def _resolve_naver_order_preview_window(start_datetime: datetime, end_datetime: datetime) -> tuple[datetime, datetime]:
+def _resolve_naver_order_preview_window(
+    start_datetime: datetime,
+    end_datetime: datetime,
+    *,
+    max_window_days: int = NAVER_ORDER_PREVIEW_MAX_DAYS,
+) -> tuple[datetime, datetime]:
     business_tz = get_business_timezone()
     if start_datetime.tzinfo is None:
         start_kst = start_datetime.replace(tzinfo=business_tz)
@@ -4771,15 +4782,21 @@ def _resolve_naver_order_preview_window(start_datetime: datetime, end_datetime: 
             error_code="date_range_invalid",
             status_code=400,
         )
-    if end_kst - start_kst > timedelta(days=NAVER_ORDER_PREVIEW_MAX_DAYS):
+    if max_window_days not in {NAVER_ORDER_PREVIEW_MAX_DAYS, 30}:
         raise ApiError(
-            message="Naver order micro preview window must be 7 KST days or less",
+            message="Naver order readonly preview window policy is invalid",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if end_kst - start_kst > timedelta(days=max_window_days):
+        raise ApiError(
+            message=f"Naver order micro preview window must be {max_window_days} KST days or less",
             error_code="date_range_invalid",
             status_code=400,
             detail={
                 "start_datetime": start_kst.isoformat(),
                 "end_datetime": end_kst.isoformat(),
-                "max_window": f"P{NAVER_ORDER_PREVIEW_MAX_DAYS}D",
+                "max_window": f"P{max_window_days}D",
             },
         )
     return start_kst, end_kst
@@ -4832,6 +4849,7 @@ def _ensure_naver_order_real_preview_allowed(
     end_kst: datetime,
     field_observation: dict,
     real_sync: bool = False,
+    readonly_window_max_days: int = NAVER_ORDER_PREVIEW_MAX_DAYS,
 ) -> None:
     settings = get_settings()
     if not settings.real_api_test_enabled or settings.real_api_write_enabled:
@@ -4853,9 +4871,15 @@ def _ensure_naver_order_real_preview_allowed(
             status_code=400,
             detail={"page": page, "size": size, "max_size": NAVER_ORDER_MANUAL_BATCH_MAX_COUNT},
         )
-    if end_kst - start_kst > timedelta(days=NAVER_ORDER_PREVIEW_MAX_DAYS):
+    if readonly_window_max_days not in {NAVER_ORDER_PREVIEW_MAX_DAYS, 30}:
         raise ApiError(
-            message="Naver order micro preview window must be 7 KST days or less",
+            message="Naver order readonly preview window policy is invalid",
+            error_code="guardrail_blocked",
+            status_code=400,
+        )
+    if end_kst - start_kst > timedelta(days=readonly_window_max_days):
+        raise ApiError(
+            message=f"Naver order micro preview window must be {readonly_window_max_days} KST days or less",
             error_code="date_range_invalid",
             status_code=400,
         )

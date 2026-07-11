@@ -80,12 +80,54 @@ def main() -> None:
             sync_service._request_naver_customer_inquiries = originals["inquiries"]
 
         assert result["store"] == {"name": "pxg球包店", "platform": "Naver"}
-        assert result["limits"]["max_real_orders"] == 3
+        assert result["limits"] == {"max_real_orders": 3, "order_window_days": 7}
         assert result["counts"] == {"products": 2, "orders": 3, "customer_inquiries": 2, "logistics_order_details": 3}
         assert result["state_unchanged"] is True and result["writes"]["platform_write"] is False
         serialized = json.dumps(result, ensure_ascii=False).lower()
         for forbidden in ("must-not-return", "never-output-this-secret", "in-memory-test-token", "receiver_phone", "receiver_address"):
             assert forbidden not in serialized
+
+        order_windows = []
+        def empty_order_preview(*_args, **kwargs):
+            order_windows.append((kwargs["end_datetime"] - kwargs["start_datetime"]).days)
+            return {
+                "preview_status": "success_empty",
+                "sample_ids": [],
+                "field_observation": {"detail_called": False, "detail_limit": 0, "privacy_fields_redacted": True},
+                "local_sync_result": {"orders_written": False},
+            }
+        sync_service.preview_naver_orders = empty_order_preview
+        sync_service.preview_naver_products = lambda *_args, **_kwargs: {
+            "preview_status": "success", "sample_ids": ["hash-1"], "local_sync_result": {"products_written": False},
+        }
+        api_credential_readiness_service._request_naver_token_from_context = lambda _context: ("in-memory-test-token", 200)
+        sync_service._request_naver_customer_inquiries = lambda **_kwargs: {
+            "success": False,
+            "http_status": 403,
+            "error_code": "secret-platform-message-must-not-return",
+            "diagnostics": {"customerContent": "private-content-must-not-return"},
+        }
+        try:
+            unavailable_result = preview_pxg_naver_real_reads(db, get_settings())
+        finally:
+            sync_service.preview_naver_products = originals["products"]
+            sync_service.preview_naver_orders = originals["orders"]
+            api_credential_readiness_service._request_naver_token_from_context = originals["token"]
+            sync_service._request_naver_customer_inquiries = originals["inquiries"]
+        assert order_windows == [7, 30]
+        assert unavailable_result["status"] == "completed"
+        assert unavailable_result["limits"]["order_window_days"] == 30
+        assert unavailable_result["reads"]["orders"] == "current_no_orders"
+        assert unavailable_result["reads"]["logistics"] == "not_required"
+        assert unavailable_result["customer_inquiry_result"] == {
+            "status": "platform_not_authorized_or_unavailable",
+            "endpoint": "/v1/pay-user/inquiries",
+            "http_status": 403,
+            "platform_error_category": "platform_not_authorized",
+        }
+        unavailable_serialized = json.dumps(unavailable_result, ensure_ascii=False).lower()
+        assert "secret-platform-message" not in unavailable_serialized
+        assert "private-content" not in unavailable_serialized
     engine.dispose()
     if TEMP_DB.exists():
         TEMP_DB.unlink()
