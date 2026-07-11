@@ -149,8 +149,8 @@ def main() -> None:
         recipient.source_observed_at = now - timedelta(days=31)
         assert _recipient_due(recipient, order, now=now) is True
         recipient.source_observed_at = now
-        order.updated_at = now - timedelta(days=1)
-        recipient.source_observed_at = now - timedelta(days=31)
+        recipient.terminal_confirmed_at = now - timedelta(days=8)
+        order.updated_at = now
         tracking.source_updated_at = now - timedelta(days=31)
         for state in db.scalars(select(PxgNaverReadonlyRecordState).where(PxgNaverReadonlyRecordState.store_id == store.id)).all():
             state.source_observed_at = now
