@@ -78,6 +78,14 @@ def create_app() -> FastAPI:
                     status_code=exc.status_code,
                     content={"success": False, "message": exc.message, "error_code": exc.error_code, "detail": None},
                 )
+        elif _requires_read_protection(request):
+            try:
+                _enforce_read_protection(request)
+            except ApiError as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"success": False, "message": exc.message, "error_code": exc.error_code, "detail": None},
+                )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -121,6 +129,8 @@ def _write_permission_for_path(path: str) -> str:
     if path.startswith("/api/v1/shipping/"):
         return "shipping.writeback.approve" if "writeback" in path else "shipping.batch.manage"
     if path.startswith("/api/v1/sync/"):
+        if path == "/api/v1/sync/manual-batch/all":
+            return "system.configure"
         return "customer.inquiries.reply" if path.endswith("/reply") else "platform.sync"
     if path.startswith("/api/v1/stores"):
         return "store.manage"
@@ -143,6 +153,15 @@ def _request_store_id(request: Request, body: dict, db) -> int | None:
         except (TypeError, ValueError) as exc:
             raise ApiError("store scope is required", "store_scope_forbidden", 403) from exc
     parts = [part for part in request.url.path.split("/") if part]
+    if len(parts) >= 5 and parts[2] == "shipping" and parts[3] == "warehouse-batches":
+        from app.models.shipping import WarehouseShippingBatch
+
+        try:
+            batch = db.get(WarehouseShippingBatch, int(parts[4]))
+        except ValueError:
+            batch = None
+        if batch is not None:
+            return batch.store_id
     if len(parts) >= 4 and parts[2] == "stores":
         try:
             return int(parts[3])
@@ -203,5 +222,42 @@ async def _enforce_write_protection(request: Request) -> None:
             require_any_store_permission(db, identity=identity, permission_key=permission_key)
         else:
             require_store_permission(db, identity=identity, store_id=store_id, permission_key=permission_key)
+        if request.url.path in {
+            "/api/v1/shipping/shipment-writeback/execute",
+            "/api/v1/sync/customer-inquiries/naver/reply",
+        }:
+            raise ApiError("legacy real platform write is disabled", "legacy_platform_write_disabled", 403)
+    finally:
+        db.close()
+
+
+def _requires_read_protection(request: Request) -> bool:
+    return (
+        settings.app_env != "development"
+        and request.method.upper() in {"GET", "HEAD"}
+        and request.url.path.startswith("/api/v1/")
+        and not request.url.path.startswith(("/api/v1/auth/", "/api/v1/health"))
+    )
+
+
+def _enforce_read_protection(request: Request) -> None:
+    from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_membership
+    from app.services.session_service import require_session
+
+    db = SessionLocal()
+    try:
+        principal = require_session(request, db)
+        identity = OperatorIdentity(
+            user_id=principal.user_id,
+            user_key_hash=principal.user_key_hash,
+            session_id=principal.session_id,
+            last_reauthenticated_at=principal.last_reauthenticated_at,
+        )
+        request.state.authenticated_user_id = principal.user_id
+        store_id = _request_store_id(request, {}, db)
+        if store_id is not None:
+            require_store_membership(db, identity=identity, store_id=store_id)
+        elif request.url.path != "/api/v1/stores":
+            require_any_store_permission(db, identity=identity, permission_key="system.configure")
     finally:
         db.close()

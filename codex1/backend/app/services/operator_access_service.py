@@ -84,6 +84,24 @@ def require_store_permission(db: Session, *, identity: OperatorIdentity, store_i
         raise ApiError("operator does not have this permission", code, 403)
 
 
+def require_store_membership(db: Session, *, identity: OperatorIdentity, store_id: int) -> None:
+    membership = db.scalar(
+        select(ErpStoreMembership.id)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .join(Store, Store.id == ErpStoreMembership.store_id)
+        .where(
+            ErpStoreMembership.user_id == identity.user_id,
+            ErpStoreMembership.store_id == store_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+            Store.status == "active",
+        )
+        .limit(1)
+    )
+    if membership is None:
+        raise ApiError("store is outside assigned scope", "store_scope_forbidden", 403)
+
+
 def require_any_store_permission(db: Session, *, identity: OperatorIdentity, permission_key: str) -> None:
     granted = db.scalars(
         select(ErpPermission.permission_key)

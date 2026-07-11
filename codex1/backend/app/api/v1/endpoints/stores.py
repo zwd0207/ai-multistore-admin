@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from app.core.exceptions import ApiError
 from app.core.responses import success_response
 from app.database import get_db
 from app.models.store import Store
+from app.models.auth import ErpRole, ErpStoreMembership
 from app.schemas.store import StoreCreate, StoreRead, StoreUpdate
 
 
@@ -50,14 +51,26 @@ def create_store(payload: StoreCreate, db: Session = Depends(get_db)) -> dict:
 
 @router.get("")
 def list_stores(
+    request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> dict:
     offset = (page - 1) * page_size
-    total = db.scalar(select(func.count()).select_from(Store)) or 0
+    query = select(Store)
+    user_id = getattr(request.state, "authenticated_user_id", None)
+    if user_id is not None:
+        query = query.join(ErpStoreMembership, ErpStoreMembership.store_id == Store.id).join(
+            ErpRole, ErpRole.id == ErpStoreMembership.role_id,
+        ).where(
+            ErpStoreMembership.user_id == user_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+            Store.status == "active",
+        ).distinct()
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     stores = db.scalars(
-        select(Store)
+        query
         .order_by(Store.id.asc())
         .offset(offset)
         .limit(page_size)
