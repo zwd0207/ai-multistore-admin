@@ -145,7 +145,11 @@ def _candidate_hash(db: Session, batch: WarehouseShippingBatch, grant_scope: str
                 "quantity": row.quantity,
                 "internal_sku": row.internal_sku,
                 "logistics_inventory_code": row.logistics_inventory_code,
-                "recipient": order_service.recipient_contract(row.order),
+                "recipient": order_service.recipient_contract(
+                    row.order,
+                    db=db,
+                    warehouse_authorized=True,
+                ),
             })
     payload = {
         "batch_id": batch.id,
@@ -516,7 +520,7 @@ def download_warehouse_manifest(
         if item.row_status != "pending_export":
             continue
         order = item.order
-        recipient = order_service.recipient_contract(order)
+        recipient = order_service.recipient_contract(order, db=db, warehouse_authorized=True)
         rows.append({
             "batch_no": batch.batch_no, "platform": batch.platform, "order_reference": item.order_reference,
             "product_order_reference": item.product_order_reference or "", "internal_sku": item.internal_sku or "",

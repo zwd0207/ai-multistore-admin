@@ -18,6 +18,10 @@ os.environ["CREDENTIAL_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
 os.environ["CORS_ALLOWED_ORIGINS"] = '["https://erp.test"]'
 os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
+os.environ["OPERATOR_TRIAL_ENABLED"] = "true"
+os.environ["OPERATOR_TRIAL_ARTIFICIAL_DATA_ONLY"] = "true"
+os.environ["OPERATOR_TRIAL_REAL_READ_ENABLED"] = "false"
+os.environ["PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED"] = "true"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -40,6 +44,8 @@ from app.models.auth import (
 from app.models.shipping import WarehouseShippingBatch
 from app.models.store import Store
 from app.models.operation_audit_log import OperationAuditLog
+from app.models.order import Order
+from app.models.product import Product
 from app.models.sync_log import SyncLog
 from app.services import shipping_service, sync_service
 from app.services.encryption import encrypt_value
@@ -51,10 +57,46 @@ PASSWORD = "T06-test-password-not-production"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
 
+def readonly_persistence_payload(store_id: int) -> dict:
+    return {
+        "store_id": store_id,
+        "platform": "naver",
+        "source_mode": "fictional_test",
+        "manual_approval": True,
+        "products": [{
+            "external_product_id": "production-session-fixture-product",
+            "name": "PXG Fixture Bag",
+            "price": "1000",
+            "currency": "KRW",
+            "stock_quantity": 1,
+            "source_updated_at": "2026-07-12T08:00:00+00:00",
+        }],
+        "orders": [{
+            "external_order_id": "production-session-fixture-order",
+            "external_product_order_id": "production-session-fixture-product-order",
+            "product_name": "PXG Fixture Bag",
+            "quantity": 1,
+            "order_amount": "1000",
+            "currency": "KRW",
+            "order_status": "PAYED",
+            "ordered_at": "2026-07-12T07:30:00+00:00",
+            "source_updated_at": "2026-07-12T08:00:00+00:00",
+            "recipient": {
+                "receiver_name": "Production Fixture Recipient",
+                "receiver_phone": "010-5555-0001",
+                "zip_code": "06123",
+                "receiver_address_full": "Production Fixture Address",
+            },
+        }],
+        "logistics": [],
+        "customer_inquiries": [],
+    }
+
+
 def seed() -> None:
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
-        store1 = Store(name="Session Test Store", platform="naver", status="active")
+        store1 = Store(name="pxg球包店", platform="naver", status="active")
         store2 = Store(name="Forbidden Store", platform="naver", status="active")
         user = ErpUser(
             user_key_hash="session-test-user-key-hash",
@@ -70,6 +112,8 @@ def seed() -> None:
             ErpPermission(permission_key="shipping.writeback.approve", permission_group="shipping", permission_label_zh="test", sensitive_action=True),
             ErpPermission(permission_key="platform.sync", permission_group="sync", permission_label_zh="test"),
             ErpPermission(permission_key="customer.inquiries.reply", permission_group="customer", permission_label_zh="test"),
+            ErpPermission(permission_key="platform.readonly.persist", permission_group="platform", permission_label_zh="test", sensitive_action=True),
+            ErpPermission(permission_key="orders.read", permission_group="orders", permission_label_zh="test"),
         ]
         db.add_all([store1, store2, user, role, *permissions])
         db.flush()
@@ -113,6 +157,11 @@ def main() -> None:
     with TestClient(app, base_url=ORIGIN) as client:
         missing = client.get("/api/v1/shipping/warehouse-batches", params={"store_id": 1})
         assert missing.status_code == 401 and missing.json()["error_code"] == "session_required", missing.text
+        missing_readonly_write = client.post(
+            "/api/v1/pxg-naver-readonly/persist",
+            json=readonly_persistence_payload(1),
+        )
+        assert missing_readonly_write.status_code == 401, missing_readonly_write.text
         for protected_read in (
             "/api/v1/stores",
             "/api/v1/products?store_id=1",
@@ -147,6 +196,7 @@ def main() -> None:
         assert invalid.status_code == 401 and invalid.json()["error_code"] == "invalid_credentials", invalid.text
 
         csrf = authenticate(client)
+        readonly_payload = readonly_persistence_payload(1)
         visible_stores = client.get("/api/v1/stores")
         assert visible_stores.status_code == 200, visible_stores.text
         assert [item["id"] for item in visible_stores.json()["data"]["items"]] == [1], visible_stores.text
@@ -158,6 +208,11 @@ def main() -> None:
         assert cross_store_read.status_code == 403 and cross_store_read.json()["error_code"] == "store_scope_forbidden", cross_store_read.text
         no_csrf = client.post("/api/v1/shipping/warehouse-batches/1/approval/writeback", json={"confirmation": True})
         assert no_csrf.status_code == 403 and no_csrf.json()["error_code"] == "csrf_validation_failed", no_csrf.text
+        readonly_without_csrf = client.post(
+            "/api/v1/pxg-naver-readonly/persist",
+            json=readonly_payload,
+        )
+        assert readonly_without_csrf.status_code == 403 and readonly_without_csrf.json()["error_code"] == "csrf_validation_failed", readonly_without_csrf.text
         unknown_without_csrf = client.post("/api/v1/future-unknown-write", json={"store_id": 1})
         assert unknown_without_csrf.status_code == 403 and unknown_without_csrf.json()["error_code"] == "csrf_validation_failed", unknown_without_csrf.text
         unknown_without_permission = client.post(
@@ -184,6 +239,12 @@ def main() -> None:
             json={"store_id": 2, "platform": "naver", "order_ids": [], "manual_approval": True},
         )
         assert cross_store_write.status_code == 403, cross_store_write.text
+        readonly_cross_store_write = client.post(
+            "/api/v1/pxg-naver-readonly/persist",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json=readonly_persistence_payload(2),
+        )
+        assert readonly_cross_store_write.status_code == 403, readonly_cross_store_write.text
         with SessionLocal() as db:
             audit_count_before_rejections = db.query(OperationAuditLog).count()
             sync_log_count_before_rejections = db.query(SyncLog).count()
@@ -225,7 +286,32 @@ def main() -> None:
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
             json={"confirmation": True},
         )
-        assert writeback_permission.status_code == 200, writeback_permission.text
+        assert writeback_permission.status_code == 403 and writeback_permission.json()["error_code"] == "trial_platform_write_disabled", writeback_permission.text
+
+        readonly_success = client.post(
+            "/api/v1/pxg-naver-readonly/persist",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json=readonly_payload,
+        )
+        assert readonly_success.status_code == 200, readonly_success.text
+        readonly_data = readonly_success.json()["data"]
+        assert readonly_data["writes"] == {
+            "platform_write": False,
+            "customer_send": False,
+            "ai_automatic_operation": False,
+        }, readonly_data
+        assert "Production Fixture Recipient" not in readonly_success.text
+        assert "010-5555-0001" not in readonly_success.text
+        assert "Production Fixture Address" not in readonly_success.text
+        readonly_summary = client.get("/api/v1/pxg-naver-readonly/local-summary", params={"store_id": 1})
+        assert readonly_summary.status_code == 200, readonly_summary.text
+        assert "Production Fixture Recipient" not in readonly_summary.text
+        assert "010-5555-0001" not in readonly_summary.text
+        assert "Production Fixture Address" not in readonly_summary.text
+        with SessionLocal() as db:
+            readonly_order = db.query(Order).filter(Order.external_order_id == "production-session-fixture-order").one()
+            assert readonly_order.receiver_name is None and readonly_order.receiver_phone is None and readonly_order.receiver_address is None
+            assert db.query(Product).filter(Product.external_product_id == "production-session-fixture-product").count() == 1
 
         session_cookie = client.cookies.get("__Host-erp_session")
         assert session_cookie

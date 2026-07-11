@@ -136,6 +136,8 @@ def _write_permission_for_path(path: str) -> str:
         if path == "/api/v1/sync/manual-batch/all":
             return "system.configure"
         return "customer.inquiries.reply" if path.endswith("/reply") else "platform.sync"
+    if path.startswith("/api/v1/pxg-naver-readonly/"):
+        return "platform.readonly.persist"
     if path.startswith("/api/v1/stores"):
         return "store.manage"
     if path.startswith(("/api/v1/credentials", "/api/v1/platform-logins", "/api/v1/api-credentials")):

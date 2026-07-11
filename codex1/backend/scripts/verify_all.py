@@ -82,6 +82,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/batch/naver/products/rollback-readonly-report",
     "/api/v1/products",
     "/api/v1/orders",
+    "/api/v1/pxg-naver-readonly/local-summary",
+    "/api/v1/pxg-naver-readonly/persist",
     "/api/v1/shipping/logistics-mappings",
     "/api/v1/shipping/logistics-mappings/write-gate",
     "/api/v1/shipping/export-excel",
@@ -1526,6 +1528,8 @@ def verify_stage_scripts() -> None:
         "verify_stage_1d.py",
         "verify_stage_1e.py",
         "verify_stage_1f.py",
+        "verify_pxg_naver_readonly_persistence.py",
+        "verify_production_sessions.py",
     ]:
         print(f"running {script}")
         run([PYTHON, f"scripts/{script}"])
@@ -1604,6 +1608,13 @@ def verify_openapi() -> None:
     for shipping_path, expected_methods in shipping_methods.items():
         methods = set(openapi_json["paths"][shipping_path].keys())
         assert methods == expected_methods, {shipping_path: methods}
+    readonly_persistence_methods = {
+        "/api/v1/pxg-naver-readonly/local-summary": {"get"},
+        "/api/v1/pxg-naver-readonly/persist": {"post"},
+    }
+    for readonly_path, expected_methods in readonly_persistence_methods.items():
+        methods = set(openapi_json["paths"][readonly_path].keys())
+        assert methods == expected_methods, {readonly_path: methods}
     print("openapi/docs: ok")
 
 
@@ -19882,6 +19893,7 @@ def verify_git_tracking() -> None:
         " M .gitignore",
         " M backend/.env.example",
         " M backend/app/api/v1/router.py",
+        " M backend/app/main.py",
         " M backend/app/api/v1/endpoints/batch.py",
         "A  backend/app/api/v1/endpoints/batch.py",
         " M backend/app/api/v1/endpoints/backups.py",
@@ -19938,6 +19950,7 @@ def verify_git_tracking() -> None:
         " M backend/app/services/shipping_service.py",
         "A  backend/app/services/shipping_service.py",
         " M backend/app/services/order_service.py",
+        " M backend/app/services/warehouse_shipping_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
         "M  backend/docs/",
@@ -19950,6 +19963,7 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_stage_1c.py",
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
+        " M backend/scripts/verify_production_sessions.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_operation_audit_logs_schema.py",
         "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
@@ -19987,9 +20001,13 @@ def verify_git_tracking() -> None:
         "?? backend/app/services/invitation_audit_linkage_service.py",
         "?? backend/app/services/shipping_service.py",
         "?? backend/app/api/v1/endpoints/platform_logins.py",
+        "?? backend/app/api/v1/endpoints/pxg_naver_readonly.py",
         "?? backend/app/models/platform_login_credential.py",
+        "?? backend/app/models/pxg_naver_readonly.py",
         "?? backend/app/schemas/platform_login.py",
+        "?? backend/app/schemas/pxg_naver_readonly.py",
         "?? backend/app/services/platform_login_service.py",
+        "?? backend/app/services/pxg_naver_readonly_persistence_service.py",
         "?? backend/docs/",
         "?? backend/scripts/upgrade_api_credentials_schema.py",
         "?? backend/scripts/upgrade_auth_schema.py",
@@ -19997,6 +20015,8 @@ def verify_git_tracking() -> None:
         "?? backend/scripts/upgrade_operation_audit_logs_schema.py",
         "?? backend/scripts/upgrade_shipping_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
+        "?? backend/scripts/upgrade_pxg_naver_readonly_schema.py",
+        "?? backend/scripts/verify_pxg_naver_readonly_persistence.py",
         "?? backend/scripts/verify_all.py",
     )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]

@@ -141,8 +141,34 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
     }
 
 
-def recipient_contract(order: Order) -> dict[str, str]:
-    """Return the only recipient field set exposed to authorised operations and warehouse exports."""
+def recipient_contract(
+    order: Order,
+    *,
+    db: Session | None = None,
+    warehouse_authorized: bool = False,
+) -> dict[str, str]:
+    """Return recipient fields only from the correct operational boundary.
+
+    PXG/Naver readonly-local orders intentionally keep recipient PII out of the
+    generic order row. Their encrypted contract is available only to the
+    warehouse export and approval path, never to ordinary order serializers.
+    """
+    if order.source_type == "pxg_naver_readonly_local_v1":
+        empty = {
+            "receiver_name": "",
+            "receiver_phone": "",
+            "receiver_phone_secondary": "",
+            "zip_code": "",
+            "receiver_address_line1": "",
+            "receiver_address_line2": "",
+            "receiver_address_full": "",
+            "delivery_memo": "",
+        }
+        if not warehouse_authorized or db is None:
+            return empty
+        from app.services.pxg_naver_readonly_persistence_service import recipient_contract_for_authorized_warehouse
+
+        return recipient_contract_for_authorized_warehouse(db, order=order) or empty
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
     receiver_name = _first_text(
         order.receiver_name,

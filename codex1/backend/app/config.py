@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     operator_trial_enabled: bool = False
     operator_trial_artificial_data_only: bool = True
     operator_trial_real_read_enabled: bool = False
+    pxg_naver_local_read_persistence_enabled: bool = False
+    pxg_naver_local_read_stale_after_hours: int = 24
+    pxg_naver_local_read_retention_days: int = 90
+    pxg_naver_local_read_retention_cleanup_enabled: bool = False
     ai_automatic_operations_enabled: bool = False
     platform_product_write_enabled: bool = False
     platform_inventory_write_enabled: bool = False

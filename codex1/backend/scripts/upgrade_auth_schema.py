@@ -197,6 +197,7 @@ PERMISSION_LABELS = {
     "products.read": "查看商品",
     "products.preview": "预览商品接口",
     "products.batch_sync_write": "受控批量写入本地商品",
+    "platform.readonly.persist": "PXG Naver 只读本地持久化",
     "orders.read": "查看订单",
     "orders.preview": "预览订单接口",
     "orders.local_write": "受控写入本地订单",

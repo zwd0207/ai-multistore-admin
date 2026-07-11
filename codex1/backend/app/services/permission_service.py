@@ -23,6 +23,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "products.read",
             "products.preview",
             "products.batch_sync_write",
+            "platform.readonly.persist",
             "orders.read",
             "orders.preview",
             "orders.local_write",
@@ -95,6 +96,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
 
 SENSITIVE_ACTIONS = {
     "products.batch_sync_write",
+    "platform.readonly.persist",
     "orders.batch_sync_write",
     "orders.local_write",
     "orders.refresh_batch_write",

@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     operation_audit_logs,
     orders,
     platform_logins,
+    pxg_naver_readonly,
     permissions,
     products,
     shipping,
@@ -44,6 +45,7 @@ api_router.include_router(batch.router)
 api_router.include_router(backups.router)
 api_router.include_router(credentials.router)
 api_router.include_router(platform_logins.router)
+api_router.include_router(pxg_naver_readonly.router)
 api_router.include_router(permissions.router)
 api_router.include_router(stores.router)
 api_router.include_router(products.router)
