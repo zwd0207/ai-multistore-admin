@@ -54,3 +54,7 @@ The commander accepts the T09 cleanup, encrypted backup, ACL, checksum, structur
 ## D012 - T09 activation remains blocked
 
 Sol's final activation review found three release blockers: the real refresh route does not use the backup/batch/rollback wrapper, expired backup cleanup is not automatically scheduled or enforced as an activation/refresh gate, and terminal recipient retention is based on mutable `order.updated_at` instead of a stable terminal event time. Real persistence remains disabled until all three are implemented, commander-verified, and approved in a new Sol review.
+
+## D013 - T09-R3 engineering blockers resolved
+
+The real refresh path now preserves its source and uses the guarded backup, pre-write restore drill, sync batch, and rollback flow. Cleanup runs at startup and every 24 hours when enabled, expired undeleted backups immediately block protected data use, cleanup recovery cannot clear unrelated safety locks, and terminal privacy timing is immutable. Focused lifecycle tests and `verify_all.py` passed. Real persistence remains disabled pending Sol re-review and a separate commander approval.
