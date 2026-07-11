@@ -47,7 +47,7 @@ TABLE_COLUMNS = {
     },
     "pxg_naver_readonly_sync_backups": {
         "id", "batch_id", "store_id", "platform", "backup_ref", "encrypted_path", "checksum_sha256", "schema_version",
-        "actor_id_hash", "expires_at", "restore_drill_passed_at", "deleted_at", "created_at",
+        "actor_id_hash", "baseline_manifest", "expires_at", "restore_drill_passed_at", "deleted_at", "created_at",
     },
 }
 
@@ -216,7 +216,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS pxg_naver_readonly_sync_backups (
             id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, store_id INTEGER NOT NULL, platform VARCHAR(50) NOT NULL DEFAULT 'naver',
             backup_ref VARCHAR(160) NOT NULL, encrypted_path VARCHAR(500) NOT NULL, checksum_sha256 VARCHAR(64) NOT NULL,
-            schema_version VARCHAR(60) NOT NULL, actor_id_hash VARCHAR(64) NOT NULL, expires_at DATETIME NOT NULL,
+            schema_version VARCHAR(60) NOT NULL, actor_id_hash VARCHAR(64) NOT NULL, baseline_manifest JSON NOT NULL, expires_at DATETIME NOT NULL,
             restore_drill_passed_at DATETIME, deleted_at DATETIME, created_at DATETIME NOT NULL,
             FOREIGN KEY(batch_id) REFERENCES pxg_naver_readonly_sync_batches(id), FOREIGN KEY(store_id) REFERENCES stores(id), UNIQUE(backup_ref)
         )
@@ -226,6 +226,15 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         connection.execute(
             f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table_name} ({', '.join(columns)})"
         )
+
+
+def _upgrade_existing_sync_backup_columns(connection: sqlite3.Connection) -> None:
+    tables = _existing_tables(connection)
+    if "pxg_naver_readonly_sync_backups" not in tables:
+        return
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_sync_backups)").fetchall()}
+    if "baseline_manifest" not in columns:
+        connection.execute("ALTER TABLE pxg_naver_readonly_sync_backups ADD COLUMN baseline_manifest JSON NOT NULL DEFAULT '{}'")
 
 
 def _verify_schema(connection: sqlite3.Connection) -> None:
@@ -405,6 +414,7 @@ def upgrade(*, run_create_all: bool = True) -> None:
     try:
         _rebuild_orders_for_product_order_uniqueness(connection)
         _create_schema(connection)
+        _upgrade_existing_sync_backup_columns(connection)
         _verify_schema(connection)
         connection.commit()
     finally:

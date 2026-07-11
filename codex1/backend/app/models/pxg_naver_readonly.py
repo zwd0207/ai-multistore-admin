@@ -234,6 +234,7 @@ class PxgNaverReadonlySyncBackup(Base):
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     schema_version: Mapped[str] = mapped_column(String(60), nullable=False)
     actor_id_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    baseline_manifest: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     restore_drill_passed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
