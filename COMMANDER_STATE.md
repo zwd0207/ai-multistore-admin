@@ -26,7 +26,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 ## Active Trial Boundary
 
-- Exactly one explicitly selected store participates in the first trial.
+- Selected trial store: `pxg球包店` on `Naver`.
+- Frontend mock id is `8`; the backend read-only store id must be resolved by exact name and platform, never assumed.
 - The operator works manually; AI and automatic platform actions remain off.
 - Real platform reads may be enabled only for the selected store.
 - Platform shipment writeback and customer-message sending remain disabled.
@@ -56,10 +57,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 ## Next Action
 
-1. User selects the first trial store.
-2. Commander creates a short operator trial checklist and evidence record.
-3. Terra prepares the selected-store configuration without enabling real writes.
-4. Run one artificial-data rehearsal before using real read-only store data.
+1. Terra prepares the selected-store configuration without enabling real writes.
+2. Run `OPERATOR_TRIAL_PXG_NAVER.md` once with artificial data.
+3. Commander reviews the rehearsal record before allowing real read-only store data.
 
 ## Compact Reporting Contract
 
