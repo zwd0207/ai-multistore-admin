@@ -1052,7 +1052,7 @@ def _recipient_due(secure: PxgNaverOrderRecipientSecureRecord, order: Order, *, 
     observed_at = _utc(secure.source_observed_at)
     if observed_at <= now - timedelta(days=RECIPIENT_MAX_RETENTION_DAYS):
         return True
-    return _terminal_order_for_recipient(order) and _utc(order.updated_at) <= now - timedelta(days=RECIPIENT_TERMINAL_RETENTION_DAYS)
+    return secure.terminal_confirmed_at is not None and _utc(secure.terminal_confirmed_at) <= now - timedelta(days=RECIPIENT_TERMINAL_RETENTION_DAYS)
 
 
 def _metadata_state_due(state: PxgNaverReadonlyRecordState, *, now: datetime) -> bool:

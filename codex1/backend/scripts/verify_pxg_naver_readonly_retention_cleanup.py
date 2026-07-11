@@ -62,6 +62,7 @@ from app.services.pxg_naver_readonly_persistence_service import (
     recipient_contract_for_authorized_warehouse,
     readonly_local_summary,
     run_pxg_naver_readonly_retention_cleanup,
+    _recipient_due,
 )
 
 
@@ -141,6 +142,13 @@ def main() -> None:
         recipient = db.scalar(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.store_id == store.id))
         tracking = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.store_id == store.id))
         assert order is not None and recipient is not None and tracking is not None
+        recipient.terminal_confirmed_at = now - timedelta(days=8)
+        order.updated_at = now
+        assert _recipient_due(recipient, order, now=now) is True
+        recipient.terminal_confirmed_at = None
+        recipient.source_observed_at = now - timedelta(days=31)
+        assert _recipient_due(recipient, order, now=now) is True
+        recipient.source_observed_at = now
         order.updated_at = now - timedelta(days=1)
         recipient.source_observed_at = now - timedelta(days=31)
         tracking.source_updated_at = now - timedelta(days=31)
