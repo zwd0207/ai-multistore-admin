@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: project commander
-Status: T06-R3 accepted; awaiting Sol final read-only release review
+Status: approved for single-store manual operator trial with real platform writes disabled
 
 ## Mission
 
@@ -19,22 +19,19 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Last accepted code integration: `e578cde`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
-- Sol's latest blockers were business-read authentication, all-store sync scope, and legacy real-platform writes; Terra commit `b81365c` addresses all three and passed commander verification.
+- Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
 - The frontend fail-closed issue and the named write routes are fixed and tested.
 - Terra commit `fd40add` adds default denial for unregistered write endpoints and is accepted into integration.
-- Real Naver/Coupang writes are forbidden during this gate.
+- Real Naver/Coupang writes remain forbidden during the trial.
 
-## Active Gate
+## Active Trial Boundary
 
-T06-R3 closed the remaining trial boundary:
-
-- Production business reads require a valid session and store membership.
-- Store-list responses expose only stores assigned to the current user.
-- A single-store operator cannot call all-store synchronization.
-- Legacy shipment writeback and direct customer-reply platform writes are disabled for the operator trial.
-- Rejected and disabled paths produce no database mutation or real-platform request.
-
-Commander verification passed. Luna and Terra remain paused. Sol now performs one final read-only release review.
+- Exactly one explicitly selected store participates in the first trial.
+- The operator works manually; AI and automatic platform actions remain off.
+- Real platform reads may be enabled only for the selected store.
+- Platform shipment writeback and customer-message sending remain disabled.
+- Full recipient PII remains limited to the authorized warehouse fulfillment path.
+- Every failure, manual workaround, and unclear screen is recorded as trial feedback.
 
 ## Accepted Evidence
 
@@ -44,6 +41,7 @@ Commander verification passed. Luna and Terra remain paused. Sol now performs on
 - `02aacdd`: frontend session fail-closed behavior and named write-route authorization.
 - `fd40add`: unregistered and future write routes default to privileged denial; capability-result writes are protected.
 - `b81365c`: production reads require sessions and store membership; all-store sync is privileged; legacy shipping and direct customer platform replies are disabled.
+- Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
 
@@ -52,15 +50,16 @@ Commander verification passed. Luna and Terra remain paused. Sol now performs on
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | high-risk read-only review only |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused after trial release approval |
 | Terra | `codex2-terra` | `task/terra-shipping-backend` | paused after T06-R3 acceptance |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
-1. Sol performs one narrow read-only release review.
-2. Enter a single-store artificial-data rehearsal only if Sol returns `passed`.
-3. If Sol blocks, route only the named blocker to the lowest suitable model.
+1. User selects the first trial store.
+2. Commander creates a short operator trial checklist and evidence record.
+3. Terra prepares the selected-store configuration without enabling real writes.
+4. Run one artificial-data rehearsal before using real read-only store data.
 
 ## Compact Reporting Contract
 
