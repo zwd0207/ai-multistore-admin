@@ -1,5 +1,15 @@
 # AI 多店铺运营与环境管理系统（Codex2）
 
+## 总指挥快速入口
+
+新任务、上下文压缩或模型切换后，依次读取：
+
+1. `COMMANDER_STATE.md`：当前唯一事实、阻塞项和下一步。
+2. `MODEL_TASK_ALLOCATION_RULES.md`：Sol、Terra、Luna 强制分工。
+3. `COMMANDER_DECISIONS.md`：不可轻易改变的产品与安全决策。
+
+历史 Phase 文档仅作为证据，不再用于判断当前进度。
+
 ## 项目执行核心规则
 
 所有 Sol、Terra、Luna 任务在派发前必须遵守 [MODEL_TASK_ALLOCATION_RULES.md](MODEL_TASK_ALLOCATION_RULES.md)。模型按任务难度、风险和重复程度分配，优先使用能够可靠完成任务的最低等级模型，禁止重复开发和无理由浪费高等级模型算力。
