@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     operator_trial_artificial_data_only: bool = True
     operator_trial_real_read_enabled: bool = False
     pxg_naver_local_read_persistence_enabled: bool = False
-    pxg_naver_local_read_stale_after_hours: int = 24
+    pxg_naver_local_read_order_stale_after_minutes: int = 15
+    pxg_naver_local_read_inquiry_stale_after_minutes: int = 15
+    pxg_naver_local_read_logistics_stale_after_minutes: int = 30
+    pxg_naver_local_read_product_stale_after_hours: int = 6
     pxg_naver_local_read_retention_days: int = 90
     pxg_naver_local_read_retention_cleanup_enabled: bool = False
     ai_automatic_operations_enabled: bool = False

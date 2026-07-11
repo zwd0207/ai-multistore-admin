@@ -193,6 +193,113 @@ def _verify_schema(connection: sqlite3.Connection) -> None:
         raise RuntimeError(f"Missing PXG/Naver readonly indexes: {missing_indexes}")
 
 
+def _order_unique_columns(connection: sqlite3.Connection) -> set[tuple[str, ...]]:
+    unique_indexes: set[tuple[str, ...]] = set()
+    for row in connection.execute("PRAGMA index_list(orders)").fetchall():
+        if not row[2]:
+            continue
+        columns = tuple(item[2] for item in connection.execute(f"PRAGMA index_info({row[1]})").fetchall())
+        unique_indexes.add(columns)
+    return unique_indexes
+
+
+def _rebuild_orders_for_product_order_uniqueness(connection: sqlite3.Connection) -> None:
+    """Add PXG-only product-order uniqueness without changing legacy semantics."""
+
+    unique_indexes = _order_unique_columns(connection)
+    desired_index_name = "uq_pxg_naver_readonly_product_order"
+    legacy = ("store_id", "platform", "external_order_id")
+    index_names = {row[1] for row in connection.execute("PRAGMA index_list(orders)").fetchall()}
+    if desired_index_name in index_names:
+        return
+    if legacy not in unique_indexes:
+        raise RuntimeError("orders table has an unsupported unique-key shape")
+    duplicates = connection.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT store_id, platform, external_product_order_id
+            FROM orders
+            WHERE source_type = 'pxg_naver_readonly_local_v1'
+              AND external_product_order_id IS NOT NULL
+              AND TRIM(external_product_order_id) != ''
+            GROUP BY store_id, platform, external_product_order_id
+            HAVING COUNT(*) > 1
+        )
+    """).fetchone()[0]
+    if duplicates:
+        raise RuntimeError("orders migration found duplicate product-order identifiers; manual reconciliation is required")
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("""
+            CREATE TABLE orders__pxg_product_order_upgrade (
+                id INTEGER NOT NULL PRIMARY KEY,
+                store_id INTEGER NOT NULL,
+                platform VARCHAR(50) NOT NULL,
+                external_order_id VARCHAR(120) NOT NULL,
+                external_product_order_id VARCHAR(120),
+                buyer_name VARCHAR(120),
+                buyer_phone VARCHAR(40),
+                buyer_masked_phone VARCHAR(30),
+                receiver_name VARCHAR(120),
+                receiver_phone VARCHAR(40),
+                receiver_address VARCHAR(300),
+                zip_code VARCHAR(30),
+                product_name VARCHAR(300) NOT NULL,
+                quantity INTEGER NOT NULL,
+                order_amount NUMERIC(12, 2) NOT NULL,
+                currency VARCHAR(10) NOT NULL,
+                order_status VARCHAR(30) NOT NULL,
+                paid_at DATETIME,
+                ordered_at DATETIME NOT NULL,
+                source_type VARCHAR(30) NOT NULL,
+                last_synced_at DATETIME,
+                raw_data JSON,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                FOREIGN KEY(store_id) REFERENCES stores(id)
+            )
+        """)
+        connection.execute("""
+            INSERT INTO orders__pxg_product_order_upgrade (
+                id, store_id, platform, external_order_id, external_product_order_id,
+                buyer_name, buyer_phone, buyer_masked_phone, receiver_name, receiver_phone,
+                receiver_address, zip_code, product_name, quantity, order_amount, currency,
+                order_status, paid_at, ordered_at, source_type, last_synced_at, raw_data,
+                created_at, updated_at
+            )
+            SELECT
+                id, store_id, platform, external_order_id, external_product_order_id,
+                buyer_name, buyer_phone, buyer_masked_phone, receiver_name, receiver_phone,
+                receiver_address, zip_code, product_name, quantity, order_amount, currency,
+                order_status, paid_at, ordered_at, source_type, last_synced_at, raw_data,
+                created_at, updated_at
+            FROM orders
+        """)
+        connection.execute("DROP TABLE orders")
+        connection.execute("ALTER TABLE orders__pxg_product_order_upgrade RENAME TO orders")
+        connection.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_pxg_naver_readonly_product_order
+            ON orders (store_id, platform, external_product_order_id)
+            WHERE source_type = 'pxg_naver_readonly_local_v1'
+              AND external_product_order_id IS NOT NULL
+              AND TRIM(external_product_order_id) != ''
+        """)
+        for index_name, columns in {
+            "ix_orders_store_id": "store_id",
+            "ix_orders_platform": "platform",
+            "ix_orders_external_order_id": "external_order_id",
+            "ix_orders_external_product_order_id": "external_product_order_id",
+            "ix_orders_order_status": "order_status",
+            "ix_orders_source_type": "source_type",
+        }.items():
+            connection.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON orders ({columns})")
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+    foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_issues:
+        raise RuntimeError("orders migration foreign-key verification failed")
+
+
 def upgrade(*, run_create_all: bool = True) -> None:
     import app.models  # noqa: F401
 
@@ -205,6 +312,7 @@ def upgrade(*, run_create_all: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     try:
+        _rebuild_orders_for_product_order_uniqueness(connection)
         _create_schema(connection)
         _verify_schema(connection)
         connection.commit()

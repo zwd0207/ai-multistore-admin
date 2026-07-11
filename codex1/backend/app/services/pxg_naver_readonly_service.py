@@ -17,6 +17,14 @@ from app.models.product import Product
 from app.models.shipping import ShippingTrackingImportBatch, WarehouseShippingBatch
 from app.models.store import Store
 from app.models.sync_log import SyncLog
+from app.schemas.pxg_naver_readonly import (
+    PxgNaverReadonlyAdapterBatch,
+    PxgNaverReadonlyInquiryCandidate,
+    PxgNaverReadonlyLogisticsCandidate,
+    PxgNaverReadonlyOrderCandidate,
+    PxgNaverReadonlyProductCandidate,
+    PxgNaverReadonlyRecipientCandidate,
+)
 from app.services import api_credential_readiness_service, sync_service
 from app.services.operator_trial_service import assert_trial_runtime_closed, resolve_trial_store
 
@@ -227,3 +235,158 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
         if forbidden in serialized:
             raise ApiError("readonly summary contains a forbidden field", "readonly_summary_privacy_failed", 500)
     return result
+
+
+def collect_pxg_naver_readonly_adapter_batch(db: Session, settings: Settings) -> PxgNaverReadonlyAdapterBatch:
+    """Read and normalize a bounded Naver batch entirely on the server.
+
+    Raw responses, credential material, and request headers stay in local memory
+    only. This adapter is the sole production source for persistence candidates.
+    """
+
+    assert_trial_runtime_closed(settings)
+    if not settings.pxg_naver_local_read_persistence_enabled:
+        raise ApiError("PXG/Naver readonly local persistence is disabled", "readonly_local_persistence_disabled", 403)
+    if not settings.operator_trial_real_read_enabled:
+        raise ApiError("PXG Naver real reads are disabled", "trial_real_read_disabled", 403)
+
+    store = resolve_trial_store(db)
+    credential = _resolve_unique_active_credential(db, store.id)
+    now = get_utc_now()
+    context = sync_service._build_naver_token_context_from_credential(credential)
+    access_token, _token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    product_result = sync_service._request_naver_product_search(
+        api_base=context["api_base"], headers=headers, page=1, size=3,
+    )
+    if not product_result.get("success"):
+        raise ApiError("Naver product readonly adapter failed", "readonly_adapter_product_read_failed", 502)
+    raw_products, _skip_reasons = sync_service._extract_naver_product_sync_candidates(product_result.get("payload"))
+    products = [
+        PxgNaverReadonlyProductCandidate(
+            external_product_id=item["external_product_id"],
+            name=item["name"],
+            sku=item.get("sku"),
+            brand=item.get("brand"),
+            category=item.get("category"),
+            status=item.get("status") or "unknown",
+            price=item.get("price") or 0,
+            currency=item.get("currency") or "KRW",
+            stock_quantity=item.get("stock_quantity") or 0,
+            source_updated_at=now,
+        )
+        for item in raw_products[:3]
+    ]
+
+    feed_result = sync_service._request_naver_order_last_changed_feed(
+        api_base=context["api_base"],
+        headers=headers,
+        start_kst=now - timedelta(days=7),
+        end_kst=now,
+        size=MAX_REAL_ORDER_PREVIEW,
+        attempt="pxg_readonly_persistence",
+        include_last_changed_to=False,
+        datetime_format_shape="offset_milliseconds",
+    )
+    if not feed_result.get("success"):
+        raise ApiError("Naver order readonly adapter failed", "readonly_adapter_order_read_failed", 502)
+    product_order_ids = sync_service._extract_naver_product_order_ids(feed_result.get("payload"))[:MAX_REAL_ORDER_PREVIEW]
+    detail_records: list[dict] = []
+    if product_order_ids:
+        detail_result = sync_service._request_naver_order_detail_query(
+            api_base=context["api_base"], headers=headers, product_order_ids=product_order_ids,
+        )
+        if not detail_result.get("success"):
+            raise ApiError("Naver order detail readonly adapter failed", "readonly_adapter_order_detail_failed", 502)
+        detail_records = sync_service._extract_naver_order_detail_records(
+            detail_result.get("payload"), product_order_ids,
+        )
+
+    orders: list[PxgNaverReadonlyOrderCandidate] = []
+    logistics: list[PxgNaverReadonlyLogisticsCandidate] = []
+    for raw_detail in detail_records:
+        detail = sync_service._build_naver_order_internal_detail(raw_detail, store_id=store.id)
+        external_order_id = str(detail.get("external_order_id_full") or "").strip()
+        external_product_order_id = str(detail.get("external_product_order_id") or "").strip()
+        if not external_order_id or not external_product_order_id:
+            raise ApiError("Naver order adapter key is missing", "readonly_adapter_order_key_missing", 502)
+        status = detail.get("order_status") if isinstance(detail.get("order_status"), dict) else {}
+        recipient = PxgNaverReadonlyRecipientCandidate(
+            receiver_name=detail.get("receiver_name"),
+            receiver_phone=detail.get("receiver_phone"),
+            zip_code=detail.get("zip_code"),
+            receiver_address_full=detail.get("receiver_address"),
+        )
+        orders.append(PxgNaverReadonlyOrderCandidate(
+            external_order_id=external_order_id,
+            external_product_order_id=external_product_order_id,
+            product_name=str(detail.get("product_name") or "Naver product order"),
+            quantity=max(1, int(detail.get("quantity") or 1)),
+            order_amount=detail.get("order_amount") or 0,
+            currency=str(detail.get("currency") or "KRW"),
+            order_status=str(status.get("raw") or "unknown"),
+            ordered_at=detail.get("ordered_at") or now,
+            paid_at=detail.get("paid_at"),
+            source_updated_at=detail.get("last_changed_at") or now,
+            recipient=recipient,
+        ))
+        tracking_number = str(detail.get("tracking_number") or "").strip()
+        if tracking_number:
+            delivery_status = detail.get("delivery_status") if isinstance(detail.get("delivery_status"), dict) else {}
+            logistics.append(PxgNaverReadonlyLogisticsCandidate(
+                external_order_id=external_order_id,
+                external_product_order_id=external_product_order_id,
+                carrier=detail.get("delivery_company") or detail.get("delivery_company_code"),
+                tracking_number=tracking_number,
+                shipment_status=str(delivery_status.get("raw") or "observed"),
+                shipped_at=detail.get("shipped_at"),
+                source_updated_at=detail.get("last_changed_at") or now,
+            ))
+
+    inquiry_result = sync_service._request_naver_customer_inquiries(
+        api_base=context["api_base"],
+        headers=headers,
+        start_date=(now - timedelta(days=CUSTOMER_INQUIRY_PREVIEW_WINDOW_DAYS)).date(),
+        end_date=now.date(),
+        answered=None,
+        page=1,
+        size=10,
+    )
+    inquiries: list[PxgNaverReadonlyInquiryCandidate] = []
+    if inquiry_result.get("success"):
+        for item in sync_service._extract_naver_customer_inquiry_items(inquiry_result.get("payload"))[:10]:
+            inquiry_id = str(item.get("inquiryNo") or item.get("inquiry_no") or "").strip()
+            if not inquiry_id:
+                continue
+            product_order_ids = sync_service._split_naver_product_order_ids(
+                item.get("productOrderIdList") or item.get("product_order_id_list"),
+            )
+            customer_name = item.get("customerName") or item.get("customer_name")
+            inquiries.append(PxgNaverReadonlyInquiryCandidate(
+                external_inquiry_id=inquiry_id,
+                related_external_order_id=(str(item.get("orderId") or item.get("order_id") or "").strip() or None),
+                related_external_product_order_id=product_order_ids[0] if product_order_ids else None,
+                inquiry_type="platform_message",
+                status="answered" if bool(item.get("answered")) else "open",
+                customer_display_masked=sync_service._mask_person_name(customer_name) if customer_name else None,
+                subject_category="platform_message",
+                content_available=bool(item.get("inquiryContent") or item.get("content")),
+                received_at=sync_service._parse_preview_iso_datetime(
+                    sync_service._extract_scalar_by_keys(item, ("inquiryRegistrationDateTime", "registeredAt", "createdAt")),
+                ),
+                answered_at=sync_service._parse_preview_iso_datetime(
+                    sync_service._extract_scalar_by_keys(item, ("answerRegistrationDateTime", "answeredAt")),
+                ),
+                source_updated_at=now,
+            ))
+
+    return PxgNaverReadonlyAdapterBatch(
+        store_id=store.id,
+        platform="naver",
+        source_mode="real_readonly",
+        products=products,
+        orders=orders,
+        logistics=logistics,
+        customer_inquiries=inquiries,
+    )

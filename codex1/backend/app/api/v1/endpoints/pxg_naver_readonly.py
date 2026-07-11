@@ -4,15 +4,17 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.exceptions import ApiError
 from app.core.responses import success_response
 from app.database import get_db
-from app.schemas.pxg_naver_readonly import parse_pxg_naver_readonly_persistence_request
 from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_store_permission
 from app.services.pxg_naver_readonly_persistence_service import (
-    persist_pxg_naver_readonly_candidates,
+    persist_pxg_naver_readonly_adapter_batch,
     readonly_local_summary,
     retention_cleanup_status,
 )
+from app.services.pxg_naver_readonly_service import collect_pxg_naver_readonly_adapter_batch
+from app.services.operator_trial_service import resolve_trial_store
 
 
 router = APIRouter(prefix="/pxg-naver-readonly", tags=["pxg-naver-readonly"])
@@ -31,30 +33,33 @@ def get_pxg_naver_readonly_local_summary(
     return success_response(data=result, message="PXG Naver readonly local summary listed")
 
 
-@router.post("/persist")
-async def persist_pxg_naver_readonly_local_candidates(
+@router.post("/refresh")
+async def refresh_pxg_naver_readonly_local_records(
     request_http: Request,
     db: Session = Depends(get_db),
     identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
-    # Parse and validate manually so malformed input cannot be echoed by FastAPI with PII.
+    # The endpoint deliberately accepts no marketplace business data. It only
+    # accepts an explicit confirmation before invoking the server-side adapter.
     try:
         payload: Any = await request_http.json()
     except ValueError as exc:
-        from app.core.exceptions import ApiError
-
-        raise ApiError("readonly local persistence request is invalid", "readonly_persistence_payload_invalid", 400) from exc
-    request = parse_pxg_naver_readonly_persistence_request(payload)
+        raise ApiError("readonly refresh request is invalid", "readonly_refresh_payload_invalid", 400) from exc
+    if not isinstance(payload, dict) or set(payload) != {"manual_approval"} or payload.get("manual_approval") is not True:
+        raise ApiError("readonly refresh request is invalid", "readonly_refresh_payload_invalid", 400)
+    store = resolve_trial_store(db)
     require_store_permission(
         db,
         identity=identity,
-        store_id=request.store_id,
+        store_id=store.id,
         permission_key="platform.readonly.persist",
     )
-    result = persist_pxg_naver_readonly_candidates(
+    batch = collect_pxg_naver_readonly_adapter_batch(db, get_settings())
+    result = persist_pxg_naver_readonly_adapter_batch(
         db,
         settings=get_settings(),
-        request=request,
+        batch=batch,
         actor_id=identity.user_key_hash,
+        manual_approval=True,
     )
-    return success_response(data=result, message="PXG Naver readonly local candidates persisted")
+    return success_response(data=result, message="PXG Naver readonly local records refreshed")

@@ -2,6 +2,7 @@ import base64
 import copy
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 from datetime import timedelta
@@ -31,7 +32,10 @@ os.environ["OPERATOR_TRIAL_REAL_READ_ENABLED"] = "false"
 os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED"] = "true"
-os.environ["PXG_NAVER_LOCAL_READ_STALE_AFTER_HOURS"] = "24"
+os.environ["PXG_NAVER_LOCAL_READ_ORDER_STALE_AFTER_MINUTES"] = "15"
+os.environ["PXG_NAVER_LOCAL_READ_INQUIRY_STALE_AFTER_MINUTES"] = "15"
+os.environ["PXG_NAVER_LOCAL_READ_LOGISTICS_STALE_AFTER_MINUTES"] = "30"
+os.environ["PXG_NAVER_LOCAL_READ_PRODUCT_STALE_AFTER_HOURS"] = "6"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_DAYS"] = "90"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "false"
 
@@ -55,11 +59,12 @@ from app.services import order_service, shipping_service, warehouse_shipping_ser
 from app.services.pxg_naver_readonly_persistence_service import (
     PXG_NAVER_READONLY_LOCAL_SOURCE,
     mark_pxg_naver_readonly_stale,
-    persist_pxg_naver_readonly_candidates,
+    persist_pxg_naver_readonly_adapter_batch,
     readonly_local_summary,
     retention_cleanup_status,
 )
-from app.schemas.pxg_naver_readonly import parse_pxg_naver_readonly_persistence_request
+from app.schemas.pxg_naver_readonly import PxgNaverReadonlyAdapterBatch
+from scripts.upgrade_pxg_naver_readonly_schema import _rebuild_orders_for_product_order_uniqueness
 
 
 def fixture(store_id: int) -> dict:
@@ -67,7 +72,6 @@ def fixture(store_id: int) -> dict:
         "store_id": store_id,
         "platform": "naver",
         "source_mode": "fictional_test",
-        "manual_approval": True,
         "products": [{
             "external_product_id": "fixture-product-001",
             "name": "PXG Fictional Carry Bag",
@@ -151,7 +155,96 @@ def add_memberships(db, store: Store, other_store: Store) -> tuple[ErpUser, ErpU
     return admin, operator, other_admin
 
 
+def verify_legacy_order_uniqueness_migration() -> None:
+    legacy_path = Path(tempfile.gettempdir()) / "verify-pxg-naver-legacy-order-upgrade.db"
+    if legacy_path.exists():
+        legacy_path.unlink()
+    connection = sqlite3.connect(legacy_path)
+    try:
+        connection.executescript("""
+            CREATE TABLE stores (id INTEGER PRIMARY KEY);
+            INSERT INTO stores (id) VALUES (1);
+            CREATE TABLE orders (
+                id INTEGER NOT NULL PRIMARY KEY,
+                store_id INTEGER NOT NULL,
+                platform VARCHAR(50) NOT NULL,
+                external_order_id VARCHAR(120) NOT NULL,
+                external_product_order_id VARCHAR(120),
+                buyer_name VARCHAR(120), buyer_phone VARCHAR(40), buyer_masked_phone VARCHAR(30),
+                receiver_name VARCHAR(120), receiver_phone VARCHAR(40), receiver_address VARCHAR(300), zip_code VARCHAR(30),
+                product_name VARCHAR(300) NOT NULL, quantity INTEGER NOT NULL, order_amount NUMERIC(12, 2) NOT NULL,
+                currency VARCHAR(10) NOT NULL, order_status VARCHAR(30) NOT NULL, paid_at DATETIME, ordered_at DATETIME NOT NULL,
+                source_type VARCHAR(30) NOT NULL, last_synced_at DATETIME, raw_data JSON,
+                created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+                FOREIGN KEY(store_id) REFERENCES stores(id),
+                CONSTRAINT uq_order_external_id UNIQUE (store_id, platform, external_order_id)
+            );
+            INSERT INTO orders VALUES (
+                1, 1, 'naver', 'legacy-platform-order', 'legacy-product-order-1',
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                'Legacy Item', 1, 1000, 'KRW', 'PAYED', NULL, '2026-07-12T00:00:00+00:00',
+                'legacy', NULL, NULL, '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+            );
+        """)
+        _rebuild_orders_for_product_order_uniqueness(connection)
+        connection.execute("""
+            INSERT INTO orders (
+                id, store_id, platform, external_order_id, external_product_order_id,
+                product_name, quantity, order_amount, currency, order_status, ordered_at,
+                source_type, created_at, updated_at
+            ) VALUES (
+                2, 1, 'naver', 'legacy-platform-order', 'legacy-product-order-2',
+                'Second Legacy Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                'legacy', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+            )
+        """)
+        connection.execute("""
+            INSERT INTO orders (
+                id, store_id, platform, external_order_id, external_product_order_id,
+                product_name, quantity, order_amount, currency, order_status, ordered_at,
+                source_type, created_at, updated_at
+            ) VALUES (
+                3, 1, 'naver', 'legacy-other-platform-order', 'legacy-product-order-1',
+                'Legacy Shared Product Order', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                'legacy', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+            )
+        """)
+        connection.execute("""
+            INSERT INTO orders (
+                id, store_id, platform, external_order_id, external_product_order_id,
+                product_name, quantity, order_amount, currency, order_status, ordered_at,
+                source_type, created_at, updated_at
+            ) VALUES (
+                4, 1, 'naver', 'pxg-platform-order', 'pxg-product-order-1',
+                'PXG First Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                'pxg_naver_readonly_local_v1', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+            )
+        """)
+        try:
+            connection.execute("""
+                INSERT INTO orders (
+                    id, store_id, platform, external_order_id, external_product_order_id,
+                    product_name, quantity, order_amount, currency, order_status, ordered_at,
+                    source_type, created_at, updated_at
+                ) VALUES (
+                    5, 1, 'naver', 'pxg-other-platform-order', 'pxg-product-order-1',
+                    'PXG Duplicate Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                    'pxg_naver_readonly_local_v1', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+                )
+            """)
+            raise AssertionError("PXG duplicate product-order identifier should be rejected")
+        except sqlite3.IntegrityError:
+            pass
+        connection.commit()
+        assert connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 4
+    finally:
+        connection.close()
+        if legacy_path.exists():
+            legacy_path.unlink()
+
+
 def main() -> None:
+    verify_legacy_order_uniqueness_migration()
     init_db()
     schema = inspect(engine)
     expected_tables = {
@@ -171,7 +264,7 @@ def main() -> None:
         db.refresh(other_store)
         admin, operator, other_admin = add_memberships(db, store, other_store)
         payload = fixture(store.id)
-        parsed = parse_pxg_naver_readonly_persistence_request(payload)
+        batch = PxgNaverReadonlyAdapterBatch.model_validate(payload)
 
         disabled_settings = Settings(
             app_env="development",
@@ -183,21 +276,23 @@ def main() -> None:
             pxg_naver_local_read_persistence_enabled=False,
         )
         try:
-            persist_pxg_naver_readonly_candidates(
+            persist_pxg_naver_readonly_adapter_batch(
                 db,
                 settings=disabled_settings,
-                request=parsed,
+                batch=batch,
                 actor_id=admin.user_key_hash,
+                manual_approval=True,
             )
             raise AssertionError("default-disabled persistence should be rejected")
         except ApiError as exc:
             assert exc.error_code == "readonly_local_persistence_disabled", exc
 
-        result = persist_pxg_naver_readonly_candidates(
+        result = persist_pxg_naver_readonly_adapter_batch(
             db,
             settings=get_settings(),
-            request=parsed,
+            batch=batch,
             actor_id=admin.user_key_hash,
+            manual_approval=True,
         )
         assert result["status"] == "completed", result
         for resource in ("products", "orders", "logistics", "customer_inquiries"):
@@ -229,6 +324,29 @@ def main() -> None:
         assert "TEST-TRACK-987654321" not in logistics.encrypted_tracking_number
         assert logistics.tracking_number_masked.endswith("4321")
         assert inquiry.customer_display_masked == "Fi***" and inquiry.content_available is True
+        state_durations = {
+            item.resource_type: int((item.expires_at - item.source_observed_at).total_seconds())
+            for item in db.scalars(select(PxgNaverReadonlyRecordState).where(
+                PxgNaverReadonlyRecordState.store_id == store.id,
+            )).all()
+        }
+        assert state_durations["product"] == 6 * 60 * 60
+        assert state_durations["order"] == 15 * 60
+        assert state_durations["recipient"] == 15 * 60
+        assert state_durations["logistics"] == 30 * 60
+        assert state_durations["customer_inquiry"] == 15 * 60
+        assert int((secure_recipient.expires_at - secure_recipient.source_observed_at).total_seconds()) == 15 * 60
+        assert int((logistics.expires_at - logistics.source_observed_at).total_seconds()) == 30 * 60
+
+        # Verify the success transaction from an independent session, rather than
+        # relying on the writer's SQLAlchemy identity map.
+        with SessionLocal() as fresh_db:
+            assert fresh_db.query(Product).filter(Product.store_id == store.id).count() == 1
+            assert fresh_db.query(Order).filter(Order.store_id == store.id).count() == 1
+            assert fresh_db.query(PxgNaverReadonlyLogisticsRecord).filter(
+                PxgNaverReadonlyLogisticsRecord.store_id == store.id,
+            ).count() == 1
+            assert fresh_db.query(OperationAuditLog).filter(OperationAuditLog.store_id == store.id).count() == 1
 
         ordinary_orders = order_service.list_orders(db, store_id=store.id, platform="naver", include_test_orders=True)
         operations_orders = order_service.list_operations_orders(db, store_id=store.id, platform="naver", include_test_orders=True)
@@ -242,11 +360,12 @@ def main() -> None:
         assert summary["orders"][0]["source_updated_at"] is not None
         assert summary["orders"][0]["expires_at"] is not None
 
-        duplicate = persist_pxg_naver_readonly_candidates(
+        duplicate = persist_pxg_naver_readonly_adapter_batch(
             db,
             settings=get_settings(),
-            request=parsed,
+            batch=batch,
             actor_id=admin.user_key_hash,
+            manual_approval=True,
         )
         for resource in ("products", "orders", "logistics", "customer_inquiries"):
             assert duplicate["counts"][resource].get("unchanged") == 1, duplicate
@@ -255,14 +374,43 @@ def main() -> None:
         assert db.query(PxgNaverReadonlyLogisticsRecord).filter(PxgNaverReadonlyLogisticsRecord.store_id == store.id).count() == 1
         assert db.query(PxgNaverReadonlyCustomerInquiry).filter(PxgNaverReadonlyCustomerInquiry.store_id == store.id).count() == 1
 
+        multi_item_payload = copy.deepcopy(payload)
+        second_order = copy.deepcopy(multi_item_payload["orders"][0])
+        second_order["external_product_order_id"] = "fixture-product-order-002"
+        second_order["source_updated_at"] = "2026-07-12T08:05:00+00:00"
+        second_order["recipient"]["receiver_name"] = "Second Fictional Recipient"
+        multi_item_payload["orders"].append(second_order)
+        second_logistics = copy.deepcopy(multi_item_payload["logistics"][0])
+        second_logistics["external_product_order_id"] = "fixture-product-order-002"
+        second_logistics["tracking_number"] = "TEST-TRACK-SECOND-1234"
+        second_logistics["source_updated_at"] = "2026-07-12T08:05:00+00:00"
+        multi_item_payload["logistics"].append(second_logistics)
+        multi_result = persist_pxg_naver_readonly_adapter_batch(
+            db,
+            settings=get_settings(),
+            batch=PxgNaverReadonlyAdapterBatch.model_validate(multi_item_payload),
+            actor_id=admin.user_key_hash,
+            manual_approval=True,
+        )
+        assert multi_result["counts"]["orders"].get("created") == 1, multi_result
+        assert multi_result["counts"]["logistics"].get("created") == 1, multi_result
+        same_platform_order = db.scalars(select(Order).where(
+            Order.store_id == store.id,
+            Order.external_order_id == "fixture-order-001",
+        ).order_by(Order.external_product_order_id.asc())).all()
+        assert [item.external_product_order_id for item in same_platform_order] == [
+            "fixture-product-order-001", "fixture-product-order-002",
+        ]
+
         old_payload = copy.deepcopy(payload)
         old_payload["orders"][0]["product_name"] = "Attempted old overwrite"
         old_payload["orders"][0]["source_updated_at"] = "2026-07-11T08:00:00+00:00"
-        old_result = persist_pxg_naver_readonly_candidates(
+        old_result = persist_pxg_naver_readonly_adapter_batch(
             db,
             settings=get_settings(),
-            request=parse_pxg_naver_readonly_persistence_request(old_payload),
+            batch=PxgNaverReadonlyAdapterBatch.model_validate(old_payload),
             actor_id=admin.user_key_hash,
+            manual_approval=True,
         )
         assert old_result["counts"]["orders"].get("older_source") == 1, old_result
         db.refresh(order)
@@ -271,11 +419,12 @@ def main() -> None:
         cross_store_payload = copy.deepcopy(payload)
         cross_store_payload["store_id"] = other_store.id
         try:
-            persist_pxg_naver_readonly_candidates(
+            persist_pxg_naver_readonly_adapter_batch(
                 db,
                 settings=get_settings(),
-                request=parse_pxg_naver_readonly_persistence_request(cross_store_payload),
+                batch=PxgNaverReadonlyAdapterBatch.model_validate(cross_store_payload),
                 actor_id=admin.user_key_hash,
+                manual_approval=True,
             )
             raise AssertionError("cross-store persistence should be rejected")
         except ApiError as exc:
@@ -292,14 +441,15 @@ def main() -> None:
         stale_summary = readonly_local_summary(db, store_id=store.id, settings=get_settings())
         assert stale_summary["orders"][0]["is_stale"] is True
         assert stale_summary["freshness"]["stale_warning_count"] >= 4
-        assert db.query(Order).filter(Order.store_id == store.id).count() == 1
+        assert db.query(Order).filter(Order.store_id == store.id).count() == 2
         assert retention_cleanup_status(get_settings())["automatic_cleanup_enabled"] is False
 
-        refreshed = persist_pxg_naver_readonly_candidates(
+        refreshed = persist_pxg_naver_readonly_adapter_batch(
             db,
             settings=get_settings(),
-            request=parsed,
+            batch=batch,
             actor_id=admin.user_key_hash,
+            manual_approval=True,
         )
         assert refreshed["counts"]["orders"].get("unchanged") == 1
         db.refresh(secure_recipient)
@@ -348,33 +498,41 @@ def main() -> None:
         assert b"Fictional Recipient" in warehouse_sheet
         assert b"Fictional Seoul Road 1" in warehouse_sheet
 
+        second_local_order = db.scalar(select(Order).where(
+            Order.store_id == store.id,
+            Order.external_product_order_id == "fixture-product-order-002",
+        ))
+        assert second_local_order is not None
+        stale_batch = warehouse_shipping_service.create_warehouse_batch(
+            db,
+            store_id=store.id,
+            platform="naver",
+            order_ids=[second_local_order.id],
+            manual_approval=True,
+            actor_context=actor,
+        )
+        assert stale_batch["status"] == "created", stale_batch
+        stale_batch_id = stale_batch["batch"]["id"]
+        stale_approval = warehouse_shipping_service.issue_approval_grant(
+            db,
+            batch_id=stale_batch_id,
+            user_id=admin.id,
+            grant_scope="manifest",
+        )
+        assert stale_approval == {"status": "blocked", "skip_reason": "recipient_data_stale"}, stale_approval
+        stale_manifest = warehouse_shipping_service.download_warehouse_manifest(
+            db,
+            batch_id=stale_batch_id,
+            manual_approval=True,
+            privacy_access_acknowledged=True,
+            actor_context=actor,
+        )
+        assert stale_manifest == {"status": "blocked", "skip_reason": "recipient_data_stale"}, stale_manifest
+
         audits = db.scalars(select(OperationAuditLog).where(OperationAuditLog.store_id == store.id)).all()
         assert audits
         assert_not_contains(audits, "Fictional Recipient", "010-5555-1234", "Fictional Seoul Road", "TEST-TRACK-987654321")
         assert db.query(PxgNaverReadonlyRecordState).filter(PxgNaverReadonlyRecordState.store_id == store.id).count() >= 4
-
-        unsafe_payload = copy.deepcopy(payload)
-        unsafe_payload["raw_response"] = {"unsafe": "Fictional Recipient"}
-        before_orders = db.query(Order).filter(Order.store_id == store.id).count()
-        try:
-            persist_pxg_naver_readonly_candidates(
-                db,
-                settings=get_settings(),
-                request=unsafe_payload,
-                actor_id=admin.user_key_hash,
-            )
-            raise AssertionError("raw response input should be rejected")
-        except ApiError as exc:
-            assert exc.error_code == "readonly_persistence_payload_invalid", exc
-        assert db.query(Order).filter(Order.store_id == store.id).count() == before_orders
-
-        unsafe_inquiry_payload = copy.deepcopy(payload)
-        unsafe_inquiry_payload["customer_inquiries"][0]["subject_category"] = "call 010-5555-1234"
-        try:
-            parse_pxg_naver_readonly_persistence_request(unsafe_inquiry_payload)
-            raise AssertionError("customer inquiry free text should be rejected")
-        except ApiError as exc:
-            assert exc.error_code == "readonly_persistence_payload_invalid", exc
 
         with TestClient(app) as client:
             ordinary_response = client.get(
@@ -392,11 +550,18 @@ def main() -> None:
             assert_not_contains(operations_response.json(), "Fictional Recipient", "010-5555-1234", "Fictional Seoul Road")
 
             forbidden_write = client.post(
-                "/api/v1/pxg-naver-readonly/persist",
-                json=payload,
+                "/api/v1/pxg-naver-readonly/refresh",
+                json={"manual_approval": True},
                 headers={"X-ERP-User-Key": operator.user_key_hash},
             )
             assert forbidden_write.status_code == 403, forbidden_write.text
+
+            removed_persist_endpoint = client.post(
+                "/api/v1/pxg-naver-readonly/persist",
+                json={"manual_approval": True},
+                headers={"X-ERP-User-Key": admin.user_key_hash},
+            )
+            assert removed_persist_endpoint.status_code == 404, removed_persist_endpoint.text
 
             cross_store_read = client.get(
                 f"/api/v1/pxg-naver-readonly/local-summary?store_id={store.id}",
@@ -405,20 +570,19 @@ def main() -> None:
             assert cross_store_read.status_code == 403, cross_store_read.text
 
             invalid_response = client.post(
-                "/api/v1/pxg-naver-readonly/persist",
-                json=unsafe_payload,
+                "/api/v1/pxg-naver-readonly/refresh",
+                json={"manual_approval": True, "orders": payload["orders"]},
                 headers={"X-ERP-User-Key": admin.user_key_hash},
             )
             assert invalid_response.status_code == 400, invalid_response.text
             assert_not_contains(invalid_response.json(), "Fictional Recipient")
 
-            accepted_response = client.post(
-                "/api/v1/pxg-naver-readonly/persist",
-                json=payload,
+            disabled_refresh = client.post(
+                "/api/v1/pxg-naver-readonly/refresh",
+                json={"manual_approval": True},
                 headers={"X-ERP-User-Key": admin.user_key_hash},
             )
-            assert accepted_response.status_code == 200, accepted_response.text
-            assert_not_contains(accepted_response.json(), "Fictional Recipient", "010-5555-1234", "Fictional Seoul Road", "TEST-TRACK-987654321")
+            assert disabled_refresh.status_code == 403, disabled_refresh.text
 
         assert db.query(OperationAuditLog).filter(OperationAuditLog.store_id == store.id).count() >= 4
 

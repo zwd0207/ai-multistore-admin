@@ -1,7 +1,7 @@
 """Default-closed local persistence for the approved PXG/Naver readonly trial.
 
-The service accepts only a deliberately small, sanitized candidate contract. It
-does not create HTTP clients, decrypt marketplace credentials, persist raw
+The service accepts only normalized candidates from a server-side Naver
+readonly adapter. It does not accept HTTP request payloads, persist raw
 platform responses, or invoke any platform write operation.
 """
 
@@ -27,12 +27,11 @@ from app.models.pxg_naver_readonly import (
     PxgNaverReadonlyRecordState,
 )
 from app.schemas.pxg_naver_readonly import (
+    PxgNaverReadonlyAdapterBatch,
     PxgNaverReadonlyInquiryCandidate,
     PxgNaverReadonlyLogisticsCandidate,
     PxgNaverReadonlyOrderCandidate,
-    PxgNaverReadonlyPersistenceRequest,
     PxgNaverReadonlyProductCandidate,
-    parse_pxg_naver_readonly_persistence_request,
 )
 from app.services.encryption import decrypt_value, encrypt_value
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
@@ -80,6 +79,16 @@ def _empty_recipient_contract() -> dict[str, str]:
     return {field: "" for field in RECIPIENT_FIELDS}
 
 
+def _resource_expiry(settings: Settings, resource_type: str, observed_at: datetime) -> datetime:
+    if resource_type in {"order", "recipient", "customer_inquiry"}:
+        return observed_at + timedelta(minutes=max(1, settings.pxg_naver_local_read_order_stale_after_minutes))
+    if resource_type == "logistics":
+        return observed_at + timedelta(minutes=max(1, settings.pxg_naver_local_read_logistics_stale_after_minutes))
+    if resource_type == "product":
+        return observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_product_stale_after_hours))
+    raise ValueError(f"unsupported readonly resource type: {resource_type}")
+
+
 def _recipient_payload(candidate: PxgNaverReadonlyOrderCandidate) -> dict[str, str] | None:
     if candidate.recipient is None:
         return None
@@ -90,7 +99,12 @@ def _recipient_payload(candidate: PxgNaverReadonlyOrderCandidate) -> dict[str, s
     return payload if any(payload.values()) else None
 
 
-def _assert_persistence_enabled(settings: Settings, request: PxgNaverReadonlyPersistenceRequest) -> None:
+def _assert_persistence_enabled(
+    settings: Settings,
+    batch: PxgNaverReadonlyAdapterBatch,
+    *,
+    manual_approval: bool,
+) -> None:
     assert_trial_runtime_closed(settings)
     if not settings.pxg_naver_local_read_persistence_enabled:
         raise ApiError(
@@ -98,13 +112,13 @@ def _assert_persistence_enabled(settings: Settings, request: PxgNaverReadonlyPer
             "readonly_local_persistence_disabled",
             403,
         )
-    if not request.manual_approval:
+    if not manual_approval:
         raise ApiError(
             "local readonly persistence requires explicit approval",
             "readonly_local_persistence_approval_required",
             403,
         )
-    if request.source_mode == "real_readonly":
+    if batch.source_mode == "real_readonly":
         if not settings.operator_trial_real_read_enabled:
             raise ApiError(
                 "real readonly local persistence is not enabled",
@@ -120,9 +134,9 @@ def _assert_persistence_enabled(settings: Settings, request: PxgNaverReadonlyPer
         )
 
 
-def _resolve_selected_store(db: Session, request: PxgNaverReadonlyPersistenceRequest):
+def _resolve_selected_store(db: Session, batch: PxgNaverReadonlyAdapterBatch):
     store = resolve_trial_store(db)
-    if request.platform != "naver" or request.store_id != store.id:
+    if batch.platform != "naver" or batch.store_id != store.id:
         raise ApiError(
             "readonly local persistence is limited to the selected PXG/Naver store",
             "readonly_persistence_store_mismatch",
@@ -178,7 +192,7 @@ def _refresh_state(
 ) -> PxgNaverReadonlyRecordState:
     if resource_type not in RESOURCE_TYPES:
         raise ValueError(f"unsupported readonly resource type: {resource_type}")
-    expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+    expires_at = _resource_expiry(settings, resource_type, observed_at)
     retention_review_at = observed_at + timedelta(days=max(1, settings.pxg_naver_local_read_retention_days))
     if state is None:
         state = PxgNaverReadonlyRecordState(
@@ -213,7 +227,7 @@ def _refresh_existing_state(
     settings: Settings,
 ) -> None:
     state.source_observed_at = observed_at
-    state.expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+    state.expires_at = _resource_expiry(settings, state.resource_type, observed_at)
     state.retention_review_at = observed_at + timedelta(days=max(1, settings.pxg_naver_local_read_retention_days))
     state.is_stale = False
 
@@ -315,7 +329,7 @@ def _order_outcome(
     observed_at: datetime,
     settings: Settings,
 ) -> tuple[str, Order | None]:
-    source_key_hash = _hash(f"order:{candidate.external_order_id}")
+    source_key_hash = _hash(f"order:{candidate.external_product_order_id}")
     recipient = _recipient_payload(candidate)
     payload = candidate.model_dump(mode="json", exclude={"source_updated_at", "recipient"})
     payload["recipient_fingerprint"] = _fingerprint(recipient) if recipient else None
@@ -325,11 +339,15 @@ def _order_outcome(
     if decision == "older_source" or decision == "same_version_conflict":
         return decision, None
 
-    order = db.scalar(select(Order).where(
+    statement = select(Order).where(
         Order.store_id == store_id,
         Order.platform == "naver",
-        Order.external_order_id == candidate.external_order_id,
-    ))
+        Order.external_product_order_id == candidate.external_product_order_id,
+    )
+    matches = db.scalars(statement).all()
+    if len(matches) > 1:
+        return "order_not_unique", None
+    order = matches[0] if matches else None
     if order is not None and order.source_type != PXG_NAVER_READONLY_LOCAL_SOURCE:
         return "legacy_record_protected", None
     if decision == "unchanged":
@@ -446,11 +464,11 @@ def _upsert_secure_recipient(
         if secure is not None:
             secure.is_stale = False
             secure.source_observed_at = observed_at
-            secure.expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+            secure.expires_at = _resource_expiry(settings, "recipient", observed_at)
         return decision
 
     encrypted = encrypt_value(json.dumps(recipient, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+    expires_at = _resource_expiry(settings, "recipient", observed_at)
     is_new = secure is None
     if secure is None:
         secure = PxgNaverOrderRecipientSecureRecord(
@@ -542,10 +560,10 @@ def _logistics_outcome(
         if record is not None:
             record.is_stale = False
             record.source_observed_at = observed_at
-            record.expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+            record.expires_at = _resource_expiry(settings, "logistics", observed_at)
         return decision
 
-    expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+    expires_at = _resource_expiry(settings, "logistics", observed_at)
     encrypted_tracking = encrypt_value(candidate.tracking_number)
     if record is None:
         record = PxgNaverReadonlyLogisticsRecord(
@@ -620,7 +638,7 @@ def _inquiry_outcome(
         if record is not None:
             record.is_stale = False
             record.source_observed_at = observed_at
-            record.expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+            record.expires_at = _resource_expiry(settings, "customer_inquiry", observed_at)
         return decision
 
     related_order = None
@@ -631,7 +649,7 @@ def _inquiry_outcome(
             external_order_id=candidate.related_external_order_id or "",
             external_product_order_id=candidate.related_external_product_order_id,
         )
-    expires_at = observed_at + timedelta(hours=max(1, settings.pxg_naver_local_read_stale_after_hours))
+    expires_at = _resource_expiry(settings, "customer_inquiry", observed_at)
     if record is None:
         record = PxgNaverReadonlyCustomerInquiry(
             store_id=store_id,
@@ -753,19 +771,20 @@ def _audit_local_ingestion(
         )
 
 
-def persist_pxg_naver_readonly_candidates(
+def persist_pxg_naver_readonly_adapter_batch(
     db: Session,
     *,
     settings: Settings,
-    request: PxgNaverReadonlyPersistenceRequest | dict[str, Any],
+    batch: PxgNaverReadonlyAdapterBatch,
     actor_id: str | None,
+    manual_approval: bool,
 ) -> dict[str, Any]:
-    """Persist a trusted, already-read readonly candidate batch without platform calls."""
+    """Persist a server-generated readonly adapter batch without platform writes."""
 
-    if not isinstance(request, PxgNaverReadonlyPersistenceRequest):
-        request = parse_pxg_naver_readonly_persistence_request(request)
-    _assert_persistence_enabled(settings, request)
-    store = _resolve_selected_store(db, request)
+    if not isinstance(batch, PxgNaverReadonlyAdapterBatch):
+        raise ApiError("readonly adapter batch is required", "readonly_adapter_batch_required", 400)
+    _assert_persistence_enabled(settings, batch, manual_approval=manual_approval)
+    store = _resolve_selected_store(db, batch)
     observed_at = get_utc_now()
     counts: dict[str, dict[str, int]] = {
         "products": {},
@@ -775,20 +794,20 @@ def persist_pxg_naver_readonly_candidates(
     }
     try:
         mark_pxg_naver_readonly_stale(db, store_id=store.id, settings=settings, now=observed_at)
-        for candidate in request.products:
+        for candidate in batch.products:
             _count_outcome(counts, "products", _product_outcome(
                 db, store_id=store.id, candidate=candidate, observed_at=observed_at, settings=settings,
             ))
-        for candidate in request.orders:
+        for candidate in batch.orders:
             outcome, _order = _order_outcome(
                 db, store_id=store.id, candidate=candidate, observed_at=observed_at, settings=settings,
             )
             _count_outcome(counts, "orders", outcome)
-        for candidate in request.logistics:
+        for candidate in batch.logistics:
             _count_outcome(counts, "logistics", _logistics_outcome(
                 db, store_id=store.id, candidate=candidate, observed_at=observed_at, settings=settings,
             ))
-        for candidate in request.customer_inquiries:
+        for candidate in batch.customer_inquiries:
             _count_outcome(counts, "customer_inquiries", _inquiry_outcome(
                 db, store_id=store.id, candidate=candidate, observed_at=observed_at, settings=settings,
             ))
@@ -797,9 +816,13 @@ def persist_pxg_naver_readonly_candidates(
             store_id=store.id,
             actor_id=actor_id,
             counts=counts,
-            source_mode=request.source_mode,
+            source_mode=batch.source_mode,
             observed_at=observed_at,
         )
+        # The audit writer commits the audited business mutation. Commit again
+        # explicitly so this contract remains durable if the audit implementation
+        # changes to use a flush-only transaction in the future.
+        db.commit()
     except Exception:
         db.rollback()
         raise
@@ -807,7 +830,7 @@ def persist_pxg_naver_readonly_candidates(
         "status": "completed",
         "store_id": store.id,
         "platform": "naver",
-        "source_mode": request.source_mode,
+        "source_mode": batch.source_mode,
         "counts": counts,
         "privacy": {
             "recipient_data_encrypted": True,
@@ -979,7 +1002,12 @@ def readonly_local_summary(db: Session, *, store_id: int, settings: Settings) ->
             "is_stale": bool(item.is_stale or _utc(item.expires_at) <= now),
         } for item in inquiries],
         "freshness": {
-            "stale_after_hours": settings.pxg_naver_local_read_stale_after_hours,
+            "resource_expiry_minutes": {
+                "orders": settings.pxg_naver_local_read_order_stale_after_minutes,
+                "customer_inquiries": settings.pxg_naver_local_read_inquiry_stale_after_minutes,
+                "logistics": settings.pxg_naver_local_read_logistics_stale_after_minutes,
+                "products": settings.pxg_naver_local_read_product_stale_after_hours * 60,
+            },
             "retention_review_days": settings.pxg_naver_local_read_retention_days,
             "stale_warning_count": stale_warning_count,
             "automatic_cleanup_enabled": False,
@@ -1006,6 +1034,13 @@ def recipient_contract_for_authorized_warehouse(db: Session, *, order: Order) ->
     ))
     if secure is None:
         return _empty_recipient_contract()
+    expires_at = _utc(secure.expires_at)
+    if secure.is_stale or expires_at <= _utc(get_utc_now()):
+        raise ApiError(
+            "recipient data is stale and cannot be used for warehouse fulfillment",
+            "readonly_recipient_data_stale",
+            409,
+        )
     try:
         decoded = json.loads(decrypt_value(secure.encrypted_recipient_payload) or "{}")
     except (TypeError, ValueError) as exc:

@@ -3,9 +3,7 @@ from decimal import Decimal
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-
-from app.core.exceptions import ApiError
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 SAFE_INQUIRY_LABEL_PATTERN = re.compile(r"^[\w.:-]{1,120}$", re.UNICODE)
@@ -54,7 +52,7 @@ class PxgNaverReadonlyProductCandidate(_StrictReadonlyCandidate):
 
 class PxgNaverReadonlyOrderCandidate(_StrictReadonlyCandidate):
     external_order_id: str = Field(..., min_length=1, max_length=120)
-    external_product_order_id: str | None = Field(default=None, max_length=120)
+    external_product_order_id: str = Field(..., min_length=1, max_length=120)
     product_name: str = Field(..., min_length=1, max_length=300)
     quantity: int = Field(default=1, ge=1)
     order_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
@@ -129,29 +127,19 @@ class PxgNaverReadonlyInquiryCandidate(_StrictReadonlyCandidate):
         return value
 
 
-class PxgNaverReadonlyPersistenceRequest(BaseModel):
-    """Restricted local persistence request; it never carries raw platform payloads."""
+class PxgNaverReadonlyAdapterBatch(BaseModel):
+    """Normalized candidates produced only by the server-side Naver adapter.
 
-    model_config = ConfigDict(extra="forbid")
+    This is intentionally not an HTTP request model. The public refresh endpoint
+    accepts no product, order, logistics, inquiry, or recipient fields.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     store_id: int = Field(..., ge=1)
     platform: Literal["naver"] = "naver"
     source_mode: Literal["fictional_test", "real_readonly"]
-    manual_approval: bool = False
     products: list[PxgNaverReadonlyProductCandidate] = Field(default_factory=list, max_length=50)
     orders: list[PxgNaverReadonlyOrderCandidate] = Field(default_factory=list, max_length=50)
     logistics: list[PxgNaverReadonlyLogisticsCandidate] = Field(default_factory=list, max_length=50)
     customer_inquiries: list[PxgNaverReadonlyInquiryCandidate] = Field(default_factory=list, max_length=50)
-
-
-def parse_pxg_naver_readonly_persistence_request(payload: object) -> PxgNaverReadonlyPersistenceRequest:
-    """Avoid FastAPI's default validation echoing untrusted input in error details."""
-
-    try:
-        return PxgNaverReadonlyPersistenceRequest.model_validate(payload)
-    except ValidationError as exc:
-        raise ApiError(
-            "readonly local persistence request is invalid",
-            "readonly_persistence_payload_invalid",
-            400,
-        ) from exc

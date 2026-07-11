@@ -256,13 +256,19 @@ def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) 
 
     for item in items:
         external_order_id = item["external_order_id"]
-        order = db.scalar(
-            select(Order).where(
-                Order.store_id == store_id,
-                Order.platform == platform,
-                Order.external_order_id == external_order_id,
-            )
+        external_product_order_id = str(item.get("external_product_order_id") or "").strip()
+        statement = select(Order).where(
+            Order.store_id == store_id,
+            Order.platform == platform,
         )
+        if external_product_order_id and item.get("source_type") == "pxg_naver_readonly_local_v1":
+            statement = statement.where(Order.external_product_order_id == external_product_order_id)
+        else:
+            statement = statement.where(Order.external_order_id == external_order_id)
+        matches = db.scalars(statement).all()
+        if len(matches) > 1:
+            raise ValueError("order match is ambiguous")
+        order = matches[0] if matches else None
         payload = {**item, "store_id": store_id, "platform": platform}
         if order is None:
             db.add(Order(**payload))

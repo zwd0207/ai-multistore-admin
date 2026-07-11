@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
@@ -196,7 +197,12 @@ def issue_approval_grant(db: Session, *, batch_id: int, user_id: int, grant_scop
         _candidates, candidate_error = _writeback_execution_candidates(db, batch)
         if candidate_error:
             return {"status": "blocked", "skip_reason": candidate_error}
-    candidate_hash = _candidate_hash(db, batch, grant_scope)
+    try:
+        candidate_hash = _candidate_hash(db, batch, grant_scope)
+    except ApiError as exc:
+        if exc.error_code == "readonly_recipient_data_stale":
+            return {"status": "blocked", "skip_reason": "recipient_data_stale"}
+        raise
     token = secrets.token_urlsafe(32)
     now = get_utc_now()
     db.add(WarehouseShippingApprovalGrant(
@@ -220,12 +226,16 @@ def _consume_approval_grant(
     ))
     batch = db.scalar(select(WarehouseShippingBatch).where(WarehouseShippingBatch.id == batch_id))
     expires_at = grant.expires_at.replace(tzinfo=timezone.utc) if grant is not None and grant.expires_at.tzinfo is None else (grant.expires_at if grant is not None else None)
+    try:
+        candidate_hash = _candidate_hash(db, batch, grant_scope) if batch is not None else None
+    except ApiError:
+        return None
     if (
         grant is None
         or batch is None
         or expires_at < get_utc_now()
         or grant.batch_version != batch.version
-        or grant.candidate_hash != _candidate_hash(db, batch, grant_scope)
+        or grant.candidate_hash != candidate_hash
     ):
         return None
     grant.used_at = get_utc_now()
@@ -515,12 +525,23 @@ def download_warehouse_manifest(
         return {"status": "blocked", "skip_reason": "shipping_batch_not_found"}
     if batch.status not in {"created", "warehouse_sent"}:
         return {"status": "blocked", "skip_reason": "batch_not_exportable"}
-    rows: list[dict[str, Any]] = []
+    prepared_rows: list[tuple[WarehouseShippingBatchOrder, dict[str, str]]] = []
     for item in batch.rows:
         if item.row_status != "pending_export":
             continue
         order = item.order
-        recipient = order_service.recipient_contract(order, db=db, warehouse_authorized=True)
+        try:
+            recipient = order_service.recipient_contract(order, db=db, warehouse_authorized=True)
+        except ApiError as exc:
+            if exc.error_code == "readonly_recipient_data_stale":
+                return {"status": "blocked", "skip_reason": "recipient_data_stale"}
+            raise
+        prepared_rows.append((item, recipient))
+    if not prepared_rows:
+        return {"status": "blocked", "skip_reason": "no_exportable_batch_rows"}
+
+    rows: list[dict[str, Any]] = []
+    for item, recipient in prepared_rows:
         rows.append({
             "batch_no": batch.batch_no, "platform": batch.platform, "order_reference": item.order_reference,
             "product_order_reference": item.product_order_reference or "", "internal_sku": item.internal_sku or "",
@@ -528,8 +549,6 @@ def download_warehouse_manifest(
             "quantity": item.quantity, **recipient, "carrier": "", "tracking_number": "", "warehouse_note": "",
         })
         item.row_status = "warehouse_sent"
-    if not rows:
-        return {"status": "blocked", "skip_reason": "no_exportable_batch_rows"}
     batch.status = "warehouse_sent"
     batch.version += 1
     batch.warehouse_sent_at = get_utc_now()

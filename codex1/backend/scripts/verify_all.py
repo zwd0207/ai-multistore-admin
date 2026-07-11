@@ -83,7 +83,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/products",
     "/api/v1/orders",
     "/api/v1/pxg-naver-readonly/local-summary",
-    "/api/v1/pxg-naver-readonly/persist",
+    "/api/v1/pxg-naver-readonly/refresh",
     "/api/v1/shipping/logistics-mappings",
     "/api/v1/shipping/logistics-mappings/write-gate",
     "/api/v1/shipping/export-excel",
@@ -1610,7 +1610,7 @@ def verify_openapi() -> None:
         assert methods == expected_methods, {shipping_path: methods}
     readonly_persistence_methods = {
         "/api/v1/pxg-naver-readonly/local-summary": {"get"},
-        "/api/v1/pxg-naver-readonly/persist": {"post"},
+        "/api/v1/pxg-naver-readonly/refresh": {"post"},
     }
     for readonly_path, expected_methods in readonly_persistence_methods.items():
         methods = set(openapi_json["paths"][readonly_path].keys())
@@ -19901,6 +19901,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
         " M backend/app/api/v1/endpoints/dashboard.py",
         " M backend/app/api/v1/endpoints/orders.py",
+        " M backend/app/api/v1/endpoints/pxg_naver_readonly.py",
         " M backend/app/api/v1/endpoints/permissions.py",
         "A  backend/app/api/v1/endpoints/permissions.py",
         " M backend/app/api/v1/endpoints/shipping.py",
@@ -19934,6 +19935,7 @@ def verify_git_tracking() -> None:
         "A  backend/app/schemas/permission.py",
         " M backend/app/schemas/product.py",
         " M backend/app/schemas/shipping.py",
+        " M backend/app/schemas/pxg_naver_readonly.py",
         "A  backend/app/schemas/shipping.py",
         " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
@@ -19951,6 +19953,8 @@ def verify_git_tracking() -> None:
         "A  backend/app/services/shipping_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/warehouse_shipping_service.py",
+        " M backend/app/services/pxg_naver_readonly_persistence_service.py",
+        " M backend/app/services/pxg_naver_readonly_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
         "M  backend/docs/",
@@ -19972,6 +19976,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/upgrade_shipping_schema.py",
         "A  backend/scripts/upgrade_shipping_schema.py",
         " M backend/scripts/upgrade_sync_schema.py",
+        " M backend/scripts/upgrade_pxg_naver_readonly_schema.py",
+        " M backend/scripts/verify_pxg_naver_readonly_persistence.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",

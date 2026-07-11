@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, Numeric, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -11,7 +11,18 @@ from app.models.store import utc_now
 class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
-        UniqueConstraint("store_id", "platform", "external_order_id", name="uq_order_external_id"),
+        Index(
+            "uq_pxg_naver_readonly_product_order",
+            "store_id",
+            "platform",
+            "external_product_order_id",
+            unique=True,
+            sqlite_where=text(
+                "source_type = 'pxg_naver_readonly_local_v1' "
+                "AND external_product_order_id IS NOT NULL "
+                "AND TRIM(external_product_order_id) != ''"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
