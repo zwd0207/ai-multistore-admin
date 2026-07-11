@@ -109,12 +109,15 @@ def _requires_write_protection(request: Request) -> bool:
         settings.app_env != "development"
         and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
         and request.url.path.startswith("/api/v1/")
-        and not request.url.path.startswith("/api/v1/auth/")
-        and _write_permission_for_path(request.url.path) is not None
+        and request.url.path not in {
+            "/api/v1/auth/login",
+            "/api/v1/auth/mfa/verify",
+            "/api/v1/auth/logout",
+        }
     )
 
 
-def _write_permission_for_path(path: str) -> str | None:
+def _write_permission_for_path(path: str) -> str:
     if path.startswith("/api/v1/shipping/"):
         return "shipping.writeback.approve" if "writeback" in path else "shipping.batch.manage"
     if path.startswith("/api/v1/sync/"):
@@ -125,9 +128,11 @@ def _write_permission_for_path(path: str) -> str | None:
         return "credentials.manage"
     if path.startswith(("/api/v1/device-environments", "/api/v1/email-accounts", "/api/v1/important-emails", "/api/v1/appeal-cases")):
         return "store.manage"
-    if path.startswith("/api/v1/api-capabilities"):
+    if path.startswith(("/api/v1/api-capabilities", "/api/v1/api-capability-results")):
         return "system.configure"
-    return None
+    # Unknown and future write endpoints are privileged by default. They must be
+    # assigned a narrower permission explicitly before ordinary operators use them.
+    return "system.configure"
 
 
 def _request_store_id(request: Request, body: dict, db) -> int | None:
