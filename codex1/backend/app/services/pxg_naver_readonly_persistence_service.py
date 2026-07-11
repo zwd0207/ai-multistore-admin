@@ -26,6 +26,7 @@ from app.models.pxg_naver_readonly import (
     PxgNaverReadonlyCustomerInquiry,
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
+    PxgNaverReadonlySyncControl,
 )
 from app.models.shipping import WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.schemas.pxg_naver_readonly import (
@@ -917,6 +918,17 @@ def assert_pxg_naver_cleanup_healthy(
     """Require a current, successful retention run before data may be used."""
 
     settings = settings or get_settings()
+    sync_control = db.scalar(select(PxgNaverReadonlySyncControl).where(
+        PxgNaverReadonlySyncControl.store_id == store_id,
+        PxgNaverReadonlySyncControl.platform == "naver",
+    ))
+    if sync_control is not None and (sync_control.write_and_refresh_blocked or sync_control.backup_retention_failed):
+        raise ApiError(
+            "PXG/Naver sync safety control is blocking data use",
+            "readonly_sync_safety_blocked",
+            409,
+            {"alert_status": "readonly_sync_safety_blocked"},
+        )
     if not settings.pxg_naver_local_read_retention_cleanup_enabled:
         raise ApiError(
             "PXG/Naver retention cleanup is disabled; data use is blocked",

@@ -1534,6 +1534,7 @@ def verify_stage_scripts() -> None:
         "verify_pxg_naver_readonly_persistence.py",
         "verify_pxg_naver_readonly_activation.py",
         "verify_pxg_naver_readonly_retention_cleanup.py",
+        "verify_pxg_naver_readonly_sync_safety.py",
         "verify_production_sessions.py",
     ]:
         print(f"running {script}")
@@ -19965,6 +19966,8 @@ def verify_git_tracking() -> None:
         " M backend/app/services/pxg_naver_readonly_persistence_service.py",
         " M backend/app/services/pxg_naver_readonly_activation_service.py",
         "?? backend/scripts/verify_pxg_naver_readonly_retention_cleanup.py",
+        "?? backend/scripts/verify_pxg_naver_readonly_sync_safety.py",
+        "?? backend/app/services/pxg_naver_readonly_sync_safety_service.py",
         " M backend/app/services/pxg_naver_readonly_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",

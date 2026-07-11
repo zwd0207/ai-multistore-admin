@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -184,3 +184,57 @@ class PxgNaverReadonlyCleanupStatus(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+
+
+class PxgNaverReadonlySyncControl(Base):
+    __tablename__ = "pxg_naver_readonly_sync_controls"
+    __table_args__ = (UniqueConstraint("store_id", "platform", name="uq_pxg_naver_readonly_sync_control"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="naver")
+    write_and_refresh_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    backup_retention_failed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    reason_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class PxgNaverReadonlySyncBatch(Base):
+    __tablename__ = "pxg_naver_readonly_sync_batches"
+    __table_args__ = (
+        UniqueConstraint("batch_no", name="uq_pxg_naver_readonly_sync_batch_no"),
+        Index("ix_pxg_naver_readonly_sync_batch_store_status", "store_id", "platform", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="naver")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="prepared")
+    actor_id_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    backup_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    baseline_counts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    mutation_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_record_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PxgNaverReadonlySyncBackup(Base):
+    __tablename__ = "pxg_naver_readonly_sync_backups"
+    __table_args__ = (UniqueConstraint("backup_ref", name="uq_pxg_naver_readonly_sync_backup_ref"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("pxg_naver_readonly_sync_batches.id"), nullable=False)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="naver")
+    backup_ref: Mapped[str] = mapped_column(String(160), nullable=False)
+    encrypted_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(60), nullable=False)
+    actor_id_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    restore_drill_passed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

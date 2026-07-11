@@ -38,6 +38,17 @@ TABLE_COLUMNS = {
         "id", "store_id", "platform", "status", "last_run_at", "last_success_at", "last_failure_at",
         "last_failure_code", "manual_review_count", "created_at", "updated_at",
     },
+    "pxg_naver_readonly_sync_controls": {
+        "id", "store_id", "platform", "write_and_refresh_blocked", "backup_retention_failed", "reason_code", "updated_at",
+    },
+    "pxg_naver_readonly_sync_batches": {
+        "id", "batch_no", "store_id", "platform", "status", "actor_id_hash", "backup_id", "baseline_counts",
+        "mutation_counts", "created_record_ids", "created_at", "completed_at", "rolled_back_at",
+    },
+    "pxg_naver_readonly_sync_backups": {
+        "id", "batch_id", "store_id", "platform", "backup_ref", "encrypted_path", "checksum_sha256", "schema_version",
+        "actor_id_hash", "expires_at", "restore_drill_passed_at", "deleted_at", "created_at",
+    },
 }
 
 INDEXES = {
@@ -182,6 +193,32 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             UNIQUE(store_id, platform),
             CHECK (platform = 'naver'),
             CHECK (status IN ('healthy', 'manual_review_required', 'failed'))
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pxg_naver_readonly_sync_controls (
+            id INTEGER PRIMARY KEY, store_id INTEGER NOT NULL, platform VARCHAR(50) NOT NULL DEFAULT 'naver',
+            write_and_refresh_blocked BOOLEAN NOT NULL DEFAULT 0, backup_retention_failed BOOLEAN NOT NULL DEFAULT 0,
+            reason_code VARCHAR(120), updated_at DATETIME NOT NULL,
+            FOREIGN KEY(store_id) REFERENCES stores(id), UNIQUE(store_id, platform)
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pxg_naver_readonly_sync_batches (
+            id INTEGER PRIMARY KEY, batch_no VARCHAR(100) NOT NULL, store_id INTEGER NOT NULL, platform VARCHAR(50) NOT NULL DEFAULT 'naver',
+            status VARCHAR(40) NOT NULL, actor_id_hash VARCHAR(64) NOT NULL, backup_id INTEGER,
+            baseline_counts JSON NOT NULL, mutation_counts JSON, created_record_ids JSON,
+            created_at DATETIME NOT NULL, completed_at DATETIME, rolled_back_at DATETIME,
+            FOREIGN KEY(store_id) REFERENCES stores(id), UNIQUE(batch_no)
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pxg_naver_readonly_sync_backups (
+            id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, store_id INTEGER NOT NULL, platform VARCHAR(50) NOT NULL DEFAULT 'naver',
+            backup_ref VARCHAR(160) NOT NULL, encrypted_path VARCHAR(500) NOT NULL, checksum_sha256 VARCHAR(64) NOT NULL,
+            schema_version VARCHAR(60) NOT NULL, actor_id_hash VARCHAR(64) NOT NULL, expires_at DATETIME NOT NULL,
+            restore_drill_passed_at DATETIME, deleted_at DATETIME, created_at DATETIME NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES pxg_naver_readonly_sync_batches(id), FOREIGN KEY(store_id) REFERENCES stores(id), UNIQUE(backup_ref)
         )
     """)
     for index_name, (table_name, columns, unique) in INDEXES.items():
