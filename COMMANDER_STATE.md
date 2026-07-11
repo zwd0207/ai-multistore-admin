@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: project commander
-Status: PXG trial configuration accepted; awaiting secure target database provisioning
+Status: local isolated PXG artificial-data trial is running and ready for operator rehearsal
 
 ## Mission
 
@@ -16,21 +16,23 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted code integration: `6feccef`
+- Last accepted code integration: `12718ec`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
 - Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
 - The frontend fail-closed issue and the named write routes are fixed and tested.
 - Terra commit `fd40add` adds default denial for unregistered write endpoints and is accepted into integration.
 - Real Naver/Coupang writes remain forbidden during the trial.
-- Terra commit `eaef7f6` provides isolated PXG trial validation and account provisioning, but no target database account has been changed yet.
+- Persistent local trial database and restricted operator account are provisioned without deployment credentials.
+- Current local frontend: `http://127.0.0.1:5181/`.
+- Credential handoff exists only in ignored local storage with a current-user Windows ACL.
 
 ## Active Trial Boundary
 
 - Selected trial store: `pxg球包店` on `Naver`.
 - Frontend mock id is `8`; the backend read-only store id must be resolved by exact name and platform, never assumed.
 - The operator works manually; AI and automatic platform actions remain off.
-- Real platform reads may be enabled only for the selected store.
+- Real platform reads and writes are disabled; the first rehearsal uses artificial data only.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
 - Every failure, manual workaround, and unclear screen is recorded as trial feedback.
@@ -44,6 +46,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `fd40add`: unregistered and future write routes default to privileged denial; capability-result writes are protected.
 - `b81365c`: production reads require sessions and store membership; all-store sync is privileged; legacy shipping and direct customer platform replies are disabled.
 - `eaef7f6`: PXG store is resolved by exact database name and platform; artificial-data-only runtime and single-store trial role are enforced.
+- `6684653`: persistent isolated SQLite trial, artificial PXG data, local credential handoff, and safe start/stop helpers.
+- `12718ec`: authenticated store reload, artificial-order visibility, accurate closed-write health status, and exact trial-process shutdown.
+- Browser QA passed local login, MFA, one-store isolation, three artificial orders, warehouse page visibility, and closed platform processing.
 - Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
@@ -59,11 +64,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 ## Next Action
 
-1. Administrator provides the target database connection through local environment configuration, never chat or Git.
-2. Validate exact `pxg球包店 + Naver` match without applying changes.
-3. Provision the isolated trial account only after validation passes.
-4. Run `OPERATOR_TRIAL_PXG_NAVER.md` once with artificial data.
-5. Commander reviews the rehearsal record before allowing real read-only store data.
+1. Operator opens the local credential handoff file and signs in at the local frontend URL.
+2. Operator runs `OPERATOR_TRIAL_PXG_NAVER.md` once with artificial data.
+3. Commander reviews the rehearsal record before allowing real read-only store data.
 
 ## Compact Reporting Contract
 
