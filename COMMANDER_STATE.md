@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: project commander
-Status: Terra security gate passed; awaiting Sol final read-only release review
+Status: blocked from single-store trial by Sol T06-FINAL review
 
 ## Mission
 
@@ -19,22 +19,22 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Last accepted code integration: `d37c59b`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
-- Sol's last verdict was blocked: session failure previously allowed frontend entry and write routes lacked unified authorization.
+- Sol's latest verdict is blocked: business reads lack authentication, single-store users can trigger all-store sync, and legacy real-platform writes bypass the approved workflow.
 - The frontend fail-closed issue and the named write routes are fixed and tested.
 - Terra commit `fd40add` adds default denial for unregistered write endpoints and is accepted into integration.
 - Real Naver/Coupang writes are forbidden during this gate.
 
 ## Active Gate
 
-T06-R2.1 proved all unsafe production API requests are fail-closed:
+T06-R3 must close the remaining trial boundary:
 
-- Authentication endpoints are the only deliberate exception.
-- Known writes require session, CSRF, store scope, and explicit permission.
-- Unregistered or future writes default to denial or `system.configure` authority.
-- `api-capability-results` cannot bypass the gate.
-- Rejected requests produce no database or platform side effects.
+- Production business reads require a valid session and store membership.
+- Store-list responses expose only stores assigned to the current user.
+- A single-store operator cannot call all-store synchronization.
+- Legacy shipment writeback and direct customer-reply platform writes are disabled for the operator trial.
+- Rejected and disabled paths produce no database mutation or real-platform request.
 
-Commander verification passed. Sol now performs one read-only final review. Terra and Luna do not repeat Sol's review.
+Terra implements and verifies this boundary. Luna remains paused. Sol reviews only after commander acceptance.
 
 ## Accepted Evidence
 
@@ -52,14 +52,15 @@ Commander verification passed. Sol now performs one read-only final review. Terr
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
 | Sol | `codex2-sol` | `task/t03-6-session-contract` | high-risk read-only review only |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused after T06-R2.1 acceptance |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | active on T06-R3 security boundary |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
-1. Send Sol a narrow read-only security and operator-trial review using this file as context.
-2. Enter a single-store artificial-data rehearsal only if Sol returns `passed`.
-3. If Sol blocks, route only the named blocker to the lowest suitable model.
+1. Terra implements T06-R3 from the current integration branch.
+2. Commander verifies and integrates the result.
+3. Sol performs one narrow read-only release review.
+4. Enter a single-store artificial-data rehearsal only if Sol returns `passed`.
 
 ## Compact Reporting Contract
 
