@@ -62,8 +62,12 @@ def resolve_trial_store(db: Session) -> Store:
 def assert_trial_runtime_closed(settings: Settings) -> None:
     if not settings.operator_trial_enabled:
         raise ApiError("operator trial mode is not enabled", "operator_trial_not_enabled", 409)
+    if settings.operator_trial_real_read_enabled:
+        if not settings.real_api_test_enabled or settings.operator_trial_artificial_data_only:
+            raise ApiError("real readonly trial flags are inconsistent", "trial_readonly_flags_invalid", 409)
+    elif settings.real_api_test_enabled or not settings.operator_trial_artificial_data_only:
+        raise ApiError("artificial trial flags are inconsistent", "trial_artificial_flags_invalid", 409)
     flags = {
-        "real_api_test_enabled": settings.real_api_test_enabled,
         "real_api_write_enabled": settings.real_api_write_enabled,
         "ai_automatic_operations_enabled": settings.ai_automatic_operations_enabled,
         "platform_product_write_enabled": settings.platform_product_write_enabled,
@@ -75,8 +79,6 @@ def assert_trial_runtime_closed(settings: Settings) -> None:
     enabled = sorted(key for key, value in flags.items() if value)
     if enabled:
         raise ApiError("trial real operations must remain disabled", "trial_real_operation_enabled", 409, {"enabled_flags": enabled})
-    if not settings.operator_trial_artificial_data_only:
-        raise ApiError("first trial must use artificial data only", "trial_artificial_data_required", 409)
 
 
 def assert_store_has_only_artificial_customer_data(db: Session, store_id: int) -> None:

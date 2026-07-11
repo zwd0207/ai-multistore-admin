@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     real_api_write_enabled: bool = False
     operator_trial_enabled: bool = False
     operator_trial_artificial_data_only: bool = True
+    operator_trial_real_read_enabled: bool = False
     ai_automatic_operations_enabled: bool = False
     platform_product_write_enabled: bool = False
     platform_inventory_write_enabled: bool = False
