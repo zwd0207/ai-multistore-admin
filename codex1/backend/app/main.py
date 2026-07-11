@@ -2,6 +2,7 @@ import asyncio
 from contextlib import suppress
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,32 @@ from app.routers import health
 
 
 settings = get_settings()
+
+
+async def run_pxg_naver_cleanup_scheduler(
+    *,
+    runtime_settings: Any,
+    session_factory: Callable[[], Any] = SessionLocal,
+    cleanup_runner: Callable[..., Any] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    interval_seconds: float = 24 * 60 * 60,
+) -> None:
+    """Run cleanup immediately and then once per interval while enabled."""
+
+    while True:
+        if runtime_settings.pxg_naver_local_read_retention_cleanup_enabled:
+            try:
+                runner = cleanup_runner
+                if runner is None:
+                    from app.services.pxg_naver_readonly_sync_safety_service import run_pxg_naver_daily_cleanup
+
+                    runner = run_pxg_naver_daily_cleanup
+                with session_factory() as db:
+                    runner(db, settings=runtime_settings)
+            except Exception:
+                # The cleanup service records a fail-closed state when the trial store exists.
+                pass
+        await sleep_fn(interval_seconds)
 
 
 def _validate_production_configuration() -> None:
@@ -46,20 +73,7 @@ def _validate_production_configuration() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
-    async def daily_cleanup_loop() -> None:
-        while True:
-            try:
-                if not settings.pxg_naver_local_read_retention_cleanup_enabled:
-                    await asyncio.sleep(24 * 60 * 60)
-                    continue
-                from app.services.pxg_naver_readonly_sync_safety_service import run_pxg_naver_daily_cleanup
-                with SessionLocal() as db:
-                    run_pxg_naver_daily_cleanup(db, settings=settings)
-            except Exception:
-                # The service persists a blocking control state when the PXG store exists.
-                pass
-            await asyncio.sleep(24 * 60 * 60)
-    task = asyncio.create_task(daily_cleanup_loop())
+    task = asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings))
     yield
     task.cancel()
     with suppress(asyncio.CancelledError):

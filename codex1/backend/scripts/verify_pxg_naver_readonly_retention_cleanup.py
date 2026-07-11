@@ -33,6 +33,7 @@ from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.database import SessionLocal, engine, init_db
+import app.main as app_main
 from app.main import app
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
@@ -45,6 +46,8 @@ from app.models.pxg_naver_readonly import (
     PxgNaverReadonlyCustomerInquiry,
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
+    PxgNaverReadonlySyncBackup,
+    PxgNaverReadonlySyncBatch,
 )
 from app.models.shipping import WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.models.store import Store
@@ -56,6 +59,7 @@ from app.services.pxg_naver_readonly_persistence_service import (
     PXG_NAVER_READONLY_LOCAL_SOURCE,
     assert_pxg_naver_cleanup_healthy,
     persist_pxg_naver_readonly_adapter_batch,
+    recipient_contract_for_authorized_warehouse,
     readonly_local_summary,
     run_pxg_naver_readonly_retention_cleanup,
 )
@@ -285,6 +289,56 @@ def main() -> None:
         )
         assert daily_recovery["status"] == "completed", daily_recovery
         assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+
+        expiry_batch = PxgNaverReadonlySyncBatch(
+            batch_no="CLEANUP-EXPIRED-BACKUP", store_id=store.id, platform="naver", status="completed",
+            actor_id_hash="a" * 64, baseline_counts={}, mutation_counts={}, created_record_ids={},
+        )
+        db.add(expiry_batch)
+        db.flush()
+        expired_backup = PxgNaverReadonlySyncBackup(
+            batch_id=expiry_batch.id, store_id=store.id, platform="naver", backup_ref="expired-access-gate",
+            encrypted_path=str(TEMP_DB.with_suffix(".expired.enc")), checksum_sha256="b" * 64,
+            schema_version="test", actor_id_hash="c" * 64, baseline_manifest={},
+            expires_at=now - timedelta(seconds=1),
+        )
+        db.add(expired_backup)
+        db.commit()
+        original_runtime_settings = app_main.settings
+        app_main.settings = original_runtime_settings.model_copy(update={
+            "pxg_naver_local_read_retention_cleanup_enabled": False,
+        })
+        try:
+            with TestClient(app) as client:
+                requests = (
+                    client.get(
+                        f"/api/v1/pxg-naver-readonly/local-summary?store_id={store.id}",
+                        headers={"X-ERP-User-Key": admin.user_key_hash},
+                    ),
+                    client.post(
+                        "/api/v1/pxg-naver-readonly/refresh",
+                        json={"manual_approval": True},
+                        headers={"X-ERP-User-Key": admin.user_key_hash},
+                    ),
+                )
+                for response in requests:
+                    assert response.status_code == 409, response.text
+                    assert response.json()["error_code"] == "readonly_expired_backup_pending", response.text
+            warehouse_order = db.scalar(select(Order).where(
+                Order.store_id == store.id,
+                Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE,
+            ))
+            assert warehouse_order is not None
+            try:
+                recipient_contract_for_authorized_warehouse(db, order=warehouse_order)
+            except ApiError as exc:
+                assert exc.error_code == "readonly_expired_backup_pending"
+            else:
+                raise AssertionError("an expired backup must block warehouse recipient reads")
+        finally:
+            app_main.settings = original_runtime_settings
+        expired_backup.deleted_at = now
+        db.commit()
 
         with TestClient(app) as client:
             denied = client.post("/api/v1/pxg-naver-readonly/retention-cleanup", json={"preview": True, "manual_confirmation": False})
