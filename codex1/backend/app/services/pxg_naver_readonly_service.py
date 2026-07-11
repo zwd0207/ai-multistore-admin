@@ -23,6 +23,7 @@ from app.services.operator_trial_service import assert_trial_runtime_closed, res
 
 MAX_REAL_ORDER_PREVIEW = 3
 CUSTOMER_INQUIRY_ENDPOINT = "/v1/pay-user/inquiries"
+CUSTOMER_INQUIRY_PREVIEW_WINDOW_DAYS = 1
 
 
 def _resolve_unique_active_credential(db: Session, store_id: int) -> ApiCredential:
@@ -74,19 +75,32 @@ def _customer_inquiry_capability_result(request_result: dict, inquiry_count: int
             "platform_error_category": None,
         }
     http_status = request_result.get("http_status")
-    if http_status in {401, 403}:
+    safe_error = request_result.get("safe_error") if isinstance(request_result.get("safe_error"), dict) else {}
+    if http_status == 400:
+        category = "request_error"
+        status = "blocked_request_error"
+    elif http_status in {401, 403}:
         category = "platform_not_authorized"
+        status = "platform_not_authorized_or_unavailable"
     elif http_status == 404:
         category = "capability_unavailable"
+        status = "platform_not_authorized_or_unavailable"
     elif isinstance(http_status, int) and http_status >= 500:
         category = "platform_temporarily_unavailable"
+        status = "platform_not_authorized_or_unavailable"
     else:
         category = "capability_unavailable"
+        status = "platform_not_authorized_or_unavailable"
     return {
-        "status": "platform_not_authorized_or_unavailable",
+        "status": status,
         "endpoint": CUSTOMER_INQUIRY_ENDPOINT,
         "http_status": http_status if isinstance(http_status, int) else None,
         "platform_error_category": category,
+        "platform_error_code": safe_error.get("platform_error_code"),
+        "platform_error_fields": [
+            field for field in safe_error.get("platform_error_fields", [])
+            if field in {"fromDate", "toDate", "page", "size", "answered"}
+        ][:5],
     }
 
 
@@ -147,7 +161,7 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
     inquiry_result = sync_service._request_naver_customer_inquiries(
         api_base=context["api_base"],
         headers={"Authorization": f"Bearer {access_token}"},
-        start_date=(now - timedelta(days=7)).date(),
+        start_date=(now - timedelta(days=CUSTOMER_INQUIRY_PREVIEW_WINDOW_DAYS)).date(),
         end_date=now.date(),
         answered=None,
         page=1,
@@ -173,9 +187,13 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
         "observed_in_masked_order_details" if order_fields.get("detail_called") else "not_observed"
     )
     result = {
-        "status": "completed",
+        "status": "blocked" if inquiry_capability["platform_error_category"] == "request_error" else "completed",
         "store": {"name": store.name, "platform": "Naver"},
-        "limits": {"max_real_orders": MAX_REAL_ORDER_PREVIEW, "order_window_days": order_window_days},
+        "limits": {
+            "max_real_orders": MAX_REAL_ORDER_PREVIEW,
+            "order_window_days": order_window_days,
+            "customer_inquiry_window_days": CUSTOMER_INQUIRY_PREVIEW_WINDOW_DAYS,
+        },
         "counts": {
             "products": min(3, len(products.get("sample_ids") or [])),
             "orders": order_count,

@@ -1113,16 +1113,15 @@ def _request_naver_customer_inquiries(
     params: dict[str, str | int] = {
         "page": int(page),
         "size": int(size),
-        "startSearchDate": start_date.isoformat(),
-        "endSearchDate": end_date.isoformat(),
+        "fromDate": start_date.isoformat(),
+        "toDate": end_date.isoformat(),
     }
     if answered is not None:
         params["answered"] = "true" if answered else "false"
     diagnostics = {
         "endpoint": "/v1/pay-user/inquiries",
         "query_param_keys": list(params.keys()),
-        "start_search_date": start_date.isoformat(),
-        "end_search_date": end_date.isoformat(),
+        "date_format": "YYYY-MM-DD",
         "answered_filter_used": answered is not None,
     }
     with httpx.Client(timeout=10.0) as client:
@@ -1138,6 +1137,10 @@ def _request_naver_customer_inquiries(
             "success": False,
             "http_status": response.status_code,
             "error_code": _naver_readonly_error_code(response, scope="customer_inquiry"),
+            "safe_error": {
+                "platform_error_code": diagnostics.get("naver_error_code"),
+                "platform_error_fields": diagnostics.get("naver_error_fields") or [],
+            },
             "diagnostics": diagnostics,
         }
     return {
