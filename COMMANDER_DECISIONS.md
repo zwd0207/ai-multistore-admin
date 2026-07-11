@@ -35,3 +35,6 @@ Use the lowest-cost model that can reliably complete the work. Do not ask multip
 
 Parallel tasks are allowed only when file ownership and contracts are independent. Security boundaries and upstream API contracts complete before dependent UI work begins.
 
+## D008 - PXG Naver real read-only boundary
+
+Guarded real reads are allowed only for the uniquely resolved `pxg球包店 / Naver` store. Product, order, logistics, and customer-inquiry previews must remain bounded and privacy-safe. Preview calls must not persist platform payloads or alter local business state. Shipment writeback, customer sending, product/order/inventory modification, all-store sync, and AI automatic operations remain disabled.
