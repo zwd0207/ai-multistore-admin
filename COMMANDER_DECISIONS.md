@@ -58,3 +58,7 @@ Sol's final activation review found three release blockers: the real refresh rou
 ## D013 - T09-R3 engineering blockers resolved
 
 The real refresh path now preserves its source and uses the guarded backup, pre-write restore drill, sync batch, and rollback flow. Cleanup runs at startup and every 24 hours when enabled, expired undeleted backups immediately block protected data use, cleanup recovery cannot clear unrelated safety locks, and terminal privacy timing is immutable. Focused lifecycle tests and `verify_all.py` passed. Real persistence remains disabled pending Sol re-review and a separate commander approval.
+
+## D014 - Recipient deletion must use immutable terminal time
+
+Sol's T09-R3 re-review passed security, backup, rollback, and cleanup but found that actual recipient deletion still uses mutable `order.updated_at`. The seven-day terminal retention deadline must use `secure.terminal_confirmed_at`, and later order updates must never extend that deadline. Real persistence remains disabled pending this fix and re-review.

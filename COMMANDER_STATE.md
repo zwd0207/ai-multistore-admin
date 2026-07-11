@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T09-R3 engineering blockers resolved and verified; awaiting Sol re-review
+Status: T09-R3 Sol re-review blocked on recipient deletion timestamp
 
 ## Mission
 
@@ -35,8 +35,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Guarded real reads are approved only for `pxg球包店 / Naver`; all real platform writes remain disabled.
 - Guarded local persistence code is merged but default-disabled; no approval has been given to save real platform data.
 - T09 automatic cleanup, encrypted backup lifecycle, restore drill, and batch-specific rollback are implemented and commander-verified.
-- Sol's three T09 blockers now have implemented and verified controls: guarded real refresh, immediate and daily cleanup gates, and immutable terminal privacy timing.
-- Real persistence remains disabled until Sol re-reviews this evidence and the commander separately approves one bounded manual sync.
+- Guarded real refresh, backup, rollback, immediate expiry gates, and daily cleanup passed Sol re-review.
+- Sol found that actual recipient deletion still uses mutable `order.updated_at` even though backup expiry uses immutable `terminal_confirmed_at`.
+- Real persistence remains disabled until recipient deletion uses the immutable terminal timestamp, regression tests pass, and Sol re-reviews the fix.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
@@ -71,15 +72,15 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | assigned T09-R3 final re-review |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | T09-R3 fixes accepted and merged |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | T09-R3 re-review blocked on one privacy fix |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | assigned immutable recipient deletion fix |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Return the complete T09-R3 evidence to Sol for final privacy, security, backup, rollback, and activation review.
-3. Only after Sol passes, prepare a separate commander decision for one bounded manual PXG/Naver real read-only sync.
+2. Change recipient terminal retention to use `secure.terminal_confirmed_at`, never `order.updated_at`, and add a regression test proving later order updates cannot extend deletion.
+3. Re-run commander verification and return the narrow fix to Sol.
 
 ## Compact Reporting Contract
 
