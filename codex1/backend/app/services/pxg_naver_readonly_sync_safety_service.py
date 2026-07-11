@@ -189,9 +189,8 @@ def _privacy_backup_expiry(db: Session, *, store_id: int, now: datetime) -> date
     deadlines = [now + timedelta(days=BACKUP_RETENTION_DAYS)]
     for record in db.scalars(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.store_id == store_id)).all():
         deadlines.append(_utc(record.source_observed_at) + timedelta(days=30))
-        order = db.get(Order, record.order_id)
-        if order is not None and str(order.order_status or "").upper() in {"DELIVERED", "DELIVERY_COMPLETED", "CANCELLED", "CANCELED", "RETURNED"}:
-            deadlines.append(_utc(order.updated_at) + timedelta(days=7))
+        if record.terminal_confirmed_at is not None:
+            deadlines.append(_utc(record.terminal_confirmed_at) + timedelta(days=7))
     for record in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
         PxgNaverReadonlyLogisticsRecord.store_id == store_id,
         PxgNaverReadonlyLogisticsRecord.encrypted_tracking_number != "",
@@ -306,7 +305,7 @@ def prepare_fictional_first_sync(
     actor_id: str,
     backup_root: Path,
     force_failure_for_test: bool = False,
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     """Persist one fictional first sync with encrypted backup and batch evidence."""
     if settings.pxg_naver_local_read_persistence_enabled or adapter_batch.source_mode != "fictional_test" or settings.app_env not in {"test", "development"}:
         raise ApiError("T09-R2 only permits fictional test syncs while real persistence is disabled", "readonly_sync_safety_scope_forbidden", 403)
@@ -352,6 +351,11 @@ def prepare_fictional_first_sync(
         db.commit()
         rollback_pxg_naver_sync_batch(db, settings=settings, batch_id=batch.id)
         raise
+
+
+def guarded_real_readonly_sync(*, settings: Settings) -> None:
+    """Real refreshes have no direct-save path while activation remains blocked."""
+    raise ApiError("PXG/Naver real readonly refresh remains disabled pending approved batch activation", "readonly_local_persistence_disabled", 403)
 
 
 def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: int) -> dict[str, Any]:

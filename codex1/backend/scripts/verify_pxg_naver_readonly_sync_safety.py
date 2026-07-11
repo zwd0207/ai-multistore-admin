@@ -145,11 +145,9 @@ def main() -> None:
             privacy_record = PxgNaverOrderRecipientSecureRecord(
                 order_id=protected_order.id, store_id=store.id, platform="naver", encrypted_recipient_payload="ciphertext",
                 recipient_payload_hash="a" * 64, source_updated_at=get_utc_now(),
-                source_observed_at=get_utc_now(), expires_at=get_utc_now(), is_stale=True,
+                source_observed_at=get_utc_now(), expires_at=get_utc_now(), terminal_confirmed_at=get_utc_now() - timedelta(days=6), is_stale=True,
             )
             db.add(privacy_record)
-            protected_order.order_status = "DELIVERED"
-            protected_order.updated_at = get_utc_now() - timedelta(days=6)
             db.commit()
             assert _privacy_backup_expiry(db, store_id=store.id, now=get_utc_now()) < get_utc_now() + timedelta(days=2)
             sent_batch = WarehouseShippingBatch(batch_no="T09-R2-PROTECTED", store_id=store.id, platform="naver", status="warehouse_sent")

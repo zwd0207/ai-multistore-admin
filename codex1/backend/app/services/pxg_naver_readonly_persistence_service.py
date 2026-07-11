@@ -448,6 +448,10 @@ def _order_outcome(
         observed_at=observed_at,
         settings=settings,
     )
+    if str(order.order_status or "").upper() in TERMINAL_ORDER_STATUSES:
+        secure = db.scalar(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.order_id == order.id))
+        if secure is not None and secure.terminal_confirmed_at is None:
+            secure.terminal_confirmed_at = _utc(candidate.source_updated_at)
     return ("created" if is_new else "updated"), order
 
 

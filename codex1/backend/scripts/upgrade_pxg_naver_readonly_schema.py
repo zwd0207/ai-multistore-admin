@@ -20,7 +20,7 @@ TABLE_COLUMNS = {
     },
     "pxg_naver_order_recipient_secure_records": {
         "id", "order_id", "store_id", "platform", "encrypted_recipient_payload",
-        "recipient_payload_hash", "source_updated_at", "source_observed_at", "expires_at",
+        "recipient_payload_hash", "source_updated_at", "source_observed_at", "expires_at", "terminal_confirmed_at",
         "is_stale", "created_at", "updated_at",
     },
     "pxg_naver_readonly_logistics_records": {
@@ -92,6 +92,7 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             source_updated_at DATETIME NOT NULL,
             source_observed_at DATETIME NOT NULL,
             expires_at DATETIME NOT NULL,
+            terminal_confirmed_at DATETIME,
             retention_review_at DATETIME NOT NULL,
             is_stale BOOLEAN NOT NULL DEFAULT 0,
             created_at DATETIME NOT NULL,
@@ -235,6 +236,9 @@ def _upgrade_existing_sync_backup_columns(connection: sqlite3.Connection) -> Non
     columns = {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_sync_backups)").fetchall()}
     if "baseline_manifest" not in columns:
         connection.execute("ALTER TABLE pxg_naver_readonly_sync_backups ADD COLUMN baseline_manifest JSON NOT NULL DEFAULT '{}'")
+    recipient_columns = {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_order_recipient_secure_records)").fetchall()}
+    if "terminal_confirmed_at" not in recipient_columns:
+        connection.execute("ALTER TABLE pxg_naver_order_recipient_secure_records ADD COLUMN terminal_confirmed_at DATETIME")
 
 
 def _verify_schema(connection: sqlite3.Connection) -> None:
