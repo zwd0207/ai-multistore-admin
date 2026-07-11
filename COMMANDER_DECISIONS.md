@@ -42,3 +42,7 @@ Guarded real reads are allowed only for the uniquely resolved `pxg球包店 / Na
 ## D009 - Read-only persistence activation
 
 Merging the PXG/Naver persistence foundation does not authorize real data storage. The persistence feature remains default-disabled. Activation requires a separate approval covering retention, backup, rollback, one-store scope, bounded first sync, privacy verification, and operator UI acceptance. Real platform writes remain disabled independently of this decision.
+
+## D010 - T09 retention and rollback gate
+
+PXG/Naver activation is blocked until automatic retention cleanup, cleanup audit, encrypted-backup lifecycle, restore verification, and batch-specific rollback pass tests and Sol review. Recipient PII expires operationally after 15 minutes and must be deleted within the approved shipment/cancellation and 30-day limits. First sync remains one manual batch with at most three product-order rows. Full policy: `.codex-handoff/T09-SOL-ACTIVATION-POLICY.md`.
