@@ -305,6 +305,7 @@ def prepare_guarded_readonly_sync(
     actor_id: str,
     backup_root: Path,
     force_failure_for_test: bool = False,
+    force_prewrite_restore_failure_for_test: bool = False,
     ) -> dict[str, Any]:
     """Persist one approved batch without changing its source or safety configuration."""
     if adapter_batch.source_mode not in {"fictional_test", "real_readonly"}:
@@ -328,9 +329,21 @@ def prepare_guarded_readonly_sync(
     backup = _encrypted_backup(db, settings=settings, batch=batch, backup_root=backup_root, now=now)
     batch.backup_id = backup.id
     db.commit()
-    # A restore copy must pass before any real local business record is saved.
-    prewrite_drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup)
     before = _snapshot_ids(db, store_id=store.id)
+    if force_prewrite_restore_failure_for_test:
+        Path(backup.encrypted_path).write_bytes(b"invalid-encrypted-backup")
+    # A restore copy must pass before any real local business record is saved.
+    try:
+        prewrite_drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup)
+    except Exception:
+        batch.status = "failed"
+        batch.mutation_counts = {"failure": "prewrite_restore_drill_failed"}
+        batch.created_record_ids = {name: [] for name in before}
+        db.commit()
+        rollback_pxg_naver_sync_batch(db, settings=settings, batch_id=batch.id, skip_restore_drill=True)
+        batch.status = "failed"
+        db.commit()
+        raise
     try:
         result = persist_pxg_naver_readonly_adapter_batch(
             db, settings=settings, batch=adapter_batch, actor_id=actor_id, manual_approval=True,
@@ -375,7 +388,7 @@ def run_guarded_readonly_sync(
 prepare_fictional_first_sync = prepare_guarded_readonly_sync
 
 
-def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: int) -> dict[str, Any]:
+def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: int, skip_restore_drill: bool = False) -> dict[str, Any]:
     batch = db.get(PxgNaverReadonlySyncBatch, batch_id)
     if batch is None:
         raise ApiError("PXG/Naver sync batch not found", "readonly_sync_batch_not_found", 404)
@@ -442,7 +455,7 @@ def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: 
             db, store_id=batch.store_id, status="success", reason_code="empty_warehouse_batch_cancelled", count=1,
         )
     backup = db.get(PxgNaverReadonlySyncBackup, batch.backup_id) if batch.backup_id else None
-    drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup) if backup is not None else None
+    drill = None if skip_restore_drill else (run_pxg_naver_restore_drill(db, settings=settings, backup=backup) if backup is not None else None)
     return {"status": "rolled_back", "batch_id": batch.id, "write_and_refresh_blocked": True, "revoked_approval_count": revoked_approvals, "restore_drill": drill}
 
 

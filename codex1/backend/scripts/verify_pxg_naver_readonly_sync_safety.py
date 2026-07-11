@@ -171,6 +171,19 @@ def main() -> None:
             else:
                 raise AssertionError("resource failure must rollback the complete fictional batch")
             assert db.query(Order).filter(Order.external_order_id == "order-three").count() == 0
+            control.write_and_refresh_blocked = False
+            control.reason_code = None
+            db.commit()
+            try:
+                prepare_fictional_first_sync(
+                    db, settings=get_settings(), adapter_batch=fictional_batch(store.id, "prewrite"), actor_id="fictional-operator", backup_root=backup_root,
+                    force_prewrite_restore_failure_for_test=True,
+                )
+            except Exception:
+                pass
+            else:
+                raise AssertionError("prewrite restore failure must abort the sync")
+            assert db.query(Order).filter(Order.external_order_id == "order-prewrite").count() == 0
             expired = db.query(PxgNaverReadonlySyncBackup).filter(PxgNaverReadonlySyncBackup.deleted_at.is_(None)).first()
             assert expired is not None
             expired.expires_at = get_utc_now() - timedelta(seconds=1)
