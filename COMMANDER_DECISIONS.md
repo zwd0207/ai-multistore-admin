@@ -38,3 +38,7 @@ Parallel tasks are allowed only when file ownership and contracts are independen
 ## D008 - PXG Naver real read-only boundary
 
 Guarded real reads are allowed only for the uniquely resolved `pxg球包店 / Naver` store. Product, order, logistics, and customer-inquiry previews must remain bounded and privacy-safe. Preview calls must not persist platform payloads or alter local business state. Shipment writeback, customer sending, product/order/inventory modification, all-store sync, and AI automatic operations remain disabled.
+
+## D009 - Read-only persistence activation
+
+Merging the PXG/Naver persistence foundation does not authorize real data storage. The persistence feature remains default-disabled. Activation requires a separate approval covering retention, backup, rollback, one-store scope, bounded first sync, privacy verification, and operator UI acceptance. Real platform writes remain disabled independently of this decision.
