@@ -18,7 +18,7 @@ from app.services.pxg_naver_readonly_persistence_service import (
 )
 from app.services.pxg_naver_readonly_activation_service import readonly_activation_precheck
 from app.services.pxg_naver_readonly_service import collect_pxg_naver_readonly_adapter_batch
-from app.services.pxg_naver_readonly_sync_safety_service import guarded_real_readonly_sync
+from app.services.pxg_naver_readonly_sync_safety_service import guarded_real_readonly_sync, run_guarded_readonly_sync
 from app.services.operator_trial_service import resolve_trial_store
 
 
@@ -115,5 +115,11 @@ async def refresh_pxg_naver_readonly_local_records(
     )
     settings = get_settings()
     assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=settings)
-    guarded_real_readonly_sync(settings=settings)
-    raise AssertionError("unreachable")
+    if not settings.pxg_naver_local_read_persistence_enabled:
+        guarded_real_readonly_sync(settings=settings)
+    batch = collect_pxg_naver_readonly_adapter_batch(db, settings)
+    result = run_guarded_readonly_sync(
+        db, settings=settings, adapter_batch=batch, actor_id=identity.user_key_hash,
+        backup_root=__import__("pathlib").Path(settings.pxg_naver_local_read_backup_root or "."),
+    )
+    return success_response(data=result, message="PXG Naver readonly local records refreshed")

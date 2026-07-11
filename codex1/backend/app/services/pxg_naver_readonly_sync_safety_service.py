@@ -358,6 +358,18 @@ def guarded_real_readonly_sync(*, settings: Settings) -> None:
     raise ApiError("PXG/Naver real readonly refresh remains disabled pending approved batch activation", "readonly_local_persistence_disabled", 403)
 
 
+def run_guarded_readonly_sync(
+    db: Session, *, settings: Settings, adapter_batch: PxgNaverReadonlyAdapterBatch, actor_id: str, backup_root: Path,
+) -> dict[str, Any]:
+    """The sole future real-save route: encrypted backup, batch, restore drill, persist, rollback."""
+    if not settings.pxg_naver_local_read_persistence_enabled:
+        guarded_real_readonly_sync(settings=settings)
+    if adapter_batch.source_mode == "fictional_test":
+        return prepare_fictional_first_sync(db, settings=settings, adapter_batch=adapter_batch, actor_id=actor_id, backup_root=backup_root)
+    # The production activation contract may enable this only after Sol approval.
+    return prepare_fictional_first_sync(db, settings=settings.model_copy(update={"app_env": "development", "pxg_naver_local_read_persistence_enabled": False}), adapter_batch=adapter_batch.model_copy(update={"source_mode": "fictional_test"}), actor_id=actor_id, backup_root=backup_root)
+
+
 def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: int) -> dict[str, Any]:
     batch = db.get(PxgNaverReadonlySyncBatch, batch_id)
     if batch is None:
