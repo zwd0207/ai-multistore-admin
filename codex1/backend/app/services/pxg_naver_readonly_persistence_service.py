@@ -80,8 +80,10 @@ def _empty_recipient_contract() -> dict[str, str]:
 
 
 def _resource_expiry(settings: Settings, resource_type: str, observed_at: datetime) -> datetime:
-    if resource_type in {"order", "recipient", "customer_inquiry"}:
+    if resource_type in {"order", "recipient"}:
         return observed_at + timedelta(minutes=max(1, settings.pxg_naver_local_read_order_stale_after_minutes))
+    if resource_type == "customer_inquiry":
+        return observed_at + timedelta(minutes=max(1, settings.pxg_naver_local_read_inquiry_stale_after_minutes))
     if resource_type == "logistics":
         return observed_at + timedelta(minutes=max(1, settings.pxg_naver_local_read_logistics_stale_after_minutes))
     if resource_type == "product":

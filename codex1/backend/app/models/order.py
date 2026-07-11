@@ -12,12 +12,26 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         Index(
+            "uq_order_non_pxg_external_id",
+            "store_id",
+            "platform",
+            "external_order_id",
+            unique=True,
+            sqlite_where=text("source_type != 'pxg_naver_readonly_local_v1'"),
+            postgresql_where=text("source_type != 'pxg_naver_readonly_local_v1'"),
+        ),
+        Index(
             "uq_pxg_naver_readonly_product_order",
             "store_id",
             "platform",
             "external_product_order_id",
             unique=True,
             sqlite_where=text(
+                "source_type = 'pxg_naver_readonly_local_v1' "
+                "AND external_product_order_id IS NOT NULL "
+                "AND TRIM(external_product_order_id) != ''"
+            ),
+            postgresql_where=text(
                 "source_type = 'pxg_naver_readonly_local_v1' "
                 "AND external_product_order_id IS NOT NULL "
                 "AND TRIM(external_product_order_id) != ''"

@@ -203,30 +203,67 @@ def _order_unique_columns(connection: sqlite3.Connection) -> set[tuple[str, ...]
     return unique_indexes
 
 
-def _rebuild_orders_for_product_order_uniqueness(connection: sqlite3.Connection) -> None:
-    """Add PXG-only product-order uniqueness without changing legacy semantics."""
-
-    unique_indexes = _order_unique_columns(connection)
-    desired_index_name = "uq_pxg_naver_readonly_product_order"
-    legacy = ("store_id", "platform", "external_order_id")
-    index_names = {row[1] for row in connection.execute("PRAGMA index_list(orders)").fetchall()}
-    if desired_index_name in index_names:
-        return
-    if legacy not in unique_indexes:
-        raise RuntimeError("orders table has an unsupported unique-key shape")
-    duplicates = connection.execute("""
+def _assert_no_order_duplicates(connection: sqlite3.Connection, *, source_where: str, key_column: str, message: str) -> None:
+    duplicates = connection.execute(f"""
         SELECT COUNT(*) FROM (
-            SELECT store_id, platform, external_product_order_id
+            SELECT store_id, platform, {key_column}
             FROM orders
-            WHERE source_type = 'pxg_naver_readonly_local_v1'
-              AND external_product_order_id IS NOT NULL
-              AND TRIM(external_product_order_id) != ''
-            GROUP BY store_id, platform, external_product_order_id
+            WHERE {source_where} AND {key_column} IS NOT NULL AND TRIM({key_column}) != ''
+            GROUP BY store_id, platform, {key_column}
             HAVING COUNT(*) > 1
         )
     """).fetchone()[0]
     if duplicates:
-        raise RuntimeError("orders migration found duplicate product-order identifiers; manual reconciliation is required")
+        raise RuntimeError(message)
+
+
+def _create_order_uniqueness_indexes(connection: sqlite3.Connection) -> None:
+    _assert_no_order_duplicates(
+        connection,
+        source_where="source_type != 'pxg_naver_readonly_local_v1'",
+        key_column="external_order_id",
+        message="orders migration found duplicate non-PXG platform-order identifiers; manual reconciliation is required",
+    )
+    _assert_no_order_duplicates(
+        connection,
+        source_where="source_type = 'pxg_naver_readonly_local_v1'",
+        key_column="external_product_order_id",
+        message="orders migration found duplicate PXG product-order identifiers; manual reconciliation is required",
+    )
+    connection.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_order_non_pxg_external_id
+        ON orders (store_id, platform, external_order_id)
+        WHERE source_type != 'pxg_naver_readonly_local_v1'
+    """)
+    connection.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_pxg_naver_readonly_product_order
+        ON orders (store_id, platform, external_product_order_id)
+        WHERE source_type = 'pxg_naver_readonly_local_v1'
+          AND external_product_order_id IS NOT NULL
+          AND TRIM(external_product_order_id) != ''
+    """)
+
+
+def _rebuild_orders_for_product_order_uniqueness(connection: sqlite3.Connection) -> None:
+    """Add PXG-only product-order uniqueness without changing legacy semantics."""
+
+    unique_indexes = _order_unique_columns(connection)
+    desired_index_names = {"uq_order_non_pxg_external_id", "uq_pxg_naver_readonly_product_order"}
+    legacy = ("store_id", "platform", "external_order_id")
+    index_names = {row[1] for row in connection.execute("PRAGMA index_list(orders)").fetchall()}
+    if desired_index_names.issubset(index_names):
+        return
+    if legacy not in unique_indexes:
+        if "uq_pxg_naver_readonly_product_order" in index_names:
+            _create_order_uniqueness_indexes(connection)
+            return
+        raise RuntimeError("orders table has an unsupported unique-key shape")
+    _assert_no_order_duplicates(
+        connection,
+        source_where="source_type = 'pxg_naver_readonly_local_v1'",
+        key_column="external_product_order_id",
+        message="orders migration found duplicate PXG product-order identifiers; manual reconciliation is required",
+    )
 
     connection.execute("PRAGMA foreign_keys=OFF")
     try:
@@ -277,13 +314,7 @@ def _rebuild_orders_for_product_order_uniqueness(connection: sqlite3.Connection)
         """)
         connection.execute("DROP TABLE orders")
         connection.execute("ALTER TABLE orders__pxg_product_order_upgrade RENAME TO orders")
-        connection.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_pxg_naver_readonly_product_order
-            ON orders (store_id, platform, external_product_order_id)
-            WHERE source_type = 'pxg_naver_readonly_local_v1'
-              AND external_product_order_id IS NOT NULL
-              AND TRIM(external_product_order_id) != ''
-        """)
+        _create_order_uniqueness_indexes(connection)
         for index_name, columns in {
             "ix_orders_store_id": "store_id",
             "ix_orders_platform": "platform",

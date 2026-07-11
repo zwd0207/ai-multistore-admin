@@ -33,7 +33,7 @@ os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED"] = "true"
 os.environ["PXG_NAVER_LOCAL_READ_ORDER_STALE_AFTER_MINUTES"] = "15"
-os.environ["PXG_NAVER_LOCAL_READ_INQUIRY_STALE_AFTER_MINUTES"] = "15"
+os.environ["PXG_NAVER_LOCAL_READ_INQUIRY_STALE_AFTER_MINUTES"] = "7"
 os.environ["PXG_NAVER_LOCAL_READ_LOGISTICS_STALE_AFTER_MINUTES"] = "30"
 os.environ["PXG_NAVER_LOCAL_READ_PRODUCT_STALE_AFTER_HOURS"] = "6"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_DAYS"] = "90"
@@ -193,7 +193,7 @@ def verify_legacy_order_uniqueness_migration() -> None:
                 product_name, quantity, order_amount, currency, order_status, ordered_at,
                 source_type, created_at, updated_at
             ) VALUES (
-                2, 1, 'naver', 'legacy-platform-order', 'legacy-product-order-2',
+                2, 1, 'naver', 'legacy-second-platform-order', 'legacy-product-order-2',
                 'Second Legacy Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
                 'legacy', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
             )
@@ -227,7 +227,33 @@ def verify_legacy_order_uniqueness_migration() -> None:
                     product_name, quantity, order_amount, currency, order_status, ordered_at,
                     source_type, created_at, updated_at
                 ) VALUES (
-                    5, 1, 'naver', 'pxg-other-platform-order', 'pxg-product-order-1',
+                    6, 1, 'naver', 'legacy-platform-order', 'legacy-product-order-3',
+                    'Legacy Duplicate Platform Order', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                    'legacy', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+                )
+            """)
+            raise AssertionError("legacy duplicate platform-order identifier should be rejected")
+        except sqlite3.IntegrityError:
+            pass
+        connection.execute("""
+            INSERT INTO orders (
+                id, store_id, platform, external_order_id, external_product_order_id,
+                product_name, quantity, order_amount, currency, order_status, ordered_at,
+                source_type, created_at, updated_at
+            ) VALUES (
+                5, 1, 'naver', 'pxg-platform-order', 'pxg-product-order-2',
+                'PXG Second Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
+                'pxg_naver_readonly_local_v1', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
+            )
+        """)
+        try:
+            connection.execute("""
+                INSERT INTO orders (
+                    id, store_id, platform, external_order_id, external_product_order_id,
+                    product_name, quantity, order_amount, currency, order_status, ordered_at,
+                    source_type, created_at, updated_at
+                ) VALUES (
+                    7, 1, 'naver', 'pxg-other-platform-order', 'pxg-product-order-1',
                     'PXG Duplicate Item', 1, 1000, 'KRW', 'PAYED', '2026-07-12T00:00:00+00:00',
                     'pxg_naver_readonly_local_v1', '2026-07-12T00:00:00+00:00', '2026-07-12T00:00:00+00:00'
                 )
@@ -236,7 +262,7 @@ def verify_legacy_order_uniqueness_migration() -> None:
         except sqlite3.IntegrityError:
             pass
         connection.commit()
-        assert connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 4
+        assert connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 5
     finally:
         connection.close()
         if legacy_path.exists():
@@ -334,7 +360,7 @@ def main() -> None:
         assert state_durations["order"] == 15 * 60
         assert state_durations["recipient"] == 15 * 60
         assert state_durations["logistics"] == 30 * 60
-        assert state_durations["customer_inquiry"] == 15 * 60
+        assert state_durations["customer_inquiry"] == 7 * 60
         assert int((secure_recipient.expires_at - secure_recipient.source_observed_at).total_seconds()) == 15 * 60
         assert int((logistics.expires_at - logistics.source_observed_at).total_seconds()) == 30 * 60
 
