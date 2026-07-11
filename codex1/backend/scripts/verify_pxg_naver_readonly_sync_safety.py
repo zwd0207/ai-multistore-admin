@@ -37,7 +37,7 @@ from app.core.timezone import get_utc_now
 from app.database import SessionLocal, engine, init_db
 from app.models.order import Order
 from app.models.operation_audit_log import OperationAuditLog
-from app.models.pxg_naver_readonly import PxgNaverReadonlySyncBackup, PxgNaverReadonlySyncControl
+from app.models.pxg_naver_readonly import PxgNaverReadonlySyncBackup, PxgNaverReadonlySyncBatch, PxgNaverReadonlySyncControl
 from app.models.shipping import WarehouseShippingApprovalGrant, WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.models.store import Store
 from app.schemas.pxg_naver_readonly import PxgNaverReadonlyAdapterBatch
@@ -184,6 +184,11 @@ def main() -> None:
             else:
                 raise AssertionError("prewrite restore failure must abort the sync")
             assert db.query(Order).filter(Order.external_order_id == "order-prewrite").count() == 0
+            failed_batch = db.query(PxgNaverReadonlySyncBatch).filter(
+                PxgNaverReadonlySyncBatch.status == "failed",
+            ).one()
+            assert failed_batch.mutation_counts == {"failure": "prewrite_restore_drill_failed"}
+            assert control.write_and_refresh_blocked is True
             expired = db.query(PxgNaverReadonlySyncBackup).filter(PxgNaverReadonlySyncBackup.deleted_at.is_(None)).first()
             assert expired is not None
             expired.expires_at = get_utc_now() - timedelta(seconds=1)
