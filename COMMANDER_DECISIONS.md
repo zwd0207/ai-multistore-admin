@@ -46,3 +46,7 @@ Merging the PXG/Naver persistence foundation does not authorize real data storag
 ## D010 - T09 retention and rollback gate
 
 PXG/Naver activation is blocked until automatic retention cleanup, cleanup audit, encrypted-backup lifecycle, restore verification, and batch-specific rollback pass tests and Sol review. Recipient PII expires operationally after 15 minutes and must be deleted within the approved shipment/cancellation and 30-day limits. First sync remains one manual batch with at most three product-order rows. Full policy: `.codex-handoff/T09-SOL-ACTIVATION-POLICY.md`.
+
+## D011 - T09 engineering acceptance
+
+The commander accepts the T09 cleanup, encrypted backup, ACL, checksum, structure verification, restore drill, and batch rollback implementation after independent verification. This engineering acceptance does not enable real persistence. `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` remains disabled until Sol passes the final activation review and the commander separately approves one bounded manual sync.
