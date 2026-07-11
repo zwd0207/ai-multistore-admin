@@ -7,7 +7,11 @@ persistence remains disabled. It never calls a marketplace write endpoint.
 from __future__ import annotations
 
 import hashlib
+import json
+import getpass
+import os
 import sqlite3
+import subprocess
 import tempfile
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -107,10 +111,33 @@ def _backup_root(settings: Settings, requested_root: Path) -> Path:
         raise ApiError("PXG/Naver backup directory is outside the designated root", "readonly_backup_path_forbidden", 403)
     root.mkdir(parents=True, exist_ok=True)
     try:
-        root.chmod(0o700)
+        if os.name == "nt":
+            result = subprocess.run(
+                ["icacls", str(root), "/inheritance:r", "/grant:r", f"{getpass.getuser()}:(OI)(CI)F"],
+                capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                raise OSError("icacls failed")
+        else:
+            root.chmod(0o700)
     except OSError as exc:
         raise ApiError("PXG/Naver backup directory permissions cannot be set", "readonly_backup_acl_failed", 409) from exc
     return root
+
+
+def _restrict_backup_file(path: Path) -> None:
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", f"{getpass.getuser()}:F"],
+                capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                raise OSError("icacls failed")
+        else:
+            path.chmod(0o600)
+    except OSError as exc:
+        raise ApiError("PXG/Naver backup file permissions cannot be set", "readonly_backup_acl_failed", 409) from exc
 
 
 def _assert_inside_root(path: Path, root: Path) -> Path:
@@ -129,13 +156,37 @@ def _baseline_manifest(connection: sqlite3.Connection, *, store_id: int) -> dict
             return 0
         return int(connection.execute(f"SELECT COUNT(*) FROM {table}{predicate}").fetchone()[0])
     indexes = sorted(row[1] for row in connection.execute("PRAGMA index_list(orders)").fetchall() if row[2])
+    def structure_hash(query: str, params: tuple = ()) -> str:
+        if not query.split(" FROM ", 1)[1].split()[0] in tables:
+            return _hash([])
+        rows = [tuple(row) for row in connection.execute(query, params).fetchall()]
+        return hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     return {
         "orders": count("orders"),
         "unique_order_indexes": indexes,
         "store_memberships": count("erp_store_memberships", f" WHERE store_id = {int(store_id)}"),
         "accounts": count("erp_users"),
         "sessions": count("erp_sessions"),
+        "order_structure_hash": structure_hash("SELECT id, store_id, platform, external_order_id, external_product_order_id, order_status FROM orders ORDER BY id"),
+        "membership_structure_hash": structure_hash("SELECT user_id, store_id, role_id, membership_status FROM erp_store_memberships WHERE store_id = ? ORDER BY user_id, role_id", (store_id,)),
+        "account_structure_hash": structure_hash("SELECT id, user_key_hash, status FROM erp_users ORDER BY id"),
+        "session_structure_hash": structure_hash("SELECT user_id, authn_level, revoked_at, idle_expires_at, absolute_expires_at FROM erp_sessions ORDER BY id"),
     }
+
+
+def _privacy_backup_expiry(db: Session, *, store_id: int, now: datetime) -> datetime:
+    deadlines = [now + timedelta(days=BACKUP_RETENTION_DAYS)]
+    for record in db.scalars(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.store_id == store_id)).all():
+        deadlines.append(_utc(record.source_observed_at) + timedelta(days=30))
+    for record in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
+        PxgNaverReadonlyLogisticsRecord.store_id == store_id,
+        PxgNaverReadonlyLogisticsRecord.encrypted_tracking_number != "",
+    )).all():
+        deadlines.append(_utc(record.source_updated_at) + timedelta(days=30))
+    expiry = min(deadlines)
+    if expiry <= now:
+        raise ApiError("PXG/Naver backup contains expired privacy data; cleanup is required", "readonly_backup_privacy_expired", 409)
+    return expiry
 
 
 def _write_backup_retention_audit(db: Session, *, store_id: int, status: str, reason_code: str, count: int) -> None:
@@ -180,13 +231,13 @@ def _encrypted_backup(
             schema_version = _schema_version(check)
             baseline_manifest = _baseline_manifest(check, store_id=batch.store_id)
         encrypted_path.write_bytes(fernet.encrypt(plain.read_bytes()))
-        encrypted_path.chmod(0o600)
+        _restrict_backup_file(encrypted_path)
     backup = PxgNaverReadonlySyncBackup(
         batch_id=batch.id, store_id=batch.store_id, platform="naver",
         backup_ref=f"backup-{batch.batch_no}", encrypted_path=str(encrypted_path),
         checksum_sha256=_file_hash(encrypted_path), schema_version=schema_version,
         actor_id_hash=batch.actor_id_hash, baseline_manifest=baseline_manifest,
-        expires_at=now + timedelta(days=BACKUP_RETENTION_DAYS),
+        expires_at=_privacy_backup_expiry(db, store_id=batch.store_id, now=now),
     )
     db.add(backup)
     db.flush()
@@ -327,6 +378,17 @@ def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: 
             revoked_approvals += 1
     for row in warehouse_rows:
         db.delete(row)
+    db.flush()
+    cancelled_batch_ids: list[int] = []
+    for warehouse_batch_id in warehouse_batch_ids:
+        remaining = db.scalar(select(func.count()).select_from(WarehouseShippingBatchOrder).where(
+            WarehouseShippingBatchOrder.batch_id == warehouse_batch_id,
+        ))
+        if not remaining:
+            warehouse_batch = db.get(WarehouseShippingBatch, warehouse_batch_id)
+            if warehouse_batch is not None:
+                warehouse_batch.status = "cancelled"
+                cancelled_batch_ids.append(warehouse_batch_id)
     mapping = [
         (PxgNaverReadonlyCustomerInquiry, "inquiries"), (PxgNaverReadonlyRecordState, "record_states"),
         (PxgNaverOrderRecipientSecureRecord, "recipients"), (PxgNaverReadonlyLogisticsRecord, "logistics"),
@@ -340,6 +402,10 @@ def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: 
     batch.status = "rolled_back"
     batch.rolled_back_at = get_utc_now()
     db.commit()
+    for warehouse_batch_id in cancelled_batch_ids:
+        _write_backup_retention_audit(
+            db, store_id=batch.store_id, status="success", reason_code="empty_warehouse_batch_cancelled", count=1,
+        )
     backup = db.get(PxgNaverReadonlySyncBackup, batch.backup_id) if batch.backup_id else None
     drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup) if backup is not None else None
     return {"status": "rolled_back", "batch_id": batch.id, "write_and_refresh_blocked": True, "revoked_approval_count": revoked_approvals, "restore_drill": drill}

@@ -3,6 +3,8 @@
 import os
 import sys
 import tempfile
+import subprocess
+import getpass
 from datetime import timedelta
 from pathlib import Path
 
@@ -46,6 +48,7 @@ from app.services.pxg_naver_readonly_sync_safety_service import (
     prepare_fictional_first_sync,
     rollback_pxg_naver_sync_batch,
     run_pxg_naver_restore_drill,
+    _privacy_backup_expiry,
 )
 
 
@@ -77,6 +80,9 @@ def main() -> None:
             backup = db.get(PxgNaverReadonlySyncBackup, 1)
             assert backup is not None and Path(backup.encrypted_path).exists() and len(backup.checksum_sha256) == 64
             assert b"PXG Fictional Bag" not in Path(backup.encrypted_path).read_bytes()
+            if os.name == "nt":
+                acl = subprocess.run(["icacls", str(backup_root)], capture_output=True, text=True, check=False)
+                assert acl.returncode == 0 and getpass.getuser().lower() in acl.stdout.lower(), acl.stdout
             original_ciphertext = Path(backup.encrypted_path).read_bytes()
             Path(backup.encrypted_path).write_bytes(original_ciphertext + b"tampered")
             try:
@@ -118,6 +124,8 @@ def main() -> None:
             rollback = rollback_pxg_naver_sync_batch(db, settings=get_settings(), batch_id=result["batch_id"])
             assert rollback["status"] == "rolled_back" and rollback["write_and_refresh_blocked"] is True, rollback
             assert rollback["revoked_approval_count"] == 1
+            db.refresh(warehouse)
+            assert warehouse.status == "cancelled"
             assert db.query(WarehouseShippingBatchOrder).filter(WarehouseShippingBatchOrder.batch_id == warehouse.id).count() == 0
             assert db.query(WarehouseShippingApprovalGrant).filter(WarehouseShippingApprovalGrant.batch_id == warehouse.id).count() == 0
             assert db.query(Order).filter(Order.external_order_id == "baseline-order").count() == 1
@@ -131,6 +139,15 @@ def main() -> None:
                 db, settings=get_settings(), adapter_batch=fictional_batch(store.id, "two"), actor_id="fictional-operator", backup_root=backup_root,
             )
             protected_order = db.query(Order).filter(Order.external_order_id == "order-two").one()
+            from app.models.pxg_naver_readonly import PxgNaverOrderRecipientSecureRecord
+            privacy_record = PxgNaverOrderRecipientSecureRecord(
+                order_id=protected_order.id, store_id=store.id, platform="naver", encrypted_recipient_payload="ciphertext",
+                recipient_payload_hash="a" * 64, source_updated_at=get_utc_now() - timedelta(days=29),
+                source_observed_at=get_utc_now() - timedelta(days=29), expires_at=get_utc_now(), is_stale=True,
+            )
+            db.add(privacy_record)
+            db.commit()
+            assert _privacy_backup_expiry(db, store_id=store.id, now=get_utc_now()) < get_utc_now() + timedelta(days=2)
             sent_batch = WarehouseShippingBatch(batch_no="T09-R2-PROTECTED", store_id=store.id, platform="naver", status="warehouse_sent")
             db.add(sent_batch)
             db.flush()
