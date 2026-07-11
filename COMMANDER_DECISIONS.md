@@ -62,3 +62,7 @@ The real refresh path now preserves its source and uses the guarded backup, pre-
 ## D014 - Recipient deletion must use immutable terminal time
 
 Sol's T09-R3 re-review passed security, backup, rollback, and cleanup but found that actual recipient deletion still uses mutable `order.updated_at`. The seven-day terminal retention deadline must use `secure.terminal_confirmed_at`, and later order updates must never extend that deadline. Real persistence remains disabled pending this fix and re-review.
+
+## D015 - Immutable recipient deletion implemented
+
+Actual recipient deletion now uses `secure.terminal_confirmed_at` for the seven-day terminal deadline and retains the independent 30-day collection maximum. Regression coverage proves that later `order.updated_at` changes cannot extend retention. The focused cleanup test and `verify_all.py` passed; real persistence remains disabled pending Sol's final narrow re-review.

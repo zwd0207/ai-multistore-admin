@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T09-R3 Sol re-review blocked on recipient deletion timestamp
+Status: T09-R4 recipient deletion fix verified; awaiting Sol final re-review
 
 ## Mission
 
@@ -16,7 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted code integration: `f8eb11b`
+- Last accepted code integration: `66eff2d`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
 - Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
@@ -36,8 +36,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Guarded local persistence code is merged but default-disabled; no approval has been given to save real platform data.
 - T09 automatic cleanup, encrypted backup lifecycle, restore drill, and batch-specific rollback are implemented and commander-verified.
 - Guarded real refresh, backup, rollback, immediate expiry gates, and daily cleanup passed Sol re-review.
-- Sol found that actual recipient deletion still uses mutable `order.updated_at` even though backup expiry uses immutable `terminal_confirmed_at`.
-- Real persistence remains disabled until recipient deletion uses the immutable terminal timestamp, regression tests pass, and Sol re-reviews the fix.
+- Actual recipient deletion now uses immutable `terminal_confirmed_at`; later order updates cannot extend the seven-day deadline, while the 30-day maximum remains enforced.
+- Real persistence remains disabled until Sol completes the final narrow re-review and the commander separately approves one bounded manual sync.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
@@ -58,6 +58,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `e9873a7`: PXG-only retention cleanup, privacy deletion, cleanup audit, unfinished-batch freeze, daily health gate, and recovery tests passed commander verification.
 - `6f34793` through `5d8c5ba`: encrypted SQLite backup, checksum and structure verification, Windows ACL isolation, privacy-derived backup expiry, restore drill, batch rollback, warehouse rollback protection, backup retention audit, and failure gates passed commander verification.
 - `2010c6b` through `f8eb11b`: real refresh safety routing, source integrity, immutable terminal timing, pre-write restore failure handling, immediate expired-backup blocking, daily cleanup lifecycle, isolated lock recovery, and explicit lifecycle tests passed commander verification and `verify_all.py`.
+- `b213c68` and `66eff2d`: actual recipient deletion uses immutable terminal time, with a regression test proving later order updates cannot extend the deadline and an independent full verification pass.
 - `6684653`: persistent isolated SQLite trial, artificial PXG data, local credential handoff, and safe start/stop helpers.
 - `12718ec`: authenticated store reload, artificial-order visibility, accurate closed-write health status, and exact trial-process shutdown.
 - Browser QA passed local login, MFA, one-store isolation, three artificial orders, warehouse page visibility, and closed platform processing.
@@ -72,15 +73,15 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | T09-R3 re-review blocked on one privacy fix |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | assigned immutable recipient deletion fix |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | assigned final narrow T09-R4 re-review |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | T09-R4 privacy fix accepted and merged |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Change recipient terminal retention to use `secure.terminal_confirmed_at`, never `order.updated_at`, and add a regression test proving later order updates cannot extend deletion.
-3. Re-run commander verification and return the narrow fix to Sol.
+2. Ask Sol to verify only the T09-R4 recipient deletion fix and its regression evidence.
+3. Only after Sol passes, prepare a separate commander decision for one bounded manual PXG/Naver real read-only sync.
 
 ## Compact Reporting Contract
 
