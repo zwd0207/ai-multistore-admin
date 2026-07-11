@@ -463,6 +463,12 @@ def cleanup_expired_pxg_naver_backups(db: Session, *, settings: Settings, now: d
             deleted += 1
         db.commit()
         for store_id in {item.store_id for item in backups}:
+            control = _control(db, store_id=store_id)
+            control.backup_retention_failed = False
+            if control.reason_code == "backup_retention_failed":
+                control.write_and_refresh_blocked = False
+                control.reason_code = None
+            db.commit()
             _write_backup_retention_audit(db, store_id=store_id, status="success", reason_code="backup_retention_deleted", count=deleted)
         return {"status": "completed", "deleted_count": deleted}
     except Exception:

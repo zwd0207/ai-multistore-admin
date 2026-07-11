@@ -184,14 +184,15 @@ def main() -> None:
                 assert getattr(exc, "error_code", None) == "readonly_sync_safety_blocked"
             else:
                 raise AssertionError("backup-retention failure must block activation and refresh")
-            control.backup_retention_failed = False
-            control.write_and_refresh_blocked = False
-            control.reason_code = None
+            control.write_and_refresh_blocked = True
+            control.reason_code = "sync_batch_rollback"
             db.commit()
             retention_recovery = cleanup_expired_pxg_naver_backups(db, settings=get_settings())
             assert retention_recovery["status"] == "completed" and retention_recovery["deleted_count"] >= 1, retention_recovery
             db.refresh(expired)
             assert expired.deleted_at is not None and not Path(expired.encrypted_path).exists()
+            assert control.backup_retention_failed is False
+            assert control.write_and_refresh_blocked is True and control.reason_code == "sync_batch_rollback"
             retention_audits = db.query(OperationAuditLog).filter(
                 OperationAuditLog.action == "pxg_naver_readonly_backup_retention",
             ).all()
