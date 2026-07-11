@@ -112,6 +112,10 @@ def main() -> None:
             store_count_before = db.query(Store).count()
         rejected_store_create = client.post("/api/v1/stores", json={"name": "Rejected Store", "platform": "naver"})
         assert rejected_store_create.status_code == 401, rejected_store_create.text
+        rejected_capability_result = client.post("/api/v1/api-capability-results", json={})
+        assert rejected_capability_result.status_code == 401, rejected_capability_result.text
+        rejected_unknown_write = client.post("/api/v1/future-unknown-write", json={"store_id": 1})
+        assert rejected_unknown_write.status_code == 401, rejected_unknown_write.text
         with SessionLocal() as db:
             assert db.query(Store).count() == store_count_before
         forged = client.get(
@@ -134,6 +138,20 @@ def main() -> None:
         assert forbidden.status_code == 403, forbidden.text
         no_csrf = client.post("/api/v1/shipping/warehouse-batches/1/approval/writeback", json={"confirmation": True})
         assert no_csrf.status_code == 403 and no_csrf.json()["error_code"] == "csrf_validation_failed", no_csrf.text
+        unknown_without_csrf = client.post("/api/v1/future-unknown-write", json={"store_id": 1})
+        assert unknown_without_csrf.status_code == 403 and unknown_without_csrf.json()["error_code"] == "csrf_validation_failed", unknown_without_csrf.text
+        unknown_without_permission = client.post(
+            "/api/v1/future-unknown-write",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={"store_id": 1},
+        )
+        assert unknown_without_permission.status_code == 403 and unknown_without_permission.json()["error_code"] == "system_configure_forbidden", unknown_without_permission.text
+        capability_without_permission = client.post(
+            "/api/v1/api-capability-results",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={"store_id": 1},
+        )
+        assert capability_without_permission.status_code == 403 and capability_without_permission.json()["error_code"] == "system_configure_forbidden", capability_without_permission.text
         denied_store_create = client.post(
             "/api/v1/stores",
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
