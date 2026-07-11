@@ -66,3 +66,7 @@ Sol's T09-R3 re-review passed security, backup, rollback, and cleanup but found 
 ## D015 - Immutable recipient deletion implemented
 
 Actual recipient deletion now uses `secure.terminal_confirmed_at` for the seven-day terminal deadline and retains the independent 30-day collection maximum. Regression coverage proves that later `order.updated_at` changes cannot extend retention. The focused cleanup test and `verify_all.py` passed; real persistence remains disabled pending Sol's final narrow re-review.
+
+## D016 - T09 safety passed; activation remains separate
+
+Sol passed the final T09 safety review with no blocker. This does not authorize real persistence. Before activation, the project must define a historical-order retention policy that keeps necessary non-PII order records searchable by platform order number while recipient name, phone, address, and delivery memo continue to follow the immutable 7-day/30-day deletion boundary.
