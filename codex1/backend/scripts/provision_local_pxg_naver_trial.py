@@ -221,13 +221,24 @@ def _seed_database(credentials: dict[str, str]) -> None:
             CustomerInquiry.store_id == store.id,
             CustomerInquiry.external_inquiry_id == "PXG-TRIAL-INQUIRY-001",
         ))
+        inquiry_data = {
+            "is_test": True,
+            "artificial_data_only": True,
+            "order_id": "PXG-TRIAL-ORDER-001",
+            "product_order_id": "PXG-TRIAL-PRODUCT-ORDER-001",
+            "product_order_id_list": ["PXG-TRIAL-PRODUCT-ORDER-001"],
+            "product_name": "PXG Trial Carry Bag",
+        }
         if inquiry is None:
-            db.add(CustomerInquiry(
+            inquiry = CustomerInquiry(
                 store_id=store.id, platform="naver", external_inquiry_id="PXG-TRIAL-INQUIRY-001",
                 inquiry_type="shipping", customer_name="Artificial buyer", title="Artificial shipping inquiry",
                 content="Artificial rehearsal inquiry. Do not send to a platform.", status="open",
-                received_at=now, raw_data={"is_test": True, "artificial_data_only": True},
-            ))
+                received_at=now, raw_data=inquiry_data,
+            )
+            db.add(inquiry)
+        else:
+            inquiry.raw_data = {**(inquiry.raw_data or {}), **inquiry_data}
         db.commit()
         provision_trial_operator(
             db,

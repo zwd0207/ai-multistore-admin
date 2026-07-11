@@ -114,6 +114,23 @@ export default function CustomerService() {
   const [replyConfirm, setReplyConfirm] = useState(false);
   const [replySubmitting, setReplySubmitting] = useState(false);
   const [draftReplies, setDraftReplies] = useState({});
+  const [platformReplyEnabled, setPlatformReplyEnabled] = useState(!isBackendSource);
+
+  useEffect(() => {
+    if (!isBackendSource) return undefined;
+    let cancelled = false;
+    dataProvider.healthCheck()
+      .then((health) => {
+        if (cancelled) return;
+        const approved = health.approved_platform_write_operations || health.approvedPlatformWriteOperations || [];
+        setPlatformReplyEnabled(
+          health.controlled_platform_writes_enabled === true
+          && approved.includes('naver_customer_inquiry_reply'),
+        );
+      })
+      .catch(() => { if (!cancelled) setPlatformReplyEnabled(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const load = async (nextQuery = query) => {
     if (isBackendSource && storeLoading) return [];
@@ -321,6 +338,11 @@ export default function CustomerService() {
                 ['客户', activeMessage.customerName],
                 ['订单号', activeMessage.orderNo],
                 ['商品', activeMessage.productName],
+                ['订单状态', activeMessage.relatedOrder?.orderStatus || '待确认'],
+                ['发货批次', activeMessage.relatedOrder?.batchNo || '尚未进入批次'],
+                ['仓库进度', activeMessage.relatedOrder?.warehouseStatus || activeMessage.relatedOrder?.batchStatus || '待处理'],
+                ['快递公司', activeMessage.relatedOrder?.carrier || '尚未录入'],
+                ['物流单号', activeMessage.relatedOrder?.trackingNumber || '尚未录入'],
                 ['状态', <StatusBadge value={activeMessage.statusLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
                 ['记录状态', activeMessage.sourceInfo.label],
@@ -348,8 +370,8 @@ export default function CustomerService() {
         title={draftModal.message ? `回复 · ${draftModal.message.ticketNo}` : '回复'}
         onClose={() => setDraftModal({ open: false, message: null, content: '' })}
         onConfirm={submitNaverReply}
-        confirmText={replySubmitting ? '提交中...' : '提交到 Naver'}
-        confirmDisabled={replySubmitting || !replyConfirm || !draftModal.content.trim()}
+        confirmText={!platformReplyEnabled ? '试运营中禁止发送' : replySubmitting ? '提交中...' : '提交到 Naver'}
+        confirmDisabled={!platformReplyEnabled || replySubmitting || !replyConfirm || !draftModal.content.trim()}
         width="min(860px, 94vw)"
       >
         <FormField label="草稿内容">
@@ -362,11 +384,13 @@ export default function CustomerService() {
         <label className="checkbox-line">
           <input
             type="checkbox"
+            disabled={!platformReplyEnabled}
             checked={replyConfirm}
             onChange={(event) => setReplyConfirm(event.target.checked)}
           />
           <span>人工确认发送：我已核对回复内容，并确认提交到 Naver。</span>
         </label>
+        {!platformReplyEnabled ? <div className="form-info">当前为模拟试运营，只能保存或复制回复草稿，不能发送到真实 Naver。</div> : null}
         <div className="modal-actions-inline">
           <button type="button" className="button ghost" onClick={saveDraft} disabled={replySubmitting}>保存本地草稿</button>
         </div>

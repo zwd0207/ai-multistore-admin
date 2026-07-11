@@ -528,9 +528,10 @@ export function adaptNaverOrderCompletePreview(data = {}) {
 
 export function adaptCustomerInquiry(item = {}) {
   const rawData = item.raw_data || {};
+  const relatedOrder = item.related_order || item.relatedOrder || {};
   const productOrderIds = Array.isArray(rawData.product_order_id_list) ? rawData.product_order_id_list : [];
-  const orderNo = item.order_no || rawData.order_id || productOrderIds[0] || '';
-  const productName = item.product_name || rawData.product_name || '';
+  const orderNo = item.order_no || relatedOrder.order_no || rawData.order_id || productOrderIds[0] || '';
+  const productName = item.product_name || relatedOrder.product_name || rawData.product_name || '';
   return {
     id: item.id,
     storeId: item.store_id,
@@ -552,6 +553,18 @@ export function adaptCustomerInquiry(item = {}) {
     orderNo: emptyText(orderNo),
     productName: emptyText(productName),
     productOrderIds,
+    relatedOrder: {
+      orderNo: relatedOrder.order_no || orderNo,
+      productOrderNo: relatedOrder.product_order_no || productOrderIds[0] || '',
+      productName: relatedOrder.product_name || productName,
+      orderStatus: relatedOrder.order_status || '',
+      batchNo: relatedOrder.batch_no || '',
+      batchStatus: relatedOrder.batch_status || '',
+      warehouseStatus: relatedOrder.warehouse_row_status || '',
+      carrier: relatedOrder.carrier || '',
+      trackingNumber: relatedOrder.tracking_number || '',
+      trackingStatus: relatedOrder.tracking_status || '',
+    },
     answerContent: rawData.answer_content || '',
     platformReplySubmitted: Boolean(rawData.platform_reply_submitted),
     platformReplyAlreadyExisted: Boolean(rawData.platform_reply_already_existed),

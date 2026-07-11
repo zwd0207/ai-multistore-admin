@@ -67,6 +67,23 @@ export default function ShippingAssistant() {
   const [writebackConfirm, setWritebackConfirm] = useState(false);
   const [approvalExpired, setApprovalExpired] = useState(false);
   const [trackingDetails, setTrackingDetails] = useState([]);
+  const [platformWriteEnabled, setPlatformWriteEnabled] = useState(!isBackendSource);
+
+  useEffect(() => {
+    if (!isBackendSource) return undefined;
+    let cancelled = false;
+    dataProvider.healthCheck()
+      .then((health) => {
+        if (cancelled) return;
+        const approved = health.approved_platform_write_operations || health.approvedPlatformWriteOperations || [];
+        setPlatformWriteEnabled(
+          health.controlled_platform_writes_enabled === true
+          && approved.includes('naver_shipment_dispatch'),
+        );
+      })
+      .catch(() => { if (!cancelled) setPlatformWriteEnabled(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const refreshBatches = async ({ restoreUrgent = false } = {}) => {
     const storeId = query.storeId || selectedStoreId;
@@ -205,7 +222,7 @@ export default function ShippingAssistant() {
         <div className="card-title"><div><h2>{activeBatch.code}</h2><p>{activeStoreName} · {activeBatch.platform} · {activeBatch.rows.filter((row) => !row.removed).length} 个商品订单 · {activeBatch.rows.filter((row) => !row.removed).reduce((sum, row) => sum + row.quantity, 0)} 件商品</p></div><select value={activeBatch.id} onChange={(event) => setActiveBatchId(event.target.value)}>{currentStageBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.code} · {stores.find((store) => String(store.id) === String(batch.storeId))?.name || `店铺 ${batch.storeId}`}</option>)}</select></div>
         {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={async () => { const approval = await dataProvider.requestWarehouseShippingApproval(activeBatch.id, 'manifest', { confirmation: true }); const approvalToken = approval.approval_token || approval.token; if (approval.status !== 'approval_granted' || !approvalToken) return setNotice('信息已变化，请重新确认。'); const result = await dataProvider.downloadWarehouseShippingManifest(activeBatch.id, warehouseRequest.manifest(approvalToken)); if (result.status !== 'warehouse_manifest_ready') return setNotice('信息已变化，请重新确认。'); const link = document.createElement('a'); link.href = `data:${result.content_type};base64,${result.file_content_base64}`; link.download = result.file_name; link.click(); await refreshBatches(); setNotice('仓库发货表已下载。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".xlsx" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
         {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.counts.normal} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.counts.needs_confirmation} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.counts.blocked} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>物流单号</th><th>结果</th><th>原因</th></tr></thead><tbody>{trackingDetails.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.carrier}</td><td>{row.trackingNumber}</td><td><StatusBadge value={row.status} /></td><td>{row.reason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
-        {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>物流单号</th><th>处理</th></tr></thead><tbody>{trackingDetails.filter((item) => ['ready_for_writeback', 'platform_failed'].includes(item.status)).map((item) => { const batchRow = activeBatch.rows.find((row) => String(row.id) === String(item.batchRowId)); return <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.carrier}</td><td>{item.trackingNumber}</td><td>{batchRow && !batchRow.removed ? <button type="button" onClick={() => setRemoveRow(batchRow)}>移出批次</button> : '-'}</td></tr>; })}</tbody></table>{approvalExpired ? <div className="form-error">信息已变化，请重新确认。</div> : null}<label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品、快递公司和物流单号无误，并同意提交到当前平台。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认并回填平台</button></> : null}
+        {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>物流单号</th><th>处理</th></tr></thead><tbody>{trackingDetails.filter((item) => ['ready_for_writeback', 'platform_failed'].includes(item.status)).map((item) => { const batchRow = activeBatch.rows.find((row) => String(row.id) === String(item.batchRowId)); return <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.carrier}</td><td>{item.trackingNumber}</td><td>{batchRow && !batchRow.removed ? <button type="button" onClick={() => setRemoveRow(batchRow)}>移出批次</button> : '-'}</td></tr>; })}</tbody></table>{approvalExpired ? <div className="form-error">信息已变化，请重新确认。</div> : null}{platformWriteEnabled ? <><label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已确认店铺、订单、商品、快递公司和物流单号无误，并同意提交到当前平台。</span></label><button className="button primary" type="button" onClick={submitWriteback}>确认并回填平台</button></> : <div className="form-info">模拟试运营已完成到人工确认阶段。真实平台回填保持关闭，本批次不会提交到 Naver。</div>}</> : null}
         {activeStage === 'result' ? <EmptyState title={activeBatch.failed ? '发货信息处理失败' : '发货批次已完成'} description={activeBatch.failed ? '请查看失败原因并修正后重新处理。' : '该批次已从当前待办中移除。'} /> : null}
       </>}
     </section>}

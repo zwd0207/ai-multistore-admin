@@ -49,6 +49,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `6684653`: persistent isolated SQLite trial, artificial PXG data, local credential handoff, and safe start/stop helpers.
 - `12718ec`: authenticated store reload, artificial-order visibility, accurate closed-write health status, and exact trial-process shutdown.
 - Browser QA passed local login, MFA, one-store isolation, three artificial orders, warehouse page visibility, and closed platform processing.
+- First operator rehearsal proved batch persistence after logout/login and exposed two UX gaps; customer order/logistics context and closed-write UI were fixed and browser reverified.
 - Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.

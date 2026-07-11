@@ -87,6 +87,11 @@ def main() -> None:
         orders = client.get("/api/v1/orders", params={"store_id": stores.json()["data"]["items"][0]["id"]})
         assert orders.status_code == 200 and orders.json()["data"]["total"] == 3, orders.text
         assert orders.json()["data"]["include_test_orders"] is True, orders.text
+        inquiries = client.get("/api/v1/customer-inquiries", params={"store_id": stores.json()["data"]["items"][0]["id"]})
+        assert inquiries.status_code == 200 and inquiries.json()["data"]["total"] == 1, inquiries.text
+        related_order = inquiries.json()["data"]["items"][0]["related_order"]
+        assert related_order["order_no"] == "PXG-TRIAL-ORDER-001", inquiries.text
+        assert related_order["product_name"] == "PXG Trial Carry Bag", inquiries.text
         cross_store = client.get("/api/v1/orders", params={"store_id": 999999})
         assert cross_store.status_code == 403, cross_store.text
         headers = {"Origin": origin, "X-CSRF-Token": csrf}

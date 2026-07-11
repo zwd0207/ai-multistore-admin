@@ -21,6 +21,11 @@ assert.match(authContext, /getRequestState/, 'consumers need explicit request fa
 assert.match(authContext, /unavailable/, 'session service failures must have a blocked state');
 assert.match(storeContext, /useAuthContext/, 'backend store loading must follow authenticated session state');
 assert.match(storeContext, /isBackendSource\s*&&\s*!isAuthenticated/, 'backend stores must not load before login');
+const shippingPage = await readFile(new URL('../src/pages/ShippingAssistant.jsx', import.meta.url), 'utf8');
+const customerPage = await readFile(new URL('../src/pages/CustomerService.jsx', import.meta.url), 'utf8');
+assert.match(shippingPage, /platformWriteEnabled/, 'shipping UI must fail closed when platform writes are disabled');
+assert.match(customerPage, /platformReplyEnabled/, 'customer reply UI must fail closed when platform sends are disabled');
+assert.match(customerPage, /relatedOrder/, 'customer inquiry detail must display its related order and logistics context');
 assert.match(await readFile(new URL('../src/routes/index.jsx', import.meta.url), 'utf8'), /type="unavailable"/, 'unavailable sessions must not render operator routes');
 for (const endpoint of ['login:', 'verifyMfa:', 'getSession:', 'logout:']) {
   assert.match(backendApi, new RegExp(endpoint), `missing auth API wrapper: ${endpoint}`);
