@@ -297,7 +297,7 @@ def _first_sync_precheck(db: Session, *, store_id: int, adapter_batch: PxgNaverR
         raise ApiError("PXG/Naver first sync cannot update existing orders", "readonly_first_sync_existing_record", 409)
 
 
-def prepare_fictional_first_sync(
+def prepare_guarded_readonly_sync(
     db: Session,
     *,
     settings: Settings,
@@ -306,9 +306,13 @@ def prepare_fictional_first_sync(
     backup_root: Path,
     force_failure_for_test: bool = False,
     ) -> dict[str, Any]:
-    """Persist one fictional first sync with encrypted backup and batch evidence."""
-    if settings.pxg_naver_local_read_persistence_enabled or adapter_batch.source_mode != "fictional_test" or settings.app_env not in {"test", "development"}:
-        raise ApiError("T09-R2 only permits fictional test syncs while real persistence is disabled", "readonly_sync_safety_scope_forbidden", 403)
+    """Persist one approved batch without changing its source or safety configuration."""
+    if adapter_batch.source_mode not in {"fictional_test", "real_readonly"}:
+        raise ApiError("PXG/Naver sync source is not allowed", "readonly_sync_safety_source_forbidden", 403)
+    if adapter_batch.source_mode == "fictional_test" and (settings.app_env not in {"test", "development"} or not settings.operator_trial_artificial_data_only):
+        raise ApiError("fictional PXG/Naver sync requires the artificial-data test scope", "readonly_sync_safety_scope_forbidden", 403)
+    if not settings.pxg_naver_local_read_persistence_enabled:
+        raise ApiError("PXG/Naver readonly local persistence is disabled", "readonly_local_persistence_disabled", 403)
     store = resolve_trial_store(db)
     if adapter_batch.store_id != store.id or adapter_batch.platform != "naver":
         raise ApiError("PXG/Naver sync store mismatch", "readonly_sync_safety_store_mismatch", 403)
@@ -325,10 +329,9 @@ def prepare_fictional_first_sync(
     batch.backup_id = backup.id
     db.commit()
     before = _snapshot_ids(db, store_id=store.id)
-    test_settings = settings.model_copy(update={"pxg_naver_local_read_persistence_enabled": True})
     try:
         result = persist_pxg_naver_readonly_adapter_batch(
-            db, settings=test_settings, batch=adapter_batch, actor_id=actor_id, manual_approval=True,
+            db, settings=settings, batch=adapter_batch, actor_id=actor_id, manual_approval=True,
         )
         if force_failure_for_test:
             raise RuntimeError("forced_resource_failure")
@@ -364,10 +367,11 @@ def run_guarded_readonly_sync(
     """The sole future real-save route: encrypted backup, batch, restore drill, persist, rollback."""
     if not settings.pxg_naver_local_read_persistence_enabled:
         guarded_real_readonly_sync(settings=settings)
-    if adapter_batch.source_mode == "fictional_test":
-        return prepare_fictional_first_sync(db, settings=settings, adapter_batch=adapter_batch, actor_id=actor_id, backup_root=backup_root)
-    # The production activation contract may enable this only after Sol approval.
-    return prepare_fictional_first_sync(db, settings=settings.model_copy(update={"app_env": "development", "pxg_naver_local_read_persistence_enabled": False}), adapter_batch=adapter_batch.model_copy(update={"source_mode": "fictional_test"}), actor_id=actor_id, backup_root=backup_root)
+    return prepare_guarded_readonly_sync(db, settings=settings, adapter_batch=adapter_batch, actor_id=actor_id, backup_root=backup_root)
+
+
+# Backward-compatible test helper name; it never changes the source or settings.
+prepare_fictional_first_sync = prepare_guarded_readonly_sync
 
 
 def rollback_pxg_naver_sync_batch(db: Session, *, settings: Settings, batch_id: int) -> dict[str, Any]:
@@ -470,3 +474,24 @@ def cleanup_expired_pxg_naver_backups(db: Session, *, settings: Settings, now: d
         for store_id in {item.store_id for item in backups}:
             _write_backup_retention_audit(db, store_id=store_id, status="failed", reason_code="backup_retention_failed", count=deleted)
         return {"status": "failed", "deleted_count": deleted}
+
+
+def run_pxg_naver_daily_cleanup(db: Session, *, settings: Settings) -> dict[str, Any]:
+    """Startup and 24-hour cleanup entrypoint. Failures leave the health gate closed."""
+    from app.services.pxg_naver_readonly_persistence_service import run_pxg_naver_readonly_retention_cleanup
+
+    store = resolve_trial_store(db)
+    try:
+        retention = run_pxg_naver_readonly_retention_cleanup(
+            db, settings=settings, preview=False, manual_confirmation=True, actor_id="system-daily-cleanup",
+        )
+        backups = cleanup_expired_pxg_naver_backups(db, settings=settings)
+        if retention.get("status") != "completed" or backups.get("status") != "completed":
+            raise ApiError("PXG/Naver daily cleanup did not complete", "readonly_daily_cleanup_failed", 409)
+        return {"status": "completed", "store_id": store.id, "retention": retention, "backups": backups}
+    except Exception:
+        control = _control(db, store_id=store.id)
+        control.write_and_refresh_blocked = True
+        control.reason_code = "daily_cleanup_failed"
+        db.commit()
+        raise

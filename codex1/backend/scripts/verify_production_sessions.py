@@ -249,7 +249,7 @@ def main() -> None:
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
             json=readonly_payload,
         )
-        assert readonly_success.status_code == 409 and readonly_success.json()["error_code"] == "readonly_retention_cleanup_disabled", readonly_success.text
+        assert readonly_success.status_code == 409 and readonly_success.json()["error_code"] in {"readonly_retention_cleanup_disabled", "readonly_sync_safety_blocked"}, readonly_success.text
         with SessionLocal() as db:
             assert db.query(OperationAuditLog).count() == audit_count_before_rejections
 

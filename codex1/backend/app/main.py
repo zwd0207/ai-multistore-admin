@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -44,7 +45,19 @@ def _validate_production_configuration() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
+    async def daily_cleanup_loop() -> None:
+        while True:
+            try:
+                from app.services.pxg_naver_readonly_sync_safety_service import run_pxg_naver_daily_cleanup
+                with SessionLocal() as db:
+                    run_pxg_naver_daily_cleanup(db, settings=settings)
+            except Exception:
+                # The service persists a blocking control state when the PXG store exists.
+                pass
+            await asyncio.sleep(24 * 60 * 60)
+    task = asyncio.create_task(daily_cleanup_loop())
     yield
+    task.cancel()
 
 
 def create_app() -> FastAPI:

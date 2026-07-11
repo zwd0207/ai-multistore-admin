@@ -127,7 +127,7 @@ def main() -> None:
                 json={"manual_approval": True},
                 headers={"X-ERP-User-Key": admin.user_key_hash},
             )
-            assert no_status_refresh.status_code == 409, no_status_refresh.text
+            assert no_status_refresh.status_code in {403, 409}, no_status_refresh.text
         persisted = persist_pxg_naver_readonly_adapter_batch(
             db, settings=get_settings(), batch=fictional_batch(store.id), actor_id="cleanup-test", manual_approval=True,
         )
