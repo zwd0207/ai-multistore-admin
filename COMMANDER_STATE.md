@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: project commander
-Status: T09 activation preparation merged; activation blocked on cleanup and real-data rollback lifecycle
+Status: T09 retention cleanup merged; activation remains blocked on encrypted backup and batch rollback lifecycle
 
 ## Mission
 
@@ -16,7 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted code integration: `7ec7baf`
+- Last accepted code integration: `e9873a7`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
 - Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
@@ -35,6 +35,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Guarded real reads are approved only for `pxg球包店 / Naver`; all real platform writes remain disabled.
 - Guarded local persistence code is merged but default-disabled; no approval has been given to save real platform data.
 - Sol T09 policy blocks activation until automatic cleanup, backup lifecycle, and batch-specific rollback are implemented and verified.
+- Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
 - Every failure, manual workaround, and unclear screen is recorded as trial feedback.
@@ -51,6 +52,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `8213f66`: guarded PXG/Naver real read-only preview passed for products, masked orders, masked logistics details, and customer inquiries.
 - `64f1a88`: default-closed PXG/Naver local persistence, encrypted recipient isolation, resource freshness, legacy order uniqueness, and multi-item order support passed Terra verification and Sol final security review.
 - `7ec7baf`: default-closed activation precheck, three-order fictional simulation, and temporary SQLite backup/restore drill passed commander verification.
+- `e9873a7`: PXG-only retention cleanup, privacy deletion, cleanup audit, unfinished-batch freeze, daily health gate, and recovery tests passed commander verification.
 - `6684653`: persistent isolated SQLite trial, artificial PXG data, local credential handoff, and safe start/stop helpers.
 - `12718ec`: authenticated store reload, artificial-order visibility, accurate closed-write health status, and exact trial-process shutdown.
 - Browser QA passed local login, MFA, one-store isolation, three artificial orders, warehouse page visibility, and closed platform processing.
@@ -72,8 +74,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Implement and verify T09 automatic retention cleanup and cleanup audit.
-3. Implement encrypted backup lifecycle and batch-specific rollback, then return to Sol for activation review.
+2. Implement encrypted backup lifecycle and batch-specific rollback without enabling real persistence.
+3. Verify restore isolation and cleanup of expired PII inside backups, then return to Sol for activation review.
 
 ## Compact Reporting Contract
 
