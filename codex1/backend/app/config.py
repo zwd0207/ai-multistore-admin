@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     credential_encryption_key: str | None = None
     real_api_test_enabled: bool = False
     real_api_write_enabled: bool = False
+    operator_trial_enabled: bool = False
+    operator_trial_artificial_data_only: bool = True
+    ai_automatic_operations_enabled: bool = False
+    platform_product_write_enabled: bool = False
+    platform_inventory_write_enabled: bool = False
+    platform_order_write_enabled: bool = False
+    customer_platform_write_enabled: bool = False
+    shipping_platform_write_enabled: bool = False
     allow_dev_auth: bool = False
     session_token_pepper: str | None = None
     session_cookie_name: str = "__Host-erp_session"

@@ -17,6 +17,10 @@ settings = get_settings()
 
 
 def _validate_production_configuration() -> None:
+    if settings.operator_trial_enabled:
+        from app.services.operator_trial_service import assert_trial_runtime_closed
+
+        assert_trial_runtime_closed(settings)
     if settings.app_env != "production":
         return
     errors = []
@@ -222,11 +226,11 @@ async def _enforce_write_protection(request: Request) -> None:
             require_any_store_permission(db, identity=identity, permission_key=permission_key)
         else:
             require_store_permission(db, identity=identity, store_id=store_id, permission_key=permission_key)
-        if request.url.path in {
-            "/api/v1/shipping/shipment-writeback/execute",
-            "/api/v1/sync/customer-inquiries/naver/reply",
-        }:
+        from app.services.operator_trial_service import DISABLED_TRIAL_WRITE_PATHS
+        if request.url.path in DISABLED_TRIAL_WRITE_PATHS:
             raise ApiError("legacy real platform write is disabled", "legacy_platform_write_disabled", 403)
+        if settings.operator_trial_enabled and request.url.path.endswith("/writeback"):
+            raise ApiError("platform writeback is disabled for the trial", "trial_platform_write_disabled", 403)
     finally:
         db.close()
 
