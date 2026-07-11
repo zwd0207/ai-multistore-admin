@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
+from app.config import get_settings
 from app.database import get_db
 from app.services import order_service
 from app.services.store_service import normalize_platform
@@ -12,6 +13,11 @@ from app.services.warehouse_shipping_service import write_recipient_view_audit
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
+def _include_trial_orders(requested: bool) -> bool:
+    settings = get_settings()
+    return requested or (settings.operator_trial_enabled and settings.operator_trial_artificial_data_only)
+
+
 @router.get("")
 def list_orders(
     store_id: int = Query(...),
@@ -19,6 +25,7 @@ def list_orders(
     include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
+    include_test_orders = _include_trial_orders(include_test_orders)
     normalized_platform = normalize_platform(platform) if platform else None
     items = order_service.list_orders(
         db,
@@ -46,6 +53,7 @@ def list_operations_orders(
     db: Session = Depends(get_db),
     identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    include_test_orders = _include_trial_orders(include_test_orders)
     require_store_permission(db, identity=identity, store_id=store_id, permission_key="recipient_pii.view")
     items = order_service.list_operations_orders(db, store_id=store_id, platform=normalize_platform(platform) if platform else None, include_test_orders=include_test_orders)
     write_recipient_view_audit(db, store_id=store_id, platform=normalize_platform(platform) if platform else "all", user_key_hash=identity.user_key_hash, row_count=len(items))

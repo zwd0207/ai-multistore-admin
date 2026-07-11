@@ -234,7 +234,7 @@ def _seed_database(credentials: dict[str, str]) -> None:
             login_identifier=credentials["login_identifier"],
             password=credentials["password"],
             mfa_secret=credentials["totp_secret"],
-            display_name="PXG Naver local trial operator",
+            display_name="PXG球包店试运营员",
         )
 
 

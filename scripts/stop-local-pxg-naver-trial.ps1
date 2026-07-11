@@ -1,7 +1,10 @@
 $ErrorActionPreference = "Stop"
-foreach ($port in @(8013, 8014, 8015, 8016, 5181, 5182, 5183, 5184)) {
-  Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
-    $process = Get-Process -Id $_ -ErrorAction SilentlyContinue
-    if ($process -and $process.ProcessName -in @("python", "node")) { Stop-Process -Id $_ -Force }
-  }
+$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$processFile = Join-Path $root "codex1\backend\.local-trial\processes.json"
+if (-not (Test-Path -LiteralPath $processFile)) { return }
+$trialProcesses = Get-Content -LiteralPath $processFile -Encoding UTF8 | ConvertFrom-Json
+foreach ($processId in @($trialProcesses.backend_pid, $trialProcesses.frontend_pid)) {
+  $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+  if ($process) { Stop-Process -Id $processId -Force }
 }
+Remove-Item -LiteralPath $processFile -Force

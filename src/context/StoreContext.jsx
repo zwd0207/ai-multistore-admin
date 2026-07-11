@@ -3,6 +3,7 @@ import {
 } from 'react';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { filterVisibleBusinessStores } from '../utils/storeDisplay';
+import { useAuthContext } from './AuthContext';
 
 const STORAGE_KEY = 'codex2.selectedStoreId';
 const StoreContext = createContext(null);
@@ -33,6 +34,7 @@ function pickSelectedStoreId(nextStores, preferredStoreId) {
 }
 
 export function StoreProvider({ children }) {
+  const { isAuthenticated, status: authStatus } = useAuthContext();
   const [stores, setStores] = useState([]);
   const [selectedStoreId, setSelectedStoreIdState] = useState(readStoredStoreId);
   const [loading, setLoading] = useState(true);
@@ -62,6 +64,14 @@ export function StoreProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (isBackendSource && !isAuthenticated) {
+      setStores([]);
+      setSelectedStoreIdState('');
+      setError('');
+      setLoading(authStatus === 'checking');
+      return undefined;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -86,7 +96,7 @@ export function StoreProvider({ children }) {
       });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [authStatus, isAuthenticated]);
 
   const setSelectedStoreId = useCallback((storeId) => {
     const nextStoreId = storeId ? String(storeId) : '';

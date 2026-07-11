@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [http, authContext, backendApi] = await Promise.all([
+const [http, authContext, backendApi, storeContext] = await Promise.all([
   readFile(new URL('../src/services/http.js', import.meta.url), 'utf8'),
   readFile(new URL('../src/context/AuthContext.jsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/services/backendApi.js', import.meta.url), 'utf8'),
+  readFile(new URL('../src/context/StoreContext.jsx', import.meta.url), 'utf8'),
 ]);
 
 assert.match(http, /credentials:\s*'include'/, 'all API calls must include HttpOnly cookies');
@@ -18,6 +19,8 @@ assert.match(authContext, /reauthentication_required/, 'recent-auth failures nee
 assert.match(authContext, /permission_forbidden/, 'permission failures need an explicit state');
 assert.match(authContext, /getRequestState/, 'consumers need explicit request failure classification');
 assert.match(authContext, /unavailable/, 'session service failures must have a blocked state');
+assert.match(storeContext, /useAuthContext/, 'backend store loading must follow authenticated session state');
+assert.match(storeContext, /isBackendSource\s*&&\s*!isAuthenticated/, 'backend stores must not load before login');
 assert.match(await readFile(new URL('../src/routes/index.jsx', import.meta.url), 'utf8'), /type="unavailable"/, 'unavailable sessions must not render operator routes');
 for (const endpoint of ['login:', 'verifyMfa:', 'getSession:', 'logout:']) {
   assert.match(backendApi, new RegExp(endpoint), `missing auth API wrapper: ${endpoint}`);

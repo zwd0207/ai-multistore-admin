@@ -84,6 +84,9 @@ def main() -> None:
         csrf = session.json()["data"]["csrf_token"]
         stores = client.get("/api/v1/stores")
         assert stores.status_code == 200 and stores.json()["data"]["total"] == 1, stores.text
+        orders = client.get("/api/v1/orders", params={"store_id": stores.json()["data"]["items"][0]["id"]})
+        assert orders.status_code == 200 and orders.json()["data"]["total"] == 3, orders.text
+        assert orders.json()["data"]["include_test_orders"] is True, orders.text
         cross_store = client.get("/api/v1/orders", params={"store_id": 999999})
         assert cross_store.status_code == 403, cross_store.text
         headers = {"Origin": origin, "X-CSRF-Token": csrf}
