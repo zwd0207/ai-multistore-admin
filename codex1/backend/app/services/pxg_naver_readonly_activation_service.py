@@ -149,6 +149,7 @@ def _activation_checks(db: Session, settings: Settings) -> tuple[dict[str, bool]
         "activation_explicitly_enabled": bool(settings.pxg_naver_local_read_activation_enabled),
         "real_persistence_enabled": bool(settings.pxg_naver_local_read_persistence_enabled),
         "all_platform_writes_disabled": not any(write_flags.values()),
+        "retention_cleanup_enabled": bool(settings.pxg_naver_local_read_retention_cleanup_enabled),
     }
     return checks, store.id, first_sync_limit
 
@@ -160,7 +161,7 @@ def readonly_activation_precheck(db: Session, *, settings: Settings) -> dict[str
     from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
 
     try:
-        assert_pxg_naver_cleanup_healthy(db, store_id=store_id)
+        assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings)
         checks["retention_cleanup_healthy"] = True
     except ApiError:
         checks["retention_cleanup_healthy"] = False
@@ -173,6 +174,7 @@ def readonly_activation_precheck(db: Session, *, settings: Settings) -> dict[str
         "activation_explicitly_enabled",
         "real_persistence_enabled",
         "all_platform_writes_disabled",
+        "retention_cleanup_enabled",
         "retention_cleanup_healthy",
     )
     missing = [name for name in required if not checks[name]]
@@ -203,7 +205,7 @@ def assert_real_persistence_activation_ready(
     checks, store_id, first_sync_limit = _activation_checks(db, settings)
     from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
 
-    assert_pxg_naver_cleanup_healthy(db, store_id=store_id)
+    assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings)
     required = (
         "single_pxg_naver_store",
         "first_sync_limit_bounded",

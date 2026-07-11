@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.order import Order
@@ -116,6 +116,8 @@ def _assert_persistence_enabled(
     manual_approval: bool,
 ) -> None:
     assert_trial_runtime_closed(settings)
+    if batch.source_mode == "real_readonly":
+        assert_pxg_naver_cleanup_healthy(db, store_id=batch.store_id, settings=settings)
     if not settings.pxg_naver_local_read_persistence_enabled:
         raise ApiError(
             "PXG/Naver readonly local persistence is disabled",
@@ -905,16 +907,52 @@ def _cleanup_status(db: Session, *, store_id: int, create: bool = True) -> PxgNa
     return status
 
 
-def assert_pxg_naver_cleanup_healthy(db: Session, *, store_id: int) -> None:
-    """Block PXG readonly data use after a failed retention job."""
+def assert_pxg_naver_cleanup_healthy(
+    db: Session,
+    *,
+    store_id: int,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Require a current, successful retention run before data may be used."""
 
+    settings = settings or get_settings()
+    if not settings.pxg_naver_local_read_retention_cleanup_enabled:
+        raise ApiError(
+            "PXG/Naver retention cleanup is disabled; data use is blocked",
+            "readonly_retention_cleanup_disabled",
+            409,
+            {"alert_status": "retention_cleanup_disabled"},
+        )
     status = _cleanup_status(db, store_id=store_id, create=False)
-    if status is not None and status.status == "failed":
+    if status is None or status.last_success_at is None:
+        raise ApiError(
+            "PXG/Naver retention cleanup has no successful run; data use is blocked",
+            "readonly_retention_cleanup_no_successful_run",
+            409,
+            {"alert_status": "retention_cleanup_no_successful_run"},
+        )
+    if status.status == "manual_review_required":
+        raise ApiError(
+            "PXG/Naver retention cleanup requires manual warehouse review; data use is blocked",
+            "readonly_retention_cleanup_manual_review_required",
+            409,
+            {"alert_status": "retention_cleanup_manual_review_required"},
+        )
+    if status.status == "failed":
         raise ApiError(
             "PXG/Naver readonly retention cleanup failed; data use is blocked",
             "readonly_retention_cleanup_failed",
             409,
             {"alert_status": "retention_cleanup_failed"},
+        )
+    current = _utc(now or get_utc_now())
+    if _utc(status.last_success_at) < current - timedelta(hours=24):
+        raise ApiError(
+            "PXG/Naver retention cleanup is overdue; data use is blocked",
+            "readonly_retention_cleanup_overdue",
+            409,
+            {"alert_status": "retention_cleanup_overdue"},
         )
 
 
@@ -1228,7 +1266,7 @@ def readonly_local_summary(db: Session, *, store_id: int, settings: Settings) ->
             "readonly_persistence_store_mismatch",
             403,
         )
-    assert_pxg_naver_cleanup_healthy(db, store_id=store.id)
+    assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=settings)
     now = _utc(get_utc_now())
     product_states = _state_lookup_for_records(db, store_id=store.id, resource_type="product")
     order_states = _state_lookup_for_records(db, store_id=store.id, resource_type="order")
@@ -1352,7 +1390,7 @@ def recipient_contract_for_authorized_warehouse(db: Session, *, order: Order) ->
 
     if order.source_type != PXG_NAVER_READONLY_LOCAL_SOURCE:
         return None
-    assert_pxg_naver_cleanup_healthy(db, store_id=order.store_id)
+    assert_pxg_naver_cleanup_healthy(db, store_id=order.store_id, settings=get_settings())
     secure = db.scalar(select(PxgNaverOrderRecipientSecureRecord).where(
         PxgNaverOrderRecipientSecureRecord.order_id == order.id,
         PxgNaverOrderRecipientSecureRecord.store_id == order.store_id,
@@ -1403,9 +1441,14 @@ def retention_cleanup_status(settings: Settings) -> dict[str, Any]:
 
 def retention_cleanup_runtime_status(db: Session, *, store_id: int, settings: Settings) -> dict[str, Any]:
     status = _cleanup_status(db, store_id=store_id, create=False)
+    alert_status = None
+    try:
+        assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings)
+    except ApiError as exc:
+        alert_status = str(exc.detail.get("alert_status")) if isinstance(exc.detail, dict) else exc.error_code
     return {
         **retention_cleanup_status(settings),
-        "alert_status": "retention_cleanup_failed" if status is not None and status.status == "failed" else None,
+        "alert_status": alert_status,
         "manual_review_required": bool(status is not None and status.status == "manual_review_required"),
         "last_run_at": status.last_run_at if status is not None else None,
         "last_success_at": status.last_success_at if status is not None else None,

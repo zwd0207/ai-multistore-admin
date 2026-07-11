@@ -11,6 +11,7 @@ from app.services.operator_access_service import OperatorIdentity, get_operator_
 from app.services.pxg_naver_readonly_persistence_service import (
     persist_pxg_naver_readonly_adapter_batch,
     readonly_local_summary,
+    assert_pxg_naver_cleanup_healthy,
     retention_cleanup_runtime_status,
     retention_cleanup_status,
     run_pxg_naver_readonly_retention_cleanup,
@@ -111,10 +112,12 @@ async def refresh_pxg_naver_readonly_local_records(
         store_id=store.id,
         permission_key="platform.readonly.persist",
     )
-    batch = collect_pxg_naver_readonly_adapter_batch(db, get_settings())
+    settings = get_settings()
+    assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=settings)
+    batch = collect_pxg_naver_readonly_adapter_batch(db, settings)
     result = persist_pxg_naver_readonly_adapter_batch(
         db,
-        settings=get_settings(),
+        settings=settings,
         batch=batch,
         actor_id=identity.user_key_hash,
         manual_approval=True,

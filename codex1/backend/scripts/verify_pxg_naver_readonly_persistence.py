@@ -37,7 +37,7 @@ os.environ["PXG_NAVER_LOCAL_READ_INQUIRY_STALE_AFTER_MINUTES"] = "7"
 os.environ["PXG_NAVER_LOCAL_READ_LOGISTICS_STALE_AFTER_MINUTES"] = "30"
 os.environ["PXG_NAVER_LOCAL_READ_PRODUCT_STALE_AFTER_HOURS"] = "6"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_DAYS"] = "90"
-os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "false"
+os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
 
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
@@ -62,6 +62,7 @@ from app.services.pxg_naver_readonly_persistence_service import (
     persist_pxg_naver_readonly_adapter_batch,
     readonly_local_summary,
     retention_cleanup_status,
+    run_pxg_naver_readonly_retention_cleanup,
 )
 from app.schemas.pxg_naver_readonly import PxgNaverReadonlyAdapterBatch
 from scripts.upgrade_pxg_naver_readonly_schema import _rebuild_orders_for_product_order_uniqueness
@@ -376,6 +377,20 @@ def main() -> None:
 
         ordinary_orders = order_service.list_orders(db, store_id=store.id, platform="naver", include_test_orders=True)
         operations_orders = order_service.list_operations_orders(db, store_id=store.id, platform="naver", include_test_orders=True)
+        try:
+            readonly_local_summary(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_no_successful_run", exc
+        else:
+            raise AssertionError("readonly summary must wait for a successful retention cleanup")
+        cleanup = run_pxg_naver_readonly_retention_cleanup(
+            db,
+            settings=get_settings(),
+            preview=False,
+            manual_confirmation=True,
+            actor_id=admin.user_key_hash,
+        )
+        assert cleanup["status"] == "completed", cleanup
         summary = readonly_local_summary(db, store_id=store.id, settings=get_settings())
         assert_not_contains(ordinary_orders, "Fictional Recipient", "010-5555-1234", "Fictional Seoul Road")
         assert_not_contains(operations_orders, "Fictional Recipient", "010-5555-1234", "Fictional Seoul Road")
@@ -468,7 +483,7 @@ def main() -> None:
         assert stale_summary["orders"][0]["is_stale"] is True
         assert stale_summary["freshness"]["stale_warning_count"] >= 4
         assert db.query(Order).filter(Order.store_id == store.id).count() == 2
-        assert retention_cleanup_status(get_settings())["automatic_cleanup_enabled"] is False
+        assert retention_cleanup_status(get_settings())["automatic_cleanup_enabled"] is True
 
         refreshed = persist_pxg_naver_readonly_adapter_batch(
             db,

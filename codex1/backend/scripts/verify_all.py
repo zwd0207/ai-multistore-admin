@@ -19989,6 +19989,7 @@ def verify_git_tracking() -> None:
         " M backend/scripts/upgrade_sync_schema.py",
         " M backend/scripts/upgrade_pxg_naver_readonly_schema.py",
         " M backend/scripts/verify_pxg_naver_readonly_persistence.py",
+        " M backend/scripts/verify_pxg_naver_readonly_retention_cleanup.py",
         "?? backend/scripts/verify_pxg_naver_readonly_activation.py",
         "?? backend/scripts/verify_pxg_naver_readonly_retention_cleanup.py",
         "?? backend/scripts/run_pxg_naver_readonly_retention_cleanup.py",

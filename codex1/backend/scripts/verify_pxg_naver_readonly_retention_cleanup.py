@@ -29,7 +29,7 @@ os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED"] = "true"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.database import SessionLocal, engine, init_db
@@ -41,6 +41,7 @@ from app.models.order import Order
 from app.models.product import Product
 from app.models.pxg_naver_readonly import (
     PxgNaverOrderRecipientSecureRecord,
+    PxgNaverReadonlyCleanupStatus,
     PxgNaverReadonlyCustomerInquiry,
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
@@ -103,6 +104,30 @@ def main() -> None:
         db.flush()
         db.add(ErpStoreMembership(user_id=admin.id, store_id=store.id, role_id=admin_role.id, membership_status="active"))
         db.commit()
+        try:
+            assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_no_successful_run"
+        else:
+            raise AssertionError("a missing cleanup record must block operations")
+        no_status_activation = readonly_activation_precheck(db, settings=get_settings())
+        assert no_status_activation["checks"]["retention_cleanup_healthy"] is False
+        cleanup_disabled = Settings(pxg_naver_local_read_retention_cleanup_enabled=False)
+        try:
+            assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=cleanup_disabled)
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_disabled"
+        else:
+            raise AssertionError("a disabled cleanup switch must block operations")
+        disabled_activation = readonly_activation_precheck(db, settings=cleanup_disabled)
+        assert disabled_activation["checks"]["retention_cleanup_enabled"] is False
+        with TestClient(app) as client:
+            no_status_refresh = client.post(
+                "/api/v1/pxg-naver-readonly/refresh",
+                json={"manual_approval": True},
+                headers={"X-ERP-User-Key": admin.user_key_hash},
+            )
+            assert no_status_refresh.status_code == 409, no_status_refresh.text
         persisted = persist_pxg_naver_readonly_adapter_batch(
             db, settings=get_settings(), batch=fictional_batch(store.id), actor_id="cleanup-test", manual_approval=True,
         )
@@ -178,6 +203,31 @@ def main() -> None:
         assert frozen["manual_review_frozen_count"] == 1, frozen
         assert db.scalar(select(PxgNaverOrderRecipientSecureRecord).where(PxgNaverOrderRecipientSecureRecord.order_id == frozen_order.id)) is not None
         assert db.get(PxgNaverReadonlyRecordState, secure_state.id) is not None
+        try:
+            assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_manual_review_required"
+        else:
+            raise AssertionError("manual-review cleanup state must block operations")
+        try:
+            readonly_local_summary(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_manual_review_required"
+        else:
+            raise AssertionError("manual-review cleanup state must block display")
+        try:
+            warehouse_shipping_service.issue_approval_grant(db, batch_id=batch.id, user_id=admin.id, grant_scope="manifest")
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_manual_review_required"
+        else:
+            raise AssertionError("manual-review cleanup state must block warehouse approval and export")
+        with TestClient(app) as client:
+            manual_review_refresh = client.post(
+                "/api/v1/pxg-naver-readonly/refresh",
+                json={"manual_approval": True},
+                headers={"X-ERP-User-Key": admin.user_key_hash},
+            )
+            assert manual_review_refresh.status_code == 409, manual_review_refresh.text
 
         failure = run_pxg_naver_readonly_retention_cleanup(
             db, settings=get_settings(), preview=False, manual_confirmation=True, actor_id="cleanup-test", now=now,
@@ -205,6 +255,37 @@ def main() -> None:
         else:
             raise AssertionError("cleanup failure must block warehouse approval and export")
 
+        batch.status = "completed"
+        db.commit()
+        recovered = run_pxg_naver_readonly_retention_cleanup(
+            db, settings=get_settings(), preview=False, manual_confirmation=True, actor_id="cleanup-test", now=now,
+        )
+        assert recovered["status"] == "completed" and recovered["manual_review_frozen_count"] == 0, recovered
+        assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+        cleanup_status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+            PxgNaverReadonlyCleanupStatus.store_id == store.id,
+        ))
+        assert cleanup_status is not None
+        cleanup_status.last_success_at = now - timedelta(hours=25)
+        db.commit()
+        try:
+            assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_overdue"
+        else:
+            raise AssertionError("a cleanup older than 24 hours must block operations")
+        try:
+            readonly_local_summary(db, store_id=store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_overdue"
+        else:
+            raise AssertionError("an overdue cleanup must block display")
+        daily_recovery = run_pxg_naver_readonly_retention_cleanup(
+            db, settings=get_settings(), preview=False, manual_confirmation=True, actor_id="cleanup-test", now=now,
+        )
+        assert daily_recovery["status"] == "completed", daily_recovery
+        assert_pxg_naver_cleanup_healthy(db, store_id=store.id, settings=get_settings())
+
         with TestClient(app) as client:
             denied = client.post("/api/v1/pxg-naver-readonly/retention-cleanup", json={"preview": True, "manual_confirmation": False})
             assert denied.status_code in {401, 403}, denied.text
@@ -220,7 +301,7 @@ def main() -> None:
                 headers={"X-ERP-User-Key": admin.user_key_hash},
             )
             assert status.status_code == 200, status.text
-            assert status.json()["data"]["alert_status"] == "retention_cleanup_failed", status.text
+            assert status.json()["data"]["alert_status"] is None, status.text
 
     engine.dispose()
     if TEMP_DB.exists():
