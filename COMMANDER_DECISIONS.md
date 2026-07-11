@@ -50,3 +50,7 @@ PXG/Naver activation is blocked until automatic retention cleanup, cleanup audit
 ## D011 - T09 engineering acceptance
 
 The commander accepts the T09 cleanup, encrypted backup, ACL, checksum, structure verification, restore drill, and batch rollback implementation after independent verification. This engineering acceptance does not enable real persistence. `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` remains disabled until Sol passes the final activation review and the commander separately approves one bounded manual sync.
+
+## D012 - T09 activation remains blocked
+
+Sol's final activation review found three release blockers: the real refresh route does not use the backup/batch/rollback wrapper, expired backup cleanup is not automatically scheduled or enforced as an activation/refresh gate, and terminal recipient retention is based on mutable `order.updated_at` instead of a stable terminal event time. Real persistence remains disabled until all three are implemented, commander-verified, and approved in a new Sol review.
