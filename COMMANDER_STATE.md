@@ -70,7 +70,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Prepare a separate activation checklist covering retention approval, backup, rollback, first bounded sync, and operator UI verification.
+2. Execute T09 activation preparation according to `.codex-handoff/T09-PXG-READONLY-ACTIVATION-PLAN.md`.
 3. Enable one bounded PXG/Naver sync only after explicit commander approval; all platform writes remain disabled.
 
 ## Compact Reporting Contract
