@@ -16,6 +16,7 @@ from app.models.platform_login_credential import PlatformLoginCredential
 from app.models.product import Product
 from app.models.pxg_naver_readonly import (
     PxgNaverOrderRecipientSecureRecord,
+    PxgNaverReadonlyCleanupStatus,
     PxgNaverReadonlyCustomerInquiry,
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
@@ -59,6 +60,7 @@ __all__ = [
     "PlatformLoginCredential",
     "Product",
     "PxgNaverOrderRecipientSecureRecord",
+    "PxgNaverReadonlyCleanupStatus",
     "PxgNaverReadonlyCustomerInquiry",
     "PxgNaverReadonlyLogisticsRecord",
     "PxgNaverReadonlyRecordState",

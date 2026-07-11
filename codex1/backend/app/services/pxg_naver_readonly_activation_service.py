@@ -157,6 +157,13 @@ def readonly_activation_precheck(db: Session, *, settings: Settings) -> dict[str
     """Return a masked, no-write activation checklist for the selected store."""
 
     checks, store_id, first_sync_limit = _activation_checks(db, settings)
+    from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
+
+    try:
+        assert_pxg_naver_cleanup_healthy(db, store_id=store_id)
+        checks["retention_cleanup_healthy"] = True
+    except ApiError:
+        checks["retention_cleanup_healthy"] = False
     required = (
         "single_pxg_naver_store",
         "first_sync_limit_bounded",
@@ -166,6 +173,7 @@ def readonly_activation_precheck(db: Session, *, settings: Settings) -> dict[str
         "activation_explicitly_enabled",
         "real_persistence_enabled",
         "all_platform_writes_disabled",
+        "retention_cleanup_healthy",
     )
     missing = [name for name in required if not checks[name]]
     return {
@@ -193,6 +201,9 @@ def assert_real_persistence_activation_ready(
     """Enforce Sol's future activation gate immediately before a real write."""
 
     checks, store_id, first_sync_limit = _activation_checks(db, settings)
+    from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
+
+    assert_pxg_naver_cleanup_healthy(db, store_id=store_id)
     required = (
         "single_pxg_naver_store",
         "first_sync_limit_bounded",

@@ -22,10 +22,12 @@ from app.models.order import Order
 from app.models.product import Product
 from app.models.pxg_naver_readonly import (
     PxgNaverOrderRecipientSecureRecord,
+    PxgNaverReadonlyCleanupStatus,
     PxgNaverReadonlyCustomerInquiry,
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
 )
+from app.models.shipping import WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.schemas.pxg_naver_readonly import (
     PxgNaverReadonlyAdapterBatch,
     PxgNaverReadonlyInquiryCandidate,
@@ -40,6 +42,11 @@ from app.services.operator_trial_service import assert_trial_runtime_closed, res
 
 PXG_NAVER_READONLY_LOCAL_SOURCE = "pxg_naver_readonly_local_v1"
 RESOURCE_TYPES = {"product", "order", "recipient", "logistics", "customer_inquiry"}
+RECIPIENT_TERMINAL_RETENTION_DAYS = 7
+RECIPIENT_MAX_RETENTION_DAYS = 30
+TRACKING_RETENTION_DAYS = 30
+METADATA_RETENTION_DAYS = 90
+TERMINAL_ORDER_STATUSES = {"DELIVERED", "DELIVERY_COMPLETED", "CANCELLED", "CANCELED", "RETURNED"}
 RECIPIENT_FIELDS = (
     "receiver_name",
     "receiver_phone",
@@ -886,6 +893,317 @@ def mark_pxg_naver_readonly_stale(
     return len(states)
 
 
+def _cleanup_status(db: Session, *, store_id: int, create: bool = True) -> PxgNaverReadonlyCleanupStatus | None:
+    status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+        PxgNaverReadonlyCleanupStatus.store_id == store_id,
+        PxgNaverReadonlyCleanupStatus.platform == "naver",
+    ))
+    if status is None and create:
+        status = PxgNaverReadonlyCleanupStatus(store_id=store_id, platform="naver", status="healthy")
+        db.add(status)
+        db.flush()
+    return status
+
+
+def assert_pxg_naver_cleanup_healthy(db: Session, *, store_id: int) -> None:
+    """Block PXG readonly data use after a failed retention job."""
+
+    status = _cleanup_status(db, store_id=store_id, create=False)
+    if status is not None and status.status == "failed":
+        raise ApiError(
+            "PXG/Naver readonly retention cleanup failed; data use is blocked",
+            "readonly_retention_cleanup_failed",
+            409,
+            {"alert_status": "retention_cleanup_failed"},
+        )
+
+
+def _has_unfinished_warehouse_batch(db: Session, *, order_id: int) -> bool:
+    return db.scalar(select(WarehouseShippingBatchOrder.id).join(WarehouseShippingBatch).where(
+        WarehouseShippingBatchOrder.local_order_id == order_id,
+        WarehouseShippingBatchOrder.is_active.is_(True),
+        WarehouseShippingBatch.status != "completed",
+    ).limit(1)) is not None
+
+
+def _cleanup_audit(
+    db: Session,
+    *,
+    store_id: int,
+    actor_id: str | None,
+    status: str,
+    reason_code: str,
+    counts: dict[str, int],
+) -> None:
+    now = get_utc_now()
+    write_operation_audit_log_local(
+        db,
+        {
+            "created_at": now,
+            "updated_at": now,
+            "store_id": store_id,
+            "platform": "naver",
+            "environment": "local",
+            "actor_type": "human",
+            "actor_id": _hash(actor_id or "authorized-operator"),
+            "actor_label": "Authorized operator",
+            "actor_role": "operator",
+            "action": "pxg_naver_readonly_retention_cleanup",
+            "operation_phase": "T09-R1-RETENTION",
+            "correlation_id": f"pxg-retention-{store_id}-{now:%Y%m%d%H%M%S%f}",
+            "request_id": None,
+            "status": status,
+            "reason_code": reason_code,
+            "target_type": "readonly_retention",
+            "target_id": None,
+            "target_hash": _hash(f"pxg-naver-store:{store_id}"),
+            "target_label": "PXG Naver readonly retention cleanup",
+            "changed_field_names": ["retention_cleanup"],
+            "before_summary": None,
+            "after_summary": None,
+            "counts_summary": counts,
+            "backup_sha256": None,
+            "restore_source_sha256": None,
+            "safety_flags": {
+                "platform_write": False,
+                "customer_send": False,
+                "ai_automatic_operation": False,
+                "privacy_fields_redacted": True,
+            },
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+            "notes": "Retention lifecycle counters only; no recipient or tracking values retained.",
+        },
+        write_enabled=True,
+        manual_approval=True,
+        local_write_scope=LOCAL_WRITER_SCOPE,
+    )
+
+
+def _terminal_order_for_recipient(order: Order) -> bool:
+    return str(order.order_status or "").strip().upper() in TERMINAL_ORDER_STATUSES
+
+
+def _recipient_due(secure: PxgNaverOrderRecipientSecureRecord, order: Order, *, now: datetime) -> bool:
+    observed_at = _utc(secure.source_observed_at)
+    if observed_at <= now - timedelta(days=RECIPIENT_MAX_RETENTION_DAYS):
+        return True
+    return _terminal_order_for_recipient(order) and _utc(order.updated_at) <= now - timedelta(days=RECIPIENT_TERMINAL_RETENTION_DAYS)
+
+
+def _metadata_state_due(state: PxgNaverReadonlyRecordState, *, now: datetime) -> bool:
+    return _utc(state.source_observed_at) <= now - timedelta(days=METADATA_RETENTION_DAYS)
+
+
+def _clear_state_for_local_record(db: Session, *, store_id: int, resource_type: str, local_record_id: int) -> int | None:
+    state = db.scalar(select(PxgNaverReadonlyRecordState).where(
+        PxgNaverReadonlyRecordState.store_id == store_id,
+        PxgNaverReadonlyRecordState.platform == "naver",
+        PxgNaverReadonlyRecordState.resource_type == resource_type,
+        PxgNaverReadonlyRecordState.local_record_id == local_record_id,
+    ))
+    if state is not None:
+        db.delete(state)
+        return state.id
+    return None
+
+
+def _anonymize_expired_order(order: Order) -> None:
+    """Retain only a non-identifying reference when dependent records remain."""
+
+    order.external_order_id = f"retired-{_hash(order.external_order_id)}"
+    order.external_product_order_id = f"retired-{_hash(order.external_product_order_id or order.id)}"
+    order.buyer_name = None
+    order.buyer_phone = None
+    order.buyer_masked_phone = None
+    order.receiver_name = None
+    order.receiver_phone = None
+    order.receiver_address = None
+    order.zip_code = None
+    order.product_name = "Expired PXG readonly order"
+    order.order_status = "expired_metadata"
+    order.raw_data = None
+    order.last_synced_at = None
+
+
+def _state_order_id(db: Session, state: PxgNaverReadonlyRecordState) -> int | None:
+    if state.resource_type == "order":
+        return state.local_record_id
+    if state.resource_type == "recipient" and state.local_record_id:
+        record = db.get(PxgNaverOrderRecipientSecureRecord, state.local_record_id)
+        return record.order_id if record is not None else None
+    if state.resource_type == "logistics" and state.local_record_id:
+        record = db.get(PxgNaverReadonlyLogisticsRecord, state.local_record_id)
+        return record.order_id if record is not None else None
+    if state.resource_type == "customer_inquiry" and state.local_record_id:
+        record = db.get(PxgNaverReadonlyCustomerInquiry, state.local_record_id)
+        return record.related_order_id if record is not None else None
+    return None
+
+
+def run_pxg_naver_readonly_retention_cleanup(
+    db: Session,
+    *,
+    settings: Settings,
+    preview: bool,
+    manual_confirmation: bool,
+    actor_id: str | None,
+    now: datetime | None = None,
+    force_failure_for_test: bool = False,
+) -> dict[str, Any]:
+    """Preview or execute the fixed PXG/Naver retention lifecycle.
+
+    The operation is constrained to the readonly source and never calls a platform.
+    A cleanup error stores an alert state which blocks later display, fulfillment,
+    export, and activation until a successful formal cleanup clears it.
+    """
+
+    store = resolve_trial_store(db)
+    current = _utc(now or get_utc_now())
+    if not preview:
+        if not settings.pxg_naver_local_read_retention_cleanup_enabled:
+            raise ApiError("PXG/Naver retention cleanup is disabled", "readonly_retention_cleanup_disabled", 403)
+        if not manual_confirmation:
+            raise ApiError("PXG/Naver retention cleanup requires manual confirmation", "readonly_retention_cleanup_confirmation_required", 403)
+
+    counts = {
+        "recipient_cleanup_count": 0,
+        "tracking_cleanup_count": 0,
+        "metadata_cleanup_count": 0,
+        "manual_review_frozen_count": 0,
+    }
+    recipients = db.execute(select(PxgNaverOrderRecipientSecureRecord, Order).join(
+        Order, Order.id == PxgNaverOrderRecipientSecureRecord.order_id,
+    ).where(
+        PxgNaverOrderRecipientSecureRecord.store_id == store.id,
+        PxgNaverOrderRecipientSecureRecord.platform == "naver",
+        Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE,
+    )).all()
+    logistics = db.scalars(select(PxgNaverReadonlyLogisticsRecord).join(Order).where(
+        PxgNaverReadonlyLogisticsRecord.store_id == store.id,
+        PxgNaverReadonlyLogisticsRecord.platform == "naver",
+        Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE,
+    )).all()
+    states = db.scalars(select(PxgNaverReadonlyRecordState).where(
+        PxgNaverReadonlyRecordState.store_id == store.id,
+        PxgNaverReadonlyRecordState.platform == "naver",
+    )).all()
+
+    recipient_ids: list[int] = []
+    frozen_order_ids: set[int] = set()
+
+    def freeze_for_manual_review(order_id: int) -> None:
+        if order_id not in frozen_order_ids:
+            frozen_order_ids.add(order_id)
+            counts["manual_review_frozen_count"] += 1
+
+    for secure, order in recipients:
+        if not _recipient_due(secure, order, now=current):
+            continue
+        if _has_unfinished_warehouse_batch(db, order_id=order.id):
+            freeze_for_manual_review(order.id)
+        else:
+            recipient_ids.append(secure.id)
+    tracking_ids = [
+        record.id for record in logistics
+        if str(record.shipment_status or "").strip().upper() in {"DELIVERED", "DELIVERY_COMPLETED"}
+        and _utc(record.source_updated_at) <= current - timedelta(days=TRACKING_RETENTION_DAYS)
+    ]
+    metadata_states = [state for state in states if _metadata_state_due(state, now=current)]
+    counts["recipient_cleanup_count"] = len(recipient_ids)
+    counts["tracking_cleanup_count"] = len(tracking_ids)
+    counts["metadata_cleanup_count"] = len(metadata_states)
+
+    if preview:
+        return {"status": "preview", "store_id": store.id, "platform": "naver", **counts, "platform_write": False}
+
+    cleanup_status = _cleanup_status(db, store_id=store.id)
+    try:
+        with db.begin_nested():
+            if force_failure_for_test:
+                raise RuntimeError("forced_cleanup_failure")
+            removed_state_ids: set[int] = set()
+            for secure_id in recipient_ids:
+                secure = db.get(PxgNaverOrderRecipientSecureRecord, secure_id)
+                if secure is not None:
+                    state_id = _clear_state_for_local_record(db, store_id=store.id, resource_type="recipient", local_record_id=secure.id)
+                    if state_id is not None:
+                        removed_state_ids.add(state_id)
+                    db.delete(secure)
+            for record_id in tracking_ids:
+                record = db.get(PxgNaverReadonlyLogisticsRecord, record_id)
+                if record is not None:
+                    record.encrypted_tracking_number = ""
+                    record.is_stale = True
+            for state in metadata_states:
+                if state.id in removed_state_ids:
+                    continue
+                associated_order_id = _state_order_id(db, state)
+                if associated_order_id and _has_unfinished_warehouse_batch(db, order_id=associated_order_id):
+                    freeze_for_manual_review(associated_order_id)
+                    continue
+                if state.resource_type == "product" and state.local_record_id:
+                    record = db.get(Product, state.local_record_id)
+                    if record is not None and record.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE:
+                        db.delete(record)
+                elif state.resource_type == "customer_inquiry" and state.local_record_id:
+                    record = db.get(PxgNaverReadonlyCustomerInquiry, state.local_record_id)
+                    if record is not None:
+                        db.delete(record)
+                elif state.resource_type == "logistics" and state.local_record_id:
+                    record = db.get(PxgNaverReadonlyLogisticsRecord, state.local_record_id)
+                    if record is not None:
+                        db.delete(record)
+                elif state.resource_type == "order" and state.local_record_id:
+                    order = db.get(Order, state.local_record_id)
+                    if order is not None and order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE:
+                        if _has_unfinished_warehouse_batch(db, order_id=order.id):
+                            freeze_for_manual_review(order.id)
+                            continue
+                        for secure in db.scalars(select(PxgNaverOrderRecipientSecureRecord).where(
+                            PxgNaverOrderRecipientSecureRecord.order_id == order.id,
+                        )).all():
+                            state_id = _clear_state_for_local_record(db, store_id=store.id, resource_type="recipient", local_record_id=secure.id)
+                            if state_id is not None:
+                                removed_state_ids.add(state_id)
+                            db.delete(secure)
+                        for record in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
+                            PxgNaverReadonlyLogisticsRecord.order_id == order.id,
+                        )).all():
+                            state_id = _clear_state_for_local_record(db, store_id=store.id, resource_type="logistics", local_record_id=record.id)
+                            if state_id is not None:
+                                removed_state_ids.add(state_id)
+                            db.delete(record)
+                        has_retained_dependency = db.scalar(select(WarehouseShippingBatchOrder.id).where(
+                            WarehouseShippingBatchOrder.local_order_id == order.id,
+                        ).limit(1)) is not None or db.scalar(select(PxgNaverReadonlyCustomerInquiry.id).where(
+                            PxgNaverReadonlyCustomerInquiry.related_order_id == order.id,
+                        ).limit(1)) is not None
+                        if has_retained_dependency:
+                            _anonymize_expired_order(order)
+                        else:
+                            db.delete(order)
+                db.delete(state)
+            cleanup_status.status = "manual_review_required" if counts["manual_review_frozen_count"] else "healthy"
+            cleanup_status.last_run_at = current
+            cleanup_status.last_success_at = current
+            cleanup_status.last_failure_at = None
+            cleanup_status.last_failure_code = None
+            cleanup_status.manual_review_count = counts["manual_review_frozen_count"]
+        _cleanup_audit(db, store_id=store.id, actor_id=actor_id, status="success", reason_code="retention_cleanup_completed", counts=counts)
+        return {"status": "completed", "store_id": store.id, "platform": "naver", **counts, "platform_write": False}
+    except Exception:
+        cleanup_status.status = "failed"
+        cleanup_status.last_run_at = current
+        cleanup_status.last_failure_at = current
+        cleanup_status.last_failure_code = "retention_cleanup_failed"
+        cleanup_status.manual_review_count = 0
+        _cleanup_audit(db, store_id=store.id, actor_id=actor_id, status="failed", reason_code="retention_cleanup_failed", counts=counts)
+        return {"status": "failed", "store_id": store.id, "platform": "naver", **counts, "platform_write": False}
+
+
 def _state_lookup_for_records(
     db: Session,
     *,
@@ -910,6 +1228,7 @@ def readonly_local_summary(db: Session, *, store_id: int, settings: Settings) ->
             "readonly_persistence_store_mismatch",
             403,
         )
+    assert_pxg_naver_cleanup_healthy(db, store_id=store.id)
     now = _utc(get_utc_now())
     product_states = _state_lookup_for_records(db, store_id=store.id, resource_type="product")
     order_states = _state_lookup_for_records(db, store_id=store.id, resource_type="order")
@@ -1033,6 +1352,7 @@ def recipient_contract_for_authorized_warehouse(db: Session, *, order: Order) ->
 
     if order.source_type != PXG_NAVER_READONLY_LOCAL_SOURCE:
         return None
+    assert_pxg_naver_cleanup_healthy(db, store_id=order.store_id)
     secure = db.scalar(select(PxgNaverOrderRecipientSecureRecord).where(
         PxgNaverOrderRecipientSecureRecord.order_id == order.id,
         PxgNaverOrderRecipientSecureRecord.store_id == order.store_id,
@@ -1068,11 +1388,25 @@ def recipient_contract_for_authorized_warehouse(db: Session, *, order: Order) ->
 
 
 def retention_cleanup_status(settings: Settings) -> dict[str, Any]:
-    """Expose policy only; this phase intentionally has no automatic data deletion."""
+    """Expose fixed policy without exposing privacy-bearing cleanup details."""
 
     return {
-        "automatic_cleanup_enabled": False,
+        "automatic_cleanup_enabled": bool(settings.pxg_naver_local_read_retention_cleanup_enabled),
         "configured_cleanup_switch": bool(settings.pxg_naver_local_read_retention_cleanup_enabled),
-        "requires_separate_approved_cleanup_phase": True,
-        "retention_review_days": settings.pxg_naver_local_read_retention_days,
+        "requires_manual_confirmation": True,
+        "recipient_terminal_days": RECIPIENT_TERMINAL_RETENTION_DAYS,
+        "recipient_max_days": RECIPIENT_MAX_RETENTION_DAYS,
+        "tracking_delivery_days": TRACKING_RETENTION_DAYS,
+        "metadata_days": METADATA_RETENTION_DAYS,
+    }
+
+
+def retention_cleanup_runtime_status(db: Session, *, store_id: int, settings: Settings) -> dict[str, Any]:
+    status = _cleanup_status(db, store_id=store_id, create=False)
+    return {
+        **retention_cleanup_status(settings),
+        "alert_status": "retention_cleanup_failed" if status is not None and status.status == "failed" else None,
+        "manual_review_required": bool(status is not None and status.status == "manual_review_required"),
+        "last_run_at": status.last_run_at if status is not None else None,
+        "last_success_at": status.last_success_at if status is not None else None,
     }

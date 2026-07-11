@@ -156,3 +156,31 @@ class PxgNaverReadonlyCustomerInquiry(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+
+
+class PxgNaverReadonlyCleanupStatus(Base):
+    """PII-free health state for the PXG/Naver readonly retention job."""
+
+    __tablename__ = "pxg_naver_readonly_cleanup_statuses"
+    __table_args__ = (
+        UniqueConstraint("store_id", "platform", name="uq_pxg_naver_readonly_cleanup_store"),
+        CheckConstraint("platform = 'naver'", name="ck_pxg_naver_readonly_cleanup_platform"),
+        CheckConstraint(
+            "status IN ('healthy', 'manual_review_required', 'failed')",
+            name="ck_pxg_naver_readonly_cleanup_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="naver")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="healthy", server_default="healthy")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    manual_review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )

@@ -34,6 +34,10 @@ TABLE_COLUMNS = {
         "answered_at", "source_updated_at", "source_observed_at", "expires_at", "is_stale",
         "created_at", "updated_at",
     },
+    "pxg_naver_readonly_cleanup_statuses": {
+        "id", "store_id", "platform", "status", "last_run_at", "last_success_at", "last_failure_at",
+        "last_failure_code", "manual_review_count", "created_at", "updated_at",
+    },
 }
 
 INDEXES = {
@@ -159,6 +163,25 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             UNIQUE(store_id, platform, external_inquiry_id_hash),
             CHECK (platform = 'naver'),
             CHECK (is_stale IN (0, 1))
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pxg_naver_readonly_cleanup_statuses (
+            id INTEGER PRIMARY KEY,
+            store_id INTEGER NOT NULL,
+            platform VARCHAR(50) NOT NULL DEFAULT 'naver',
+            status VARCHAR(40) NOT NULL DEFAULT 'healthy',
+            last_run_at DATETIME,
+            last_success_at DATETIME,
+            last_failure_at DATETIME,
+            last_failure_code VARCHAR(120),
+            manual_review_count INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            FOREIGN KEY(store_id) REFERENCES stores(id),
+            UNIQUE(store_id, platform),
+            CHECK (platform = 'naver'),
+            CHECK (status IN ('healthy', 'manual_review_required', 'failed'))
         )
     """)
     for index_name, (table_name, columns, unique) in INDEXES.items():

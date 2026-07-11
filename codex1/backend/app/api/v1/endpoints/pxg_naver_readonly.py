@@ -11,7 +11,9 @@ from app.services.operator_access_service import OperatorIdentity, get_operator_
 from app.services.pxg_naver_readonly_persistence_service import (
     persist_pxg_naver_readonly_adapter_batch,
     readonly_local_summary,
+    retention_cleanup_runtime_status,
     retention_cleanup_status,
+    run_pxg_naver_readonly_retention_cleanup,
 )
 from app.services.pxg_naver_readonly_activation_service import readonly_activation_precheck
 from app.services.pxg_naver_readonly_service import collect_pxg_naver_readonly_adapter_batch
@@ -45,6 +47,47 @@ def get_pxg_naver_readonly_local_summary(
     result = readonly_local_summary(db, store_id=store_id, settings=settings)
     result["retention"] = retention_cleanup_status(settings)
     return success_response(data=result, message="PXG Naver readonly local summary listed")
+
+
+@router.get("/retention-status")
+def get_pxg_naver_readonly_retention_status(
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    store = resolve_trial_store(db)
+    require_store_permission(db, identity=identity, store_id=store.id, permission_key="orders.read")
+    return success_response(
+        data=retention_cleanup_runtime_status(db, store_id=store.id, settings=get_settings()),
+        message="PXG Naver readonly retention status listed",
+    )
+
+
+@router.post("/retention-cleanup")
+async def run_pxg_naver_readonly_retention_cleanup_endpoint(
+    request_http: Request,
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    try:
+        payload: Any = await request_http.json()
+    except ValueError as exc:
+        raise ApiError("readonly retention cleanup request is invalid", "readonly_retention_cleanup_payload_invalid", 400) from exc
+    if not isinstance(payload, dict) or set(payload) != {"preview", "manual_confirmation"}:
+        raise ApiError("readonly retention cleanup request is invalid", "readonly_retention_cleanup_payload_invalid", 400)
+    preview = payload.get("preview")
+    manual_confirmation = payload.get("manual_confirmation")
+    if not isinstance(preview, bool) or not isinstance(manual_confirmation, bool):
+        raise ApiError("readonly retention cleanup request is invalid", "readonly_retention_cleanup_payload_invalid", 400)
+    store = resolve_trial_store(db)
+    require_store_permission(db, identity=identity, store_id=store.id, permission_key="platform.readonly.persist")
+    result = run_pxg_naver_readonly_retention_cleanup(
+        db,
+        settings=get_settings(),
+        preview=preview,
+        manual_confirmation=manual_confirmation,
+        actor_id=identity.user_key_hash,
+    )
+    return success_response(data=result, message="PXG Naver readonly retention cleanup processed")
 
 
 @router.post("/refresh")

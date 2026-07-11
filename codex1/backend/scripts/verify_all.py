@@ -85,6 +85,8 @@ EXPECTED_API_PATHS = {
     "/api/v1/pxg-naver-readonly/local-summary",
     "/api/v1/pxg-naver-readonly/activation-check",
     "/api/v1/pxg-naver-readonly/refresh",
+    "/api/v1/pxg-naver-readonly/retention-cleanup",
+    "/api/v1/pxg-naver-readonly/retention-status",
     "/api/v1/shipping/logistics-mappings",
     "/api/v1/shipping/logistics-mappings/write-gate",
     "/api/v1/shipping/export-excel",
@@ -1531,6 +1533,7 @@ def verify_stage_scripts() -> None:
         "verify_stage_1f.py",
         "verify_pxg_naver_readonly_persistence.py",
         "verify_pxg_naver_readonly_activation.py",
+        "verify_pxg_naver_readonly_retention_cleanup.py",
         "verify_production_sessions.py",
     ]:
         print(f"running {script}")
@@ -1614,6 +1617,8 @@ def verify_openapi() -> None:
         "/api/v1/pxg-naver-readonly/local-summary": {"get"},
         "/api/v1/pxg-naver-readonly/activation-check": {"get"},
         "/api/v1/pxg-naver-readonly/refresh": {"post"},
+        "/api/v1/pxg-naver-readonly/retention-cleanup": {"post"},
+        "/api/v1/pxg-naver-readonly/retention-status": {"get"},
     }
     for readonly_path, expected_methods in readonly_persistence_methods.items():
         methods = set(openapi_json["paths"][readonly_path].keys())
@@ -19905,6 +19910,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/dashboard.py",
         " M backend/app/api/v1/endpoints/orders.py",
         " M backend/app/api/v1/endpoints/pxg_naver_readonly.py",
+        " M backend/app/models/pxg_naver_readonly.py",
         " M backend/app/api/v1/endpoints/permissions.py",
         "A  backend/app/api/v1/endpoints/permissions.py",
         " M backend/app/api/v1/endpoints/shipping.py",
@@ -19957,6 +19963,8 @@ def verify_git_tracking() -> None:
         " M backend/app/services/order_service.py",
         " M backend/app/services/warehouse_shipping_service.py",
         " M backend/app/services/pxg_naver_readonly_persistence_service.py",
+        " M backend/app/services/pxg_naver_readonly_activation_service.py",
+        "?? backend/scripts/verify_pxg_naver_readonly_retention_cleanup.py",
         " M backend/app/services/pxg_naver_readonly_service.py",
         " M backend/app/services/sync_service.py",
         " M backend/docs/",
@@ -19982,6 +19990,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/upgrade_pxg_naver_readonly_schema.py",
         " M backend/scripts/verify_pxg_naver_readonly_persistence.py",
         "?? backend/scripts/verify_pxg_naver_readonly_activation.py",
+        "?? backend/scripts/verify_pxg_naver_readonly_retention_cleanup.py",
+        "?? backend/scripts/run_pxg_naver_readonly_retention_cleanup.py",
         "?? backend/app/core/timezone.py",
         "?? backend/app/api/v1/endpoints/api_capabilities.py",
         "?? backend/app/api/v1/endpoints/api_credential_readiness.py",
