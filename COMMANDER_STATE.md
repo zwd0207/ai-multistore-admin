@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: project commander
-Status: approved for single-store manual operator trial with real platform writes disabled
+Status: PXG trial configuration accepted; awaiting secure target database provisioning
 
 ## Mission
 
@@ -16,13 +16,14 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted code integration: `e578cde`
+- Last accepted code integration: `6feccef`
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
 - Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
 - The frontend fail-closed issue and the named write routes are fixed and tested.
 - Terra commit `fd40add` adds default denial for unregistered write endpoints and is accepted into integration.
 - Real Naver/Coupang writes remain forbidden during the trial.
+- Terra commit `eaef7f6` provides isolated PXG trial validation and account provisioning, but no target database account has been changed yet.
 
 ## Active Trial Boundary
 
@@ -42,6 +43,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `02aacdd`: frontend session fail-closed behavior and named write-route authorization.
 - `fd40add`: unregistered and future write routes default to privileged denial; capability-result writes are protected.
 - `b81365c`: production reads require sessions and store membership; all-store sync is privileged; legacy shipping and direct customer platform replies are disabled.
+- `eaef7f6`: PXG store is resolved by exact database name and platform; artificial-data-only runtime and single-store trial role are enforced.
 - Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
@@ -52,14 +54,16 @@ AI automation is deferred until the manual operator workflow is stable and measu
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
 | Sol | `codex2-sol` | `task/t03-6-session-contract` | paused after trial release approval |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused after T06-R3 acceptance |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused after PXG trial configuration acceptance |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
-1. Terra prepares the selected-store configuration without enabling real writes.
-2. Run `OPERATOR_TRIAL_PXG_NAVER.md` once with artificial data.
-3. Commander reviews the rehearsal record before allowing real read-only store data.
+1. Administrator provides the target database connection through local environment configuration, never chat or Git.
+2. Validate exact `pxg球包店 + Naver` match without applying changes.
+3. Provision the isolated trial account only after validation passes.
+4. Run `OPERATOR_TRIAL_PXG_NAVER.md` once with artificial data.
+5. Commander reviews the rehearsal record before allowing real read-only store data.
 
 ## Compact Reporting Contract
 
