@@ -27,6 +27,7 @@ from app.models.pxg_naver_readonly import (
     PxgNaverReadonlyLogisticsRecord,
     PxgNaverReadonlyRecordState,
     PxgNaverReadonlySyncControl,
+    PxgNaverReadonlySyncBackup,
 )
 from app.models.shipping import WarehouseShippingBatch, WarehouseShippingBatchOrder
 from app.schemas.pxg_naver_readonly import (
@@ -933,6 +934,13 @@ def assert_pxg_naver_cleanup_healthy(
             409,
             {"alert_status": "readonly_sync_safety_blocked"},
         )
+    expired_backup = db.scalar(select(PxgNaverReadonlySyncBackup.id).where(
+        PxgNaverReadonlySyncBackup.store_id == store_id,
+        PxgNaverReadonlySyncBackup.deleted_at.is_(None),
+        PxgNaverReadonlySyncBackup.expires_at <= _utc(now or get_utc_now()),
+    ).limit(1))
+    if expired_backup is not None:
+        raise ApiError("PXG/Naver expired encrypted backup requires deletion", "readonly_expired_backup_pending", 409)
     if not settings.pxg_naver_local_read_retention_cleanup_enabled:
         raise ApiError(
             "PXG/Naver retention cleanup is disabled; data use is blocked",

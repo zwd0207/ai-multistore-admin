@@ -328,6 +328,8 @@ def prepare_guarded_readonly_sync(
     backup = _encrypted_backup(db, settings=settings, batch=batch, backup_root=backup_root, now=now)
     batch.backup_id = backup.id
     db.commit()
+    # A restore copy must pass before any real local business record is saved.
+    prewrite_drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup)
     before = _snapshot_ids(db, store_id=store.id)
     try:
         result = persist_pxg_naver_readonly_adapter_batch(
@@ -344,8 +346,7 @@ def prepare_guarded_readonly_sync(
         batch.status = "completed"
         batch.completed_at = get_utc_now()
         db.commit()
-        drill = run_pxg_naver_restore_drill(db, settings=settings, backup=backup)
-        return {"status": "completed", "batch_id": batch.id, "batch_no": batch.batch_no, "backup_checksum": backup.checksum_sha256, "counts": result["counts"], "restore_drill": drill}
+        return {"status": "completed", "batch_id": batch.id, "batch_no": batch.batch_no, "backup_checksum": backup.checksum_sha256, "counts": result["counts"], "restore_drill": prewrite_drill}
     except Exception:
         after = _snapshot_ids(db, store_id=store.id)
         created = {name: sorted(after[name] - before[name]) for name in before}
@@ -488,6 +489,11 @@ def run_pxg_naver_daily_cleanup(db: Session, *, settings: Settings) -> dict[str,
         backups = cleanup_expired_pxg_naver_backups(db, settings=settings)
         if retention.get("status") != "completed" or backups.get("status") != "completed":
             raise ApiError("PXG/Naver daily cleanup did not complete", "readonly_daily_cleanup_failed", 409)
+        control = _control(db, store_id=store.id)
+        if control.reason_code == "daily_cleanup_failed":
+            control.write_and_refresh_blocked = False
+            control.reason_code = None
+            db.commit()
         return {"status": "completed", "store_id": store.id, "retention": retention, "backups": backups}
     except Exception:
         control = _control(db, store_id=store.id)
