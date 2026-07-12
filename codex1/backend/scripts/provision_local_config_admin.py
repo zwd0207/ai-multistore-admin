@@ -153,7 +153,12 @@ def main() -> None:
         security.session_version = (security.session_version or 0) + 1
         security.authz_version = (security.authz_version or 0) + 1
 
-        db.execute(delete(ErpStoreMembership).where(ErpStoreMembership.user_id == user.id))
+        # Reconcile only the PXG assignment. Local fixture assignments for this
+        # same stable account must survive a normal config-admin reprovision.
+        db.execute(delete(ErpStoreMembership).where(
+            ErpStoreMembership.user_id == user.id,
+            ErpStoreMembership.store_id == store.id,
+        ))
         db.add(ErpStoreMembership(
             user_id=user.id,
             store_id=store.id,
