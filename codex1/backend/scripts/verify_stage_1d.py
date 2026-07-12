@@ -10,6 +10,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 os.environ["CREDENTIAL_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
+os.environ["APP_ENV"] = "development"
+os.environ["ALLOW_DEV_AUTH"] = "true"
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -17,6 +19,7 @@ from sqlalchemy import select
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.api_credential import ApiCredential
+from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.product import Product
@@ -110,7 +113,7 @@ def create_store_and_credentials(client: TestClient) -> int:
     return store_id
 
 
-def verify_query_payloads(client: TestClient, store_id: int) -> None:
+def verify_legacy_query_payloads(client: TestClient, store_id: int) -> None:
     products = assert_success(client.get(f"/api/v1/products?store_id={store_id}&platform=naver"))
     product_names = [item["name"] for item in products["data"]["items"]]
     assert products["data"]["total"] == 3, products
@@ -142,6 +145,52 @@ def verify_query_payloads(client: TestClient, store_id: int) -> None:
     assert "请确认是否可以提供小票和卡支付明细。" in str(inquiries), inquiries
     assert "배송이 언제 시작되는지 확인 부탁드립니다." in str(inquiries), inquiries
     assert "고객문의 처리 후 中文运营备注에 기록해야 합니다." in str(inquiries), inquiries
+
+
+def create_customer_inquiry_reader(store_id: int) -> dict[str, str]:
+    with SessionLocal() as db:
+        permission = db.scalar(select(ErpPermission).where(ErpPermission.permission_key == "orders.read"))
+        if permission is None:
+            permission = ErpPermission(
+                permission_key="orders.read",
+                permission_group="orders",
+                permission_label_zh="stage 1D test",
+            )
+            db.add(permission)
+        role = ErpRole(role_key="stage_1d_inquiry_reader", role_label_zh="test", role_label_en="test", status="active")
+        user = ErpUser(
+            user_key_hash="stage-1d-customer-inquiry-reader",
+            display_name="Stage 1D Reader",
+            login_identifier_hash="stage-1d-reader-login-hash",
+            login_identifier_masked="stage-1d-reader",
+            status="active",
+            auth_provider="password",
+        )
+        db.add_all([role, user])
+        db.flush()
+        db.add(ErpRolePermission(role_id=role.id, permission_id=permission.id))
+        db.add(ErpStoreMembership(user_id=user.id, store_id=store_id, role_id=role.id, membership_status="active"))
+        db.commit()
+    return {"X-ERP-User-Key": "stage-1d-customer-inquiry-reader"}
+
+
+def verify_query_payloads(client: TestClient, store_id: int, customer_inquiry_headers: dict[str, str]) -> None:
+    products = assert_success(client.get(f"/api/v1/products?store_id={store_id}&platform=naver"))
+    assert products["data"]["total"] == 3, products
+    orders = assert_success(client.get(f"/api/v1/orders?store_id={store_id}&platform=naver&include_test_orders=true"))
+    assert orders["data"]["total"] == 3, orders
+    inquiries = assert_success(client.get(
+        f"/api/v1/customer-inquiries?store_id={store_id}&platform=naver",
+        headers=customer_inquiry_headers,
+    ))
+    items = inquiries["data"]["items"]
+    assert len(items) == 3 and inquiries["data"]["total"] == 3, inquiries
+    expected = {
+        "source", "inquiry_id", "category", "inquiry_type", "status", "summary",
+        "created_at", "updated_at", "store_id", "order_context", "logistics_context", "reply_enabled",
+    }
+    assert all(item["source"] == "generic" and expected <= set(item) for item in items), inquiries
+    assert all("title" not in item and "content" not in item and "raw_data" not in item for item in items), inquiries
 
 
 def verify_database_security_and_logs(store_id: int) -> None:
@@ -209,7 +258,7 @@ def main() -> None:
         assert sync_products_again["data"]["write_result"]["created"] == 0, sync_products_again
         assert sync_products_again["data"]["write_result"]["updated"] == 3, sync_products_again
 
-        verify_query_payloads(client, store_id)
+        verify_query_payloads(client, store_id, create_customer_inquiry_reader(store_id))
 
         logs = assert_success(client.get(f"/api/v1/sync-logs?store_id={store_id}"))
         log_types = {item["sync_type"] for item in logs["data"]["items"]}
