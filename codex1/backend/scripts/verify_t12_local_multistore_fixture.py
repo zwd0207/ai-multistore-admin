@@ -30,7 +30,7 @@ def _assert_fixture(*, expected: bool) -> None:
     from app.models.customer_inquiry import CustomerInquiry
     from app.models.order import Order
     from app.models.store import Store
-    from app.services import order_service
+    from app.services import order_service, stats_service
     from app.services.operator_trial_service import resolve_trial_store
     from app.services.session_service import hash_login_identifier
 
@@ -50,11 +50,21 @@ def _assert_fixture(*, expected: bool) -> None:
                                                               CustomerInquiry.external_inquiry_id == INQUIRY_ID)).all()
         assert len(orders) == 1 and len(inquiries) == 1
         order = orders[0]
-        assert order.order_status == "exception" and order.source_type == "local_readonly_fixture"
+        assert order.order_status == "异常" and order.source_type == "local_readonly_fixture"
         assert order.raw_data == FIXTURE_RAW_DATA
         default_orders = order_service.list_orders(db, store_id=store.id, platform=PLATFORM,
                                                    include_test_orders=False)
         assert any(row["external_order_id"] == ORDER_ID for row in default_orders)
+        workbench = stats_service._build_operator_workbench(
+            db,
+            store_id=store.id,
+            platform=PLATFORM,
+            include_test_orders=False,
+        )
+        urgent = workbench["sections"]["urgent"]
+        assert len(urgent) == 1
+        assert urgent[0]["task_type"] == "abnormal_order"
+        assert urgent[0]["related_order_id"] == order.id
         assert all(getattr(order, field) is None for field in ("buyer_name", "buyer_phone", "receiver_name",
                                                                "receiver_phone", "receiver_address", "zip_code"))
         assert inquiries[0].status == "open" and inquiries[0].answered_at is None and inquiries[0].customer_name is None
@@ -105,6 +115,7 @@ def _write_legacy_contract() -> None:
             CustomerInquiry.external_inquiry_id == INQUIRY_ID,
         ))
         assert order is not None and inquiry is not None
+        order.order_status = "exception"
         order.source_type = "mock_sync"
         order.raw_data = {"is_test": True, "marker": MARKER}
         inquiry.raw_data = {"is_test": True, "marker": MARKER}

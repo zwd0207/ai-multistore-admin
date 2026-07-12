@@ -165,7 +165,7 @@ def provision() -> None:
             order.quantity = 1
             order.order_amount = 0
             order.currency = "KRW"
-            order.order_status = "exception"
+            order.order_status = "异常"
             order.ordered_at = FIXED_TIME
             order.paid_at = None
             order.last_synced_at = FIXED_TIME
