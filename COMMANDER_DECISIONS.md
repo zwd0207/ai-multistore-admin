@@ -74,3 +74,7 @@ Sol passed the final T09 safety review with no blocker. This does not authorize 
 ## D017 - Customer follow-up requires a separate privacy purpose
 
 The owner requires customer follow-up history to improve after-sales service. This does not authorize indefinite retention of all order recipient PII. Customer profiles and contact history must be purpose-limited, consent-aware, access-controlled, auditable, and separate from fulfillment addresses and delivery notes. The existing 7-day/30-day recipient deletion policy remains in force until a replacement policy is approved and implemented.
+
+## D018 - Defer advanced privacy policy; prioritize operator workflow
+
+Customer CRM and advanced privacy-policy work are deferred because they do not yet improve the operator's immediate daily workflow. Existing security and privacy controls remain mandatory and unchanged. Current effort moves to bounded real-read data, order handling, warehouse batches, logistics return, and customer-inquiry visibility. Sol is reserved for major gates, Terra owns backend contracts, and Luna starts only after those contracts stabilize.
