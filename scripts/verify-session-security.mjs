@@ -34,6 +34,7 @@ for (const endpoint of ['login:', 'verifyMfa:', 'getSession:', 'logout:', 'getLo
 assert.match(backendApi, /getLocalMfaCode:\s*\(\)\s*=>\s*getData\('\/auth\/local-mfa-code'\)/, 'local MFA code must use the frozen GET endpoint');
 assert.match(authPage, /getLocalMfaCode/, 'MFA page must request the local test code');
 assert.match(authPage, /status\s*===\s*'mfa_required'/, 'local MFA code must be gated by mfa_required status');
+assert.match(authContext, /clearSession\('unauthenticated', true\)[\s\S]*await backendApi\.login[\s\S]*setStatus\('mfa_required'\)/, 'MFA page must open only after login establishes the pending session');
 assert.match(authPage, /localMfaDigits|mfa-code-digit/, 'MFA page must render stable digit cells');
 assert.match(authPage, /填入验证码/, 'MFA page must provide a fill-code command');
 assert.match(authPage, /mfa_invalid/, 'MFA page must support mfa_invalid errors');

@@ -70,7 +70,7 @@ export function AuthProvider({ children }) {
   }), [clearSession]);
 
   const login = useCallback(async ({ loginIdentifier, password }) => {
-    clearSession('mfa_required', true);
+    clearSession('unauthenticated', true);
     const result = await backendApi.login({ login_identifier: loginIdentifier, password });
     setStatus('mfa_required');
     return result;
