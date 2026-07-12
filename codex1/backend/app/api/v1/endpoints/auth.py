@@ -91,7 +91,10 @@ def read_local_mfa_code(request: Request, db: Session = Depends(get_db)) -> Resp
     )
     if data is None:
         return _local_mfa_not_found()
-    return JSONResponse(content=data, headers=_local_mfa_response_headers())
+    return JSONResponse(
+        content=success_response(data=data, message="local test MFA code ready"),
+        headers=_local_mfa_response_headers(),
+    )
 
 
 @router.get("/session")

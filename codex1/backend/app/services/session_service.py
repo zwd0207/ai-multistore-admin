@@ -29,6 +29,7 @@ PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 LOCAL_MFA_CODE_LOGIN_IDENTIFIER = "pxg-config-admin@local.test"
 LOCAL_MFA_CODE_ROLE_KEY = "pxg_connection_config_admin"
+LOCAL_MFA_CODE_STORE_NAME = "pxg球包店"
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,8 @@ def local_mfa_code_display(db: Session, *, pending_token: str | None) -> dict[st
             ErpStoreMembership.membership_status == "active",
             ErpRole.role_key == LOCAL_MFA_CODE_ROLE_KEY,
             ErpRole.status == "active",
+            Store.name == LOCAL_MFA_CODE_STORE_NAME,
+            Store.platform == "naver",
             Store.status == "active",
         )
         .limit(1)

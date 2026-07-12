@@ -51,7 +51,7 @@ ROLE_KEY = "pxg_connection_config_admin"
 def seed() -> None:
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
-        store = Store(name="Local MFA display", platform="naver", status="active")
+        store = Store(name="pxg球包店", platform="naver", status="active")
         role = ErpRole(role_key=ROLE_KEY, role_label_zh="test", role_label_en="test", status="active")
         user = ErpUser(
             user_key_hash="local-mfa-display-user",
@@ -132,10 +132,11 @@ def main() -> None:
         finally:
             session_service.time.time = original_time
         assert response.status_code == 200, response.text
-        assert response.json() == {"code": generate_totp(SECRET, timestamp=120), "seconds_remaining": 30}, response.text
+        assert response.json()["data"] == {"code": generate_totp(SECRET, timestamp=120), "seconds_remaining": 30}, response.text
         assert_cache_headers(response)
-        assert set(response.json()) == {"code", "seconds_remaining"}
-        assert re.fullmatch(r"\d{6}", response.json()["code"])
+        assert set(response.json()) == {"success", "message", "data"}
+        assert set(response.json()["data"]) == {"code", "seconds_remaining"}
+        assert re.fullmatch(r"\d{6}", response.json()["data"]["code"])
         for forbidden in (SECRET, LOGIN, "user", "session"):
             assert forbidden not in response.text, response.text
 
