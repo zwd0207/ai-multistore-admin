@@ -110,3 +110,11 @@ Terra commit `deb14c3` was reviewed and integrated as `ac2b687`. PXG/Naver persi
 ## D026 - T10 customer inquiry workflow accepted
 
 Sol T10 R2 passed the cleanup gate, legacy-sync gate, security, privacy, and write-boundary review with no blocker. The ordinary operator can view the saved real inquiry, understand missing order and logistics context as a normal state, and use the page on desktop and 390px mobile. Cleanup failures prevent PXG/Naver inquiry metadata from being returned, and legacy Naver inquiry synchronization cannot bypass the guarded persistence path. Customer sending, platform writes, scheduled synchronization, AI automation, and additional real persistence remain disabled. T10 is complete.
+
+## D027 - T11 current-store operator workbench accepted
+
+The owner accepted T11 at commit `61dda9a`. The existing dashboard summary now exposes a four-section operator workbench for the selected store by reusing existing order, warehouse-batch, and customer-inquiry services. Tasks deep-link to existing pages, source failures are isolated, ordinary responses remain privacy-safe, and no task table, duplicate API, platform write, customer send, scheduled sync, or AI execution path was added. Full verification and desktop/390px browser QA passed.
+
+## D028 - T12 extends store overview, not the single-store summary
+
+T12 multi-store workbench extends the existing `GET /dashboard/store-overview` response and keeps `GET /dashboard/summary?store_id=` as the T11 single-store contract. Only active stores granted through active membership, active role, and `dashboard.read` may be aggregated. The backend reuses the T11 workbench builder per authorized store; the frontend must not reclassify tasks. T12 removes dashboard sync execution controls and remains read-only: no batch execution, manual task completion, platform write, customer send, scheduler, or AI action is allowed.

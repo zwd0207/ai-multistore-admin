@@ -1,8 +1,8 @@
 # Commander State
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 Owner: project commander
-Status: T10 customer inquiry operator workflow accepted
+Status: T11 accepted; T12 multi-store operator workbench in progress
 
 ## Mission
 
@@ -16,6 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
+- Last accepted integration: `61dda9a` (T11 operator workbench).
 - Last accepted backend integration: `66074a8`
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
@@ -79,6 +80,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
+- `61dda9a`: T11 reused the existing dashboard summary, order, warehouse, and inquiry services to deliver a real current-store workbench with four task sections and deep links. Full verification, desktop QA, and 390px QA passed; no production write or automation path was opened.
 
 ## Worktree Registry
 
@@ -98,8 +100,10 @@ AI automation is deferred until the manual operator workflow is stable and measu
 5. Sol Phase C found two valid blockers: PXG inquiry aggregation lacks the retention cleanup gate, and legacy Naver inquiry sync can bypass guarded persistence during trial mode.
 6. Terra commit `deb14c3` is integrated as `ac2b687`. Customer workflow, retention cleanup, production sessions, and full `verify_all.py` passed independently.
 7. Sol T10 R2 passed cleanup, legacy sync, security, privacy, and write-boundary review with no blocker.
-8. T10 is accepted. All worker models remain paused until the commander defines the next operator-focused phase.
-9. Do not run another real persistence batch without a new explicit approval.
+8. T11 is accepted at `61dda9a`.
+9. T12 is active under the frozen contract in `.codex-handoff/T12-SOL-CONTRACT.md`: extend the existing store overview with an authorized multi-store workbench, and do not create another API or task system.
+10. Terra owns the backend authorization and aggregation files. Luna owns the stable-contract frontend files. Their write sets are disjoint.
+11. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
 
