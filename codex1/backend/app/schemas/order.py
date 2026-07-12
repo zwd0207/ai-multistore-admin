@@ -19,6 +19,10 @@ class OrderRead(BaseModel):
     receiver_address: str | None
     zip_code: str | None
     product_name: str
+    platform_product_id: str | None = None
+    option_name: str | None = None
+    product_image_url: str | None = None
+    product_url: str | None = None
     quantity: int
     order_amount: Decimal
     currency: str

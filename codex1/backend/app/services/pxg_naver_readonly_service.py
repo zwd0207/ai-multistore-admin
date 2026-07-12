@@ -322,6 +322,8 @@ def collect_pxg_naver_readonly_adapter_batch(db: Session, settings: Settings) ->
             external_order_id=external_order_id,
             external_product_order_id=external_product_order_id,
             product_name=str(detail.get("product_name") or "Naver product order"),
+            platform_product_id=detail.get("platform_product_id"),
+            option_name=detail.get("option_name"),
             quantity=max(1, int(detail.get("quantity") or 1)),
             order_amount=detail.get("order_amount") or 0,
             currency=str(detail.get("currency") or "KRW"),

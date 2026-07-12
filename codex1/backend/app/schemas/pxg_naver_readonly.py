@@ -54,6 +54,8 @@ class PxgNaverReadonlyOrderCandidate(_StrictReadonlyCandidate):
     external_order_id: str = Field(..., min_length=1, max_length=120)
     external_product_order_id: str = Field(..., min_length=1, max_length=120)
     product_name: str = Field(..., min_length=1, max_length=300)
+    platform_product_id: str | None = Field(default=None, max_length=120)
+    option_name: str | None = Field(default=None, max_length=160)
     quantity: int = Field(default=1, ge=1)
     order_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
     currency: str = Field(default="KRW", min_length=1, max_length=10)

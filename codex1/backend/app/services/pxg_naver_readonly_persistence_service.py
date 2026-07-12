@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -249,21 +250,43 @@ def _refresh_existing_state(
     state.is_stale = False
 
 
-def _safe_order_metadata() -> dict[str, bool]:
-    return {
+def _safe_order_metadata(candidate: PxgNaverReadonlyOrderCandidate) -> dict[str, object]:
+    from app.services.order_service import _safe_product_identifier, _safe_product_text
+
+    metadata: dict[str, object] = {
         "readonly_local": True,
         "raw_response_saved": False,
         "privacy_fields_redacted": True,
         "recipient_data_isolated": True,
     }
+    platform_product_id = _safe_product_identifier(candidate.platform_product_id)
+    option_name = _safe_product_text(candidate.option_name)
+    if platform_product_id:
+        metadata["platform_product_id"] = platform_product_id
+    if option_name:
+        metadata["option_name"] = option_name
+    return metadata
 
 
-def _safe_product_metadata() -> dict[str, bool]:
-    return {
+def _safe_product_metadata(existing_raw_data: object = None) -> dict[str, object]:
+    metadata: dict[str, object] = {
         "readonly_local": True,
         "raw_response_saved": False,
         "privacy_fields_redacted": True,
     }
+    # A locally generated thumbnail is derivative data, not a platform payload.
+    # Preserve only its fixed, non-sensitive contract across a product refresh.
+    if isinstance(existing_raw_data, dict):
+        thumbnail = existing_raw_data.get("thumbnail")
+        if isinstance(thumbnail, dict):
+            ref = thumbnail.get("ref")
+            if isinstance(ref, str) and re.fullmatch(r"[a-f0-9]{64}\.webp", ref):
+                metadata["thumbnail"] = {
+                    key: thumbnail[key]
+                    for key in ("ref", "format", "width", "height", "bytes", "generated_at")
+                    if key in thumbnail
+                }
+    return metadata
 
 
 def _product_outcome(
@@ -321,7 +344,7 @@ def _product_outcome(
         product.currency = candidate.currency
         product.stock_quantity = candidate.stock_quantity
         product.last_synced_at = observed_at
-        product.raw_data = _safe_product_metadata()
+        product.raw_data = _safe_product_metadata(product.raw_data)
     db.flush()
     _refresh_state(
         db,
@@ -405,7 +428,7 @@ def _order_outcome(
             ordered_at=_utc(candidate.ordered_at),
             source_type=PXG_NAVER_READONLY_LOCAL_SOURCE,
             last_synced_at=observed_at,
-            raw_data=_safe_order_metadata(),
+            raw_data=_safe_order_metadata(candidate),
         )
         db.add(order)
     else:
@@ -418,7 +441,7 @@ def _order_outcome(
         order.paid_at = _utc(candidate.paid_at) if candidate.paid_at else None
         order.ordered_at = _utc(candidate.ordered_at)
         order.last_synced_at = observed_at
-        order.raw_data = _safe_order_metadata()
+        order.raw_data = _safe_order_metadata(candidate)
         # Do not let a readonly candidate repopulate legacy plaintext recipient columns.
         order.buyer_name = None
         order.buyer_phone = None

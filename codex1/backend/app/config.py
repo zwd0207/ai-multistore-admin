@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     pxg_naver_local_read_backup_rollback_approved: bool = False
     pxg_naver_local_read_backup_encryption_key: str | None = None
     pxg_naver_local_read_backup_root: str | None = None
+    local_product_thumbnail_root: str | None = None
     pxg_naver_local_read_first_sync_limit: int = 3
     ai_automatic_operations_enabled: bool = False
     platform_product_write_enabled: bool = False

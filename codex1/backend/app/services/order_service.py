@@ -1,16 +1,21 @@
 from datetime import datetime
+import re
 from typing import Any
+from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.order import Order
+from app.models.product import Product
 from app.models.order_status_event import OrderStatusEvent
 from app.models.shipping import ShippingTrackingImportRow
 from app.schemas.order import OrderRead
 from app.services.store_service import ensure_store_exists
 
 TEST_ORDER_SOURCE_TYPES = {"mock_sync", "local_frontend_mock"}
+SAFE_PRODUCT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
+SAFE_PRODUCT_TEXT_PATTERN = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 DELIVERY_COMPANY_LABELS = {
     "CJ": "CJ대한통운",
     "CJGLS": "CJ대한통운",
@@ -24,6 +29,74 @@ def _clean_text(value: object, max_length: int = 160) -> str | None:
     if not text:
         return None
     return text[:max_length]
+
+
+def _safe_product_text(value: object, *, max_length: int = 160) -> str | None:
+    text = _clean_text(value, max_length=max_length)
+    if not text or not SAFE_PRODUCT_TEXT_PATTERN.fullmatch(text):
+        return None
+    return text
+
+
+def _safe_product_identifier(value: object) -> str | None:
+    text = _clean_text(value, max_length=120)
+    if not text or not SAFE_PRODUCT_IDENTIFIER_PATTERN.fullmatch(text):
+        return None
+    return text
+
+
+def confirmed_naver_product_url(*, store_name: str, platform: str, product_id: object) -> str | None:
+    """Build only the owner-confirmed PXG/Naver product URL shape."""
+    from app.services.operator_trial_service import TRIAL_STORE_NAME
+
+    identifier = _safe_product_identifier(product_id)
+    if store_name != TRIAL_STORE_NAME or str(platform or "").strip().lower() != "naver" or not identifier or not identifier.isdigit():
+        return None
+    return f"https://smartstore.naver.com/trendwaymn/products/{quote(identifier, safe='')}"
+
+
+def _safe_raw_value(raw_data: object, key: str, *, identifier: bool = False, max_length: int = 160) -> str | None:
+    if not isinstance(raw_data, dict):
+        return None
+    value = raw_data.get(key)
+    return _safe_product_identifier(value) if identifier else _safe_product_text(value, max_length=max_length)
+
+
+def _product_by_platform_identifier(db: Session, order: Order, platform_product_id: str | None) -> Product | None:
+    if not platform_product_id:
+        return None
+    matches = db.scalars(select(Product).where(
+        Product.store_id == order.store_id,
+        Product.platform == order.platform,
+        Product.external_product_id == platform_product_id,
+    ).limit(2)).all()
+    return matches[0] if len(matches) == 1 else None
+
+
+def product_display_contract(db: Session, order: Order) -> dict[str, str | None]:
+    """Return whitelisted product display metadata without exposing raw payloads."""
+    from app.services.product_thumbnail_service import local_thumbnail_url
+
+    order_raw = order.raw_data if isinstance(order.raw_data, dict) else {}
+    platform_product_id = _safe_raw_value(order_raw, "platform_product_id", identifier=True)
+    product = _product_by_platform_identifier(db, order, platform_product_id)
+    option_name = _safe_raw_value(order_raw, "option_name")
+    product_image_url = local_thumbnail_url(product) if product is not None else None
+    product_url = None
+    # The fixed PXG URL is only emitted after the same canonical identifier
+    # has matched a local product in the current store and platform.
+    if product is not None and platform_product_id:
+        product_url = confirmed_naver_product_url(
+            store_name=order.store.name if order.store is not None else "",
+            platform=order.platform,
+            product_id=platform_product_id,
+        )
+    return {
+        "platform_product_id": platform_product_id,
+        "option_name": option_name,
+        "product_image_url": product_image_url,
+        "product_url": product_url,
+    }
 
 
 def _first_text(*values: object, max_length: int = 160) -> str | None:
@@ -220,7 +293,7 @@ def recipient_contract(
     }
 
 
-def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
+def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None = None, *, db: Session | None = None) -> dict:
     payload = OrderRead.model_validate(order).model_dump(mode="json")
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
     payload["receiver_phone"] = payload.get("receiver_phone") or _find_nested_text(
@@ -239,11 +312,13 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
         max_length=300,
     )
     payload.update(_order_delivery_fields(order, tracking_row))
+    if db is not None:
+        payload.update(product_display_contract(db, order))
     return payload
 
 
-def serialize_order_summary(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict:
-    payload = serialize_order(order, tracking_row)
+def serialize_order_summary(order: Order, tracking_row: ShippingTrackingImportRow | None = None, *, db: Session | None = None) -> dict:
+    payload = serialize_order(order, tracking_row, db=db)
     for field in ("buyer_name", "buyer_phone", "receiver_name", "receiver_phone", "receiver_address", "zip_code", "raw_data"):
         payload.pop(field, None)
     return payload
@@ -306,7 +381,7 @@ def list_orders(
     )
     tracking_lookup = _build_tracking_lookup(db.scalars(tracking_statement).all())
 
-    return [serialize_order_summary(item, _tracking_row_for_order(item, tracking_lookup)) for item in orders]
+    return [serialize_order_summary(item, _tracking_row_for_order(item, tracking_lookup), db=db) for item in orders]
 
 
 def list_operations_orders(db: Session, store_id: int, platform: str | None = None, include_test_orders: bool = False) -> list[dict]:
@@ -317,7 +392,7 @@ def list_operations_orders(db: Session, store_id: int, platform: str | None = No
     if not include_test_orders:
         statement = statement.where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
     return [
-        {key: value for key, value in serialize_order(order).items() if key != "raw_data"} | recipient_contract(order)
+        {key: value for key, value in serialize_order(order, db=db).items() if key != "raw_data"} | recipient_contract(order)
         for order in db.scalars(statement).all()
     ]
 

@@ -5756,6 +5756,14 @@ def _build_naver_order_internal_detail(payload: object, *, store_id: int | None 
         "external_product_order_id": _safe_order_business_text(
             _extract_scalar_by_keys(payload, ("productOrderId", "productOrderNo")), max_length=120,
         ),
+        # Products are keyed locally by Naver channelProductNo/channelProductId.
+        # Do not infer a match from a similarly named origin product identifier.
+        "platform_product_id": _safe_order_business_text(_extract_scalar_by_keys(payload, (
+            "channelProductNo", "channelProductId",
+        )), max_length=120),
+        "option_name": _safe_order_business_text(
+            _extract_scalar_by_keys(payload, ("optionName", "productOption", "optionInfo")), max_length=160,
+        ),
         "receiver_name": _safe_order_business_text(
             _extract_scalar_by_keys(payload, ("receiverName", "recipientName")), max_length=120,
         ),
