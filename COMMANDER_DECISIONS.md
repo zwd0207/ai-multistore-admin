@@ -86,3 +86,7 @@ The owner explicitly approved one PXG/Naver real-read persistence batch in the i
 ## D020 - One stable account for operator testing
 
 All future local operator tests use the account displayed by `查看真实只读配置账号.cmd`. Its login and password remain stable for the isolated database; only the MFA code rotates. The account receives the read, warehouse-batch, and local readonly-configuration permissions needed for operator testing, while platform writeback, customer sending, inventory/product writes, and AI automatic operations remain disabled.
+
+## D021 - Owner accepted real-read data
+
+On 2026-07-12, the owner confirmed that the real data currently read from `pxg球包店 / Naver` is correct. The read contract is accepted for the next operator-workflow phase. Do not repeat platform-read investigation unless new evidence shows a regression. This acceptance does not authorize another persistence batch or any real platform write.

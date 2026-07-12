@@ -88,9 +88,10 @@ AI automation is deferred until the manual operator workflow is stable and measu
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Have the operator review the saved products and customer inquiry in the local UI; record any missing context or confusing actions.
-3. Do not run another real persistence batch without a new explicit approval.
-4. Use the stable real-read contract to complete the order, warehouse, logistics, and customer-inquiry workflow; use artificial orders where the current platform window has no real orders.
+2. Treat the real-read result as owner-accepted; do not repeat platform-read investigation without regression evidence.
+3. Terra exposes the saved real Naver inquiry through the ordinary customer-service data contract, with replies and all platform writes still disabled.
+4. After the contract stabilizes, Luna fixes the customer-service Chinese text and operator states, including the clear empty-order message and order/logistics context when available.
+5. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
 
