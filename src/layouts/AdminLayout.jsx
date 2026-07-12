@@ -33,6 +33,14 @@ const menuGroups = [
   },
 ];
 
+const mobileNavigation = [
+  menuGroups[0].items[0],
+  menuGroups[0].items[1],
+  menuGroups[0].items[2],
+  menuGroups[0].items[3],
+  ['⋯', '更多', '/settings'],
+];
+
 export default function AdminLayout() {
   const { user, logout } = useAuthContext();
   const [collapsed, setCollapsed] = useState(false);
@@ -85,6 +93,13 @@ export default function AdminLayout() {
           </div>
         </header>
         <main className="main-content"><Outlet /></main>
+        <nav className="mobile-nav" aria-label="移动端主导航">
+          {mobileNavigation.map(([icon, label, path]) => (
+            <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')}>
+              <span className="mobile-nav-icon">{icon}</span><span>{label}</span>
+            </NavLink>
+          ))}
+        </nav>
       </section>
     </div>
   );
