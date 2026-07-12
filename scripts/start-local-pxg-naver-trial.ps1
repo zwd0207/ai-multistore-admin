@@ -26,16 +26,16 @@ if ($LASTEXITCODE -ne 0) { throw "Local PXG trial provisioning failed." }
 Import-LocalEnv $runtimeEnv
 & $python (Join-Path $backend "scripts\provision_local_config_admin.py")
 if ($LASTEXITCODE -ne 0) { throw "Local PXG configuration administrator provisioning failed." }
-$backendPort = Find-OpenPort @(8013, 8014, 8015, 8016)
-$frontendPort = Find-OpenPort @(5181, 5182, 5183, 5184)
-$env:CORS_ALLOWED_ORIGINS = "[`"http://127.0.0.1:$frontendPort`"]"
-$env:VITE_API_BASE_URL = "http://127.0.0.1:$backendPort/api/v1"
-$env:VITE_DATA_SOURCE = "backend"
 
 $processFile = Join-Path $trialDir "processes.json"
 if (Test-Path -LiteralPath $processFile) {
   & (Join-Path $PSScriptRoot "stop-local-pxg-naver-trial.ps1")
 }
+$backendPort = Find-OpenPort @(8013, 8014, 8015, 8016)
+$frontendPort = Find-OpenPort @(5181, 5182, 5183, 5184)
+$env:CORS_ALLOWED_ORIGINS = "[`"http://127.0.0.1:$frontendPort`"]"
+$env:VITE_API_BASE_URL = "http://127.0.0.1:$backendPort/api/v1"
+$env:VITE_DATA_SOURCE = "backend"
 $backendOut = Join-Path $trialDir "backend.out.log"
 $backendErr = Join-Path $trialDir "backend.err.log"
 $frontendOut = Join-Path $trialDir "frontend.out.log"
