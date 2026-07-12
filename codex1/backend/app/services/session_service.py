@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import struct
 import time
@@ -26,6 +27,8 @@ from app.services.encryption import decrypt_value
 
 PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+LOCAL_MFA_CODE_LOGIN_IDENTIFIER = "pxg-config-admin@local.test"
+LOCAL_MFA_CODE_ROLE_KEY = "pxg_connection_config_admin"
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,75 @@ def _session_from_token(db: Session, token: str | None) -> ErpSession | None:
         ErpSession.session_token_hash == _peppered_hash(token),
         ErpSession.environment == get_settings().app_env,
     ))
+
+
+def is_loopback_socket_peer(request: Request) -> bool:
+    client = request.client
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        return False
+
+
+def local_mfa_code_display(db: Session, *, pending_token: str | None) -> dict[str, int | str] | None:
+    """Return a local test code only for the isolated configuration-admin MFA step."""
+    settings = get_settings()
+    if not settings.local_mfa_code_display_enabled or settings.app_env != "test":
+        return None
+    pending = _session_from_token(db, pending_token)
+    now = get_utc_now()
+    if (
+        pending is None
+        or pending.revoked_at is not None
+        or pending.authn_level != "mfa_pending"
+        or _as_utc(pending.idle_expires_at) <= now
+        or _as_utc(pending.absolute_expires_at) <= now
+    ):
+        return None
+    user = db.get(ErpUser, pending.user_id)
+    security = db.get(ErpUserSecurity, pending.user_id)
+    if (
+        user is None
+        or security is None
+        or user.status != "active"
+        or user.auth_provider != "password"
+        or user.login_identifier_hash != hash_login_identifier(LOCAL_MFA_CODE_LOGIN_IDENTIFIER)
+        or not security.password_hash
+        or security.mfa_type != "totp"
+        or security.mfa_enabled_at is None
+        or not security.mfa_secret_encrypted
+        or pending.session_version != security.session_version
+        or pending.authz_version_at_issue != security.authz_version
+    ):
+        return None
+    has_required_membership = db.scalar(
+        select(ErpStoreMembership.id)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .join(Store, Store.id == ErpStoreMembership.store_id)
+        .where(
+            ErpStoreMembership.user_id == user.id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.role_key == LOCAL_MFA_CODE_ROLE_KEY,
+            ErpRole.status == "active",
+            Store.status == "active",
+        )
+        .limit(1)
+    ) is not None
+    if not has_required_membership:
+        return None
+    try:
+        secret = decrypt_value(security.mfa_secret_encrypted)
+        if not secret:
+            return None
+        timestamp = int(time.time())
+        return {
+            "code": generate_totp(secret, timestamp=timestamp),
+            "seconds_remaining": 30 - timestamp % 30,
+        }
+    except Exception:
+        return None
 
 
 def complete_mfa(db: Session, *, pending_token: str | None, code: str) -> tuple[dict, str, str]:

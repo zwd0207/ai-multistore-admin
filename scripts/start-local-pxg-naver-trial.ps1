@@ -6,6 +6,7 @@ $trialDir = Join-Path $backend ".local-trial"
 $runtimeEnv = Join-Path $trialDir "runtime.env"
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) { $python = "python" }
+Remove-Item Env:LOCAL_MFA_CODE_DISPLAY_ENABLED -ErrorAction SilentlyContinue
 
 function Import-LocalEnv($Path) {
   Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
@@ -39,7 +40,9 @@ $backendOut = Join-Path $trialDir "backend.out.log"
 $backendErr = Join-Path $trialDir "backend.err.log"
 $frontendOut = Join-Path $trialDir "frontend.out.log"
 $frontendErr = Join-Path $trialDir "frontend.err.log"
+$env:LOCAL_MFA_CODE_DISPLAY_ENABLED = "true"
 $backendLauncher = Start-Process -FilePath $python -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$backendPort") -WorkingDirectory $backend -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr -WindowStyle Hidden -PassThru
+Remove-Item Env:LOCAL_MFA_CODE_DISPLAY_ENABLED -ErrorAction SilentlyContinue
 $frontendLauncher = Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "$frontendPort") -WorkingDirectory $root -RedirectStandardOutput $frontendOut -RedirectStandardError $frontendErr -WindowStyle Hidden -PassThru
 $backendConnection = $null
 $frontendConnection = $null

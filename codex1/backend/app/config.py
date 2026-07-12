@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     customer_platform_write_enabled: bool = False
     shipping_platform_write_enabled: bool = False
     allow_dev_auth: bool = False
+    local_mfa_code_display_enabled: bool = False
     session_token_pepper: str | None = None
     session_cookie_name: str = "__Host-erp_session"
     session_cookie_secure: bool = True
@@ -66,6 +68,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_local_mfa_code_display(self) -> "Settings":
+        if self.local_mfa_code_display_enabled and self.app_env != "test":
+            raise ValueError("LOCAL_MFA_CODE_DISPLAY_ENABLED requires APP_ENV=test")
+        return self
 
 
 @lru_cache

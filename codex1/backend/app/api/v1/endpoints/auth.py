@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -9,6 +10,8 @@ from app.schemas.auth import LoginRequest, MfaVerifyRequest
 from app.services.session_service import (
     begin_login,
     complete_mfa,
+    is_loopback_socket_peer,
+    local_mfa_code_display,
     require_csrf,
     require_session,
     rotate_csrf_token,
@@ -39,6 +42,18 @@ def _set_session_cookie(response: Response, token: str) -> None:
     response.headers["Cache-Control"] = "no-store, private"
 
 
+def _local_mfa_response_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store, private",
+        "Pragma": "no-cache",
+        "Vary": "Cookie",
+    }
+
+
+def _local_mfa_not_found() -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "Not Found"}, headers=_local_mfa_response_headers())
+
+
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
     _require_allowed_origin(request)
@@ -57,6 +72,26 @@ def verify_mfa(payload: MfaVerifyRequest, request: Request, response: Response, 
     )
     _set_session_cookie(response, token)
     return success_response(data=data, message="login completed")
+
+
+@router.get("/local-mfa-code")
+def read_local_mfa_code(request: Request, db: Session = Depends(get_db)) -> Response:
+    settings = get_settings()
+    origin = request.headers.get("Origin")
+    if (
+        not settings.local_mfa_code_display_enabled
+        or settings.app_env != "test"
+        or not is_loopback_socket_peer(request)
+        or (origin is not None and origin not in settings.cors_allowed_origins)
+    ):
+        return _local_mfa_not_found()
+    data = local_mfa_code_display(
+        db,
+        pending_token=request.cookies.get(settings.session_cookie_name),
+    )
+    if data is None:
+        return _local_mfa_not_found()
+    return JSONResponse(content=data, headers=_local_mfa_response_headers())
 
 
 @router.get("/session")

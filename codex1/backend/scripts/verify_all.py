@@ -1537,6 +1537,7 @@ def verify_stage_scripts() -> None:
         "verify_pxg_naver_readonly_scheduler.py",
         "verify_pxg_naver_readonly_sync_safety.py",
         "verify_production_sessions.py",
+        "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",
         "verify_multi_store_workbench.py",
     ]:
@@ -19911,6 +19912,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/backups.py",
         " M backend/app/api/v1/endpoints/api_capabilities.py",
         " M backend/app/api/v1/endpoints/api_credential_readiness.py",
+        " M backend/app/api/v1/endpoints/auth.py",
         " M backend/app/api/v1/endpoints/dashboard.py",
         " M backend/app/api/v1/endpoints/orders.py",
         " M backend/app/api/v1/endpoints/pxg_naver_readonly.py",
@@ -19963,6 +19965,7 @@ def verify_git_tracking() -> None:
         "A  backend/app/services/permission_service.py",
         "A  backend/app/services/invitation_audit_linkage_service.py",
         " M backend/app/services/shipping_service.py",
+        " M backend/app/services/session_service.py",
         "A  backend/app/services/shipping_service.py",
         " M backend/app/services/order_service.py",
         " M backend/app/services/warehouse_shipping_service.py",
@@ -19981,6 +19984,7 @@ def verify_git_tracking() -> None:
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
         "M  backend/scripts/verify_all.py",
+        "?? backend/scripts/verify_local_mfa_code_display.py",
         "?? backend/scripts/create_local_backup.py",
         "?? backend/scripts/list_local_backups.py",
         "?? backend/scripts/restore_backup_dry_run.py",
@@ -20051,6 +20055,9 @@ def verify_git_tracking() -> None:
         "?? backend/scripts/verify_pxg_naver_readonly_persistence.py",
         "?? backend/scripts/verify_multi_store_workbench.py",
         "?? backend/scripts/verify_all.py",
+        " M ../scripts/start-local-pxg-naver-trial.ps1",
+        " M \"../\\346\\237\\245\\347\\234\\213PXG\\350\\257\\225\\350\\277\\220\\350\\220\\245\\351\\252\\214\\350\\257\\201\\347\\240\\201.cmd\"",
+        " M \"../\\346\\237\\245\\347\\234\\213\\347\\234\\237\\345\\256\\236\\345\\217\\252\\350\\257\\273\\351\\205\\215\\347\\275\\256\\350\\264\\246\\345\\217\\267.cmd\"",
     )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]
     assert not unexpected, f"Unexpected git status lines: {unexpected}"
