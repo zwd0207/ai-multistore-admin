@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: bounded PXG/Naver local trial configured; awaiting explicit activation approval
+Status: first bounded PXG/Naver real-read persistence completed; operator review pending
 
 ## Mission
 
@@ -42,7 +42,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Customer follow-up profiles and advanced privacy policy are deferred until the core operator workflow is usable.
 - Existing privacy, write-disable, backup, rollback, and recipient deletion controls remain unchanged as the minimum safety baseline.
 - The isolated local trial now has one exact `pxg球包店 / Naver` store, a restricted backup root, a local backup encryption key, successful cleanup health, and local Naver readonly credentials configured without exposing secrets.
-- Persistence, activation, retention approval, and backup/rollback approval switches remain off; all platform writes remain off.
+- The owner approved and the commander executed one bounded real-read persistence batch: 3 products, 0 orders, 0 logistics records, and 1 customer inquiry. The empty order/logistics result reflects the current approved platform read window.
+- The encrypted backup and pre-write restore drill passed. Persistence, activation, retention approval, and backup/rollback approval switches were closed immediately after the run; all platform writes remain off.
+- Current local frontend: `http://127.0.0.1:5182/`.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
@@ -85,9 +87,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Obtain explicit owner approval for one manual PXG/Naver real read-only persistence batch of at most three product-order rows in the isolated local database.
-3. After approval, enable the four local activation switches only for that run, execute once, immediately close persistence again, and verify the operator-facing result.
-4. Use the resulting stable data contract to complete the order, warehouse, logistics, and customer-inquiry workflow.
+2. Have the operator review the saved products and customer inquiry in the local UI; record any missing context or confusing actions.
+3. Do not run another real persistence batch without a new explicit approval.
+4. Use the stable real-read contract to complete the order, warehouse, logistics, and customer-inquiry workflow; use artificial orders where the current platform window has no real orders.
 
 ## Compact Reporting Contract
 

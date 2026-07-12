@@ -78,3 +78,7 @@ The owner requires customer follow-up history to improve after-sales service. Th
 ## D018 - Defer advanced privacy policy; prioritize operator workflow
 
 Customer CRM and advanced privacy-policy work are deferred because they do not yet improve the operator's immediate daily workflow. Existing security and privacy controls remain mandatory and unchanged. Current effort moves to bounded real-read data, order handling, warehouse batches, logistics return, and customer-inquiry visibility. Sol is reserved for major gates, Terra owns backend contracts, and Luna starts only after those contracts stabilize.
+
+## D019 - First bounded real-read persistence executed
+
+The owner explicitly approved one PXG/Naver real-read persistence batch in the isolated local database with a maximum of three product-order rows and all platform writes disabled. The run completed with 3 products, 0 current-window orders, 0 logistics records, and 1 customer inquiry. Encrypted backup and pre-write restore verification passed. All local persistence and activation approvals were closed immediately after execution; another real persistence run requires new explicit approval.
