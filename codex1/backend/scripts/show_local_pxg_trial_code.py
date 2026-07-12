@@ -22,25 +22,27 @@ def current_code(secret: str) -> tuple[str, int]:
     return str(value % 1_000_000).zfill(6), 30 - timestamp % 30
 
 
-def read_secret() -> str:
+def read_credentials() -> dict[str, str]:
     if not CREDENTIALS_PATH.exists():
         raise RuntimeError("请先启动 PXG 本地试运营系统。")
-    values = dict(
+    return dict(
         line.split("=", 1)
         for line in CREDENTIALS_PATH.read_text(encoding="utf-8").splitlines()
         if "=" in line
     )
-    return values["totp_secret"]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    secret = read_secret()
+    credentials = read_credentials()
+    print(f"账号：{credentials['login_identifier']}")
+    print(f"密码：{credentials['password']}")
+    print()
     while True:
-        code, remaining = current_code(secret)
-        print(f"\r当前六位验证码：{code}    剩余 {remaining:02d} 秒", end="", flush=True)
+        code, remaining = current_code(credentials["totp_secret"])
+        print(f"\r当前验证码：{code}    剩余 {remaining:02d} 秒", end="", flush=True)
         if args.once:
             print()
             return
@@ -49,4 +51,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
