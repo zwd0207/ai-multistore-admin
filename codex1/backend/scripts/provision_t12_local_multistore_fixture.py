@@ -20,6 +20,18 @@ INQUIRY_ID = "T12-FICT-NAVER-INQUIRY-001"
 CONFIG_ADMIN_LOGIN = "pxg-config-admin@local.test"
 ROLE_KEY = "pxg_connection_config_admin"
 FIXED_TIME = datetime(2026, 7, 13, 0, 0, tzinfo=timezone.utc)
+FIXTURE_RAW_DATA = {
+    "is_test": True,
+    "artificial_data_only": True,
+    "fixture_tag": MARKER,
+    "marker": MARKER,
+}
+
+
+def _is_owned_fixture(raw_data: object) -> bool:
+    return isinstance(raw_data, dict) and (
+        raw_data.get("fixture_tag") == MARKER or raw_data.get("marker") == MARKER
+    )
 
 
 def configure_safe_local_environment() -> None:
@@ -135,26 +147,48 @@ def provision() -> None:
                                   scope_type="assigned", membership_status="active"))
         orders = db.scalars(select(Order).where(Order.store_id == store.id, Order.platform == PLATFORM,
                                                 Order.external_order_id == ORDER_ID)).all()
-        if any(row.raw_data != {"is_test": True, "marker": MARKER} for row in orders):
+        if any(not _is_owned_fixture(row.raw_data) for row in orders):
             raise RuntimeError("T12 fixture order identity conflict")
         if not orders:
-            db.add(Order(store_id=store.id, platform=PLATFORM, external_order_id=ORDER_ID,
-                         external_product_order_id=None, buyer_name=None, buyer_phone=None,
-                         buyer_masked_phone=None, receiver_name=None, receiver_phone=None,
-                         receiver_address=None, zip_code=None, product_name="T12 Fixture Item",
-                         quantity=1, order_amount=0, currency="KRW", order_status="exception",
-                         ordered_at=FIXED_TIME, paid_at=None, last_synced_at=FIXED_TIME,
-                         source_type="mock_sync", raw_data={"is_test": True, "marker": MARKER}))
+            orders = [Order(store_id=store.id, platform=PLATFORM, external_order_id=ORDER_ID)]
+            db.add_all(orders)
+        for order in orders:
+            order.external_product_order_id = None
+            order.buyer_name = None
+            order.buyer_phone = None
+            order.buyer_masked_phone = None
+            order.receiver_name = None
+            order.receiver_phone = None
+            order.receiver_address = None
+            order.zip_code = None
+            order.product_name = "T12 Fixture Item"
+            order.quantity = 1
+            order.order_amount = 0
+            order.currency = "KRW"
+            order.order_status = "exception"
+            order.ordered_at = FIXED_TIME
+            order.paid_at = None
+            order.last_synced_at = FIXED_TIME
+            order.source_type = "local_readonly_fixture"
+            order.raw_data = dict(FIXTURE_RAW_DATA)
         inquiries = db.scalars(select(CustomerInquiry).where(CustomerInquiry.store_id == store.id,
                                                               CustomerInquiry.platform == PLATFORM,
                                                               CustomerInquiry.external_inquiry_id == INQUIRY_ID)).all()
-        if any(row.raw_data != {"is_test": True, "marker": MARKER} for row in inquiries):
+        if any(not _is_owned_fixture(row.raw_data) for row in inquiries):
             raise RuntimeError("T12 fixture inquiry identity conflict")
         if not inquiries:
-            db.add(CustomerInquiry(store_id=store.id, platform=PLATFORM, external_inquiry_id=INQUIRY_ID,
-                                   inquiry_type="product", customer_name=None, title="T12 Fixture Inquiry",
-                                   content="Artificial local fixture only.", status="open", received_at=FIXED_TIME,
-                                   answered_at=None, raw_data={"is_test": True, "marker": MARKER}))
+            inquiries = [CustomerInquiry(store_id=store.id, platform=PLATFORM,
+                                         external_inquiry_id=INQUIRY_ID)]
+            db.add_all(inquiries)
+        for inquiry in inquiries:
+            inquiry.inquiry_type = "product"
+            inquiry.customer_name = None
+            inquiry.title = "T12 Fixture Inquiry"
+            inquiry.content = "Artificial local fixture only."
+            inquiry.status = "open"
+            inquiry.received_at = FIXED_TIME
+            inquiry.answered_at = None
+            inquiry.raw_data = dict(FIXTURE_RAW_DATA)
         db.commit()
     print("t12_local_multistore_fixture: provisioned")
 

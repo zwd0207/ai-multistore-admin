@@ -8,6 +8,7 @@ import sys
 from provision_t12_local_multistore_fixture import (
     BACKEND_DIR,
     CONFIG_ADMIN_LOGIN,
+    FIXTURE_RAW_DATA,
     INQUIRY_ID,
     MARKER,
     ORDER_ID,
@@ -29,6 +30,7 @@ def _assert_fixture(*, expected: bool) -> None:
     from app.models.customer_inquiry import CustomerInquiry
     from app.models.order import Order
     from app.models.store import Store
+    from app.services import order_service
     from app.services.operator_trial_service import resolve_trial_store
     from app.services.session_service import hash_login_identifier
 
@@ -48,10 +50,15 @@ def _assert_fixture(*, expected: bool) -> None:
                                                               CustomerInquiry.external_inquiry_id == INQUIRY_ID)).all()
         assert len(orders) == 1 and len(inquiries) == 1
         order = orders[0]
-        assert order.order_status == "exception" and order.source_type == "mock_sync"
+        assert order.order_status == "exception" and order.source_type == "local_readonly_fixture"
+        assert order.raw_data == FIXTURE_RAW_DATA
+        default_orders = order_service.list_orders(db, store_id=store.id, platform=PLATFORM,
+                                                   include_test_orders=False)
+        assert any(row["external_order_id"] == ORDER_ID for row in default_orders)
         assert all(getattr(order, field) is None for field in ("buyer_name", "buyer_phone", "receiver_name",
                                                                "receiver_phone", "receiver_address", "zip_code"))
         assert inquiries[0].status == "open" and inquiries[0].answered_at is None and inquiries[0].customer_name is None
+        assert inquiries[0].raw_data == FIXTURE_RAW_DATA
         user = db.scalar(select(ErpUser).where(ErpUser.login_identifier_hash == hash_login_identifier(CONFIG_ADMIN_LOGIN)))
         assert user is not None
         memberships = db.scalars(select(ErpStoreMembership).where(ErpStoreMembership.user_id == user.id)).all()
@@ -81,11 +88,36 @@ def _account_snapshot() -> tuple:
         return user.id, user.user_key_hash, user.login_identifier_hash, role.id, role.role_key, permissions
 
 
+def _write_legacy_contract() -> None:
+    SessionLocal = _load_runtime()
+    from sqlalchemy import select
+    from app.models.customer_inquiry import CustomerInquiry
+    from app.models.order import Order
+    from app.models.store import Store
+
+    with SessionLocal() as db:
+        store = db.scalar(select(Store).where(Store.name == STORE_NAME, Store.platform == PLATFORM,
+                                               Store.remark == MARKER))
+        assert store is not None
+        order = db.scalar(select(Order).where(Order.store_id == store.id, Order.external_order_id == ORDER_ID))
+        inquiry = db.scalar(select(CustomerInquiry).where(
+            CustomerInquiry.store_id == store.id,
+            CustomerInquiry.external_inquiry_id == INQUIRY_ID,
+        ))
+        assert order is not None and inquiry is not None
+        order.source_type = "mock_sync"
+        order.raw_data = {"is_test": True, "marker": MARKER}
+        inquiry.raw_data = {"is_test": True, "marker": MARKER}
+        db.commit()
+
+
 def main() -> None:
     configure_safe_local_environment()
     assert TRIAL_DB_PATH.resolve().parent == (BACKEND_DIR / ".local-trial").resolve()
     cleanup()
     _assert_fixture(expected=False)
+    provision()
+    _write_legacy_contract()
     provision()
     provision()
     _assert_fixture(expected=True)
