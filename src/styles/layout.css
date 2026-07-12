@@ -119,5 +119,20 @@
 .workbench-view-switch button.active { background: var(--primary); color: white; }
 .source-notices { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-notices span { overflow-wrap: anywhere; }
+.dashboard-store-table .table-wrap { overflow-x: visible; }
 @media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list, .business-capability-grid, .business-capability-grid.compact, .workbench-grid { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-store-table .table-wrap { overflow-x: visible; }
+  .dashboard-store-table table, .dashboard-store-table thead, .dashboard-store-table tbody, .dashboard-store-table tr, .dashboard-store-table td { display: block; width: 100%; }
+  .dashboard-store-table table { white-space: normal; }
+  .dashboard-store-table thead { display: none; }
+  .dashboard-store-table tbody tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .dashboard-store-table tbody tr:last-child { border-bottom: 0; }
+  .dashboard-store-table td { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 9px 0; white-space: normal; }
+  .dashboard-store-table td::before { content: attr(data-label); flex: 0 0 82px; color: #687386; font-weight: 600; }
+  .dashboard-store-table td > * { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+  .dashboard-store-table td.table-actions { justify-content: flex-start; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
+  .dashboard-store-table td.table-actions::before { flex-basis: 100%; }
+  .dashboard-store-table td.table-actions button, .dashboard-store-table td.table-actions a { display: inline-flex; min-height: 34px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; white-space: normal; }
+}

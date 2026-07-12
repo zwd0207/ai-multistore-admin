@@ -58,9 +58,9 @@ export default function DataTable({
         <tbody>
           {rows.length ? rows.map((row, index) => (
             <tr key={row[rowKey] ?? `${rowKey}-${index}`}>
-              {columns.map((column) => <td key={column.key}>{renderCell(column, row)}</td>)}
+              {columns.map((column) => <td key={column.key} data-label={column.title}>{renderCell(column, row)}</td>)}
               {hasActions && (
-                <td className="table-actions">
+                <td className="table-actions" data-label="操作">
                   {renderActions ? renderActions(row) : (
                     <>
                       {onEdit && <button type="button" onClick={() => onEdit(row)}>编辑</button>}

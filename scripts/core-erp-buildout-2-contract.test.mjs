@@ -55,6 +55,11 @@ assert.ok(!dashboard.includes('runManualAllStoresSync'), 'dashboard must not cal
 assert.ok(!dashboard.includes('runManualStoreSync'), 'dashboard must not call single-store manual sync');
 assert.ok(!dashboard.includes('\u66f4\u65b0\u5168\u90e8\u5e97\u94fa\u6570\u636e'), 'dashboard must remove all-store update button');
 assert.ok(!dashboard.includes('\u66f4\u65b0\u6570\u636e'), 'dashboard must remove single-store update button');
+assert.ok(dashboard.includes('dashboard-store-table'), 'dashboard store table needs a mobile layout hook');
+assert.ok(dashboard.includes('setSelectedStoreId(row.storeId)') && dashboard.includes('to="/orders"') && dashboard.includes('to="/shipping"'), 'dashboard store table must keep all operator actions');
+const layoutStyles = read('src/styles/layout.css');
+assert.match(layoutStyles, /dashboard-store-table[\s\S]*@media \(max-width: 600px\)/, 'dashboard store table needs a mobile responsive rule');
+assert.match(layoutStyles, /dashboard-store-table[\s\S]*table-actions[\s\S]*flex-wrap/, 'dashboard mobile actions must wrap instead of being clipped');
 assert.ok(adapters.includes('adaptOperatorWorkbench'), 'adapter must expose operator workbench');
 assert.ok(adapters.includes('failedStoreCount'), 'adapter must expose source failure count');
 assert.ok(adapters.includes('workbenchSummary'), 'adapter must expose store workbench summary');

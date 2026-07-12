@@ -156,7 +156,7 @@ export default function Dashboard() {
       </section>
       <section className="content-card">
         <div className="card-title"><div><h2>按店铺查看</h2><p>选择店铺后查看该店铺的聚合任务和数据状态。</p></div></div>
-        <DataTable columns={storeColumns} rows={overviewRows} renderActions={(row) => <><button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button><Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link><Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link></>} />
+        <div className="dashboard-store-table"><DataTable columns={storeColumns} rows={overviewRows} renderActions={(row) => <><button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button><Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link><Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link></>} /></div>
       </section>
       <section className="content-card">
         <div className="card-title"><div><h2>核心快捷入口</h2><p>常用任务集中在这里。</p></div></div>
