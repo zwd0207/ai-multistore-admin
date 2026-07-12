@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T10 Commander Gate B passed; Sol final boundary review pending
+Status: T10 Sol review blocked; Terra retention and legacy-sync correction pending
 
 ## Mission
 
@@ -85,19 +85,20 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | execute T10 Phase C final boundary review only |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused; T10 backend contract is complete |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused until Terra R1 and Commander verification pass |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | execute T10 R1 retention and legacy-sync gates only |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused; T10 operator UI passed Gate B |
 
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
 2. Treat the real-read result as owner-accepted; do not repeat platform-read investigation without regression evidence.
-3. Terra Gate A is complete and integrated as `66074a8`; do not assign more backend work unless Luna finds a contract defect.
+3. Terra Gate A remains integrated as `66074a8`; the new Terra R1 scope is limited to the two Sol-confirmed backend boundary defects.
 4. Luna commits `fb88c396` and `01a8e52` passed focused tests, build, desktop and 390px browser verification, real inquiry visibility, empty-order handling, disabled reply checks, and logout/login persistence.
-5. Sol performs only Phase C in `.codex-handoff/T10-CUSTOMER-INQUIRY-OPERATOR-WORKFLOW.md`. Terra and Luna remain paused.
-6. After Sol returns, the commander makes the final T10 acceptance decision.
-7. Do not run another real persistence batch without a new explicit approval.
+5. Sol Phase C found two valid blockers: PXG inquiry aggregation lacks the retention cleanup gate, and legacy Naver inquiry sync can bypass guarded persistence during trial mode.
+6. Terra executes `.codex-handoff/T10-TERRA-R1.md`. Luna and Sol remain paused.
+7. Commander verifies aggregate reads, cleanup failure, direct legacy sync denial, sessions, retention, and full verification before requesting one narrow Sol re-review.
+8. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
 

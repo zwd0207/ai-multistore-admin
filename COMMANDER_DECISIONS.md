@@ -98,3 +98,7 @@ Terra commit `bec5875` was independently reviewed and integrated as `66074a8`. T
 ## D023 - T10 Commander Gate B accepted
 
 Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed focused contract tests, session verification, frontend build, and Commander browser verification. The saved real PXG/Naver inquiry remains visible after logout/login, missing order and logistics context is represented as a normal state, reply controls remain disabled, desktop and 390px layouts stay within the viewport, and the browser console is clean. Sol may now perform the single final Phase C boundary review; Terra and Luna remain paused.
+
+## D024 - T10 final acceptance blocked by backend read boundaries
+
+Sol Phase C passed operator usability but found two verified backend boundary gaps. Ordinary inquiry aggregation can serialize PXG/Naver persisted inquiry metadata without first enforcing the existing retention cleanup health gate. The legacy Naver inquiry synchronization service can still perform an external read and write into the generic inquiry table during trial mode, including through internal manual-batch callers. T10 remains blocked until Terra adds fail-closed cleanup enforcement and disables the legacy sync path before network or local writes, Commander verifies the corrections, and Sol performs one narrow re-review.
