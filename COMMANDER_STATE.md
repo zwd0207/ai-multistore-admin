@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T12-R1 actual local multi-store rehearsal accepted
+Status: T12-R1 actual local multi-store rehearsal accepted; local MFA display accepted
 
 ## Mission
 
@@ -48,6 +48,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - The encrypted backup and pre-write restore drill passed. Persistence, activation, retention approval, and backup/rollback approval switches were closed immediately after the run; all platform writes remain off.
 - Current local frontend: `http://127.0.0.1:5182/`.
 - T12-R1 isolated multi-store rehearsal frontend: `http://127.0.0.1:5181/` with backend `http://127.0.0.1:8013/`. Do not use the separate `5175/8012` development runtime for this rehearsal.
+- Local trial restarts now stop the previous recorded processes before selecting ports, keeping the preferred `5181/8013` addresses stable.
+- After the stable account password is accepted, the local trial MFA page displays the current six-digit test code, countdown, and a fill command. This is available only for the exact stable configuration administrator in an active pending MFA session over loopback with `APP_ENV=test` and an explicit local-process flag. It is unavailable in every normal or production environment.
 - All future operator tests use the stable local configuration administrator shown by `查看真实只读配置账号.cmd`; only its MFA code rotates. The older trial-operator account is no longer the user-facing test account.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
@@ -86,6 +88,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `4a42f62`, `6729702`, and `a4bf490`: T12-R1 added an idempotent local-only second-store fixture, preserved it across stable-account provisioning, aligned its source and abnormal-order status with the existing workbench contract, and provided guarded cleanup without touching PXG data.
 - `7589f2f` and `11e0a3e`: the dashboard store table is fully operable at 390px and the existing order page recognizes backend `rawStatus` during abnormal-order deep links.
 - Actual browser QA passed exactly two authorized stores (`pxg球包店` and `[FICTIONAL][LOCAL][T12] Naver Multi-store Demo`), aggregate task uniqueness, single-store isolation, abnormal-order and inquiry deep links, desktop layout, 390px layout, and a clean application console. All observed business traffic stayed on localhost; no sync, reply, writeback, platform write, or AI action was called.
+- `15975f7`, `975a481`, `279e0c8`, `8c36797`, and `9c1fce7`: local-only graphical MFA display, strict backend gates, unified response contract, stable trial ports, and correct pending-session timing passed focused tests, full verification, desktop login, and 390px browser QA. Both legacy `.cmd` entries now use the same stable configuration-admin credential source.
 
 ## Worktree Registry
 
@@ -111,6 +114,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 11. Do not run another real persistence batch without a new explicit approval.
 12. T12-R1 actual local multi-store rehearsal is accepted. Keep the fictional second store for repeatable operator testing; use its guarded cleanup script when the fixture is no longer needed.
 13. The next product phase may build on verified multi-store visibility and navigation. It must not treat this fictional-store rehearsal as approval for a second real marketplace connection or any platform write.
+14. Operators no longer need a `.cmd` file to obtain the local trial MFA code. Use the code displayed on the confirmation page; keep the `.cmd` entries only as a fallback for the same stable account.
 
 ## Compact Reporting Contract
 
