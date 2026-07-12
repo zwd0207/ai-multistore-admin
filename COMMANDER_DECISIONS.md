@@ -106,3 +106,7 @@ Sol Phase C passed operator usability but found two verified backend boundary ga
 ## D025 - T10 backend boundary corrections verified
 
 Terra commit `deb14c3` was reviewed and integrated as `ac2b687`. PXG/Naver persisted inquiry aggregation now enforces the existing cleanup health gate before serialization while unrelated generic-only stores remain available. The legacy Naver inquiry sync is denied at pre-routing and service levels during trial mode, preventing direct and manual-batch bypass before token, network, sync-log, or local-write work. Customer workflow, retention cleanup, production sessions, and full verification passed independently. Sol may now perform one narrow re-review of these two boundaries.
+
+## D026 - T10 customer inquiry workflow accepted
+
+Sol T10 R2 passed the cleanup gate, legacy-sync gate, security, privacy, and write-boundary review with no blocker. The ordinary operator can view the saved real inquiry, understand missing order and logistics context as a normal state, and use the page on desktop and 390px mobile. Cleanup failures prevent PXG/Naver inquiry metadata from being returned, and legacy Naver inquiry synchronization cannot bypass the guarded persistence path. Customer sending, platform writes, scheduled synchronization, AI automation, and additional real persistence remain disabled. T10 is complete.

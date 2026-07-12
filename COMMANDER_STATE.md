@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T10 Terra boundary correction verified; Sol R2 re-review pending
+Status: T10 customer inquiry operator workflow accepted
 
 ## Mission
 
@@ -85,7 +85,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | execute T10 Sol R2 narrow boundary re-review only |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused; T10 final review passed |
 | Terra | `codex2-terra` | `task/terra-shipping-backend` | paused; T10 R1 is integrated and verified |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused; T10 operator UI passed Gate B |
 
@@ -97,8 +97,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 4. Luna commits `fb88c396` and `01a8e52` passed focused tests, build, desktop and 390px browser verification, real inquiry visibility, empty-order handling, disabled reply checks, and logout/login persistence.
 5. Sol Phase C found two valid blockers: PXG inquiry aggregation lacks the retention cleanup gate, and legacy Naver inquiry sync can bypass guarded persistence during trial mode.
 6. Terra commit `deb14c3` is integrated as `ac2b687`. Customer workflow, retention cleanup, production sessions, and full `verify_all.py` passed independently.
-7. Sol executes only `.codex-handoff/T10-SOL-R2.md`. Terra and Luna remain paused.
-8. After Sol returns, the commander makes the final T10 acceptance decision.
+7. Sol T10 R2 passed cleanup, legacy sync, security, privacy, and write-boundary review with no blocker.
+8. T10 is accepted. All worker models remain paused until the commander defines the next operator-focused phase.
 9. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
