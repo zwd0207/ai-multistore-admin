@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T12 multi-store operator workbench accepted
+Status: T12-R1 actual local multi-store rehearsal accepted
 
 ## Mission
 
@@ -16,7 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `61dda9a` (T11 operator workbench).
+- Last accepted integration: `11e0a3e` (T12-R1 actual local multi-store rehearsal).
 - Last accepted backend integration: `66074a8`
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
@@ -47,6 +47,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - The owner approved and the commander executed one bounded real-read persistence batch: 3 products, 0 orders, 0 logistics records, and 1 customer inquiry. The empty order/logistics result reflects the current approved platform read window.
 - The encrypted backup and pre-write restore drill passed. Persistence, activation, retention approval, and backup/rollback approval switches were closed immediately after the run; all platform writes remain off.
 - Current local frontend: `http://127.0.0.1:5182/`.
+- T12-R1 isolated multi-store rehearsal frontend: `http://127.0.0.1:5181/` with backend `http://127.0.0.1:8013/`. Do not use the separate `5175/8012` development runtime for this rehearsal.
 - All future operator tests use the stable local configuration administrator shown by `查看真实只读配置账号.cmd`; only its MFA code rotates. The older trial-operator account is no longer the user-facing test account.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
@@ -82,6 +83,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
 - `61dda9a`: T11 reused the existing dashboard summary, order, warehouse, and inquiry services to deliver a real current-store workbench with four task sections and deep links. Full verification, desktop QA, and 390px QA passed; no production write or automation path was opened.
 - `357a7d7`, `cda44ce`, and `9ebbf4e`: T12 added an authorized multi-store workbench to the existing store overview, removed dashboard synchronization controls, preserved single-store deep links, and enforced session/MFA plus active membership, role, store, and `dashboard.read`. Focused tests, `verify_all.py`, desktop QA, 390px QA, and Sol final review passed.
+- `4a42f62`, `6729702`, and `a4bf490`: T12-R1 added an idempotent local-only second-store fixture, preserved it across stable-account provisioning, aligned its source and abnormal-order status with the existing workbench contract, and provided guarded cleanup without touching PXG data.
+- `7589f2f` and `11e0a3e`: the dashboard store table is fully operable at 390px and the existing order page recognizes backend `rawStatus` during abnormal-order deep links.
+- Actual browser QA passed exactly two authorized stores (`pxg球包店` and `[FICTIONAL][LOCAL][T12] Naver Multi-store Demo`), aggregate task uniqueness, single-store isolation, abnormal-order and inquiry deep links, desktop layout, 390px layout, and a clean application console. All observed business traffic stayed on localhost; no sync, reply, writeback, platform write, or AI action was called.
 
 ## Worktree Registry
 
@@ -105,6 +109,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 9. T12 is accepted under `.codex-handoff/T12-SOL-CONTRACT.md`.
 10. The multi-store workbench remains read-only. It does not authorize synchronization, bulk execution, platform writeback, customer sending, or AI actions.
 11. Do not run another real persistence batch without a new explicit approval.
+12. T12-R1 actual local multi-store rehearsal is accepted. Keep the fictional second store for repeatable operator testing; use its guarded cleanup script when the fixture is no longer needed.
+13. The next product phase may build on verified multi-store visibility and navigation. It must not treat this fictional-store rehearsal as approval for a second real marketplace connection or any platform write.
 
 ## Compact Reporting Contract
 
