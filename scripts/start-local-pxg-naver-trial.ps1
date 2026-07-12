@@ -23,6 +23,8 @@ function Find-OpenPort($Ports) {
 & $python (Join-Path $backend "scripts\provision_local_pxg_naver_trial.py")
 if ($LASTEXITCODE -ne 0) { throw "Local PXG trial provisioning failed." }
 Import-LocalEnv $runtimeEnv
+& $python (Join-Path $backend "scripts\provision_local_config_admin.py")
+if ($LASTEXITCODE -ne 0) { throw "Local PXG configuration administrator provisioning failed." }
 $backendPort = Find-OpenPort @(8013, 8014, 8015, 8016)
 $frontendPort = Find-OpenPort @(5181, 5182, 5183, 5184)
 $env:CORS_ALLOWED_ORIGINS = "[`"http://127.0.0.1:$frontendPort`"]"

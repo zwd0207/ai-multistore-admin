@@ -45,7 +45,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - The owner approved and the commander executed one bounded real-read persistence batch: 3 products, 0 orders, 0 logistics records, and 1 customer inquiry. The empty order/logistics result reflects the current approved platform read window.
 - The encrypted backup and pre-write restore drill passed. Persistence, activation, retention approval, and backup/rollback approval switches were closed immediately after the run; all platform writes remain off.
 - Current local frontend: `http://127.0.0.1:5182/`.
-- The PXG trial login and password are stable for this isolated database; only the MFA code rotates. `查看PXG试运营验证码.cmd` displays all three locally without exposing them in chat.
+- All future operator tests use the stable local configuration administrator shown by `查看真实只读配置账号.cmd`; only its MFA code rotates. The older trial-operator account is no longer the user-facing test account.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.

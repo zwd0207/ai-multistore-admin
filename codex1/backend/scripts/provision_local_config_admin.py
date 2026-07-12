@@ -17,6 +17,12 @@ PERMISSION_KEYS = {
     "dashboard.read",
     "products.read",
     "orders.read",
+    "orders.preview",
+    "recipient_pii.view",
+    "recipient_pii.export",
+    "shipping.batch.manage",
+    "platform.sync",
+    "platform.readonly.persist",
     "store.manage",
     "credentials.manage",
 }

@@ -82,3 +82,7 @@ Customer CRM and advanced privacy-policy work are deferred because they do not y
 ## D019 - First bounded real-read persistence executed
 
 The owner explicitly approved one PXG/Naver real-read persistence batch in the isolated local database with a maximum of three product-order rows and all platform writes disabled. The run completed with 3 products, 0 current-window orders, 0 logistics records, and 1 customer inquiry. Encrypted backup and pre-write restore verification passed. All local persistence and activation approvals were closed immediately after execution; another real persistence run requires new explicit approval.
+
+## D020 - One stable account for operator testing
+
+All future local operator tests use the account displayed by `查看真实只读配置账号.cmd`. Its login and password remain stable for the isolated database; only the MFA code rotates. The account receives the read, warehouse-batch, and local readonly-configuration permissions needed for operator testing, while platform writeback, customer sending, inventory/product writes, and AI automatic operations remain disabled.
