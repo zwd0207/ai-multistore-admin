@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.exceptions import ApiError
 from app.core.responses import success_response
 from app.database import get_db
 from app.models.auth import ErpUser
 from app.services import stats_service
-from app.services.operator_access_service import OperatorIdentity, require_store_permission
+from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_permission
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -44,11 +45,18 @@ def get_dashboard_summary(
 
 @router.get("/store-overview")
 def get_store_overview(
+    request: Request,
     include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
+    user = db.get(ErpUser, getattr(request.state, "authenticated_user_id", None))
+    if user is None:
+        raise ApiError("login session is required", "session_required", 401)
+    identity = OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash)
+    require_any_store_permission(db, identity=identity, permission_key="dashboard.read")
     result = stats_service.get_store_overview(
         db,
         include_inactive=include_inactive,
+        operator_user_id=user.id,
     )
     return success_response(data=result)

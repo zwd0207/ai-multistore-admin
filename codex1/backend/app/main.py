@@ -296,7 +296,7 @@ def _enforce_read_protection(request: Request) -> None:
         store_id = _request_store_id(request, {}, db)
         if store_id is not None:
             require_store_membership(db, identity=identity, store_id=store_id)
-        elif request.url.path != "/api/v1/stores":
+        elif request.url.path not in {"/api/v1/stores", "/api/v1/dashboard/store-overview"}:
             require_any_store_permission(db, identity=identity, permission_key="system.configure")
     finally:
         db.close()

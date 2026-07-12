@@ -1538,6 +1538,7 @@ def verify_stage_scripts() -> None:
         "verify_pxg_naver_readonly_sync_safety.py",
         "verify_production_sessions.py",
         "verify_operator_workbench.py",
+        "verify_multi_store_workbench.py",
     ]:
         print(f"running {script}")
         run([PYTHON, f"scripts/{script}"])
@@ -20048,6 +20049,7 @@ def verify_git_tracking() -> None:
         "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/upgrade_pxg_naver_readonly_schema.py",
         "?? backend/scripts/verify_pxg_naver_readonly_persistence.py",
+        "?? backend/scripts/verify_multi_store_workbench.py",
         "?? backend/scripts/verify_all.py",
     )
     unexpected = [line for line in status.splitlines() if not line.startswith(allowed_prefixes)]

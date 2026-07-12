@@ -11,6 +11,7 @@ from app.core.exceptions import ApiError
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.api_credential import ApiCredential
+from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership
 from app.models.order import Order
 from app.models.product import Product
 from app.models.store import Store
@@ -970,11 +971,41 @@ def _metric_known_value(row: dict[str, Any], metric_key: str) -> int:
 def get_store_overview(
     db: Session,
     include_inactive: bool = False,
+    operator_user_id: int | None = None,
 ) -> dict[str, Any]:
-    stores = db.scalars(select(Store).order_by(Store.id.asc())).all()
-    if not include_inactive:
-        stores = [store for store in stores if store.status != "inactive"]
-    rows = [_store_overview_row(db, store) for store in stores]
+    if operator_user_id is None:
+        raise ApiError("dashboard store scope is required", "dashboard_read_forbidden", 403)
+    stores = db.scalars(
+        select(Store)
+        .join(ErpStoreMembership, ErpStoreMembership.store_id == Store.id)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .join(ErpRolePermission, ErpRolePermission.role_id == ErpRole.id)
+        .join(ErpPermission, ErpPermission.id == ErpRolePermission.permission_id)
+        .where(
+            ErpStoreMembership.user_id == operator_user_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+            Store.status == "active",
+            ErpPermission.status == "active",
+            ErpPermission.permission_key.in_(("dashboard.read", "*")),
+        )
+        .distinct()
+        .order_by(Store.id.asc())
+    ).all()
+    del include_inactive
+    rows = []
+    store_workbenches: list[tuple[Store, dict[str, Any]]] = []
+    for store in stores:
+        row = _store_overview_row(db, store)
+        workbench = _build_operator_workbench(
+            db,
+            store_id=store.id,
+            platform=normalize_platform(store.platform),
+            include_test_orders=False,
+        )
+        row["workbench_summary"] = dict(workbench["summary"])
+        rows.append(row)
+        store_workbenches.append((store, workbench))
     orders_unknown_store_count = sum(
         1 for row in rows
         if row["metrics"]["today_orders"]["display_value"] == "?"
@@ -988,6 +1019,7 @@ def get_store_overview(
         "data_policy": "无法确认真实平台数据时显示 ?，避免把未知误判为 0。",
         "store_count": len(rows),
         "stores": rows,
+        "operator_workbench": _aggregate_store_overview_workbenches(store_workbenches),
         "summary": {
             "store_count": len(rows),
             "connected_store_count": sum(1 for row in rows if row["connection_tone"] == "success"),
@@ -1000,6 +1032,64 @@ def get_store_overview(
             "abnormal_order_count": sum(_metric_known_value(row, "abnormal_orders") for row in rows),
             "inventory_alert_count": sum(_metric_known_value(row, "inventory_alerts") for row in rows),
         },
+    }
+
+
+def _aggregate_store_overview_workbenches(store_workbenches: list[tuple[Store, dict[str, Any]]]) -> dict[str, Any]:
+    sections: dict[str, list[dict[str, Any]]] = {key: [] for key in _WORKBENCH_SECTIONS}
+    seen_task_keys: set[tuple[int, str]] = set()
+    for store, workbench in store_workbenches:
+        for section_name in _WORKBENCH_SECTIONS:
+            for task in workbench["sections"][section_name]:
+                task_key = (store.id, str(task["task_id"]))
+                if task_key in seen_task_keys:
+                    continue
+                seen_task_keys.add(task_key)
+                sections[section_name].append({
+                    **task,
+                    "store_id": store.id,
+                    "store_name": store.name,
+                    "platform": store.platform,
+                })
+
+    for section_name in _WORKBENCH_SECTIONS:
+        sections[section_name].sort(
+            key=lambda task: (
+                -int(task["priority"]),
+                task["updated_at"] is not None,
+                task["updated_at"] or "",
+                int(task["store_id"]),
+                str(task["task_id"]),
+            )
+        )
+
+    sources: dict[str, dict[str, Any]] = {}
+    for source_name in ("orders", "shipping", "customer_inquiries"):
+        failures = []
+        for store, workbench in store_workbenches:
+            source = workbench["sources"][source_name]
+            if source["status"] != "ready":
+                failures.append({
+                    "store_id": store.id,
+                    "reason_code": source["reason_code"],
+                })
+        if not failures:
+            status, reason_code = "ready", None
+        elif len(failures) == len(store_workbenches):
+            status, reason_code = "blocked", "all_stores_blocked"
+        else:
+            status, reason_code = "partial", "partial_failure"
+        sources[source_name] = {
+            "status": status,
+            "reason_code": reason_code,
+            "failed_store_count": len(failures),
+            "failures": failures,
+        }
+
+    return {
+        "summary": {key: len(sections[key]) for key in _WORKBENCH_SECTIONS},
+        "sections": sections,
+        "sources": sources,
     }
 
 
