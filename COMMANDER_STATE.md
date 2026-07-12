@@ -89,9 +89,10 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
 2. Treat the real-read result as owner-accepted; do not repeat platform-read investigation without regression evidence.
-3. Terra exposes the saved real Naver inquiry through the ordinary customer-service data contract, with replies and all platform writes still disabled.
-4. After the contract stabilizes, Luna fixes the customer-service Chinese text and operator states, including the clear empty-order message and order/logistics context when available.
-5. Do not run another real persistence batch without a new explicit approval.
+3. Terra Gate A is complete and integrated as `66074a8`; do not assign more backend work unless Luna finds a contract defect.
+4. Luna executes T10 Phase B: fix customer-service Chinese text and operator states, show the real inquiry, display the clear empty-order message, and use order/logistics context when available.
+5. After Luna integration and commander browser verification, Sol performs the single final T10 boundary review.
+6. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
 

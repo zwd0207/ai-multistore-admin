@@ -90,3 +90,7 @@ All future local operator tests use the account displayed by `查看真实只读
 ## D021 - Owner accepted real-read data
 
 On 2026-07-12, the owner confirmed that the real data currently read from `pxg球包店 / Naver` is correct. The read contract is accepted for the next operator-workflow phase. Do not repeat platform-read investigation unless new evidence shows a regression. This acceptance does not authorize another persistence batch or any real platform write.
+
+## D022 - T10 Terra contract accepted
+
+Terra commit `bec5875` was independently reviewed and integrated as `66074a8`. The ordinary customer-inquiry API now aggregates generic inquiries with saved PXG/Naver read-only inquiry metadata under session, MFA, store, permission, privacy, and disabled-reply controls. Focused verification and `verify_all.py` passed after integration. Luna may now implement Phase B against this stable contract; Sol remains paused until the UI is integrated and browser-verified.
