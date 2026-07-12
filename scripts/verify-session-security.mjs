@@ -37,6 +37,8 @@ assert.match(authPage, /status\s*===\s*'mfa_required'/, 'local MFA code must be 
 assert.match(authContext, /clearSession\('unauthenticated', true\)[\s\S]*await backendApi\.login[\s\S]*setStatus\('mfa_required'\)/, 'MFA page must open only after login establishes the pending session');
 assert.match(authPage, /localMfaDigits|mfa-code-digit/, 'MFA page must render stable digit cells');
 assert.match(authPage, /填入验证码/, 'MFA page must provide a fill-code command');
+assert.match(authPage, /当前验证已失效，请重新登录/, 'MFA page must not leave unexplained blank code cells');
+assert.match(authPage, /返回账号登录/, 'MFA page must provide a recovery command');
 assert.match(authPage, /mfa_invalid/, 'MFA page must support mfa_invalid errors');
 assert.match(authPage, /invalid_mfa_code/, 'MFA page must support invalid_mfa_code errors');
 assert.doesNotMatch(authPage, /localStorage|sessionStorage|console\./i, 'local MFA code must not be persisted or logged');

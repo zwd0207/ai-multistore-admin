@@ -11,7 +11,7 @@ function authErrorMessage(error, status) {
 }
 
 export function AuthPage() {
-  const { status, isAuthenticated, login, verifyMfa } = useAuthContext();
+  const { status, isAuthenticated, login, verifyMfa, logout } = useAuthContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [identifier, setIdentifier] = useState('');
@@ -21,6 +21,7 @@ export function AuthPage() {
   const [error, setError] = useState('');
   const [localMfaCode, setLocalMfaCode] = useState('');
   const [secondsRemaining, setSecondsRemaining] = useState(null);
+  const [localCodeUnavailable, setLocalCodeUnavailable] = useState(false);
   const secondsRef = useRef(null);
   const localCodeRequestRef = useRef(false);
 
@@ -36,6 +37,7 @@ export function AuthPage() {
         const nextCode = typeof result?.code === 'string' ? result.code : String(result?.code || '');
         const nextSeconds = Math.max(0, Number(result?.seconds_remaining) || 0);
         setLocalMfaCode(/^\d{6}$/.test(nextCode) ? nextCode : '');
+        setLocalCodeUnavailable(!/^\d{6}$/.test(nextCode));
         secondsRef.current = nextSeconds;
         setSecondsRemaining(nextSeconds);
       } catch {
@@ -43,6 +45,7 @@ export function AuthPage() {
           setLocalMfaCode('');
           secondsRef.current = null;
           setSecondsRemaining(null);
+          setLocalCodeUnavailable(true);
         }
       } finally {
         localCodeRequestRef.current = false;
@@ -85,7 +88,7 @@ export function AuthPage() {
   };
 
   const isMfa = status === 'mfa_required';
-  return <AuthShell><h1>{isMfa ? '确认身份' : '登录运营中心'}</h1><p>{isMfa ? '请输入六位验证码继续。' : '使用管理员提供的账号和密码登录。'}</p><form onSubmit={submit}>{isMfa ? <><div className="mfa-local-code" aria-label="本地测试验证码">{Array.from({ length: 6 }, (_, index) => <span className="mfa-code-digit" key={index}>{localMfaCode[index] || ''}</span>)}</div>{localMfaCode ? <div className="mfa-local-code-meta"><span>本地测试验证码</span><span>{secondsRemaining} 秒后更新</span><button className="button ghost mfa-fill-button" type="button" onClick={() => setCode(localMfaCode)}>填入验证码</button></div> : null}<input className="auth-code-input" inputMode="numeric" maxLength={6} autoFocus value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="六位验证码" aria-label="六位验证码" /></> : <><label>账号<input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username" /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label></>}{error ? <p className="form-error">{error}</p> : null}<button className="button primary auth-submit" disabled={busy}>{busy ? '正在验证...' : isMfa ? '确认登录' : '登录'}</button></form></AuthShell>;
+  return <AuthShell><h1>{isMfa ? '确认身份' : '登录运营中心'}</h1><p>{isMfa ? '请输入六位验证码继续。' : '使用管理员提供的账号和密码登录。'}</p><form onSubmit={submit}>{isMfa ? <><div className="mfa-local-code" aria-label="本地测试验证码">{Array.from({ length: 6 }, (_, index) => <span className="mfa-code-digit" key={index}>{localMfaCode[index] || ''}</span>)}</div>{localMfaCode ? <div className="mfa-local-code-meta"><span>本地测试验证码</span><span>{secondsRemaining} 秒后更新</span><button className="button ghost mfa-fill-button" type="button" onClick={() => setCode(localMfaCode)}>填入验证码</button></div> : null}{localCodeUnavailable ? <div className="mfa-code-unavailable"><span>当前验证已失效，请重新登录。</span><button className="button ghost" type="button" onClick={() => logout().catch(() => {})}>返回账号登录</button></div> : null}<input className="auth-code-input" inputMode="numeric" maxLength={6} autoFocus value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="六位验证码" aria-label="六位验证码" /></> : <><label>账号<input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username" /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label></>}{error ? <p className="form-error">{error}</p> : null}<button className="button primary auth-submit" disabled={busy}>{busy ? '正在验证...' : isMfa ? '确认登录' : '登录'}</button></form></AuthShell>;
 }
 
 export function AuthStatePage({ type }) {

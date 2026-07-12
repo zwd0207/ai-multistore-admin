@@ -29,6 +29,8 @@ PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 LOCAL_MFA_CODE_LOGIN_IDENTIFIER = "pxg-config-admin@local.test"
 LOCAL_MFA_CODE_ROLE_KEY = "pxg_connection_config_admin"
+LOCAL_MFA_CODE_LEGACY_LOGIN_IDENTIFIER = "pxg-trial-operator@local.test"
+LOCAL_MFA_CODE_LEGACY_ROLE_KEY = "pxg_naver_trial_operator"
 LOCAL_MFA_CODE_STORE_NAME = "pxg球包店"
 
 
@@ -204,12 +206,17 @@ def local_mfa_code_display(db: Session, *, pending_token: str | None) -> dict[st
         return None
     user = db.get(ErpUser, pending.user_id)
     security = db.get(ErpUserSecurity, pending.user_id)
+    expected_role_by_login_hash = {
+        hash_login_identifier(LOCAL_MFA_CODE_LOGIN_IDENTIFIER): LOCAL_MFA_CODE_ROLE_KEY,
+        hash_login_identifier(LOCAL_MFA_CODE_LEGACY_LOGIN_IDENTIFIER): LOCAL_MFA_CODE_LEGACY_ROLE_KEY,
+    }
+    expected_role_key = expected_role_by_login_hash.get(user.login_identifier_hash) if user else None
     if (
         user is None
         or security is None
         or user.status != "active"
         or user.auth_provider != "password"
-        or user.login_identifier_hash != hash_login_identifier(LOCAL_MFA_CODE_LOGIN_IDENTIFIER)
+        or expected_role_key is None
         or not security.password_hash
         or security.mfa_type != "totp"
         or security.mfa_enabled_at is None
@@ -225,7 +232,7 @@ def local_mfa_code_display(db: Session, *, pending_token: str | None) -> dict[st
         .where(
             ErpStoreMembership.user_id == user.id,
             ErpStoreMembership.membership_status == "active",
-            ErpRole.role_key == LOCAL_MFA_CODE_ROLE_KEY,
+            ErpRole.role_key == expected_role_key,
             ErpRole.status == "active",
             Store.name == LOCAL_MFA_CODE_STORE_NAME,
             Store.platform == "naver",

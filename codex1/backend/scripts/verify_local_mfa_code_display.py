@@ -46,6 +46,10 @@ LOGIN = "pxg-config-admin@local.test"
 PASSWORD = "local-mfa-display-test-password"
 SECRET = "JBSWY3DPEHPK3PXP"
 ROLE_KEY = "pxg_connection_config_admin"
+TRIAL_LOGIN = "pxg-trial-operator@local.test"
+TRIAL_PASSWORD = "local-trial-operator-test-password"
+TRIAL_SECRET = "KRSXG5DSNFXGOIDB"
+TRIAL_ROLE_KEY = "pxg_naver_trial_operator"
 
 
 def seed() -> None:
@@ -61,7 +65,16 @@ def seed() -> None:
             status="active",
             auth_provider="password",
         )
-        db.add_all([store, role, user])
+        trial_role = ErpRole(role_key=TRIAL_ROLE_KEY, role_label_zh="trial", role_label_en="trial", status="active")
+        trial_user = ErpUser(
+            user_key_hash="local-mfa-display-trial-user",
+            display_name="Local trial operator",
+            login_identifier_hash=hash_login_identifier(TRIAL_LOGIN),
+            login_identifier_masked="pxg-trial-operator",
+            status="active",
+            auth_provider="password",
+        )
+        db.add_all([store, role, user, trial_role, trial_user])
         db.flush()
         db.add(ErpUserSecurity(
             user_id=user.id,
@@ -71,7 +84,16 @@ def seed() -> None:
             mfa_enabled_at=get_utc_now(),
             password_changed_at=get_utc_now(),
         ))
+        db.add(ErpUserSecurity(
+            user_id=trial_user.id,
+            password_hash=hash_password(TRIAL_PASSWORD),
+            mfa_type="totp",
+            mfa_secret_encrypted=encrypt_value(TRIAL_SECRET),
+            mfa_enabled_at=get_utc_now(),
+            password_changed_at=get_utc_now(),
+        ))
         db.add(ErpStoreMembership(user_id=user.id, store_id=store.id, role_id=role.id, membership_status="active"))
+        db.add(ErpStoreMembership(user_id=trial_user.id, store_id=store.id, role_id=trial_role.id, membership_status="active"))
         db.commit()
 
 
@@ -81,9 +103,9 @@ def assert_cache_headers(response) -> None:
     assert response.headers.get("vary") == "Cookie", response.headers
 
 
-def pending_client() -> TestClient:
+def pending_client(login: str = LOGIN, password: str = PASSWORD) -> TestClient:
     client = TestClient(app, base_url=ORIGIN)
-    response = client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={"login_identifier": LOGIN, "password": PASSWORD})
+    response = client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={"login_identifier": login, "password": password})
     assert response.status_code == 200, response.text
     return client
 
@@ -139,6 +161,12 @@ def main() -> None:
         assert re.fullmatch(r"\d{6}", response.json()["data"]["code"])
         for forbidden in (SECRET, LOGIN, "user", "session"):
             assert forbidden not in response.text, response.text
+
+        with pending_client(TRIAL_LOGIN, TRIAL_PASSWORD) as trial_client:
+            trial_response = trial_client.get("/api/v1/auth/local-mfa-code")
+            assert trial_response.status_code == 200, trial_response.text
+            assert re.fullmatch(r"\d{6}", trial_response.json()["data"]["code"])
+            assert TRIAL_SECRET not in trial_response.text
 
         settings = get_settings()
         settings.app_env = "development"
