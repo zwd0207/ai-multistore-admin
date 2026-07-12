@@ -86,6 +86,18 @@ assert.ok(
 );
 
 includesAll('src/pages/Orders.jsx', ['useSearchParams', "searchParams.get('orderId')"]);
+const ordersText = read('src/pages/Orders.jsx');
+assert.ok(
+  ordersText.includes('row.rawStatus') && ordersText.includes('row.raw_status'),
+  'orders status normalization and matching must reuse adapter raw status fields',
+);
+assert.ok(ordersText.includes("abnormal: ['异常'"), 'orders abnormal filter must retain the Chinese abnormal status label');
+const abnormalStatusText = String({ rawStatus: '异常' }.rawStatus).toLowerCase();
+assert.ok(
+  ['异常', '取消', '退款', '退货', '换货', 'claim', 'refund', 'return', 'exchange', 'cancel']
+    .some((flag) => abnormalStatusText.includes(flag.toLowerCase())),
+  'rawStatus=异常 must match the abnormal order filter',
+);
 includesAll('src/pages/ShippingAssistant.jsx', ['useSearchParams', "searchParams.get('batchId')", 'WORKBENCH_STAGE_MAP']);
 includesAll('src/pages/CustomerService.jsx', ['useSearchParams', "searchParams.get('inquiryId')"]);
 

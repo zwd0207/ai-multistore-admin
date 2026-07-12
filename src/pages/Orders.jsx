@@ -33,7 +33,7 @@ function textOf(...values) {
 }
 
 function normalizedOrder(row = {}) {
-  const statusText = textOf(row.status, row.order_status, row.delivery_status_label_zh, row.claim_status_label_zh);
+  const statusText = textOf(row.status, row.order_status, row.rawStatus, row.raw_status, row.delivery_status_label_zh, row.claim_status_label_zh);
   const product = row.product || row.productName || row.product_name || row.name || '-';
   const option = row.option || row.optionName || row.option_name || row.spec || '-';
   const shippingStatus = row.deliveryStatusLabelZh || row.delivery_status_label_zh || row.shippingStatus || row.delivery_status || '-';
@@ -71,7 +71,7 @@ function hasDisplayValue(value) {
 
 function matchesStatus(row, statusKey) {
   if (!statusKey) return true;
-  const text = textOf(row.statusText, row.status, row.order_status, row.delivery_status, row.claim_status).toLowerCase();
+  const text = textOf(row.statusText, row.status, row.order_status, row.rawStatus, row.raw_status, row.delivery_status, row.claim_status).toLowerCase();
   const checks = {
     new: ['新订单', '已付款', 'payed', 'place_product_order'],
     pending: ['待发货', 'ready', 'delivery_ready'],
