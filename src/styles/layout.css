@@ -31,8 +31,10 @@
   .store-selector select { min-width: 0; width: 100%; }
   .manual-sync-button { padding-inline: 10px; }
   .topbar-actions { justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; }
-  .topbar-actions > span:last-child { display: flex; min-width: 0; }
+  .topbar-actions { flex-wrap: wrap; min-width: 0; }
+  .topbar-actions > span:last-child { display: flex; min-width: 0; flex: 1 1 auto; }
   .topbar-actions > span:last-child strong { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions > .button { flex: 0 0 auto; }
   .main-content { min-width: 0; padding: 16px 12px 28px; overflow-x: hidden; }
   .summary-grid { grid-template-columns: 1fr; }
   .tab-row { max-width: 100%; overflow-x: auto; white-space: nowrap; }

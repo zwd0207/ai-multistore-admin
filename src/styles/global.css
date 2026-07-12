@@ -156,6 +156,18 @@ tbody tr:hover { background: #fafbff; }
   .financial-preview-grid { grid-template-columns: 1fr; }
   .financial-control-grid { grid-template-columns: 1fr; }
 }
+@media (max-width: 600px) {
+  .search-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; width: 100%; box-sizing: border-box; }
+  .search-input { width: auto; min-width: 0; grid-column: 1 / -1; }
+  .search-panel select, .search-panel .button { width: 100%; min-width: 0; box-sizing: border-box; }
+  .search-panel .button { white-space: nowrap; }
+  .filter-panel { min-width: 0; overflow: hidden; padding: 10px; }
+  .modal-card { width: calc(100vw - 24px); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
+  .modal-body { min-width: 0; overflow-x: hidden; padding: 16px; }
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .detail-modal { min-width: 0; overflow-x: hidden; }
+  .detail-section, .detail-item { min-width: 0; overflow-wrap: anywhere; }
+}
 .placeholder-card { min-height: 420px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .placeholder-card > p { color: var(--muted); }.placeholder-icon { width: 68px; height: 68px; display: grid; place-items: center; border-radius: 18px; background: #eeecff; color: var(--primary); font-size: 27px; font-weight: 700; margin-bottom: 22px; }
 .feature-chips { display: flex; gap: 10px; margin-top: 16px; }.feature-chips span { background: #f7f8fb; border: 1px solid var(--border); padding: 7px 12px; border-radius: 99px; color: #596579; font-size: 13px; }
