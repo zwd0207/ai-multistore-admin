@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T09 safety review passed; advanced privacy policy deferred in favor of operator workflow
+Status: bounded PXG/Naver local trial configured; awaiting explicit activation approval
 
 ## Mission
 
@@ -41,6 +41,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Before activation, define how long non-PII historical order records remain searchable by platform order number. Recipient PII remains subject to the approved 7-day/30-day deletion boundary.
 - Customer follow-up profiles and advanced privacy policy are deferred until the core operator workflow is usable.
 - Existing privacy, write-disable, backup, rollback, and recipient deletion controls remain unchanged as the minimum safety baseline.
+- The isolated local trial now has one exact `pxg球包店 / Naver` store, a restricted backup root, a local backup encryption key, successful cleanup health, and local Naver readonly credentials configured without exposing secrets.
+- Persistence, activation, retention approval, and backup/rollback approval switches remain off; all platform writes remain off.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
@@ -83,9 +85,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Prepare one bounded, manual PXG/Naver real read-only persistence trial under the already approved safety controls.
-3. Use the resulting stable data contract to complete the operator-facing order, warehouse, logistics, and customer-inquiry workflow.
-4. Defer customer CRM, marketing consent, AI automation, and advanced privacy policy until the manual workflow is stable.
+2. Obtain explicit owner approval for one manual PXG/Naver real read-only persistence batch of at most three product-order rows in the isolated local database.
+3. After approval, enable the four local activation switches only for that run, execute once, immediately close persistence again, and verify the operator-facing result.
+4. Use the resulting stable data contract to complete the order, warehouse, logistics, and customer-inquiry workflow.
 
 ## Compact Reporting Contract
 
