@@ -50,6 +50,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - T12-R1 isolated multi-store rehearsal frontend: `http://127.0.0.1:5181/` with backend `http://127.0.0.1:8013/`. Do not use the separate `5175/8012` development runtime for this rehearsal.
 - Local trial restarts now stop the previous recorded processes before selecting ports, keeping the preferred `5181/8013` addresses stable.
 - After the stable account password is accepted, the local trial MFA page displays the current six-digit test code, countdown, and a fill command. This is available only for the exact stable configuration administrator in an active pending MFA session over loopback with `APP_ENV=test` and an explicit local-process flag. It is unavailable in every normal or production environment.
+- The legacy local `pxg-trial-operator` remains accepted only as a compatibility login for existing browser credentials and receives its own session-bound local code under the same loopback/test gates. A failed or expired display now shows an explicit return-to-login action instead of empty unexplained digit cells.
 - All future operator tests use the stable local configuration administrator shown by `查看真实只读配置账号.cmd`; only its MFA code rotates. The older trial-operator account is no longer the user-facing test account.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
