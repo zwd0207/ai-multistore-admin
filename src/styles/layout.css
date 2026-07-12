@@ -99,6 +99,8 @@
 .workbench-task { display: flex; min-height: 112px; flex-direction: column; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: inherit; }
 .workbench-task:hover { border-color: #8ba8c7; box-shadow: 0 2px 8px rgba(31, 41, 55, .08); }
 .workbench-task p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.workbench-task strong, .workbench-task small, .workbench-task p { overflow-wrap: anywhere; }
+.workbench-task small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .workbench-task-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #245d94; font-size: 12px; }
 .workbench-task-action span { color: #a15c00; }
 .workbench-task.stale { border-color: #dfbd7c; }
@@ -111,5 +113,11 @@
 .technical-details { border: 1px dashed #d8e0ec; border-radius: 8px; padding: 10px 12px; background: #fbfcfe; }
 .technical-details[open] summary { margin-bottom: 10px; }
 .technical-details pre { max-height: 260px; overflow: auto; margin: 10px 0 0; padding: 12px; border-radius: 8px; background: #f4f6fa; color: #334155; }
+.workbench-view-switch { display: inline-flex; max-width: 100%; margin-bottom: 14px; border: 1px solid var(--border); overflow: hidden; }
+.workbench-view-switch button { min-height: 36px; padding: 7px 14px; border: 0; border-right: 1px solid var(--border); background: white; color: var(--muted); white-space: nowrap; }
+.workbench-view-switch button:last-child { border-right: 0; }
+.workbench-view-switch button.active { background: var(--primary); color: white; }
+.source-notices { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-notices span { overflow-wrap: anywhere; }
 @media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list, .business-capability-grid, .business-capability-grid.compact, .workbench-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

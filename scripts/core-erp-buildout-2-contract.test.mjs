@@ -3,76 +3,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
+const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const dashboard = read('src/pages/Dashboard.jsx');
+const adapters = read('src/services/adapters.js');
+const provider = read('src/services/dataProvider.js');
 
-function read(file) {
-  return fs.readFileSync(path.join(root, file), 'utf8');
-}
-
-function includesAll(file, phrases) {
-  const text = read(file);
-  for (const phrase of phrases) {
-    assert.ok(
-      text.includes(phrase),
-      `${file} should include "${phrase}"`,
-    );
-  }
-}
-
-includesAll('codex1/backend/app/api/v1/endpoints/dashboard.py', [
-  '@router.get("/store-overview")',
-  'get_store_overview',
-]);
-
-includesAll('codex1/backend/app/services/stats_service.py', [
-  'def get_store_overview',
-  'display_value": "?"',
-  'ip_not_allowed',
-  'manual_batch_sync',
-  '最近一次同步无法确认',
-  '最近一次同步：IP 白名单未通过',
-  'orders_unknown_store_count',
-]);
-
-includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
-  '@router.post("/manual-batch/all")',
-  'manual_batch_sync_all_stores',
-]);
-
-includesAll('codex1/backend/app/services/sync_service.py', [
-  'def manual_batch_sync_all_stores',
-  'store_results',
-  'if include_products',
-  'if include_orders',
-  'if include_customer_inquiries',
-  '_manual_batch_result_status(items)',
-  'platform_write": False',
-]);
-
-includesAll('src/services/backendApi.js', [
-  'getStoreOverview',
-  "'/dashboard/store-overview'",
-  'runManualAllStoresSync',
-  "'/sync/manual-batch/all'",
-]);
-
-includesAll('src/services/dataProvider.js', [
-  'getStoreOverview',
-  'runManualAllStoresSync',
-  'mockStoreOverview',
-]);
-
-includesAll('src/services/adapters.js', [
-  'storeOverview',
-  'metricDisplayValue',
-  'ordersUnknownStoreCount',
-]);
-
-includesAll('src/pages/Dashboard.jsx', [
-  '按店铺查看',
-  '更新全部店铺数据',
-  'metricDisplayValue',
-  '“待更新”表示需要管理员检查店铺连接',
-  '最近一次同步无法确认',
-]);
+assert.ok(dashboard.includes('operatorWorkbench'), 'dashboard must render operator workbench');
+assert.ok(dashboard.includes('state.overview?.operatorWorkbench'), 'dashboard queue must use store overview');
+assert.ok(dashboard.includes('\u5168\u90e8\u6388\u6743\u5e97\u94fa'), 'dashboard needs all-store view');
+assert.ok(dashboard.includes('\u5355\u5e97'), 'dashboard needs single-store view');
+assert.ok(dashboard.includes('setSelectedStoreId(task.storeId)'), 'task navigation must set store before route');
+assert.ok(!dashboard.includes('runManualAllStoresSync'), 'dashboard must not call all-store manual sync');
+assert.ok(!dashboard.includes('runManualStoreSync'), 'dashboard must not call single-store manual sync');
+assert.ok(!dashboard.includes('\u66f4\u65b0\u5168\u90e8\u5e97\u94fa\u6570\u636e'), 'dashboard must remove all-store update button');
+assert.ok(!dashboard.includes('\u66f4\u65b0\u6570\u636e'), 'dashboard must remove single-store update button');
+assert.ok(adapters.includes('adaptOperatorWorkbench'), 'adapter must expose operator workbench');
+assert.ok(adapters.includes('failedStoreCount'), 'adapter must expose source failure count');
+assert.ok(adapters.includes('workbenchSummary'), 'adapter must expose store workbench summary');
+assert.ok(provider.includes('operator_workbench'), 'mock provider must preserve overview aggregation');
+assert.ok(provider.includes('workbench_summary'), 'mock stores must preserve workbench summary');
 
 console.log('core ERP buildout 2 contract checks passed');

@@ -1197,6 +1197,9 @@ function adaptOperatorTask(item = {}) {
   return {
     taskId: item.task_id || '',
     taskType: item.task_type || '',
+    storeId: item.store_id ?? item.storeId ?? null,
+    storeName: item.store_name || item.storeName || '',
+    platform: adaptPlatform(item.platform),
     priority: numberValue(item.priority),
     title: item.title || '',
     description: item.description || '',
@@ -1217,6 +1220,13 @@ export function adaptOperatorWorkbench(data = {}) {
   const source = (key) => ({
     sourceStatus: data.sources?.[key]?.status || 'unavailable',
     reasonCode: data.sources?.[key]?.reason_code || '',
+    failedStoreCount: numberValue(data.sources?.[key]?.failed_store_count),
+    failures: (data.sources?.[key]?.failures || []).map((failure) => ({
+      storeId: failure.store_id ?? failure.storeId ?? null,
+      storeName: failure.store_name || failure.storeName || '',
+      platform: adaptPlatform(failure.platform),
+      reasonCode: failure.reason_code || failure.reasonCode || '',
+    })),
   });
   return {
     summary: {
@@ -1358,6 +1368,9 @@ function adaptStoreOverviewRow(item = {}) {
       orders: adaptOverviewResource(resources.orders),
       customerInquiries: adaptOverviewResource(resources.customer_inquiries || resources.customerInquiries),
     },
+    workbenchSummary: adaptOperatorWorkbench({
+      summary: item.workbench_summary || item.workbenchSummary || {},
+    }).summary,
   };
 }
 
@@ -1372,6 +1385,7 @@ export function adaptStoreOverview(data = {}) {
     businessDayStart: data.business_day_start || data.businessDayStart || '',
     businessDayEnd: data.business_day_end || data.businessDayEnd || '',
     stores,
+    operatorWorkbench: adaptOperatorWorkbench(data.operator_workbench || data.operatorWorkbench || {}),
     summary: {
       storeCount: numberValue(summary.store_count ?? data.store_count ?? stores.length),
       connectedStoreCount: numberValue(summary.connected_store_count),

@@ -95,7 +95,8 @@ const adaptedWorkbench = adaptDashboardSummary({
     summary: { urgent: 1, action_required: 2, waiting: 3, completed_today: 4 },
     sections: {
       urgent: [{
-        task_id: 'abnormal_order:1', task_type: 'abnormal_order', priority: 100,
+        task_id: 'abnormal_order:1', task_type: 'abnormal_order', store_id: 8,
+        store_name: 'Store 8', platform: 'naver', priority: 100,
         title: '异常订单', description: '需要查看', status: 'urgent', count: 1,
         action_path: '/orders?status=abnormal&orderId=1', action_label: '查看订单',
         related_order_id: 1, related_batch_id: null, related_inquiry_id: null,
@@ -105,13 +106,38 @@ const adaptedWorkbench = adaptDashboardSummary({
     },
     sources: {
       orders: { status: 'ready' }, shipping: { status: 'ready' },
-      customer_inquiries: { status: 'blocked', reason_code: 'cleanup_failed' },
+      customer_inquiries: {
+        status: 'blocked', reason_code: 'cleanup_failed', failed_store_count: 1,
+        failures: [{ store_id: 8, store_name: 'Store 8', platform: 'naver', reason_code: 'ip_not_allowed' }],
+      },
     },
   },
 }).summary.operatorWorkbench;
 assert.equal(adaptedWorkbench.summary.actionRequired, 2);
 assert.equal(adaptedWorkbench.sections.urgent[0].actionPath, '/orders?status=abnormal&orderId=1');
+assert.equal(adaptedWorkbench.sections.urgent[0].storeId, 8);
+assert.equal(adaptedWorkbench.sections.urgent[0].storeName, 'Store 8');
+assert.equal(adaptedWorkbench.sections.urgent[0].platform, 'Naver');
 assert.equal(adaptedWorkbench.sources.customer_inquiries.sourceStatus, 'blocked');
+assert.equal(adaptedWorkbench.sources.customer_inquiries.failedStoreCount, 1);
+assert.equal(adaptedWorkbench.sources.customer_inquiries.failures[0].reasonCode, 'ip_not_allowed');
+
+const { adaptStoreOverview } = await import('../src/services/adapters.js');
+const adaptedOverview = adaptStoreOverview({
+  stores: [{
+    store_id: 8, store_name: 'Store 8', platform: 'naver',
+    workbench_summary: { urgent: 1, action_required: 2, waiting: 0, completed_today: 3 },
+  }],
+  operator_workbench: { summary: { urgent: 1 }, sections: {}, sources: {} },
+});
+assert.equal(adaptedOverview.stores[0].workbenchSummary.actionRequired, 2);
+assert.equal(adaptedOverview.operatorWorkbench.summary.urgent, 1);
+
+const dashboardText = read('src/pages/Dashboard.jsx');
+assert.ok(dashboardText.includes('state.overview?.operatorWorkbench'), 'dashboard queue must use store overview aggregation');
+assert.ok(dashboardText.includes('setSelectedStoreId(task.storeId)'), 'task navigation must set store before route navigation');
+assert.ok(!dashboardText.includes('runManualAllStoresSync'), 'dashboard must not expose all-store manual sync');
+assert.ok(!dashboardText.includes('runManualStoreSync'), 'dashboard must not expose single-store manual sync');
 
 includesAll('src/pages/Orders.jsx', [
   '订单状态分组',

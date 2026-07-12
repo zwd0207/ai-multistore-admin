@@ -305,12 +305,35 @@ function mockStoreOverview() {
       },
     },
   ];
+  stores.forEach((store, index) => {
+    store.workbench_summary = index === 0
+      ? { urgent: 0, action_required: 1, waiting: 0, completed_today: 2 }
+      : { urgent: index === 1 ? 1 : 0, action_required: 1, waiting: 0, completed_today: 1 };
+  });
   return {
     status: 'store_overview_ready',
     data_policy: '无法确认真实平台数据时显示 ?，避免把未知误判为 0。',
     business_timezone: 'Asia/Seoul',
     business_date: '2026-07-08',
     stores,
+    operator_workbench: {
+      summary: { urgent: 1, action_required: 2, waiting: 1, completed_today: 3 },
+      sections: {
+        urgent: [{
+          task_id: 'abnormal_order:9', task_type: 'abnormal_order', store_id: 9,
+          store_name: '闊╁浗鏈湴杩愬姩闉嬪簵', platform: 'coupang', priority: 100,
+          title: '璇锋鏌ュ紓甯歌鍗?', description: '搴楅摵杩炴帴闇€瑕佺鐞嗗憳妫€鏌?',
+          status: 'urgent', count: 1, action_path: '/orders?status=abnormal', action_label: '鏌ョ湅璁㈠崟',
+          updated_at: '2026-07-08T09:05:00+09:00', stale: true,
+        }],
+        action_required: [], waiting: [], completed_today: [],
+      },
+      sources: {
+        orders: { status: 'partial', reason_code: 'store_connection_partial', failed_store_count: 1, failures: [] },
+        shipping: { status: 'ready', reason_code: '', failed_store_count: 0, failures: [] },
+        customer_inquiries: { status: 'blocked', reason_code: 'not_open', failed_store_count: 3, failures: [] },
+      },
+    },
     summary: {
       store_count: stores.length,
       connected_store_count: 1,
