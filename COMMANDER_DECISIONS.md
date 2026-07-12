@@ -94,3 +94,7 @@ On 2026-07-12, the owner confirmed that the real data currently read from `pxgÁê
 ## D022 - T10 Terra contract accepted
 
 Terra commit `bec5875` was independently reviewed and integrated as `66074a8`. The ordinary customer-inquiry API now aggregates generic inquiries with saved PXG/Naver read-only inquiry metadata under session, MFA, store, permission, privacy, and disabled-reply controls. Focused verification and `verify_all.py` passed after integration. Luna may now implement Phase B against this stable contract; Sol remains paused until the UI is integrated and browser-verified.
+
+## D023 - T10 Commander Gate B accepted
+
+Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed focused contract tests, session verification, frontend build, and Commander browser verification. The saved real PXG/Naver inquiry remains visible after logout/login, missing order and logistics context is represented as a normal state, reply controls remain disabled, desktop and 390px layouts stay within the viewport, and the browser console is clean. Sol may now perform the single final Phase C boundary review; Terra and Luna remain paused.
