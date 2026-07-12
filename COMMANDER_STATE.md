@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: first bounded PXG/Naver real-read persistence completed; operator review pending
+Status: T10 customer inquiry runtime passed; Luna mobile layout correction pending
 
 ## Mission
 
@@ -16,7 +16,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted code integration: `66eff2d`
+- Last accepted backend integration: `66074a8`
+- Luna runtime correction is present at `fb88c396` but is not yet accepted by Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
 - Sol T06-FINAL-R2 returned `passed` with no blocker and approved a single-store manual trial with real platform writes disabled.
@@ -71,6 +72,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `12718ec`: authenticated store reload, artificial-order visibility, accurate closed-write health status, and exact trial-process shutdown.
 - Browser QA passed local login, MFA, one-store isolation, three artificial orders, warehouse page visibility, and closed platform processing.
 - First operator rehearsal proved batch persistence after logout/login and exposed two UX gaps; customer order/logistics context and closed-write UI were fixed and browser reverified.
+- T10 Commander Gate B desktop verification passed: the saved real inquiry is visible, the no-related-order state is honest, reply is disabled, the detail modal works, and the browser console is clean.
+- T10 Commander Gate B mobile verification at 390px is blocked: the filter row is clipped beyond the right viewport edge and the top account/role area crowds adjacent controls. The detail modal itself fits and scrolls correctly.
 - Real read-only evidence on 2026-07-12: 3 product summaries, 2 masked orders, 2 masked logistics details, and 3 customer inquiries; HTTP reads succeeded, local business state remained unchanged, and no credentials or complete recipient PII were returned.
 - Sol T06-FINAL-R2: `passed`, no blocker, single-store manual trial approved with real writes disabled.
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
@@ -81,18 +84,19 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused; use only for major safety or architecture gates |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | next: bounded real-read activation and operator data contract |
-| Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused until T10 Commander Gate B passes |
+| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused; T10 backend contract is complete |
+| Luna | `codex2-luna` | `task/luna-operator-ux` | execute T10 R3 mobile layout correction only |
 
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
 2. Treat the real-read result as owner-accepted; do not repeat platform-read investigation without regression evidence.
 3. Terra Gate A is complete and integrated as `66074a8`; do not assign more backend work unless Luna finds a contract defect.
-4. Luna commits `8269a2c` and `92f6176` are not accepted at Gate B. R1 added contract fields but introduced undefined fields in `adaptStore`, used a static text-scan test, and can misclassify placeholder order text as a real relation. Luna executes `.codex-handoff/T10-LUNA-R2.md`.
-5. After Luna integration and commander browser verification, Sol performs the single final T10 boundary review.
-6. Do not run another real persistence batch without a new explicit approval.
+4. Luna runtime correction `fb88c396` passed focused tests, build, desktop browser verification, real inquiry visibility, empty-order handling, and disabled reply checks.
+5. Luna executes `.codex-handoff/T10-LUNA-R3.md` to fix only the 390px filter and header overflow. Terra and Sol remain paused.
+6. After Luna R3 integration and commander desktop/mobile browser verification, Sol performs the single final T10 boundary review.
+7. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract
 
