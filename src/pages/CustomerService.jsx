@@ -62,6 +62,9 @@ function normalizeMessage(row = {}) {
     createdAt: row.createdAt || row.created_at || '',
     lastReplyAt: row.lastReplyAt || row.updatedAt || '',
     sourceInfo,
+    replyEnabled: row.replyEnabled !== false,
+    replyDisabledReason: row.replyDisabledReason || '',
+    hasRelatedOrder: Boolean(row.order_context || row.orderContext || row.relatedOrder?.orderNo || row.orderNo),
   };
 }
 
@@ -274,7 +277,7 @@ export default function CustomerService() {
               renderActions={(row) => (
                 <>
                   <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
-                  <button type="button" disabled title="当前只读，不能发送">回复</button>
+                  <button type="button" disabled={!row.replyEnabled} title={row.replyEnabled ? '' : '当前咨询仅供查看，不能发送'}>回复</button>
                 </>
               )}
             />
@@ -293,11 +296,11 @@ export default function CustomerService() {
                 ['客户', activeMessage.customerName],
                 ['订单号', activeMessage.orderNo],
                 ['商品', activeMessage.productName],
-                ['订单状态', activeMessage.relatedOrder?.orderStatus || '待确认'],
-                ['发货批次', activeMessage.relatedOrder?.batchNo || '尚未进入批次'],
-                ['仓库进度', activeMessage.relatedOrder?.warehouseStatus || activeMessage.relatedOrder?.batchStatus || '待处理'],
+                ['订单状态', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.orderStatus || '待确认') : '当前读取窗口暂无关联订单'],
+                ['发货批次', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.batchNo || '尚未进入批次') : '当前读取窗口暂无关联订单'],
+                ['仓库进度', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.warehouseStatus || activeMessage.relatedOrder?.batchStatus || '待处理') : '当前读取窗口暂无关联订单'],
                 ['快递公司', activeMessage.relatedOrder?.carrier || '尚未录入'],
-                ['物流单号', activeMessage.relatedOrder?.trackingNumber ? `${String(activeMessage.relatedOrder.trackingNumber).slice(0, 3)}****${String(activeMessage.relatedOrder.trackingNumber).slice(-3)}` : '尚未录入'],
+                ['物流单号', activeMessage.relatedOrder?.trackingNumber || '尚未录入'],
                 ['状态', <StatusBadge value={activeMessage.statusLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
                 ['记录状态', activeMessage.sourceInfo.label],

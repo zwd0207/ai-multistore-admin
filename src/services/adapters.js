@@ -257,6 +257,9 @@ export function adaptStore(item = {}) {
     manager: emptyText(item.owner_name, '未配置'),
     products: numberValue(item.product_count),
     rawStatus: item.status,
+    replyEnabled,
+    replyDisabledReason: item.reply_disabled_reason || item.replyDisabledReason || '',
+    source,
     status: adaptStatus(item.status, { active: '정상 운영', inactive: '使用中止' }),
     remark: item.remark,
     createdAt: item.created_at,
@@ -528,24 +531,28 @@ export function adaptNaverOrderCompletePreview(data = {}) {
 
 export function adaptCustomerInquiry(item = {}) {
   const rawData = item.raw_data || {};
-  const relatedOrder = item.related_order || item.relatedOrder || {};
+  const stableOrder = item.order_context || item.orderContext || null;
+  const stableLogistics = item.logistics_context || item.logisticsContext || {};
+  const relatedOrder = stableOrder || item.related_order || item.relatedOrder || {};
   const productOrderIds = Array.isArray(rawData.product_order_id_list) ? rawData.product_order_id_list : [];
   const orderNo = item.order_no || relatedOrder.order_no || rawData.order_id || productOrderIds[0] || '';
   const productName = item.product_name || relatedOrder.product_name || rawData.product_name || '';
+  const source = item.source || rawData.source || item.source_type || '';
+  const replyEnabled = item.reply_enabled ?? item.replyEnabled ?? (source !== 'naver_readonly');
   return {
-    id: item.id,
+    id: item.inquiry_id || item.id,
     storeId: item.store_id,
-    platform: adaptPlatform(item.platform),
-    rawPlatform: normalizePlatform(item.platform),
+    platform: adaptPlatform(item.platform || source),
+    rawPlatform: normalizePlatform(item.platform || source),
     ticketNo: item.external_inquiry_id,
     externalInquiryId: item.external_inquiry_id,
-    type: item.inquiry_type,
-    inquiryType: item.inquiry_type,
+    type: item.category || item.inquiry_type,
+    inquiryType: item.category || item.inquiry_type,
     customer: item.customer_name,
     customerName: item.customer_name,
-    title: item.title,
-    content: item.content,
-    summary: item.title || item.content,
+    title: item.title || item.summary,
+    content: item.content || item.summary,
+    summary: item.summary || item.title || item.content,
     rawStatus: item.status,
     status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
     priority: item.priority || '일반',
@@ -558,23 +565,24 @@ export function adaptCustomerInquiry(item = {}) {
       productOrderNo: relatedOrder.product_order_no || productOrderIds[0] || '',
       productName: relatedOrder.product_name || productName,
       orderStatus: relatedOrder.order_status || '',
-      batchNo: relatedOrder.batch_no || '',
-      batchStatus: relatedOrder.batch_status || '',
+      batchNo: relatedOrder.warehouse_batch_no || relatedOrder.batch_no || '',
+      batchStatus: relatedOrder.warehouse_batch_status || relatedOrder.batch_status || '',
       warehouseStatus: relatedOrder.warehouse_row_status || '',
-      carrier: relatedOrder.carrier || '',
-      trackingNumber: relatedOrder.tracking_number || '',
-      trackingStatus: relatedOrder.tracking_status || '',
+      carrier: stableLogistics.carrier || relatedOrder.carrier || '',
+      trackingNumber: stableLogistics.tracking_number_masked || relatedOrder.tracking_number_masked || relatedOrder.tracking_number || '',
+      trackingStatus: stableLogistics.shipment_status || relatedOrder.tracking_status || '',
+      shippedAt: stableLogistics.shipped_at || '',
     },
     answerContent: rawData.answer_content || '',
     platformReplySubmitted: Boolean(rawData.platform_reply_submitted),
     platformReplyAlreadyExisted: Boolean(rawData.platform_reply_already_existed),
     rawResponseSaved: Boolean(rawData.raw_response_saved),
-    sourceType: rawData.source_type || '',
+    sourceType: source || rawData.source_type || '',
     receivedAt: item.received_at,
-    createdAt: item.received_at,
+    createdAt: item.created_at || item.received_at,
     answeredAt: item.answered_at,
     lastReplyAt: emptyText(item.answered_at),
-    updatedAt: emptyText(item.updated_at),
+    updatedAt: emptyText(item.updated_at || item.created_at),
     orderInfo: {
       orderNo: emptyText(orderNo),
       paymentMethod: '—',
