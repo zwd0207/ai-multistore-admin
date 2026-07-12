@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T11 accepted; T12 multi-store operator workbench in progress
+Status: T12 multi-store operator workbench accepted
 
 ## Mission
 
@@ -81,6 +81,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Browser QA passed login, MFA, user display, logout, expiry, forbidden state, desktop, and 390px mobile.
 - Frontend build, session contract, warehouse contract, production-session verification, warehouse verification, and `verify_all.py` passed before T06-R2.1.
 - `61dda9a`: T11 reused the existing dashboard summary, order, warehouse, and inquiry services to deliver a real current-store workbench with four task sections and deep links. Full verification, desktop QA, and 390px QA passed; no production write or automation path was opened.
+- `357a7d7`, `cda44ce`, and `9ebbf4e`: T12 added an authorized multi-store workbench to the existing store overview, removed dashboard synchronization controls, preserved single-store deep links, and enforced session/MFA plus active membership, role, store, and `dashboard.read`. Focused tests, `verify_all.py`, desktop QA, 390px QA, and Sol final review passed.
 
 ## Worktree Registry
 
@@ -101,8 +102,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 6. Terra commit `deb14c3` is integrated as `ac2b687`. Customer workflow, retention cleanup, production sessions, and full `verify_all.py` passed independently.
 7. Sol T10 R2 passed cleanup, legacy sync, security, privacy, and write-boundary review with no blocker.
 8. T11 is accepted at `61dda9a`.
-9. T12 is active under the frozen contract in `.codex-handoff/T12-SOL-CONTRACT.md`: extend the existing store overview with an authorized multi-store workbench, and do not create another API or task system.
-10. Terra owns the backend authorization and aggregation files. Luna owns the stable-contract frontend files. Their write sets are disjoint.
+9. T12 is accepted under `.codex-handoff/T12-SOL-CONTRACT.md`.
+10. The multi-store workbench remains read-only. It does not authorize synchronization, bulk execution, platform writeback, customer sending, or AI actions.
 11. Do not run another real persistence batch without a new explicit approval.
 
 ## Compact Reporting Contract

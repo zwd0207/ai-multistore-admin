@@ -118,3 +118,7 @@ The owner accepted T11 at commit `61dda9a`. The existing dashboard summary now e
 ## D028 - T12 extends store overview, not the single-store summary
 
 T12 multi-store workbench extends the existing `GET /dashboard/store-overview` response and keeps `GET /dashboard/summary?store_id=` as the T11 single-store contract. Only active stores granted through active membership, active role, and `dashboard.read` may be aggregated. The backend reuses the T11 workbench builder per authorized store; the frontend must not reclassify tasks. T12 removes dashboard sync execution controls and remains read-only: no batch execution, manual task completion, platform write, customer send, scheduler, or AI action is allowed.
+
+## D029 - T12 multi-store operator workbench accepted
+
+T12 commits `357a7d7`, `cda44ce`, and `9ebbf4e` passed focused multi-store and single-store verification, frontend contracts, session security, production build, full `verify_all.py`, desktop browser QA, 390px browser QA, and Sol final review. The store overview now returns only distinct authorized active stores and aggregates the existing T11 workbench without exposing cross-store data or PII. The frontend supports all-authorized-store and single-store views, switches store context before task navigation, and does not display technical source errors. This acceptance is read-only and does not activate platform writes, customer sending, synchronization execution, task completion, scheduled jobs, AI actions, or additional real persistence.
