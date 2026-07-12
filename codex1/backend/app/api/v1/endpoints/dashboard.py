@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.auth import ErpUser
 from app.services import stats_service
 from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_permission
+from app.services.session_service import require_session
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -49,7 +50,8 @@ def get_store_overview(
     include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
-    user = db.get(ErpUser, getattr(request.state, "authenticated_user_id", None))
+    principal = require_session(request, db)
+    user = db.get(ErpUser, principal.user_id)
     if user is None:
         raise ApiError("login session is required", "session_required", 401)
     identity = OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash)

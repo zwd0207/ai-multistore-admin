@@ -15,7 +15,11 @@ const WORKBENCH_SECTIONS = [
   ['waiting', '等待中', 'info'],
   ['completed_today', '今日完成', 'success'],
 ];
-const WORKBENCH_SOURCE_KEYS = ['orders', 'shipping', 'customer_inquiries'];
+const SOURCE_LABELS = {
+  orders: '订单',
+  shipping: '仓库发货',
+  customer_inquiries: '客户咨询',
+};
 
 function rowsOf(result) { return result?.data || result?.items || []; }
 
@@ -82,12 +86,22 @@ export default function Dashboard() {
     }
     async function load() {
       const scope = isBackendSource && selectedStoreId ? { storeId: selectedStoreId } : {};
-      const [overview, orders, activities] = await Promise.all([
-        loadOr(() => dataProvider.getStoreOverview({ includeInactive: false }), null),
-        loadOr(() => dataProvider.getOrders({ ...scope, page: 1, pageSize: 100 }), { data: [] }),
-        loadOr(() => dataProvider.getOperationAuditLogs({ ...scope, page: 1, pageSize: 8 }), { data: [] }),
-      ]);
-      if (!cancelled) setState({ loading: false, error: '', overview, orders: rowsOf(orders), activities: rowsOf(activities) });
+      try {
+        const overview = await dataProvider.getStoreOverview({ includeInactive: false });
+        const [orders, activities] = await Promise.all([
+          loadOr(() => dataProvider.getOrders({ ...scope, page: 1, pageSize: 100 }), { data: [] }),
+          loadOr(() => dataProvider.getOperationAuditLogs({ ...scope, page: 1, pageSize: 8 }), { data: [] }),
+        ]);
+        if (!cancelled) setState({ loading: false, error: '', overview, orders: rowsOf(orders), activities: rowsOf(activities) });
+      } catch (requestError) {
+        if (!cancelled) setState({
+          loading: false,
+          error: requestError.message || '今日工作台暂时无法加载',
+          overview: null,
+          orders: [],
+          activities: [],
+        });
+      }
     }
     setState((current) => ({ ...current, loading: true, error: '' }));
     load();
@@ -123,7 +137,12 @@ export default function Dashboard() {
       <section className="content-card">
         <div className="card-title"><div><h2>今天先处理什么</h2><p>任务分类和优先级由后端工作台聚合提供。</p></div></div>
         {sourceNotices.length ? <div className="form-info source-notices">
-          {sourceNotices.map(([key, source]) => <span key={key}>{key}: {source.sourceStatus}{source.reasonCode ? ` (${source.reasonCode})` : ''}{source.failedStoreCount ? ` · ${source.failedStoreCount} 个店铺失败` : ''}</span>)}
+          {sourceNotices.map(([key, source]) => (
+            <span key={key}>
+              {source.sourceStatus === 'blocked' ? '当前无法读取' : '部分店铺暂时无法读取'}{SOURCE_LABELS[key] || '业务数据'}
+              {source.failedStoreCount ? `，涉及 ${source.failedStoreCount} 个店铺` : ''}
+            </span>
+          ))}
         </div> : null}
         <div className="workbench-grid">
           {WORKBENCH_SECTIONS.map(([key, label, tone]) => {

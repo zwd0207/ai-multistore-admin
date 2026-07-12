@@ -4,9 +4,47 @@ import path from 'node:path';
 
 const root = process.cwd();
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const includesAll = (file, phrases) => {
+  const text = read(file);
+  for (const phrase of phrases) assert.ok(text.includes(phrase), `${file} should include "${phrase}"`);
+};
 const dashboard = read('src/pages/Dashboard.jsx');
 const adapters = read('src/services/adapters.js');
 const provider = read('src/services/dataProvider.js');
+
+includesAll('codex1/backend/app/api/v1/endpoints/dashboard.py', [
+  '@router.get("/store-overview")',
+  'get_store_overview',
+  'require_session',
+  'require_any_store_permission',
+]);
+includesAll('codex1/backend/app/services/stats_service.py', [
+  'def get_store_overview',
+  'display_value": "?"',
+  'ip_not_allowed',
+  'orders_unknown_store_count',
+  '_aggregate_store_overview_workbenches',
+  'operator_workbench',
+]);
+includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
+  '@router.post("/manual-batch/all")',
+  'manual_batch_sync_all_stores',
+]);
+includesAll('codex1/backend/app/services/sync_service.py', [
+  'def manual_batch_sync_all_stores',
+  'store_results',
+  'platform_write": False',
+]);
+includesAll('src/services/backendApi.js', [
+  'getStoreOverview',
+  "'/dashboard/store-overview'",
+  'runManualAllStoresSync',
+]);
+includesAll('src/services/dataProvider.js', [
+  'getStoreOverview',
+  'runManualAllStoresSync',
+  'mockStoreOverview',
+]);
 
 assert.ok(dashboard.includes('operatorWorkbench'), 'dashboard must render operator workbench');
 assert.ok(dashboard.includes('state.overview?.operatorWorkbench'), 'dashboard queue must use store overview');
