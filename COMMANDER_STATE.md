@@ -90,7 +90,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
 2. Treat the real-read result as owner-accepted; do not repeat platform-read investigation without regression evidence.
 3. Terra Gate A is complete and integrated as `66074a8`; do not assign more backend work unless Luna finds a contract defect.
-4. Luna commit `8269a2c` is not accepted at Gate B because the frontend adapter still ignores Terra's `inquiry_id`, `summary`, `order_context`, and `logistics_context` fields. Luna executes `.codex-handoff/T10-LUNA-R1.md`.
+4. Luna commits `8269a2c` and `92f6176` are not accepted at Gate B. R1 added contract fields but introduced undefined fields in `adaptStore`, used a static text-scan test, and can misclassify placeholder order text as a real relation. Luna executes `.codex-handoff/T10-LUNA-R2.md`.
 5. After Luna integration and commander browser verification, Sol performs the single final T10 boundary review.
 6. Do not run another real persistence batch without a new explicit approval.
 
