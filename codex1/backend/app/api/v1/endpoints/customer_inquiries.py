@@ -20,6 +20,11 @@ def list_customer_inquiries(
 ) -> dict:
     normalized_platform = normalize_platform(platform) if platform else None
     require_store_permission(db, identity=identity, store_id=store_id, permission_key="orders.read")
+    customer_inquiry_service.assert_customer_inquiry_read_cleanup_healthy(
+        db,
+        store_id=store_id,
+        platform=normalized_platform,
+    )
     items = customer_inquiry_service.list_customer_inquiries(
         db,
         store_id=store_id,

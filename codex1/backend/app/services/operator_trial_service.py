@@ -40,8 +40,18 @@ TRIAL_PERMISSION_KEYS = {
 FORBIDDEN_TRIAL_PERMISSION_KEYS = {"*", "system.configure", "shipping.writeback.approve", "customer.inquiries.reply"}
 DISABLED_TRIAL_WRITE_PATHS = {
     "/api/v1/shipping/shipment-writeback/execute",
+    "/api/v1/sync/customer-inquiries/naver",
     "/api/v1/sync/customer-inquiries/naver/reply",
 }
+
+
+def assert_legacy_naver_customer_inquiry_sync_closed(settings: Settings) -> None:
+    if settings.operator_trial_enabled:
+        raise ApiError(
+            "legacy Naver customer inquiry sync is disabled for the operator trial",
+            "legacy_naver_customer_inquiry_sync_disabled",
+            403,
+        )
 
 
 def resolve_trial_store(db: Session) -> Store:

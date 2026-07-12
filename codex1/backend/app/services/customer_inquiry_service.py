@@ -3,10 +3,12 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlyLogisticsRecord
 from app.models.shipping import ShippingTrackingImportRow, WarehouseShippingBatchOrder
+from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
 from app.services.store_service import ensure_store_exists
 
 
@@ -143,6 +145,22 @@ def _serialize_pxg_readonly_inquiry(db: Session, inquiry: PxgNaverReadonlyCustom
         "reply_enabled": False,
         "reply_disabled_reason": "readonly_source",
     }
+
+
+def assert_customer_inquiry_read_cleanup_healthy(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str | None = None,
+) -> None:
+    if platform is not None and platform != "naver":
+        return
+    has_pxg_inquiry = db.scalar(select(PxgNaverReadonlyCustomerInquiry.id).where(
+        PxgNaverReadonlyCustomerInquiry.store_id == store_id,
+        PxgNaverReadonlyCustomerInquiry.platform == "naver",
+    ).limit(1))
+    if has_pxg_inquiry is not None:
+        assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=get_settings())
 
 
 def upsert_customer_inquiries(db: Session, store_id: int, platform: str, items: list[dict]) -> dict:

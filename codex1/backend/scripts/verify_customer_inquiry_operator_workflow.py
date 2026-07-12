@@ -22,6 +22,7 @@ os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["OPERATOR_TRIAL_ENABLED"] = "true"
 os.environ["OPERATOR_TRIAL_ARTIFICIAL_DATA_ONLY"] = "true"
 os.environ["OPERATOR_TRIAL_REAL_READ_ENABLED"] = "false"
+os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -29,15 +30,25 @@ if str(BACKEND_DIR) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.core.timezone import get_utc_now
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
-from app.models.pxg_naver_readonly import PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlyLogisticsRecord
+from app.models.pxg_naver_readonly import (
+    PxgNaverReadonlyCleanupStatus,
+    PxgNaverReadonlyCustomerInquiry,
+    PxgNaverReadonlyLogisticsRecord,
+    PxgNaverReadonlySyncBackup,
+    PxgNaverReadonlySyncBatch,
+    PxgNaverReadonlySyncControl,
+)
 from app.models.store import Store
+from app.models.sync_log import SyncLog
 from app.services.encryption import encrypt_value
+from app.services import sync_service
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
 
@@ -82,12 +93,15 @@ def seed() -> None:
             permission_group="customer",
             permission_label_zh="test",
         )
-        db.add_all([store, other_store, permitted_role, denied_role, orders_read, customer_reply])
+        platform_sync = ErpPermission(permission_key="platform.sync", permission_group="sync", permission_label_zh="test")
+        db.add_all([store, other_store, permitted_role, denied_role, orders_read, customer_reply, platform_sync])
         db.flush()
         db.add(ErpRolePermission(role_id=permitted_role.id, permission_id=orders_read.id))
         db.add(ErpRolePermission(role_id=permitted_role.id, permission_id=customer_reply.id))
+        db.add(ErpRolePermission(role_id=permitted_role.id, permission_id=platform_sync.id))
         _create_user(db, login_identifier="reader@example.test", role=permitted_role, store_id=store.id)
         _create_user(db, login_identifier="denied@example.test", role=denied_role, store_id=store.id)
+        _create_user(db, login_identifier="generic@example.test", role=permitted_role, store_id=other_store.id)
 
         order = Order(
             store_id=store.id,
@@ -160,6 +174,25 @@ def seed() -> None:
             source_observed_at=now,
             expires_at=now + timedelta(minutes=15),
         ))
+        db.add(PxgNaverReadonlyCleanupStatus(
+            store_id=store.id,
+            platform="naver",
+            status="healthy",
+            last_run_at=now,
+            last_success_at=now,
+        ))
+        db.add(CustomerInquiry(
+            store_id=other_store.id,
+            platform="naver",
+            external_inquiry_id="generic-only-1",
+            inquiry_type="product",
+            customer_name="Unrelated Customer",
+            title="Generic-only inquiry",
+            content="No PXG local source exists for this store.",
+            status="open",
+            received_at=now,
+            raw_data={"is_test": True},
+        ))
         db.commit()
 
 
@@ -177,6 +210,28 @@ def authenticate(client: TestClient, login_identifier: str) -> str:
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]["csrf_token"]
+
+
+def assert_pxg_metadata_blocked(client: TestClient, *, expected_error_code: str) -> None:
+    response = client.get("/api/v1/customer-inquiries", params={"store_id": 1})
+    assert response.status_code == 409, response.text
+    payload = response.json()
+    assert payload["error_code"] == expected_error_code, payload
+    assert "data" not in payload and "ORDER-1" not in response.text and "product_question" not in response.text, response.text
+
+
+def restore_cleanup_health() -> None:
+    with SessionLocal() as db:
+        cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=1, platform="naver").one()
+        cleanup.status = "healthy"
+        cleanup.last_run_at = get_utc_now()
+        cleanup.last_success_at = get_utc_now()
+        control = db.query(PxgNaverReadonlySyncControl).filter_by(store_id=1, platform="naver").one_or_none()
+        if control is not None:
+            control.write_and_refresh_blocked = False
+            control.backup_retention_failed = False
+            control.reason_code = None
+        db.commit()
 
 
 def main() -> None:
@@ -213,6 +268,133 @@ def main() -> None:
         assert pxg_item["logistics_context"]["tracking_number_masked"] == "1234****7890", pxg_item
         no_context_item = next(item for item in items if item["category"] == "product_question")
         assert no_context_item["order_context"] == {} and no_context_item["logistics_context"] == {}, no_context_item
+
+        with SessionLocal() as db:
+            cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=1, platform="naver").one()
+            cleanup.last_success_at = None
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_retention_cleanup_no_successful_run")
+        restore_cleanup_health()
+
+        with SessionLocal() as db:
+            cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=1, platform="naver").one()
+            cleanup.status = "failed"
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_retention_cleanup_failed")
+        restore_cleanup_health()
+
+        with SessionLocal() as db:
+            cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=1, platform="naver").one()
+            cleanup.status = "manual_review_required"
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_retention_cleanup_manual_review_required")
+        restore_cleanup_health()
+
+        with SessionLocal() as db:
+            cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=1, platform="naver").one()
+            cleanup.last_success_at = get_utc_now() - timedelta(hours=25)
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_retention_cleanup_overdue")
+        restore_cleanup_health()
+
+        os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "false"
+        get_settings.cache_clear()
+        try:
+            assert_pxg_metadata_blocked(client, expected_error_code="readonly_retention_cleanup_disabled")
+            client.cookies.clear()
+            authenticate(client, "generic@example.test")
+            unrelated = client.get("/api/v1/customer-inquiries", params={"store_id": 2})
+            assert unrelated.status_code == 200 and unrelated.json()["data"]["total"] == 1, unrelated.text
+        finally:
+            os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
+            get_settings.cache_clear()
+        client.cookies.clear()
+        csrf = authenticate(client, "reader@example.test")
+
+        with SessionLocal() as db:
+            control = PxgNaverReadonlySyncControl(
+                store_id=1,
+                platform="naver",
+                write_and_refresh_blocked=True,
+                reason_code="test_lock",
+            )
+            db.add(control)
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_sync_safety_blocked")
+        restore_cleanup_health()
+
+        with SessionLocal() as db:
+            batch = PxgNaverReadonlySyncBatch(
+                batch_no="T10-EXPIRED-BACKUP",
+                store_id=1,
+                platform="naver",
+                status="completed",
+                actor_id_hash="a" * 64,
+                baseline_counts={},
+            )
+            db.add(batch)
+            db.flush()
+            backup = PxgNaverReadonlySyncBackup(
+                batch_id=batch.id,
+                store_id=1,
+                platform="naver",
+                backup_ref="t10-expired-backup",
+                encrypted_path="t10-test-only.enc",
+                checksum_sha256="b" * 64,
+                schema_version="test",
+                actor_id_hash="c" * 64,
+                baseline_manifest={},
+                expires_at=get_utc_now() - timedelta(seconds=1),
+            )
+            db.add(backup)
+            db.commit()
+        assert_pxg_metadata_blocked(client, expected_error_code="readonly_expired_backup_pending")
+        with SessionLocal() as db:
+            db.query(PxgNaverReadonlySyncBackup).filter_by(backup_ref="t10-expired-backup").one().deleted_at = get_utc_now()
+            db.commit()
+
+        original_credential_lookup = sync_service._ensure_naver_product_preview_credential
+        def unexpected_legacy_inquiry_work(*_args, **_kwargs):
+            raise AssertionError("legacy inquiry sync reached token, network, or local-write work")
+        sync_service._ensure_naver_product_preview_credential = unexpected_legacy_inquiry_work
+        try:
+            with SessionLocal() as db:
+                inquiry_count_before = db.query(CustomerInquiry).filter_by(store_id=1).count()
+                legacy_sync_log_count_before = db.query(SyncLog).filter_by(
+                    store_id=1,
+                    sync_type="naver_customer_inquiry_real_sync",
+                ).count()
+            direct_legacy_sync = client.post(
+                "/api/v1/sync/customer-inquiries/naver",
+                headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+                json={"store_id": 1, "page": 1, "size": 1},
+            )
+            assert direct_legacy_sync.status_code == 403 and direct_legacy_sync.json()["error_code"] == "legacy_platform_write_disabled", direct_legacy_sync.text
+            with SessionLocal() as db:
+                assert db.query(CustomerInquiry).filter_by(store_id=1).count() == inquiry_count_before
+                assert db.query(SyncLog).filter_by(
+                    store_id=1,
+                    sync_type="naver_customer_inquiry_real_sync",
+                ).count() == legacy_sync_log_count_before
+            with SessionLocal() as db:
+                manual = sync_service.manual_batch_sync(
+                    db,
+                    store_id=1,
+                    platforms=["naver"],
+                    include_products=False,
+                    include_orders=False,
+                    include_customer_inquiries=True,
+                )
+            inquiry_item = next(item for item in manual["items"] if item["resource"] == "customer_inquiries")
+            assert inquiry_item["error_code"] == "legacy_naver_customer_inquiry_sync_disabled", manual
+            with SessionLocal() as db:
+                assert db.query(CustomerInquiry).filter_by(store_id=1).count() == inquiry_count_before
+                assert db.query(SyncLog).filter_by(
+                    store_id=1,
+                    sync_type="naver_customer_inquiry_real_sync",
+                ).count() == legacy_sync_log_count_before
+        finally:
+            sync_service._ensure_naver_product_preview_credential = original_credential_lookup
 
         repeated = client.get("/api/v1/customer-inquiries", params={"store_id": 1})
         assert repeated.status_code == 200, repeated.text

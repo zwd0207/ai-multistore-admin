@@ -36,6 +36,7 @@ from app.services import (
     product_service,
     sync_log_service,
 )
+from app.services.operator_trial_service import assert_legacy_naver_customer_inquiry_sync_closed
 from app.services.store_service import ensure_store_exists, normalize_platform
 
 
@@ -1251,6 +1252,7 @@ def sync_naver_customer_inquiries(
     page: int = 1,
     size: int = 50,
 ) -> dict:
+    assert_legacy_naver_customer_inquiry_sync_closed(get_settings())
     credential = _ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
     safe_start, safe_end = _default_naver_customer_inquiry_date_range(start_date, end_date)
     sync_log = sync_log_service.create_sync_log(

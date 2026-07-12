@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
 from app.database import get_db
+from app.config import get_settings
 from app.schemas.sync import (
     CoupangOrderPreviewRequest,
     CoupangOrderSyncRequest,
@@ -19,6 +20,7 @@ from app.schemas.sync import (
     NaverProductPreviewRequest,
 )
 from app.services import sync_service
+from app.services.operator_trial_service import assert_legacy_naver_customer_inquiry_sync_closed
 
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -282,6 +284,7 @@ def sync_naver_customer_inquiries(
     payload: NaverCustomerInquirySyncRequest,
     db: Session = Depends(get_db),
 ) -> dict:
+    assert_legacy_naver_customer_inquiry_sync_closed(get_settings())
     result = sync_service.sync_naver_customer_inquiries(
         db,
         store_id=payload.store_id,
