@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
@@ -114,23 +113,7 @@ export default function CustomerService() {
   const [replyConfirm, setReplyConfirm] = useState(false);
   const [replySubmitting, setReplySubmitting] = useState(false);
   const [draftReplies, setDraftReplies] = useState({});
-  const [platformReplyEnabled, setPlatformReplyEnabled] = useState(!isBackendSource);
-
-  useEffect(() => {
-    if (!isBackendSource) return undefined;
-    let cancelled = false;
-    dataProvider.healthCheck()
-      .then((health) => {
-        if (cancelled) return;
-        const approved = health.approved_platform_write_operations || health.approvedPlatformWriteOperations || [];
-        setPlatformReplyEnabled(
-          health.controlled_platform_writes_enabled === true
-          && approved.includes('naver_customer_inquiry_reply'),
-        );
-      })
-      .catch(() => { if (!cancelled) setPlatformReplyEnabled(false); });
-    return () => { cancelled = true; };
-  }, []);
+  const platformReplyEnabled = false;
 
   const load = async (nextQuery = query) => {
     if (isBackendSource && storeLoading) return [];
@@ -241,12 +224,7 @@ export default function CustomerService() {
     <>
       <PageHeader
         title="客户咨询"
-        description="集中查看客户问题并准备回复。发送回复前，请先核对订单和物流信息。"
-        actions={(
-          <>
-            <button type="button" className="button primary" onClick={syncPlatformMessages}>更新客户咨询</button>
-          </>
-        )}
+        description="查看客户问题、订单和物流进度。当前只读，不发送平台回复。"
       />
 
       <div className="summary-grid">
@@ -255,23 +233,6 @@ export default function CustomerService() {
         <SummaryCard title="紧急消息" value={summary.urgent} note="优先处理" tone={summary.urgent ? 'danger' : 'success'} />
         <SummaryCard title="需人工到平台后台处理" value={summary.manual} note="不自动回复客户" tone="warning" />
       </div>
-
-      <section className="content-card">
-        <div className="business-capability-grid compact">
-          <article className="business-capability-card warning">
-            <div className="business-capability-head"><strong>先看订单进度</strong><span>处理前</span></div>
-            <p>回复前请核对订单、商品规格和物流进度，避免给客户错误答复。</p>
-          </article>
-          <article className="business-capability-card info">
-            <div className="business-capability-head"><strong>回复处理</strong><span>人工确认</span></div>
-            <p>回复内容可先保存为草稿；确认无误后，再由运营人员发送给客户。</p>
-          </article>
-          <article className="business-capability-card muted">
-            <div className="business-capability-head"><strong>复杂问题</strong><span>人工处理</span></div>
-            <p>退款、换货、投诉和平台审核问题需要按实际情况人工处理。</p>
-          </article>
-        </div>
-      </section>
 
       <FilterPanel>
         <SearchBar
@@ -302,12 +263,7 @@ export default function CustomerService() {
         {!error && !loading && !rows.length ? (
           <EmptyState
             title="当前没有客户咨询"
-            description="可以更新客户咨询；如果仍为空，请联系管理员检查店铺连接。"
-            actions={(
-              <>
-                <button type="button" className="button primary" onClick={syncPlatformMessages}>更新客户咨询</button>
-              </>
-            )}
+            description="当前读取窗口暂无关联订单或客户咨询。"
           />
         ) : (
           <>
@@ -318,8 +274,7 @@ export default function CustomerService() {
               renderActions={(row) => (
                 <>
                   <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
-                  <button type="button" onClick={() => openDraft(row)}>回复</button>
-                  <button type="button" disabled title="需人工到平台后台处理">平台后台处理</button>
+                  <button type="button" disabled title="当前只读，不能发送">回复</button>
                 </>
               )}
             />
@@ -342,7 +297,7 @@ export default function CustomerService() {
                 ['发货批次', activeMessage.relatedOrder?.batchNo || '尚未进入批次'],
                 ['仓库进度', activeMessage.relatedOrder?.warehouseStatus || activeMessage.relatedOrder?.batchStatus || '待处理'],
                 ['快递公司', activeMessage.relatedOrder?.carrier || '尚未录入'],
-                ['物流单号', activeMessage.relatedOrder?.trackingNumber || '尚未录入'],
+                ['物流单号', activeMessage.relatedOrder?.trackingNumber ? `${String(activeMessage.relatedOrder.trackingNumber).slice(0, 3)}****${String(activeMessage.relatedOrder.trackingNumber).slice(-3)}` : '尚未录入'],
                 ['状态', <StatusBadge value={activeMessage.statusLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
                 ['记录状态', activeMessage.sourceInfo.label],
@@ -359,7 +314,7 @@ export default function CustomerService() {
             </section>
             <section className="detail-section">
               <h3>处理提示</h3>
-              <p>Naver 客服回复支持人工确认后提交；退款、换货、投诉处理仍需人工到平台后台处理。</p>
+              <p>当前只显示已保存的客户咨询，不发送平台回复。没有关联订单时，这是正常状态。</p>
             </section>
           </>
         ) : <EmptyState title="暂无消息详情" description="请选择消息查看详情。" />}
