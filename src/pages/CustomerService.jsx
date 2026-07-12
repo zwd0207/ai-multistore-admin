@@ -64,7 +64,7 @@ function normalizeMessage(row = {}) {
     sourceInfo,
     replyEnabled: row.replyEnabled !== false,
     replyDisabledReason: row.replyDisabledReason || '',
-    hasRelatedOrder: Boolean(row.order_context || row.orderContext || row.relatedOrder?.orderNo || row.orderNo),
+    hasRelatedOrder: row.hasRelatedOrder === true,
   };
 }
 
@@ -277,7 +277,7 @@ export default function CustomerService() {
               renderActions={(row) => (
                 <>
                   <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
-                  <button type="button" disabled={!row.replyEnabled} title={row.replyEnabled ? '' : '当前咨询仅供查看，不能发送'}>回复</button>
+                  <button type="button" disabled={!platformReplyEnabled || !row.replyEnabled} title={platformReplyEnabled && row.replyEnabled ? '' : '当前咨询仅供查看，不能发送'}>回复</button>
                 </>
               )}
             />

@@ -1,4 +1,4 @@
-import { getNaverOrderStatusPresentation } from '../utils/naverOrderFulfillment';
+import { getNaverOrderStatusPresentation } from '../utils/naverOrderFulfillment.js';
 
 const numberValue = (value) => Number(value || 0);
 const emptyText = (value, fallback = '—') => value ?? fallback;
@@ -257,9 +257,6 @@ export function adaptStore(item = {}) {
     manager: emptyText(item.owner_name, '未配置'),
     products: numberValue(item.product_count),
     rawStatus: item.status,
-    replyEnabled,
-    replyDisabledReason: item.reply_disabled_reason || item.replyDisabledReason || '',
-    source,
     status: adaptStatus(item.status, { active: '정상 운영', inactive: '使用中止' }),
     remark: item.remark,
     createdAt: item.created_at,
@@ -544,8 +541,8 @@ export function adaptCustomerInquiry(item = {}) {
     storeId: item.store_id,
     platform: adaptPlatform(item.platform || source),
     rawPlatform: normalizePlatform(item.platform || source),
-    ticketNo: item.external_inquiry_id,
-    externalInquiryId: item.external_inquiry_id,
+    ticketNo: item.external_inquiry_id || item.inquiry_id,
+    externalInquiryId: item.external_inquiry_id || item.inquiry_id,
     type: item.category || item.inquiry_type,
     inquiryType: item.category || item.inquiry_type,
     customer: item.customer_name,
@@ -556,6 +553,9 @@ export function adaptCustomerInquiry(item = {}) {
     rawStatus: item.status,
     status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
     priority: item.priority || '일반',
+    replyEnabled,
+    replyDisabledReason: item.reply_disabled_reason || item.replyDisabledReason || '',
+    source,
     store: item.store_name || `店铺 #${item.store_id}`,
     orderNo: emptyText(orderNo),
     productName: emptyText(productName),
@@ -578,6 +578,10 @@ export function adaptCustomerInquiry(item = {}) {
     platformReplyAlreadyExisted: Boolean(rawData.platform_reply_already_existed),
     rawResponseSaved: Boolean(rawData.raw_response_saved),
     sourceType: source || rawData.source_type || '',
+    hasRelatedOrder: Boolean(
+      relatedOrder.order_no || relatedOrder.product_order_no || relatedOrder.id
+      || item.order_no || rawData.order_id || productOrderIds.length,
+    ),
     receivedAt: item.received_at,
     createdAt: item.created_at || item.received_at,
     answeredAt: item.answered_at,
