@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import StoreSelector from '../components/common/StoreSelector';
@@ -9,9 +9,9 @@ const menuGroups = [
   {
     label: '每日运营',
     items: [
-      ['⌂', '今日工作台', '/workbench'],
-      ['⇄', '订单处理', '/orders'],
-      ['▣', '仓库发货', '/shipping'],
+      ['⌂', '今日工作台', '/workbench', 'dashboard.read'],
+      ['⇄', '订单处理', '/orders', 'orders.read'],
+      ['▣', '仓库发货', '/shipping', 'shipping.batch.manage'],
       ['✉', '客户咨询', '/customer-service'],
       ['§', '售后异常', '/appeals'],
     ],
@@ -19,31 +19,38 @@ const menuGroups = [
   {
     label: '经营管理',
     items: [
-      ['◇', '商品管理', '/products'],
-      ['!', '库存预警', '/inventory'],
+      ['◇', '商品管理', '/products', 'products.read'],
+      ['!', '库存预警', '/inventory', 'products.read'],
     ],
   },
   {
     label: '管理员',
     items: [
-      ['□', '店铺与平台连接', '/stores'],
-      ['@', '邮箱与平台通知', '/emails'],
-      ['⚙', '管理员设置', '/settings'],
+      ['□', '店铺与平台连接', '/stores', 'store_membership.assign'],
+      ['@', '邮箱与平台通知', '/emails', 'store_membership.assign'],
+      ['⚙', '管理员设置', '/settings', 'store_membership.assign'],
     ],
   },
 ];
 
-const mobileNavigation = [
-  menuGroups[0].items[0],
-  menuGroups[0].items[1],
-  menuGroups[0].items[2],
-  menuGroups[0].items[3],
-  ['⋯', '更多', '/settings'],
-];
-
 export default function AdminLayout() {
-  const { user, logout } = useAuthContext();
+  const { user, stores, canAccessStore, logout } = useAuthContext();
   const [collapsed, setCollapsed] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const canAccessItem = (item) => {
+    const permission = item[3];
+    if (!stores.length) return false;
+    return stores.some((store) => canAccessStore(store.store_id, permission));
+  };
+
+  const visibleMenuGroups = useMemo(() => menuGroups
+    .map((group) => ({ ...group, items: group.items.filter(canAccessItem) }))
+    .filter((group) => group.items.length), [stores, canAccessStore]);
+  const primaryItems = visibleMenuGroups
+    .find((group) => group.label === '每日运营')?.items.slice(0, 4) || [];
+  const moreItems = visibleMenuGroups.flatMap((group) => group.items)
+    .filter((item) => !primaryItems.some((primary) => primary[2] === item[2]));
 
   return (
     <div className={`admin-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
@@ -58,7 +65,7 @@ export default function AdminLayout() {
           )}
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
-          {menuGroups.map((group) => (
+          {visibleMenuGroups.map((group) => (
             <section className="nav-group" key={group.label}>
               {!collapsed && <h2>{group.label}</h2>}
               {group.items.map(([icon, label, path]) => (
@@ -94,12 +101,24 @@ export default function AdminLayout() {
         </header>
         <main className="main-content"><Outlet /></main>
         <nav className="mobile-nav" aria-label="移动端主导航">
-          {mobileNavigation.map(([icon, label, path]) => (
+          {primaryItems.map(([icon, label, path]) => (
             <NavLink key={path} to={path} className={({ isActive }) => (isActive ? 'active' : '')}>
               <span className="mobile-nav-icon">{icon}</span><span>{label}</span>
             </NavLink>
           ))}
+          <button className={`mobile-nav-more ${moreOpen ? 'active' : ''}`} type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((value) => !value)}>
+            <span className="mobile-nav-icon">⋯</span><span>更多</span>
+          </button>
         </nav>
+        {moreOpen ? (
+          <div className="mobile-more-menu" role="menu" aria-label="更多运营功能">
+            {moreItems.map(([icon, label, path]) => (
+              <NavLink key={path} to={path} role="menuitem" onClick={() => setMoreOpen(false)}>
+                <span className="menu-icon">{icon}</span><span>{label}</span>
+              </NavLink>
+            ))}
+          </div>
+        ) : null}
       </section>
     </div>
   );
