@@ -102,3 +102,7 @@ Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed focuse
 ## D024 - T10 final acceptance blocked by backend read boundaries
 
 Sol Phase C passed operator usability but found two verified backend boundary gaps. Ordinary inquiry aggregation can serialize PXG/Naver persisted inquiry metadata without first enforcing the existing retention cleanup health gate. The legacy Naver inquiry synchronization service can still perform an external read and write into the generic inquiry table during trial mode, including through internal manual-batch callers. T10 remains blocked until Terra adds fail-closed cleanup enforcement and disables the legacy sync path before network or local writes, Commander verifies the corrections, and Sol performs one narrow re-review.
+
+## D025 - T10 backend boundary corrections verified
+
+Terra commit `deb14c3` was reviewed and integrated as `ac2b687`. PXG/Naver persisted inquiry aggregation now enforces the existing cleanup health gate before serialization while unrelated generic-only stores remain available. The legacy Naver inquiry sync is denied at pre-routing and service levels during trial mode, preventing direct and manual-batch bypass before token, network, sync-log, or local-write work. Customer workflow, retention cleanup, production sessions, and full verification passed independently. Sol may now perform one narrow re-review of these two boundaries.
