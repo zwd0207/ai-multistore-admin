@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import EmptyState from '../components/common/EmptyState';
@@ -8,27 +8,8 @@ import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import { metricDisplayValue } from '../services/adapters';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import { getKstTodayString } from '../utils/time';
 
 const money = (value, currency = 'KRW') => `${Number(value || 0).toLocaleString()} ${currency}`;
-
-function rowDate(value) {
-  return String(value || '').slice(0, 10);
-}
-
-function orderStatusText(order = {}) {
-  return String(order.status || order.order_status || order.delivery_status_label_zh || order.deliveryStatusLabelZh || '').trim();
-}
-
-function isPendingShipment(order = {}) {
-  const text = `${orderStatusText(order)} ${order.delivery_status || order.deliveryStatus || ''}`.toLowerCase();
-  return ['待发货', '新订单', '已付款', 'ready', 'payed', 'place_product_order', 'delivery_ready'].some((flag) => text.includes(flag.toLowerCase()));
-}
-
-function isAbnormalOrder(order = {}) {
-  const text = `${orderStatusText(order)} ${order.claim_status || order.claimStatus || ''}`.toLowerCase();
-  return ['取消', '退款', '退货', '换货', '异常', 'cancel', 'refund', 'return', 'exchange'].some((flag) => text.includes(flag.toLowerCase()));
-}
 
 function safeRows(result) {
   return result?.data || result?.items || [];
@@ -79,10 +60,6 @@ function MetricCell({ metric }) {
   );
 }
 
-function unknownNote(count, label) {
-  return count ? `${count} 个店铺${label}最近一次同步无法确认` : '已确认店铺本地统计';
-}
-
 const storeOverviewColumns = [
   {
     key: 'storeName',
@@ -124,20 +101,27 @@ function QuickLink({ to, title, note }) {
   );
 }
 
-function PriorityCard({
-  title, count, note, to, tone = 'info',
-}) {
+function WorkbenchTask({ task }) {
   return (
-    <Link className={`business-capability-card ${tone}`} to={to}>
-      <div className="business-capability-head">
-        <strong>{title}</strong>
-        <span>{count}</span>
+    <Link className={`workbench-task ${task.stale ? 'stale' : ''}`} to={task.actionPath}>
+      <div>
+        <strong>{task.title}</strong>
+        <p>{task.description}</p>
       </div>
-      <p>{note}</p>
-      <small>进入处理</small>
+      <div className="workbench-task-action">
+        {task.stale ? <span>数据可能已过期</span> : null}
+        <b>{task.actionLabel}</b>
+      </div>
     </Link>
   );
 }
+
+const WORKBENCH_SECTIONS = [
+  ['urgent', '紧急处理', 'danger'],
+  ['action_required', '现在处理', 'warning'],
+  ['waiting', '等待中', 'info'],
+  ['completed_today', '今日完成', 'success'],
+];
 
 export default function Dashboard() {
   const {
@@ -152,7 +136,6 @@ export default function Dashboard() {
     summary: {},
     overview: null,
     orders: [],
-    products: [],
     activities: [],
   });
   const [refreshKey, setRefreshKey] = useState(0);
@@ -173,13 +156,11 @@ export default function Dashboard() {
         summary,
         overview,
         orders,
-        products,
         activities,
       ] = await Promise.all([
         safeLoad(() => dataProvider.getDashboardSummary(commonParams), {}),
         safeLoad(() => dataProvider.getStoreOverview({ includeInactive: false }), null),
         safeLoad(() => dataProvider.getOrders({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
-        safeLoad(() => dataProvider.getProducts({ ...commonParams, page: 1, pageSize: 100 }), { data: [] }),
         safeLoad(() => dataProvider.getOperationAuditLogs({ ...commonParams, page: 1, pageSize: 8 }), { data: [] }),
       ]);
       if (!cancelled) {
@@ -189,7 +170,6 @@ export default function Dashboard() {
           summary,
           overview,
           orders: safeRows(orders),
-          products: safeRows(products),
           activities: safeRows(activities),
         });
       }
@@ -199,42 +179,13 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [selectedStoreId, storeError, storeLoading, refreshKey]);
 
-  const metrics = useMemo(() => {
-    const today = getKstTodayString();
-    const todayOrders = state.orders.filter((item) => rowDate(item.createdAt || item.ordered_at) === today);
-    const pendingShipment = state.orders.filter(isPendingShipment);
-    const abnormalOrders = state.orders.filter(isAbnormalOrder);
-    const inventoryAlerts = state.products.filter((item) => Number(item.stock ?? item.stock_quantity ?? 0) <= 5);
-    const outOfStock = state.products.filter((item) => Number(item.stock ?? item.stock_quantity ?? 0) <= 0);
-    const lowStock = state.products.filter((item) => {
-      const stock = Number(item.stock ?? item.stock_quantity ?? 0);
-      return stock > 0 && stock <= 5;
-    });
-    return {
-      todayOrders,
-      pendingShipment,
-      abnormalOrders,
-      inventoryAlerts,
-      outOfStock,
-      lowStock,
-    };
-  }, [state]);
-
-  const overviewSummary = state.overview?.summary || {};
   const overviewRows = state.overview?.stores || [];
-  const hasOverview = overviewRows.length > 0;
-  const todayOrderValue = hasOverview
-    ? `${overviewSummary.todayOrderCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
-    : metrics.todayOrders.length;
-  const pendingShipmentValue = hasOverview
-    ? `${overviewSummary.pendingShipmentCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
-    : metrics.pendingShipment.length;
-  const abnormalOrderValue = hasOverview
-    ? `${overviewSummary.abnormalOrderCount}${overviewSummary.ordersUnknownStoreCount ? ' + ?' : ''}`
-    : metrics.abnormalOrders.length;
-  const inventoryAlertValue = hasOverview
-    ? `${overviewSummary.inventoryAlertCount}${overviewSummary.inventoryUnknownStoreCount ? ' + ?' : ''}`
-    : metrics.inventoryAlerts.length;
+  const operatorWorkbench = state.summary.operatorWorkbench || { summary: {}, sections: {}, sources: {} };
+  const blockedSources = [
+    ['orders', '订单'],
+    ['shipping', '仓库发货'],
+    ['customer_inquiries', '客户咨询'],
+  ].filter(([key]) => operatorWorkbench.sources[key]?.sourceStatus === 'blocked').map(([, label]) => label);
 
   const runAllStoreSync = async () => {
     if (overviewAction.running) return;
@@ -289,20 +240,43 @@ export default function Dashboard() {
 
       {state.error ? <EmptyState title="首页数据加载失败" description={state.error} /> : null}
 
-      <div className="summary-grid">
-        <SummaryCard title="今日订单" value={todayOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '订单') : '按韩国业务日期统计'} tone="info" />
-        <SummaryCard title="待发货" value={pendingShipmentValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '待发货') : '进入仓库发货核对'} tone={String(pendingShipmentValue).includes('?') || metrics.pendingShipment.length ? 'warning' : 'success'} />
-        <SummaryCard title="异常订单" value={abnormalOrderValue} note={hasOverview ? unknownNote(overviewSummary.ordersUnknownStoreCount, '异常订单') : '取消/退货/换货/退款仅提醒'} tone={String(abnormalOrderValue).includes('?') || metrics.abnormalOrders.length ? 'danger' : 'success'} />
-        <SummaryCard title="库存预警" value={inventoryAlertValue} note={hasOverview ? unknownNote(overviewSummary.inventoryUnknownStoreCount, '库存') : '缺货和低库存商品'} tone={String(inventoryAlertValue).includes('?') || metrics.inventoryAlerts.length ? 'warning' : 'success'} />
-        <SummaryCard title="缺货商品" value={metrics.outOfStock.length} note="先确认补货或人工下架" tone={metrics.outOfStock.length ? 'danger' : 'success'} />
-        <SummaryCard title="低库存商品" value={metrics.lowStock.length} note="再确认补货计划" tone={metrics.lowStock.length ? 'warning' : 'success'} />
+      <div className="summary-grid workbench-summary">
+        <SummaryCard title="紧急处理" value={operatorWorkbench.summary.urgent || 0} note="异常和阻断事项" tone={operatorWorkbench.summary.urgent ? 'danger' : 'success'} />
+        <SummaryCard title="现在处理" value={operatorWorkbench.summary.actionRequired || 0} note="当前可以继续的工作" tone={operatorWorkbench.summary.actionRequired ? 'warning' : 'success'} />
+        <SummaryCard title="等待中" value={operatorWorkbench.summary.waiting || 0} note="等待仓库或管理员" tone="info" />
+        <SummaryCard title="今日完成" value={operatorWorkbench.summary.completedToday || 0} note="按韩国业务日期统计" tone="success" />
       </div>
 
       <section className="content-card">
         <div className="card-title">
           <div>
+            <h2>今天先处理什么</h2>
+            <p>按订单履约优先级排序，帮助普通运营从首页直接进入当天工作。</p>
+          </div>
+        </div>
+        {blockedSources.length ? (
+          <div className="form-info">{blockedSources.join('、')}暂时不可用，其他来源的待办仍可正常处理。</div>
+        ) : null}
+        <div className="workbench-grid">
+          {WORKBENCH_SECTIONS.map(([key, label, tone]) => {
+            const tasks = operatorWorkbench.sections[key] || [];
+            return (
+              <section className={`workbench-section ${tone}`} key={key}>
+                <div className="workbench-section-title"><h3>{label}</h3><span>{tasks.length}</span></div>
+                {tasks.length ? tasks.map((task) => <WorkbenchTask key={task.taskId} task={task} />) : (
+                  <p className="workbench-empty">当前没有需要处理的事项</p>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="content-card">
+        <div className="card-title">
+          <div>
             <h2>按店铺查看</h2>
-            <p>选择店铺后，可继续处理该店铺的订单、仓库发货和客户咨询。“待更新”表示需要管理员检查店铺连接。</p>
+            <p>选择店铺后，可继续处理该店铺的订单、仓库发货和客户咨询。“待更新”表示需要管理员检查店铺连接；最近一次同步无法确认时也会明确提示。</p>
           </div>
           <div className="overview-actions">
             <button type="button" className="button primary" onClick={runAllStoreSync} disabled={overviewAction.running}>
@@ -323,45 +297,6 @@ export default function Dashboard() {
             </>
           )}
         />
-      </section>
-
-      <section className="content-card">
-        <div className="card-title">
-          <div>
-            <h2>今天先处理什么</h2>
-            <p>按订单履约优先级排序，帮助普通运营从首页直接进入当天工作。</p>
-          </div>
-        </div>
-        <div className="business-capability-grid compact">
-          <PriorityCard
-            title="1. 处理待发货"
-            count={`${metrics.pendingShipment.length} 单`}
-            note="先核对商品规格、仓库货号和物流信息，避免漏发或错发。"
-            to="/shipping"
-            tone={metrics.pendingShipment.length ? 'warning' : 'success'}
-          />
-          <PriorityCard
-            title="2. 查看异常订单"
-            count={`${metrics.abnormalOrders.length} 单`}
-            note="取消、退货、换货和退款只做提醒，正式处理需人工确认。"
-            to="/orders"
-            tone={metrics.abnormalOrders.length ? 'danger' : 'success'}
-          />
-          <PriorityCard
-            title="3. 补库存缺口"
-            count={`${metrics.inventoryAlerts.length} 个`}
-            note="先处理缺货，再处理低库存，最后回到商品管理复核状态。"
-            to="/inventory"
-            tone={metrics.inventoryAlerts.length ? 'warning' : 'success'}
-          />
-          <PriorityCard
-            title="4. 回复客户咨询"
-            count="查看"
-            note="先确认订单和物流进度，再准备回复客户。"
-            to="/customer-service"
-            tone="info"
-          />
-        </div>
       </section>
 
       <section className="content-card">

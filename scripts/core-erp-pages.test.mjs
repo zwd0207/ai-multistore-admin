@@ -62,6 +62,57 @@ includesAll('src/pages/Dashboard.jsx', [
   '常用任务集中在这里',
 ]);
 
+includesAll('src/services/adapters.js', [
+  'adaptOperatorWorkbench',
+  'operator_workbench',
+  'actionPath',
+  'sourceStatus',
+]);
+
+includesAll('src/pages/Dashboard.jsx', [
+  'operatorWorkbench',
+  'workbench-section',
+  'completed_today',
+  'customer_inquiries',
+]);
+
+assert.ok(
+  !read('src/pages/Dashboard.jsx').includes('function isPendingShipment'),
+  'dashboard must consume backend workbench rules instead of duplicating shipment classification',
+);
+assert.ok(
+  !read('src/pages/Dashboard.jsx').includes('function isAbnormalOrder'),
+  'dashboard must consume backend workbench rules instead of duplicating abnormal-order classification',
+);
+
+includesAll('src/pages/Orders.jsx', ['useSearchParams', "searchParams.get('orderId')"]);
+includesAll('src/pages/ShippingAssistant.jsx', ['useSearchParams', "searchParams.get('batchId')", 'WORKBENCH_STAGE_MAP']);
+includesAll('src/pages/CustomerService.jsx', ['useSearchParams', "searchParams.get('inquiryId')"]);
+
+const { adaptDashboardSummary } = await import('../src/services/adapters.js');
+const adaptedWorkbench = adaptDashboardSummary({
+  operator_workbench: {
+    summary: { urgent: 1, action_required: 2, waiting: 3, completed_today: 4 },
+    sections: {
+      urgent: [{
+        task_id: 'abnormal_order:1', task_type: 'abnormal_order', priority: 100,
+        title: '异常订单', description: '需要查看', status: 'urgent', count: 1,
+        action_path: '/orders?status=abnormal&orderId=1', action_label: '查看订单',
+        related_order_id: 1, related_batch_id: null, related_inquiry_id: null,
+        updated_at: '2026-07-13T00:00:00+00:00', stale: false,
+      }],
+      action_required: [], waiting: [], completed_today: [],
+    },
+    sources: {
+      orders: { status: 'ready' }, shipping: { status: 'ready' },
+      customer_inquiries: { status: 'blocked', reason_code: 'cleanup_failed' },
+    },
+  },
+}).summary.operatorWorkbench;
+assert.equal(adaptedWorkbench.summary.actionRequired, 2);
+assert.equal(adaptedWorkbench.sections.urgent[0].actionPath, '/orders?status=abnormal&orderId=1');
+assert.equal(adaptedWorkbench.sources.customer_inquiries.sourceStatus, 'blocked');
+
 includesAll('src/pages/Orders.jsx', [
   '订单状态分组',
   '共 {rows.length} 条订单',

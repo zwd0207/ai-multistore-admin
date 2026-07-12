@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
@@ -116,6 +116,9 @@ const columns = [
 ];
 
 export default function Orders() {
+  const [searchParams] = useSearchParams();
+  const deepLinkOrderId = searchParams.get('orderId');
+  const deepLinkStatus = searchParams.get('status') || '';
   const {
     stores,
     selectedStoreId,
@@ -126,7 +129,7 @@ export default function Orders() {
     keyword: '',
     platform: '',
     storeId: '',
-    status: '',
+    status: deepLinkStatus,
     page: 1,
   });
   const [draft, setDraft] = useState(query);
@@ -167,7 +170,12 @@ export default function Orders() {
           nextRows = nextRows.filter((item) => item.store === store?.name || String(item.storeId || item.store_id) === String(query.storeId));
         }
         nextRows = nextRows.filter((item) => matchesStatus(item, query.status));
-        if (!cancelled) setRows(nextRows);
+        if (!cancelled) {
+          setRows(nextRows);
+          if (deepLinkOrderId) {
+            setActiveOrder(nextRows.find((item) => String(item.orderId ?? item.id) === deepLinkOrderId) || null);
+          }
+        }
       } catch (loadError) {
         if (!cancelled) {
           setRows([]);
@@ -179,7 +187,7 @@ export default function Orders() {
     }
     load();
     return () => { cancelled = true; };
-  }, [query, selectedStoreId, storeLoading, stores, refreshKey]);
+  }, [query, selectedStoreId, storeLoading, stores, refreshKey, deepLinkOrderId]);
 
   const summary = useMemo(() => ({
     total: rows.length,

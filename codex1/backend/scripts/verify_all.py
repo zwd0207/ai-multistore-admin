@@ -1537,6 +1537,7 @@ def verify_stage_scripts() -> None:
         "verify_pxg_naver_readonly_scheduler.py",
         "verify_pxg_naver_readonly_sync_safety.py",
         "verify_production_sessions.py",
+        "verify_operator_workbench.py",
     ]:
         print(f"running {script}")
         run([PYTHON, f"scripts/{script}"])

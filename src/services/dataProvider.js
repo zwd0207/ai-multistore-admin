@@ -645,6 +645,7 @@ async function getBackendDashboardData(params) {
   const adapted = adapters.dashboardSummary(await backendApi.getDashboardSummary(params));
   return {
     summary: adapted.summary,
+    operatorWorkbench: adapted.summary.operatorWorkbench,
     risks: adapted.risks,
     todos: adapted.todos,
     activities: adapted.activities,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import DataTable from '../components/common/DataTable';
 import DetailModal from '../components/common/DetailModal';
 import EmptyState from '../components/common/EmptyState';
@@ -104,6 +105,8 @@ const columns = [
 ];
 
 export default function CustomerService() {
+  const [searchParams] = useSearchParams();
+  const deepLinkInquiryId = searchParams.get('inquiryId');
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1 });
   const [draft, setDraft] = useState(query);
@@ -129,6 +132,9 @@ export default function CustomerService() {
       const result = await dataProvider.getCustomerInquiries(params);
       const normalized = (result.data || result.items || []).map(normalizeMessage).filter((item) => matches(item, nextQuery));
       setRows(normalized);
+      if (deepLinkInquiryId) {
+        setActiveMessage(normalized.find((item) => String(item.id ?? item.ticketNo) === deepLinkInquiryId) || null);
+      }
       return normalized;
     } catch (requestError) {
       setRows([]);
@@ -141,7 +147,7 @@ export default function CustomerService() {
 
   useEffect(() => {
     load();
-  }, [query, selectedStoreId, storeLoading, storeError]);
+  }, [query, selectedStoreId, storeLoading, storeError, deepLinkInquiryId]);
 
   const summary = useMemo(() => ({
     total: rows.length,

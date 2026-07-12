@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.responses import success_response
 from app.database import get_db
+from app.models.auth import ErpUser
 from app.services import stats_service
+from app.services.operator_access_service import OperatorIdentity, require_store_permission
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -11,6 +14,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/summary")
 def get_dashboard_summary(
+    request: Request,
     store_id: int | None = Query(default=None),
     platform: str | None = Query(default=None),
     start_date: str | None = Query(default=None),
@@ -18,6 +22,15 @@ def get_dashboard_summary(
     include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
+    if store_id is not None and get_settings().app_env != "development":
+        user = db.get(ErpUser, getattr(request.state, "authenticated_user_id", None))
+        if user is not None:
+            require_store_permission(
+                db,
+                identity=OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash),
+                store_id=store_id,
+                permission_key="dashboard.read",
+            )
     result = stats_service.get_dashboard_summary(
         db,
         store_id=store_id,

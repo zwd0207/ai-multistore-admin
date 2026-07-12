@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import EmptyState from '../components/common/EmptyState';
 import FilterPanel from '../components/common/FilterPanel';
 import PageHeader from '../components/common/PageHeader';
@@ -16,6 +17,14 @@ const STAGES = [
   ['confirm', '待确认平台回填'],
   ['result', '已完成与失败'],
 ];
+
+const WORKBENCH_STAGE_MAP = {
+  pending: 'prepare',
+  waiting: 'warehouse',
+  review: 'review',
+  writeback: 'confirm',
+  completed: 'result',
+};
 
 const REMOVE_REASONS = ['收件信息需要修改', '客户要求取消', '订单已取消', '商品货号有误', '商品缺货', '仓库异常'];
 
@@ -48,6 +57,10 @@ function normalizeOrder(row = {}) {
 }
 
 export default function ShippingAssistant() {
+  const [searchParams] = useSearchParams();
+  const deepLinkStage = WORKBENCH_STAGE_MAP[searchParams.get('stage')] || 'prepare';
+  const deepLinkBatchId = searchParams.get('batchId') || '';
+  const deepLinkOrderId = searchParams.get('orderId') || '';
   const { stores, selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const fileInput = useRef(null);
   const [query, setQuery] = useState({ keyword: '', platform: '', storeId: '' });
@@ -55,8 +68,8 @@ export default function ShippingAssistant() {
   const [orders, setOrders] = useState([]);
   const [selected, setSelected] = useState([]);
   const [batches, setBatches] = useState([]);
-  const [activeStage, setActiveStage] = useState('prepare');
-  const [activeBatchId, setActiveBatchId] = useState('');
+  const [activeStage, setActiveStage] = useState(deepLinkStage);
+  const [activeBatchId, setActiveBatchId] = useState(deepLinkBatchId);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -91,6 +104,11 @@ export default function ShippingAssistant() {
     const result = await dataProvider.getWarehouseShippingBatches({ storeId, platform: query.platform || 'naver' });
     const next = (result.items || []).map(adaptWarehouseBatch);
     setBatches(next);
+    if (deepLinkBatchId) {
+      setActiveStage(deepLinkStage);
+      setActiveBatchId(deepLinkBatchId);
+      return;
+    }
     if (restoreUrgent) {
       const urgent = ['review', 'confirm', 'warehouse'].map((stage) => next.find((batch) => batch.stage === stage)).find(Boolean);
       if (urgent) { setActiveStage(urgent.stage); setActiveBatchId(String(urgent.id)); }
@@ -120,12 +138,18 @@ export default function ShippingAssistant() {
             && (!query.platform || same(row.platform, query.platform))
             && (!query.storeId || String(row.storeId) === String(query.storeId));
         });
-        if (!cancelled) { setOrders(next); await refreshBatches({ restoreUrgent: true }); }
+        if (!cancelled) {
+          setOrders(next);
+          if (deepLinkOrderId && next.some((item) => String(item.orderId ?? item.id) === deepLinkOrderId)) {
+            setSelected([deepLinkOrderId]);
+          }
+          await refreshBatches({ restoreUrgent: !deepLinkBatchId });
+        }
       } catch (requestError) { if (!cancelled) setError(requestError.message || '待发货订单加载失败，请稍后重试。'); }
       finally { if (!cancelled) setLoading(false); }
     }
     load(); return () => { cancelled = true; };
-  }, [query, selectedStoreId, storeLoading]);
+  }, [query, selectedStoreId, storeLoading, deepLinkBatchId, deepLinkOrderId, deepLinkStage]);
 
   const assigned = useMemo(() => new Set(batches.flatMap((batch) => batch.rows.filter((row) => !row.removed).map((row) => String(row.orderId)))), [batches]);
   const pendingRows = orders.filter((row) => !assigned.has(row.id));

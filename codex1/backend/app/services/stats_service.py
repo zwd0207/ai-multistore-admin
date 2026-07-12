@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -16,6 +16,7 @@ from app.models.product import Product
 from app.models.store import Store
 from app.models.sync_log import SyncLog
 from app.services.api_capability_service import get_api_capability_summary
+from app.services import customer_inquiry_service, order_service, warehouse_shipping_service
 from app.services.order_service import TEST_ORDER_SOURCE_TYPES
 from app.services.store_service import ensure_store_exists, normalize_platform
 
@@ -83,12 +84,18 @@ def _apply_filters(statement, model, store_id: int | None = None, platform: str 
 
 
 def _safe_order(order: Order) -> dict[str, Any]:
+    buyer_name = str(order.buyer_name or "").strip()
+    buyer_name_masked = (
+        f"{buyer_name[:1]}{'*' * min(max(len(buyer_name) - 1, 1), 8)}"
+        if buyer_name
+        else None
+    )
     return {
         "id": order.id,
         "store_id": order.store_id,
         "platform": order.platform,
         "external_order_id": order.external_order_id,
-        "buyer_name": order.buyer_name,
+        "buyer_name": buyer_name_masked,
         "buyer_masked_phone": order.buyer_masked_phone,
         "product_name": order.product_name,
         "quantity": order.quantity,
@@ -552,9 +559,14 @@ def _manual_item_status_from_log(log: SyncLog | None, resource: str, platform: s
 
 
 def _order_is_pending_shipment(order: Order) -> bool:
-    raw_data = order.raw_data or {}
+    if isinstance(order, dict):
+        raw_data = order.get("raw_data") or {}
+        order_status = order.get("order_status")
+    else:
+        raw_data = order.raw_data or {}
+        order_status = order.order_status
     text = " ".join(str(value or "") for value in (
-        order.order_status,
+        order_status,
         raw_data.get("order_status_label_zh"),
         raw_data.get("delivery_status"),
         raw_data.get("delivery_status_label_zh"),
@@ -572,9 +584,14 @@ def _order_is_pending_shipment(order: Order) -> bool:
 
 
 def _order_is_abnormal(order: Order) -> bool:
-    raw_data = order.raw_data or {}
+    if isinstance(order, dict):
+        raw_data = order.get("raw_data") or {}
+        order_status = order.get("order_status")
+    else:
+        raw_data = order.raw_data or {}
+        order_status = order.order_status
     text = " ".join(str(value or "") for value in (
-        order.order_status,
+        order_status,
         raw_data.get("order_status_label_zh"),
         raw_data.get("claim_status"),
         raw_data.get("claim_status_label_zh"),
@@ -590,6 +607,224 @@ def _order_is_abnormal(order: Order) -> bool:
         "return",
         "exchange",
     ))
+
+
+_WORKBENCH_SECTIONS = ("urgent", "action_required", "waiting", "completed_today")
+
+
+def _workbench_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _workbench_task(
+    *,
+    task_id: str,
+    task_type: str,
+    priority: int,
+    title: str,
+    description: str,
+    status: str,
+    action_path: str,
+    action_label: str,
+    updated_at: Any,
+    stale_after: timedelta,
+    related_order_id: int | None = None,
+    related_batch_id: int | None = None,
+    related_inquiry_id: str | int | None = None,
+) -> dict[str, Any]:
+    event_time = _workbench_time(updated_at)
+    return {
+        "task_id": task_id,
+        "task_type": task_type,
+        "priority": priority,
+        "title": title,
+        "description": description,
+        "status": status,
+        "count": 1,
+        "action_path": action_path,
+        "action_label": action_label,
+        "related_order_id": related_order_id,
+        "related_batch_id": related_batch_id,
+        "related_inquiry_id": related_inquiry_id,
+        "updated_at": event_time.isoformat() if event_time else None,
+        "stale": event_time is None or datetime.now(timezone.utc) - event_time > stale_after,
+    }
+
+
+def _build_operator_workbench(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str,
+    include_test_orders: bool,
+) -> dict[str, Any]:
+    sections: dict[str, list[dict[str, Any]]] = {key: [] for key in _WORKBENCH_SECTIONS}
+    sources: dict[str, dict[str, Any]] = {
+        "orders": {"status": "ready", "reason_code": None},
+        "shipping": {"status": "ready", "reason_code": None},
+        "customer_inquiries": {"status": "ready", "reason_code": None},
+    }
+
+    try:
+        orders = order_service.list_orders(
+            db,
+            store_id=store_id,
+            platform=platform,
+            include_test_orders=include_test_orders,
+        )
+    except ApiError as exc:
+        sources["orders"] = {"status": "blocked", "reason_code": exc.error_code.lower()}
+        orders = []
+    try:
+        batch_result = warehouse_shipping_service.list_warehouse_batches(
+            db,
+            store_id=store_id,
+            platform=platform,
+            include_rows=True,
+        )
+        batches = batch_result.get("items", [])
+    except ApiError as exc:
+        sources["shipping"] = {"status": "blocked", "reason_code": exc.error_code.lower()}
+        batches = []
+    active_order_ids = {
+        row.get("local_order_id")
+        for batch in batches
+        if batch.get("status") in warehouse_shipping_service.ACTIVE_BATCH_STATUSES
+        for row in batch.get("rows", [])
+        if row.get("is_active")
+    }
+
+    for order in orders:
+        order_id = order.get("id")
+        updated_at = order.get("updated_at") or order.get("last_synced_at") or order.get("ordered_at")
+        if _order_is_abnormal(order):
+            sections["urgent"].append(_workbench_task(
+                task_id=f"abnormal_order:{order_id}",
+                task_type="abnormal_order",
+                priority=100,
+                title="异常订单待处理",
+                description="订单状态出现取消、退款、退换货或其他异常。",
+                status="urgent",
+                action_path=f"/orders?status=abnormal&orderId={order_id}",
+                action_label="查看订单",
+                related_order_id=order_id,
+                updated_at=updated_at,
+                stale_after=timedelta(minutes=15),
+            ))
+        elif _order_is_pending_shipment(order) and order_id not in active_order_ids:
+            sections["action_required"].append(_workbench_task(
+                task_id=f"unbatched_shipment:{order_id}",
+                task_type="unbatched_shipment",
+                priority=70,
+                title="待加入发货批次",
+                description="有效待发货订单尚未进入仓库批次。",
+                status="action_required",
+                action_path=f"/shipping?stage=pending&orderId={order_id}",
+                action_label="处理发货",
+                related_order_id=order_id,
+                updated_at=updated_at,
+                stale_after=timedelta(minutes=15),
+            ))
+
+    today = get_business_date()
+    for batch in batches:
+        batch_id = batch.get("id")
+        status = str(batch.get("status") or "")
+        rows = batch.get("rows", [])
+        row_statuses = {str(row.get("row_status") or "") for row in rows}
+        updated_at = batch.get("updated_at") or batch.get("created_at")
+        if status == "writeback_partial" or "platform_failed" in row_statuses or "blocked" in row_statuses:
+            sections["urgent"].append(_workbench_task(
+                task_id=f"warehouse_blocked:{batch_id}", task_type="warehouse_review", priority=95,
+                title="仓库批次异常", description="批次存在阻断、重复运单、SKU 不一致或回填失败。",
+                status="urgent", action_path=f"/shipping?stage=review&batchId={batch_id}",
+                action_label="检查批次", related_batch_id=batch_id, updated_at=updated_at,
+                stale_after=timedelta(minutes=30),
+            ))
+        elif status == "warehouse_returned" or "needs_confirmation" in row_statuses:
+            sections["action_required"].append(_workbench_task(
+                task_id=f"warehouse_review:{batch_id}", task_type="warehouse_review", priority=80,
+                title="仓库回传待检查", description="仓库已回传物流表，需要人工校验和确认。",
+                status="action_required", action_path=f"/shipping?stage=review&batchId={batch_id}",
+                action_label="检查回传", related_batch_id=batch_id, updated_at=updated_at,
+                stale_after=timedelta(minutes=30),
+            ))
+        elif status == "warehouse_sent":
+            sections["waiting"].append(_workbench_task(
+                task_id=f"warehouse_waiting:{batch_id}", task_type="warehouse_waiting", priority=50,
+                title="等待仓库回传", description="发货批次已发送仓库，正在等待物流表。",
+                status="waiting", action_path=f"/shipping?stage=waiting&batchId={batch_id}",
+                action_label="查看批次", related_batch_id=batch_id, updated_at=updated_at,
+                stale_after=timedelta(minutes=30),
+            ))
+        elif status == "ready_to_writeback":
+            sections["waiting"].append(_workbench_task(
+                task_id=f"writeback_waiting:{batch_id}", task_type="writeback_waiting", priority=55,
+                title="等待平台回填", description="物流已确认；真实平台回填当前保持关闭。",
+                status="waiting", action_path=f"/shipping?stage=writeback&batchId={batch_id}",
+                action_label="查看批次", related_batch_id=batch_id, updated_at=updated_at,
+                stale_after=timedelta(minutes=30),
+            ))
+        completed_at = _workbench_time(batch.get("completed_at"))
+        if status == "completed" and completed_at and to_business_timezone(completed_at).date() == today:
+            sections["completed_today"].append(_workbench_task(
+                task_id=f"completed_batch:{batch_id}", task_type="completed_batch", priority=10,
+                title="发货批次已完成", description="该批次已在今天完成。", status="completed_today",
+                action_path=f"/shipping?stage=completed&batchId={batch_id}", action_label="查看记录",
+                related_batch_id=batch_id, updated_at=completed_at, stale_after=timedelta(days=1),
+            ))
+
+    try:
+        customer_inquiry_service.assert_customer_inquiry_read_cleanup_healthy(
+            db, store_id=store_id, platform=platform,
+        )
+        inquiries = customer_inquiry_service.list_customer_inquiries(db, store_id=store_id, platform=platform)
+    except ApiError as exc:
+        sources["customer_inquiries"] = {"status": "blocked", "reason_code": exc.error_code.lower()}
+        inquiries = []
+
+    for inquiry in inquiries:
+        inquiry_id = inquiry.get("inquiry_id")
+        inquiry_status = str(inquiry.get("status") or "").lower()
+        updated_at = inquiry.get("updated_at") or inquiry.get("created_at")
+        related_order_id = None
+        order_context = inquiry.get("order_context") or {}
+        if order_context:
+            related_order_id = next(
+                (order.get("id") for order in orders if order.get("external_order_id") == order_context.get("order_no")),
+                None,
+            )
+        task = _workbench_task(
+            task_id=f"customer_inquiry:{inquiry_id}", task_type="customer_inquiry", priority=60,
+            title="客户咨询待查看", description=str(inquiry.get("summary") or "客户咨询"),
+            status="action_required", action_path=f"/customer-service?inquiryId={inquiry_id}",
+            action_label="查看咨询", related_order_id=related_order_id,
+            related_inquiry_id=inquiry_id, updated_at=updated_at, stale_after=timedelta(minutes=15),
+        )
+        if inquiry_status in {"answered", "closed", "resolved", "replied"}:
+            event_time = _workbench_time(updated_at)
+            if event_time and to_business_timezone(event_time).date() == today:
+                task.update(priority=10, title="客户咨询已完成", status="completed_today")
+                sections["completed_today"].append(task)
+        else:
+            sections["action_required"].append(task)
+
+    for key in _WORKBENCH_SECTIONS:
+        sections[key].sort(key=lambda item: (-item["priority"], item["updated_at"] or "", item["task_id"]))
+    return {
+        "summary": {key: len(sections[key]) for key in _WORKBENCH_SECTIONS},
+        "sections": sections,
+        "sources": sources,
+    }
 
 
 def _store_order_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
@@ -908,7 +1143,7 @@ def get_dashboard_summary(
         platform=platform,
     )
     business_metadata = _business_scope_metadata(start_date if start_date == end_date else None)
-    return {
+    result = {
         **business_metadata,
         "store_count": len(_get_stores(db, store_id)),
         "product_count": _count_records(db, Product, store_id=store_id, platform=platform),
@@ -929,6 +1164,16 @@ def get_dashboard_summary(
         "financial_summary": financial_summary,
         "api_capability_summary": get_api_capability_summary(db, store_id=store_id, platform=platform),
     }
+    if store_id is not None:
+        store = ensure_store_exists(db, store_id)
+        workbench_platform = platform or normalize_platform(store.platform)
+        result["operator_workbench"] = _build_operator_workbench(
+            db,
+            store_id=store_id,
+            platform=workbench_platform,
+            include_test_orders=include_test_orders,
+        )
+    return result
 
 
 def get_daily_context(

@@ -1193,6 +1193,52 @@ export function adaptCoupangFinancialPreviewResult(data = {}) {
   };
 }
 
+function adaptOperatorTask(item = {}) {
+  return {
+    taskId: item.task_id || '',
+    taskType: item.task_type || '',
+    priority: numberValue(item.priority),
+    title: item.title || '',
+    description: item.description || '',
+    status: item.status || '',
+    count: numberValue(item.count),
+    actionPath: item.action_path || '',
+    actionLabel: item.action_label || '',
+    relatedOrderId: item.related_order_id ?? null,
+    relatedBatchId: item.related_batch_id ?? null,
+    relatedInquiryId: item.related_inquiry_id ?? null,
+    updatedAt: item.updated_at || null,
+    stale: item.stale === true,
+  };
+}
+
+export function adaptOperatorWorkbench(data = {}) {
+  const section = (key) => (data.sections?.[key] || []).map(adaptOperatorTask);
+  const source = (key) => ({
+    sourceStatus: data.sources?.[key]?.status || 'unavailable',
+    reasonCode: data.sources?.[key]?.reason_code || '',
+  });
+  return {
+    summary: {
+      urgent: numberValue(data.summary?.urgent),
+      actionRequired: numberValue(data.summary?.action_required),
+      waiting: numberValue(data.summary?.waiting),
+      completedToday: numberValue(data.summary?.completed_today),
+    },
+    sections: {
+      urgent: section('urgent'),
+      action_required: section('action_required'),
+      waiting: section('waiting'),
+      completed_today: section('completed_today'),
+    },
+    sources: {
+      orders: source('orders'),
+      shipping: source('shipping'),
+      customer_inquiries: source('customer_inquiries'),
+    },
+  };
+}
+
 export function adaptDashboardSummary(data = {}) {
   const risks = (data.risk_flags || []).map((item, index) => ({
     id: item.code || `backend-risk-${index + 1}`,
@@ -1222,6 +1268,7 @@ export function adaptDashboardSummary(data = {}) {
     businessDayEnd: data.business_day_end,
     apiCapabilitySummary: adaptApiCapabilitySummary(data.api_capability_summary),
     financialSummary: adaptFinancialSummary(data.financial_summary),
+    operatorWorkbench: adaptOperatorWorkbench(data.operator_workbench || {}),
   };
 
   const todos = pendingCustomers > 0
