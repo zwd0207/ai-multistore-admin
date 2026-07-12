@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: project commander
-Status: T09 safety review passed; activation paused for historical-order retention decision
+Status: T09 safety review passed; activation paused for customer follow-up privacy policy
 
 ## Mission
 
@@ -39,6 +39,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Sol passed the final T09 safety review: immutable terminal deletion, non-extension by later updates, and the 30-day maximum all passed.
 - Sol did not authorize activation; real persistence remains disabled pending a separate commander approval.
 - Before activation, define how long non-PII historical order records remain searchable by platform order number. Recipient PII remains subject to the approved 7-day/30-day deletion boundary.
+- The owner now requires customer follow-up records to support after-sales service. This must use a separate consented customer profile and contact-history boundary rather than indefinite retention of all fulfillment PII.
+- Until that policy is approved and implemented, the existing recipient 7-day/30-day deletion rule remains active.
 - Retention cleanup now enforces no-status, manual-review, failure, disabled-switch, and overdue daily health gates.
 - Platform shipment writeback and customer-message sending remain disabled.
 - Full recipient PII remains limited to the authorized warehouse fulfillment path.
@@ -74,15 +76,16 @@ AI automation is deferred until the manual operator workflow is stable and measu
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | T09 final safety review passed; next policy task is historical-order retention |
+| Sol | `codex2-sol` | `task/t03-6-session-contract` | assigned customer follow-up privacy and retention policy |
 | Terra | `codex2-terra` | `task/terra-shipping-backend` | paused pending retention policy |
 | Luna | `codex2-luna` | `task/luna-operator-ux` | paused until a stable UI contract exists |
 
 ## Next Action
 
 1. Keep `PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED` disabled.
-2. Define the searchable historical-order retention policy separately from recipient PII deletion.
-3. After policy approval and implementation, prepare a separate commander decision for one bounded manual PXG/Naver real read-only sync.
+2. Define separate historical-order and consented customer follow-up retention policies.
+3. Preserve only the minimum customer contact fields needed for approved after-sales follow-up; do not retain address or delivery memo by default.
+4. After policy approval and implementation, prepare a separate commander decision for one bounded manual PXG/Naver real read-only sync.
 
 ## Compact Reporting Contract
 

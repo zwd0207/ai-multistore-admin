@@ -70,3 +70,7 @@ Actual recipient deletion now uses `secure.terminal_confirmed_at` for the seven-
 ## D016 - T09 safety passed; activation remains separate
 
 Sol passed the final T09 safety review with no blocker. This does not authorize real persistence. Before activation, the project must define a historical-order retention policy that keeps necessary non-PII order records searchable by platform order number while recipient name, phone, address, and delivery memo continue to follow the immutable 7-day/30-day deletion boundary.
+
+## D017 - Customer follow-up requires a separate privacy purpose
+
+The owner requires customer follow-up history to improve after-sales service. This does not authorize indefinite retention of all order recipient PII. Customer profiles and contact history must be purpose-limited, consent-aware, access-controlled, auditable, and separate from fulfillment addresses and delivery notes. The existing 7-day/30-day recipient deletion policy remains in force until a replacement policy is approved and implemented.
