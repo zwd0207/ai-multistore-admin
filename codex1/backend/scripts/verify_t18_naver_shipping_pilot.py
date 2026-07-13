@@ -187,8 +187,11 @@ def preflight(
                 "product_order_id": product_order_id,
                 "order_status": status,
                 "claim_status": claim,
-                "carrier_code": carrier_code or shipping_service._normalize_naver_delivery_company_code("CJ"),
-                "tracking_number_hash": tracking_number_hash or shipping_service._safe_hash_identifier(TRACKING_NUMBER),
+                # A normal pre-write Naver order has not yet received a
+                # carrier or tracking number. Reconciliation supplies an
+                # exact platform logistics record explicitly.
+                "carrier_code": carrier_code,
+                "tracking_number_hash": tracking_number_hash,
                 "writeback_state": writeback_state,
             }],
         }, None
@@ -465,6 +468,92 @@ def test_platform_state_change_invalidates_approval() -> None:
     assert post_calls["count"] == 0, post_calls
 
 
+def test_capability_contract_and_platform_logistics_guards() -> None:
+    reset_database()
+    store_id, user_id, _order_id, batch_id = fixture()
+    masked_tracking = warehouse_shipping_service.order_service._mask_tracking_number(TRACKING_NUMBER)
+    with SessionLocal() as db, patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=True)):
+        listing = warehouse_shipping_service.list_warehouse_batches(
+            db, store_id=store_id, platform="naver", include_rows=False,
+        )
+        capability = next(item for item in listing["items"] if item["id"] == batch_id)["writeback_capability"]
+        assert capability["status"] == "approval_required", capability
+        assert capability["allowed_action"] == "approve", capability
+        assert capability["store_name"] == TRIAL_STORE_NAME, capability
+        assert capability["product_order_reference"] == "t18-product-order-001", capability
+        assert capability["carrier"] == "CJ", capability
+        assert capability["tracking_number_masked"] == masked_tracking, capability
+        assert capability["platform_latest_status"] is None, capability
+        assert TRACKING_NUMBER not in str(capability), capability
+
+        with patch.object(
+            warehouse_shipping_service, "_t18_platform_preflight", preflight("t18-product-order-001"),
+        ):
+            approval = approve(db, batch_id=batch_id, user_id=user_id)
+        assert approval["status"] == "approval_granted", approval
+        approved_capability = approval["writeback_capability"]
+        assert approved_capability["allowed_action"] == "execute", approved_capability
+        assert approved_capability["store_name"] == TRIAL_STORE_NAME, approved_capability
+        assert approved_capability["product_order_reference"] == "t18-product-order-001", approved_capability
+        assert approved_capability["carrier"] == "CJ", approved_capability
+        assert approved_capability["tracking_number_masked"] == masked_tracking, approved_capability
+        assert approved_capability["platform_latest_status"] == "PAYED", approved_capability
+        assert TRACKING_NUMBER not in str(approved_capability), approved_capability
+
+    reset_database()
+    _store_id, user_id, _order_id, batch_id = fixture()
+    with SessionLocal() as db, patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=True)), patch.object(
+        warehouse_shipping_service,
+        "_t18_platform_preflight",
+        preflight(
+            "t18-product-order-001",
+            tracking_number_hash=shipping_service._safe_hash_identifier(TRACKING_NUMBER),
+        ),
+    ):
+        result = approve(db, batch_id=batch_id, user_id=user_id)
+        assert result["status"] == "blocked", result
+        assert result["skip_reason"] == "naver_platform_tracking_already_present", result
+        assert db.query(WarehouseShippingApprovalGrant).count() == 0
+
+    cases = (
+        ("carrier", {"carrier_code": "HANJIN"}, "shipping_approval_candidate_changed"),
+        (
+            "tracking",
+            {"tracking_number_hash": shipping_service._safe_hash_identifier("platform-tracking")},
+            "naver_platform_tracking_already_present",
+        ),
+        (
+            "writeback_state",
+            {"writeback_state": "PENDING"},
+            "naver_platform_writeback_state_not_writeback_eligible",
+        ),
+    )
+    for case_name, changed_state, expected_reason in cases:
+        reset_database()
+        _store_id, user_id, _order_id, batch_id = fixture()
+        preflights = [
+            preflight("t18-product-order-001"),
+            preflight("t18-product-order-001", **changed_state),
+        ]
+        post_calls = {"count": 0}
+
+        def changing_preflight(*args, **kwargs):
+            return preflights.pop(0)(*args, **kwargs)
+
+        with SessionLocal() as db, patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=True)), patch.object(
+            warehouse_shipping_service, "_t18_platform_preflight", changing_preflight,
+        ), patch.object(
+            shipping_service, "_post_naver_shipment_dispatch", lambda **_kwargs: post_calls.__setitem__("count", post_calls["count"] + 1),
+        ):
+            approval = approve(db, batch_id=batch_id, user_id=user_id)
+            assert approval["status"] == "approval_granted", (case_name, approval)
+            result = execute(db, batch_id=batch_id, user_id=user_id, token=approval["approval_token"])
+            assert result["status"] == "blocked", (case_name, result)
+            assert result["skip_reason"] == expected_reason, (case_name, result)
+            assert db.query(WarehouseShippingApprovalGrant).one().attempt_status == "prepared"
+        assert post_calls["count"] == 0, (case_name, post_calls)
+
+
 def test_prepost_failures_do_not_consume_attempt() -> None:
     reset_database()
     _store_id, user_id, _order_id, batch_id = fixture()
@@ -520,6 +609,45 @@ def test_prepost_failures_do_not_consume_attempt() -> None:
         assert result["skip_reason"] == "naver_write_authentication_failed", result
         grant = db.query(WarehouseShippingApprovalGrant).one()
         assert grant.attempt_status == "prepared" and grant.used_at is None, grant.attempt_status
+
+
+def test_token_then_expired_claim_never_posts() -> None:
+    reset_database()
+    _store_id, user_id, _order_id, batch_id = fixture()
+    calls = {"token": 0, "post": 0}
+
+    with SessionLocal() as db, patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=True)), patch.object(
+        shipping_service, "get_settings", lambda: settings(enabled=True),
+    ), patch.object(
+        warehouse_shipping_service, "_t18_platform_preflight", preflight("t18-product-order-001"),
+    ), patch.object(
+        shipping_service, "_ensure_naver_shipping_credential", lambda *_args, **_kwargs: mock_credential(),
+    ), patch.object(
+        shipping_service, "_build_naver_shipping_token_context", lambda _credential: {"api_base": "https://mock.invalid"},
+    ), patch.object(
+        shipping_service.api_credential_readiness_service,
+        "_request_naver_token_from_context",
+        lambda _context: _expire_approval_after_token(db, calls),
+    ), patch.object(
+        shipping_service,
+        "_post_naver_shipment_dispatch",
+        lambda **_kwargs: calls.__setitem__("post", calls["post"] + 1),
+    ):
+        approval = approve(db, batch_id=batch_id, user_id=user_id)
+        result = execute(db, batch_id=batch_id, user_id=user_id, token=approval["approval_token"])
+        assert result["status"] == "blocked", result
+        assert result["skip_reason"] == "shipping_approval_token_invalid", result
+        grant = db.query(WarehouseShippingApprovalGrant).one()
+        assert grant.attempt_status == "prepared" and grant.used_at is None, grant
+    assert calls == {"token": 1, "post": 0}, calls
+
+
+def _expire_approval_after_token(db, calls: dict[str, int]) -> tuple[str, int]:
+    calls["token"] += 1
+    grant = db.query(WarehouseShippingApprovalGrant).one()
+    grant.expires_at = shipping_service.get_utc_now() - timedelta(seconds=1)
+    db.commit()
+    return "mock-access-token", 200
 
 
 def test_wrong_user_expired_token_and_restart_attempts_are_blocked() -> None:
@@ -597,7 +725,13 @@ def test_unknown_requires_reconciliation_without_resend() -> None:
     state = {"value": "PAYED"}
 
     def current_preflight(*args, **kwargs):
-        return preflight("t18-product-order-001", status=state["value"])(*args, **kwargs)
+        platform_logistics = {}
+        if state["value"] == "DISPATCHED":
+            platform_logistics = {
+                "carrier_code": shipping_service._normalize_naver_delivery_company_code("CJ"),
+                "tracking_number_hash": shipping_service._safe_hash_identifier(TRACKING_NUMBER),
+            }
+        return preflight("t18-product-order-001", status=state["value"], **platform_logistics)(*args, **kwargs)
 
     def timeout_post(**_kwargs):
         post_calls["count"] += 1
@@ -685,7 +819,12 @@ def test_reconcile_works_with_write_gates_closed_and_requires_exact_logistics() 
         with patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=False)), patch.object(
             warehouse_shipping_service,
             "_t18_platform_preflight",
-            preflight("t18-product-order-001", status="DISPATCHED"),
+            preflight(
+                "t18-product-order-001",
+                status="DISPATCHED",
+                carrier_code=shipping_service._normalize_naver_delivery_company_code("CJ"),
+                tracking_number_hash=shipping_service._safe_hash_identifier(TRACKING_NUMBER),
+            ),
         ):
             reconciled = warehouse_shipping_service.execute_warehouse_batch_writeback(
                 db,
@@ -840,10 +979,10 @@ def test_multi_row_cross_store_claim_and_concurrent_attempt_guards() -> None:
         grant = db.query(WarehouseShippingApprovalGrant).one()
         batch = db.get(WarehouseShippingBatch, batch_id)
         first, nonce, first_error = warehouse_shipping_service._t18_claim_attempt(
-            db, batch=batch, grant_id=grant.id, candidate_hash=grant.candidate_hash,
+            db, batch=batch, grant_id=grant.id, user_id=user_id, candidate_hash=grant.candidate_hash,
         )
         second, _second_nonce, second_error = warehouse_shipping_service._t18_claim_attempt(
-            db, batch=batch, grant_id=grant.id, candidate_hash=grant.candidate_hash,
+            db, batch=batch, grant_id=grant.id, user_id=user_id, candidate_hash=grant.candidate_hash,
         )
         assert first is not None and nonce and first_error is None
         assert second is not None and second_error == "shipping_approval_attempt_already_claimed"
@@ -1011,7 +1150,9 @@ def main() -> None:
     test_platform_order_write_flag_remains_closed()
     test_exact_approval_execution_and_privacy()
     test_platform_state_change_invalidates_approval()
+    test_capability_contract_and_platform_logistics_guards()
     test_prepost_failures_do_not_consume_attempt()
+    test_token_then_expired_claim_never_posts()
     test_wrong_user_expired_token_and_restart_attempts_are_blocked()
     test_developer_actor_is_rejected_before_preflight()
     test_unknown_requires_reconciliation_without_resend()
