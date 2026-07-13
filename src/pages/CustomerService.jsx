@@ -57,7 +57,8 @@ function normalizeMessage(row = {}) {
     productName: text(row.productName || row.product || row.product_name, '未关联商品'),
     inquiryType: text(row.inquiryType || row.type || row.category, '客户咨询'),
     summary: text(row.summary || row.content || row.title, '暂无摘要'),
-    content: text(row.content || row.summary, '暂无内容'),
+    content: row.content || '',
+    detailLoaded: Boolean(row.detailLoaded),
     statusLabel: statusLabel(row.status),
     priorityLabel: priorityLabel(row.priority),
     createdAt: row.createdAt || row.created_at || '',
@@ -115,6 +116,8 @@ export default function CustomerService() {
   const [error, setError] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
   const [activeMessage, setActiveMessage] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
   const [draftModal, setDraftModal] = useState({ open: false, message: null, content: '' });
   const [replyConfirm, setReplyConfirm] = useState(false);
   const [replySubmitting, setReplySubmitting] = useState(false);
@@ -165,18 +168,39 @@ export default function CustomerService() {
       return;
     }
     try {
-      const syncResult = await dataProvider.syncNaverCustomerInquiries({
+      const syncResult = await dataProvider.refreshNaverCustomerInquiries({
         storeId: selectedStoreId,
-        page: 1,
-        size: 50,
       });
       const latestRows = await load(query);
       setSyncMessage(syncResult.message || `客户咨询已更新，当前显示 ${latestRows.length} 条。`);
     } catch (syncError) {
-      setSyncMessage(syncError.message || '客户咨询更新失败，请联系管理员检查店铺连接。');
+      setSyncMessage('Naver 客服消息暂不可用，请稍后重试');
     }
     window.setTimeout(() => setSyncMessage(''), 3200);
   };
+
+  const openMessage = (message) => {
+    setActiveMessage(message);
+    setDetailError('');
+  };
+
+  useEffect(() => {
+    if (!activeMessage || activeMessage.detailLoaded || !isBackendSource || !selectedStoreId) return undefined;
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError('');
+    dataProvider.getCustomerInquiryDetail({
+      readonlyId: activeMessage.readonlyId || activeMessage.id,
+      storeId: selectedStoreId,
+    }).then((detail) => {
+      if (!cancelled) setActiveMessage(normalizeMessage({ ...activeMessage, ...detail, detailLoaded: true }));
+    }).catch(() => {
+      if (!cancelled) setDetailError('客服消息详情暂不可用，请稍后重试');
+    }).finally(() => {
+      if (!cancelled) setDetailLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeMessage?.id, activeMessage?.detailLoaded, selectedStoreId]);
 
   const openDraft = (message) => {
     setDraftModal({
@@ -282,7 +306,7 @@ export default function CustomerService() {
               loading={loading}
               renderActions={(row) => (
                 <>
-                  <button type="button" onClick={() => setActiveMessage(row)}>详情</button>
+                  <button type="button" onClick={() => openMessage(row)}>详情</button>
                   <button type="button" disabled={!platformReplyEnabled || !row.replyEnabled} title={platformReplyEnabled && row.replyEnabled ? '' : '当前咨询仅供查看，不能发送'}>回复</button>
                 </>
               )}
@@ -319,7 +343,9 @@ export default function CustomerService() {
             </div>
             <section className="detail-section">
               <h3>消息内容</h3>
-              <p>{activeMessage.content}</p>
+              {detailLoading ? <p>正在加载客服消息详情...</p> : null}
+              {detailError ? <p className="detail-error">{detailError}</p> : null}
+              {!detailLoading && !detailError ? <p>{activeMessage.content || '暂无可显示的消息内容'}</p> : null}
             </section>
             <section className="detail-section">
               <h3>处理提示</h3>

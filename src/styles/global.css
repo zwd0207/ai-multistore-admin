@@ -226,6 +226,7 @@ tbody tr:hover { background: #fafbff; }
 .detail-modal-actions { display: flex; justify-content: flex-end; }
 .detail-section { border: 1px solid #edf1f6; border-radius: 12px; padding: 16px; background: #fbfcfe; }
 .detail-section h3 { margin: 0 0 12px; font-size: 15px; }
+.detail-error { color: #b4232d; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 18px; }
 .detail-item { display: flex; flex-direction: column; gap: 4px; }
 .detail-item span { color: #7c8798; font-size: 12px; }

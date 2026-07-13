@@ -6,7 +6,7 @@ import Modal from './Modal';
 
 const resourceOrder = ['products', 'orders', 'customer_inquiries'];
 const coupangIpBlockedLabel = 'Coupang：IP 白名单未通过';
-const customerInquiryNotOpenLabel = '客服消息暂未接入';
+const customerInquiryNotOpenLabel = '客服消息暂不可用';
 const connectionBlockedErrorCodes = new Set([
   'ip_not_allowed',
   'auth_failed',

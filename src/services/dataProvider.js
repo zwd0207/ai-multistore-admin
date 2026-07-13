@@ -5716,6 +5716,22 @@ const sourceMethods = {
     const rows = withStoreName(adapters.list(result, adapters.customerInquiry).data, stores);
     return queryBackendRows(rows, params);
   },
+  getCustomerInquiryDetail: async (payload = {}) => {
+    if (!isBackendSource) return adapters.customerInquiryDetail(payload);
+    const { store } = await resolveBackendStore(payload);
+    const result = await backendApi.getCustomerInquiryDetail(
+      payload.readonlyId || payload.readonly_id || payload.inquiryId || payload.inquiry_id,
+      Number(store.id),
+    );
+    return adapters.customerInquiryDetail(result);
+  },
+  refreshNaverCustomerInquiries: async (payload = {}) => {
+    if (!isBackendSource) {
+      return adapters.naverCustomerInquiryRefresh({ status: 'unavailable', error_code: 'not_open' });
+    }
+    const { store } = await resolveBackendStore(payload);
+    return adapters.naverCustomerInquiryRefresh(await backendApi.refreshNaverCustomerInquiries(Number(store.id)));
+  },
   syncNaverCustomerInquiries: async (payload = {}) => {
     const request = {
       store_id: Number(payload.storeId || payload.store_id),

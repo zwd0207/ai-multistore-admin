@@ -108,6 +108,8 @@ export const backendApi = {
   ),
   executeShippingShipmentWriteback: (payload) => sendData('post', '/shipping/shipment-writeback/execute', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
+  refreshNaverCustomerInquiries: (storeId) => sendData('post', '/customer-inquiries/naver/refresh', undefined, { store_id: storeId }),
+  getCustomerInquiryDetail: (readonlyId, storeId) => getData(`/customer-inquiries/${encodeURIComponent(readonlyId)}`, { store_id: storeId }),
   getSyncLogs: (params) => getData('/sync-logs', params),
   getOperationAuditLogs: (params) => getData('/operation-audit-logs', params),
   getOperationAuditLogSummary: (params) => getData('/operation-audit-logs/summary', params),

@@ -554,8 +554,11 @@ export function adaptCustomerInquiry(item = {}) {
   const productName = item.product_name || relatedOrder.product_name || rawData.product_name || '';
   const source = item.source || rawData.source || item.source_type || '';
   const replyEnabled = item.reply_enabled ?? item.replyEnabled ?? (source !== 'naver_readonly');
+  const readonlyId = item.readonly_id ?? item.readonlyId
+    ?? (String(item.inquiry_id || '').startsWith('pxg_naver_readonly:') ? String(item.inquiry_id).split(':')[1] : null);
   return {
     id: item.inquiry_id || item.id,
+    readonlyId,
     storeId: item.store_id,
     platform: adaptPlatform(item.platform || source),
     rawPlatform: normalizePlatform(item.platform || source),
@@ -566,7 +569,7 @@ export function adaptCustomerInquiry(item = {}) {
     customer: item.customer_name,
     customerName: item.customer_name,
     title: item.title || item.summary,
-    content: item.content || item.summary,
+    content: '',
     summary: item.summary || item.title || item.content,
     rawStatus: item.status,
     status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
@@ -619,6 +622,31 @@ export function adaptCustomerInquiry(item = {}) {
       store: item.store_name || `店铺 #${item.store_id}`,
     },
     replies: rawData.answer_content ? [{ content: rawData.answer_content, createdAt: item.answered_at }] : [],
+  };
+}
+
+export function adaptCustomerInquiryDetail(item = {}) {
+  const source = item.detail || item.item || item.inquiry || item;
+  const adapted = adaptCustomerInquiry(source);
+  return {
+    ...adapted,
+    content: source.decrypted_content ?? source.decryptedContent ?? source.content ?? source.message ?? '',
+    detailLoaded: true,
+  };
+}
+
+export function naverCustomerInquiryRefresh(data = {}) {
+  const status = data.status || data.raw_status || 'unavailable';
+  const unavailable = ['unavailable', 'not_open', 'skipped', 'blocked'].includes(status)
+    || ['not_open', 'unavailable', 'blocked_by_connection'].includes(data.error_code || data.errorCode);
+  const success = status === 'success';
+  return {
+    status: success ? 'success' : unavailable ? 'unavailable' : status,
+    message: data.message || (success ? 'Naver 客服消息刷新完成' : 'Naver 客服消息暂不可用'),
+    errorCode: data.error_code || data.errorCode || null,
+    createdCount: numberValue(data.created_count ?? data.createdCount),
+    updatedCount: numberValue(data.updated_count ?? data.updatedCount),
+    platformWrite: Boolean(data.platform_write ?? data.platformWrite),
   };
 }
 
@@ -1741,9 +1769,23 @@ function adaptManualBatchSyncItem(item = {}) {
 export function manualBatchSyncResult(data = {}) {
   const items = (data.items || []).map(adaptManualBatchSyncItem);
   const summary = data.summary || {};
+  const normalizedItems = items.map((item) => {
+    if (item.resource !== 'customer_inquiries') return item;
+    const unavailable = ['not_open', 'unavailable'].includes(String(item.errorCode || '').toLowerCase())
+      || item.status === 'skipped';
+    return {
+      ...item,
+      status: unavailable ? 'skipped' : item.status,
+      message: unavailable
+        ? '客服消息暂不可用'
+        : item.status === 'success'
+          ? '客服消息同步完成'
+          : '客服消息同步结果待确认',
+    };
+  });
   return {
     status: data.status || 'skipped',
-    statusLabel: manualSyncStatusLabel(data.status, items),
+    statusLabel: manualSyncStatusLabel(data.status, normalizedItems),
     modalTitle: manualSyncModalTitle(data.status, items),
     connectionBlocked: Boolean(manualSyncConnectionIssue(items)),
     storeId: data.store_id,
@@ -1752,7 +1794,7 @@ export function manualBatchSyncResult(data = {}) {
     replacePolicy: data.replace_policy || '',
     deletePolicy: data.delete_policy || '',
     platformWrite: Boolean(data.platform_write),
-    items,
+    items: normalizedItems,
     summary: {
       successCount: numberValue(summary.success_count),
       failedCount: numberValue(summary.failed_count),
@@ -1828,6 +1870,8 @@ export const adapters = {
   storeOnboarding: adaptStoreOnboarding,
   orderLogisticsTrace: adaptOrderLogisticsTrace,
   customerInquiry: adaptCustomerInquiry,
+  customerInquiryDetail: adaptCustomerInquiryDetail,
+  naverCustomerInquiryRefresh,
   syncLog: adaptSyncLog,
   deviceEnvironment: adaptDeviceEnvironment,
   emailAccount: adaptEmailAccount,
