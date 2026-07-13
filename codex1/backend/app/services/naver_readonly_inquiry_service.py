@@ -197,11 +197,22 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
         )
         db.add(record)
         return "created"
+    # Every observation corrects legacy metadata retention immediately, even
+    # when the source is older or unchanged. ``created_at`` is immutable.
+    first_collection_at = _utc(record.created_at or record.source_observed_at)
+    max_deadline = first_collection_at + timedelta(days=INQUIRY_RETENTION_DAYS)
+    record.expires_at = min(_utc(record.expires_at), max_deadline)
     existing_source_updated_at = _utc(record.source_updated_at)
     incoming_source_updated_at = _utc(source_updated_at)
     if incoming_source_updated_at < existing_source_updated_at:
         return "skipped"
     if incoming_source_updated_at == existing_source_updated_at:
+        if record.encrypted_content is None and record.content_hash is None and payload_hash is not None:
+            # Old metadata-only rows may gain encrypted content exactly once at
+            # their original source version. Later hash changes still conflict.
+            for key, value in values.items():
+                setattr(record, key, value)
+            return "updated"
         if record.content_hash != payload_hash:
             raise ApiError(
                 "same-timestamp inquiry content conflict is blocked",
@@ -213,11 +224,7 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
         record.source_observed_at = observed_at
         record.is_stale = False
         return "skipped"
-    # The immutable collection deadline is deliberately never refreshed. Clamp
-    # older 90-day metadata rows down to the inquiry-specific 30-day maximum.
-    first_collection_at = _utc(record.created_at or record.source_observed_at)
-    max_deadline = first_collection_at + timedelta(days=INQUIRY_RETENTION_DAYS)
-    record.expires_at = min(_utc(record.expires_at), max_deadline)
+    # The immutable collection deadline is deliberately never refreshed.
     for key, value in values.items():
         setattr(record, key, value)
     return "updated"

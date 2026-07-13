@@ -158,13 +158,17 @@ def main():
             ordering.expires_at = now + timedelta(days=90)
             assert _upsert_item(db, store_id=1, item=initial, observed_at=now + timedelta(minutes=1)) == "skipped"
             assert ordering.encrypted_content == ciphertext
+            assert ordering.expires_at.replace(tzinfo=None) <= ordering.created_at.replace(tzinfo=None) + timedelta(days=30)
             older = {**initial, "inquiryContent": "older", "createdAt": "2026-06-30T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=older, observed_at=now + timedelta(minutes=2)) == "skipped"
             newer = {**initial, "inquiryContent": "newer", "createdAt": "2026-07-02T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=newer, observed_at=now + timedelta(minutes=3)) == "updated"
             assert ordering.expires_at.replace(tzinfo=None) <= ordering.created_at.replace(tzinfo=None) + timedelta(days=30)
+            ordering.encrypted_content = None; ordering.content_hash = None; ordering.content_length = 0
+            assert _upsert_item(db, store_id=1, item=newer, observed_at=now + timedelta(minutes=4)) == "updated"
+            assert ordering.encrypted_content is not None and ordering.content_hash is not None
             try:
-                _upsert_item(db, store_id=1, item={**newer, "inquiryContent": "conflict"}, observed_at=now + timedelta(minutes=4))
+                _upsert_item(db, store_id=1, item={**newer, "inquiryContent": "conflict"}, observed_at=now + timedelta(minutes=5))
             except Exception as exc:
                 assert getattr(exc, "error_code", None) == "readonly_inquiry_source_conflict"
             else:
@@ -177,11 +181,19 @@ def main():
             CREATE TABLE pxg_naver_readonly_sync_backups (id INTEGER PRIMARY KEY, baseline_manifest JSON);
             CREATE TABLE pxg_naver_order_recipient_secure_records (id INTEGER PRIMARY KEY);
             CREATE TABLE pxg_naver_readonly_customer_inquiries (id INTEGER PRIMARY KEY);
+            INSERT INTO pxg_naver_readonly_customer_inquiries (id) VALUES (1);
         """)
         from scripts.upgrade_pxg_naver_readonly_schema import _upgrade_existing_sync_backup_columns
         _upgrade_existing_sync_backup_columns(connection)
         assert {"encrypted_content", "encrypted_title", "content_hash", "content_length"} <= {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)")}
+        assert connection.execute("SELECT COUNT(*) FROM pxg_naver_readonly_customer_inquiries").fetchone()[0] == 1
         connection.close(); legacy_path.unlink()
+        startup_script = BACKEND_DIR.parents[1] / "scripts" / "start-local-pxg-naver-trial.ps1"
+        startup_text = startup_script.read_text(encoding="utf-8")
+        assert "upgrade_pxg_naver_readonly_schema.py" in startup_text
+        assert startup_text.index("upgrade_pxg_naver_readonly_schema.py") > startup_text.index("Import-LocalEnv $runtimeEnv")
+        assert startup_text.index("upgrade_pxg_naver_readonly_schema.py") > startup_text.index("provision_local_config_admin.py")
+        assert "backend startup is blocked" in startup_text
         print("verify_t14_naver_readonly_inquiries: ok")
     finally:
         sync_service._build_naver_token_context_from_credential, api_credential_readiness_service._request_naver_token_from_context, sync_service._request_naver_customer_inquiries = original_context, original_token, original_request

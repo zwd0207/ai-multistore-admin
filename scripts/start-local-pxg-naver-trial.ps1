@@ -26,6 +26,8 @@ if ($LASTEXITCODE -ne 0) { throw "Local PXG trial provisioning failed." }
 Import-LocalEnv $runtimeEnv
 & $python (Join-Path $backend "scripts\provision_local_config_admin.py")
 if ($LASTEXITCODE -ne 0) { throw "Local PXG configuration administrator provisioning failed." }
+& $python (Join-Path $backend "scripts\upgrade_pxg_naver_readonly_schema.py")
+if ($LASTEXITCODE -ne 0) { throw "Local PXG readonly schema upgrade failed; backend startup is blocked." }
 
 $processFile = Join-Path $trialDir "processes.json"
 if (Test-Path -LiteralPath $processFile) {
