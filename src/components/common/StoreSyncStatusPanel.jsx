@@ -12,6 +12,9 @@ const RESOURCE_ROWS = [
 ];
 const MAX_RECOVERY_POLLS = 17;
 const RECOVERY_POLL_DELAY_MS = 4000;
+const EMPTY_ROWS = [];
+const EMPTY_ATTENTION_SUMMARY = {};
+const CANNOT_MANAGE_RECOVERY = () => false;
 
 function connectionActionPath(storeId) {
   return `/stores?storeId=${encodeURIComponent(storeId)}&focus=connection`;
@@ -76,7 +79,11 @@ function AllStoreStatus({ rows, adminStoreIds }) {
   );
 }
 
-export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {}, canManageRecovery = () => false }) {
+export default function StoreSyncStatusPanel({
+  rows = EMPTY_ROWS,
+  attentionSummary = EMPTY_ATTENTION_SUMMARY,
+  canManageRecovery = CANNOT_MANAGE_RECOVERY,
+}) {
   const [visibleRows, setVisibleRows] = useState(rows);
   const [visibleAttentionSummary, setVisibleAttentionSummary] = useState(attentionSummary);
   const [recoveringStoreId, setRecoveringStoreId] = useState('');

@@ -84,7 +84,7 @@ def _order_context(db: Session, order: Order | None) -> tuple[dict, dict]:
         "tracking_number_masked": _mask_tracking_number(tracking_row.tracking_number),
         "shipment_status": tracking_row.row_status,
         "shipped_at": tracking_row.shipped_at,
-        "updated_at": tracking_row.updated_at,
+        "updated_at": tracking_row.created_at,
         "is_stale": False,
     }
 

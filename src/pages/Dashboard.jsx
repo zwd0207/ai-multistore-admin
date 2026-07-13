@@ -22,6 +22,7 @@ const SOURCE_LABELS = {
   shipping: '仓库发货',
   customer_inquiries: '客户咨询',
 };
+const EMPTY_OVERVIEW_ROWS = [];
 
 function rowsOf(result) { return result?.data || result?.items || []; }
 
@@ -113,7 +114,7 @@ export default function Dashboard() {
 
   if (state.loading) return <div className="table-state"><span className="spinner" />正在加载首页工作台...</div>;
 
-  const overviewRows = state.overview?.stores || [];
+  const overviewRows = state.overview?.stores || EMPTY_OVERVIEW_ROWS;
   const operatorWorkbench = state.overview?.operatorWorkbench || { summary: {}, sections: {}, sources: {} };
   const selectedStore = overviewRows.find((row) => String(row.storeId) === String(selectedStoreId));
   const selectedSummary = selectedStore?.workbenchSummary || {};

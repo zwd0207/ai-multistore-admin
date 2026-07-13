@@ -69,6 +69,8 @@ assert.match(adapters, /delivery_status_label_zh/);
 assert.doesNotMatch(adapters, /naverBusinessStatusLabel\(naverDeliveryStatus/);
 assert.doesNotMatch(panel, /暂未接入自动读取/);
 assert.match(panel, /storeSyncStatusLabel\(resource\?\.status\)/);
+assert.match(panel, /rows = EMPTY_ROWS/);
+assert.match(panel, /attentionSummary = EMPTY_ATTENTION_SUMMARY/);
 assert.match(css, /overflow-wrap: anywhere/);
 assert.match(css, /html, body, #root[^\n]*overflow-x: hidden/);
 
