@@ -84,6 +84,8 @@ assert.doesNotMatch(dataProvider, /executeShippingShipmentWriteback|toBackendShi
 assert.doesNotMatch(shippingPage, /healthCheck\(|getWarehouseShippingWritebackCapability|platformWriteEnabled/);
 assert.match(shippingPage, /data-action="reconcile"/);
 assert.match(shippingPage, /unknown \? <button[^>]+data-action="reconcile"/);
-assert.match(shippingPage, /failed && capability\?\.allowedAction === 'approve'/);
+assert.match(shippingPage, /\(failed \|\| notApplied\) && capability\?\.allowedAction === 'approve'/);
+assert.match(shippingPage, /reconciled_not_applied/);
+assert.match(shippingPage, /平台确认未写入/);
 
 console.log('naver ops ready contract checks passed');

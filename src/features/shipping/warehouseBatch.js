@@ -101,6 +101,7 @@ export function writebackResultLabel(status = '') {
   if (status === 'platform_written') return '完成';
   if (status === 'ready_for_writeback') return '待提交';
   if (status === 'reconciled_success') return '完成';
+  if (status === 'reconciled_not_applied') return '平台确认未写入';
   if (status === 'unknown') return '平台结果待核对';
   return status || '平台结果待核对';
 }

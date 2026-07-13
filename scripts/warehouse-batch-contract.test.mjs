@@ -6,6 +6,7 @@ import {
   adaptWarehouseWritebackCapability,
   warehouseRequest,
   warehouseStage,
+  writebackResultLabel,
 } from '../src/features/shipping/warehouseBatch.js';
 assert.equal(warehouseStage('created'), 'warehouse');
 assert.equal(warehouseStage('warehouse_returned'), 'review');
@@ -21,6 +22,7 @@ assert.equal(batch.requiresWarehouseStop, true);
 assert.equal(batch.shippedAt, '2026-07-10');
 assert.equal(batch.writebackCapability.maxRows, 1);
 assert.equal(batch.writebackCapability.allowedAction, 'approve');
+assert.equal(adaptWarehouseWritebackCapability(batch.writebackCapability).allowedAction, 'none', 'adapted capability must not be adapted again by the page');
 assert.deepEqual(warehouseRequest.create({ storeId: '1', platform: 'naver', orderIds: ['4'] }), { store_id: 1, platform: 'naver', order_ids: [4], manual_approval: true });
 assert.deepEqual(warehouseRequest.importSheet({ fileName: 'return.xlsx', fileContentBase64: 'YWJj' }), { source_file_name: 'return.xlsx', file_content_base64: 'YWJj', manual_approval: true });
 assert.deepEqual(warehouseRequest.confirm(['9']), { confirmed_row_ids: [9], manual_approval: true });
@@ -55,11 +57,17 @@ assert.deepEqual(capability, {
   reconciliationRequired: false, allowedAction: 'approve', storeName: '店铺 A', productOrderNo: 'P-1',
   carrier: 'CJ', trackingNumberMasked: '******1234', platformLatestStatus: '已付款 / 新订单',
 });
+assert.equal(writebackResultLabel('reconciled_success'), '完成');
+assert.equal(writebackResultLabel('reconciled_not_applied'), '平台确认未写入');
 const shippingPage = fs.readFileSync('src/pages/ShippingAssistant.jsx', 'utf8');
 const backendApi = fs.readFileSync('src/services/backendApi.js', 'utf8');
 const dataProvider = fs.readFileSync('src/services/dataProvider.js', 'utf8');
 assert.doesNotMatch(shippingPage, /healthCheck\(|platformWriteEnabled|getWarehouseShippingWritebackCapability|\/writeback-capability|shipment-writeback\/execute/);
 assert.doesNotMatch(shippingPage, /capability\.allowed\b|singleOrderOnly|single_order_only/);
+assert.match(shippingPage, /setWritebackCapability\(activeBatch\.writebackCapability\)/);
+assert.doesNotMatch(shippingPage, /setWritebackCapability\(adaptWarehouseWritebackCapability\(activeBatch\.writebackCapability\)\)/);
+assert.match(shippingPage, /reconciled_not_applied/);
+assert.match(shippingPage, /平台确认未写入/);
 assert.match(shippingPage, /writebackCapability/);
 assert.match(shippingPage, /data-action="reconcile"/);
 assert.match(shippingPage, /申请平台回填审批/);

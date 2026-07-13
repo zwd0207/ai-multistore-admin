@@ -102,6 +102,7 @@ function WritebackCapabilityReview({
 function WritebackResultReview({ activeBatch, capability, trackingDetails, writebackResult, onReconcile, onReapprove }) {
   const resultStatus = writebackResult?.status || (activeBatch?.failed ? 'failed' : 'success');
   const unknown = resultStatus === 'unknown' || trackingDetails.some((item) => item.status === 'unknown');
+  const notApplied = resultStatus === 'reconciled_not_applied';
   const failed = !unknown && ['failed', 'partial_success', 'writeback_failed'].includes(resultStatus);
   const safeReason = writebackResult?.safe_failure_reason || writebackResult?.safeFailureReason
     || writebackResult?.safe_reason || writebackResult?.safeReason
@@ -109,14 +110,14 @@ function WritebackResultReview({ activeBatch, capability, trackingDetails, write
   return (
     <div className="writeback-result-review">
       <EmptyState
-        title={unknown ? '平台结果待核对' : (failed ? '发货信息处理失败' : '发货批次已完成')}
-        description={unknown ? '平台返回结果暂时无法确认，请进行结果核对。' : (failed ? `安全原因：${safeReason}` : '发货信息已完成处理。')}
+        title={unknown ? '平台结果待核对' : (notApplied ? '平台确认未写入' : (failed ? '发货信息处理失败' : '发货批次已完成'))}
+        description={unknown ? '平台返回结果暂时无法确认，请进行结果核对。' : (notApplied ? '平台已确认本次发货信息未写入。' : (failed ? `安全原因：${safeReason}` : '发货信息已完成处理。'))}
       />
       {trackingDetails.length ? (
         <table className="data-table"><thead><tr><th>商品订单号</th><th>承运商</th><th>物流单号</th><th>平台结果</th></tr></thead><tbody>{trackingDetails.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.carrier}</td><td>{row.trackingNumberTail}</td><td><StatusBadge value={writebackResultLabel(row.status)} /></td></tr>)}</tbody></table>
       ) : null}
       {unknown ? <button className="button primary" type="button" data-action="reconcile" onClick={onReconcile}>核对平台结果</button> : null}
-      {failed && capability?.allowedAction === 'approve' ? <button className="button primary" type="button" onClick={onReapprove}>重新申请审批</button> : null}
+      {(failed || notApplied) && capability?.allowedAction === 'approve' ? <button className="button primary" type="button" onClick={onReapprove}>重新申请审批</button> : null}
     </div>
   );
 }
@@ -262,7 +263,7 @@ export default function ShippingAssistant() {
       return () => { cancelled = true; };
     }
     setWritebackCapabilityLoading(false);
-    setWritebackCapability(adaptWarehouseWritebackCapability(activeBatch.writebackCapability));
+    setWritebackCapability(activeBatch.writebackCapability);
     return () => { cancelled = true; };
   }, [activeBatch?.id, activeStage]);
 
@@ -326,8 +327,18 @@ export default function ShippingAssistant() {
     try {
       const result = await dataProvider.confirmWarehouseShippingWriteback(activeBatch.id, warehouseRequest.writeback(writebackApproval.token));
       setWritebackResult(result);
-      setResultBatch(result.batch ? adaptWarehouseBatch(result.batch) : activeBatch);
-      await refreshBatches();
+      const capabilityPayload = result.writeback_capability || result.writebackCapability
+        || result.batch?.writeback_capability || result.batch?.writebackCapability;
+      const nextCapability = adaptWarehouseWritebackCapability(capabilityPayload);
+      setWritebackCapability(nextCapability);
+      const responseBatch = result.batch ? adaptWarehouseBatch(result.batch) : activeBatch;
+      const responseResultBatch = responseBatch
+        ? { ...responseBatch, writebackCapability: nextCapability || responseBatch.writebackCapability }
+        : null;
+      setResultBatch(responseResultBatch);
+      const nextBatches = await refreshBatches();
+      const refreshedBatch = nextBatches.find((batch) => String(batch.id) === String(activeBatch.id));
+      if (refreshedBatch) setResultBatch({ ...refreshedBatch, writebackCapability: nextCapability || refreshedBatch.writebackCapability });
       setWritebackApproval(null);
       setFinalWritebackConfirm(false);
       setWritebackConfirm(false);
@@ -350,12 +361,22 @@ export default function ShippingAssistant() {
     try {
       const result = await dataProvider.reconcileWarehouseShippingWriteback(targetBatch.id);
       setWritebackResult(result);
-      const nextCapability = adaptWarehouseWritebackCapability(result.writeback_capability || result.writebackCapability);
-      if (nextCapability) setWritebackCapability(nextCapability);
-      if (result.batch) setResultBatch(adaptWarehouseBatch(result.batch));
+      const capabilityPayload = result.writeback_capability || result.writebackCapability
+        || result.batch?.writeback_capability || result.batch?.writebackCapability;
+      const nextCapability = adaptWarehouseWritebackCapability(capabilityPayload);
+      const responseBatch = result.batch ? adaptWarehouseBatch(result.batch) : targetBatch;
+      const responseResultBatch = responseBatch
+        ? { ...responseBatch, writebackCapability: nextCapability || responseBatch.writebackCapability }
+        : null;
+      setWritebackCapability(responseResultBatch?.writebackCapability || nextCapability);
+      setResultBatch(responseResultBatch);
       const nextBatches = await refreshBatches();
       const refreshedBatch = nextBatches?.find((batch) => String(batch.id) === String(targetBatch.id));
-      if (refreshedBatch) setResultBatch(refreshedBatch);
+      if (refreshedBatch) {
+        const refreshedResultBatch = { ...refreshedBatch, writebackCapability: nextCapability || refreshedBatch.writebackCapability };
+        setWritebackCapability(refreshedResultBatch.writebackCapability);
+        setResultBatch(refreshedResultBatch);
+      }
       await refreshTrackingDetails(targetBatch.id);
       setNotice(result.status === 'reconciled_success' ? '平台结果已核对完成。' : '已提交平台结果核对。');
     } catch (error) {
