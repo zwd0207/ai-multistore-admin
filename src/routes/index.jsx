@@ -1,23 +1,33 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import AdminLayout from '../layouts/AdminLayout';
-import Dashboard from '../pages/Dashboard';
-import Stores from '../pages/Stores';
-import Products from '../pages/Products';
-import InventoryAlerts from '../pages/InventoryAlerts';
-import Orders from '../pages/Orders';
-import CustomerService from '../pages/CustomerService';
-import Sales from '../pages/Sales';
-import Devices from '../pages/Devices';
-import Emails from '../pages/Emails';
-import Appeals from '../pages/Appeals';
-import Environment from '../pages/Environment';
-import Accounts from '../pages/Accounts';
-import Settings from '../pages/Settings';
-import Logs from '../pages/Logs';
-import ApiCapabilities from '../pages/ApiCapabilities';
-import ShippingAssistant from '../pages/ShippingAssistant';
 import { AuthPage, AuthStatePage } from '../pages/AuthPages';
 import { useAuthContext } from '../context/AuthContext';
+
+const AdminLayout = lazy(() => import('../layouts/AdminLayout'));
+const Dashboard = lazy(() => import('../pages/Dashboard'));
+const Stores = lazy(() => import('../pages/Stores'));
+const Products = lazy(() => import('../pages/Products'));
+const InventoryAlerts = lazy(() => import('../pages/InventoryAlerts'));
+const Orders = lazy(() => import('../pages/Orders'));
+const CustomerService = lazy(() => import('../pages/CustomerService'));
+const Sales = lazy(() => import('../pages/Sales'));
+const Devices = lazy(() => import('../pages/Devices'));
+const Emails = lazy(() => import('../pages/Emails'));
+const Appeals = lazy(() => import('../pages/Appeals'));
+const Environment = lazy(() => import('../pages/Environment'));
+const Accounts = lazy(() => import('../pages/Accounts'));
+const Settings = lazy(() => import('../pages/Settings'));
+const Logs = lazy(() => import('../pages/Logs'));
+const ApiCapabilities = lazy(() => import('../pages/ApiCapabilities'));
+const ShippingAssistant = lazy(() => import('../pages/ShippingAssistant'));
+
+function DeferredPage({ children }) {
+  return (
+    <Suspense fallback={<div className="table-state"><span className="spinner" />正在加载页面...</div>}>
+      {children}
+    </Suspense>
+  );
+}
 
 function RequireAuth({ children }) {
   const { status, isAuthenticated, stores } = useAuthContext();
@@ -33,25 +43,25 @@ function RequireAuth({ children }) {
 export default function AppRoutes() {
   return (
     <Routes>
-      <Route element={<RequireAuth><AdminLayout /></RequireAuth>}>
+      <Route element={<RequireAuth><DeferredPage><AdminLayout /></DeferredPage></RequireAuth>}>
         <Route index element={<Navigate to="/workbench" replace />} />
-        <Route path="workbench" element={<Dashboard />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="stores" element={<Stores />} />
-        <Route path="products" element={<Products />} />
-        <Route path="inventory" element={<InventoryAlerts />} />
-        <Route path="orders" element={<Orders />} />
-        <Route path="shipping" element={<ShippingAssistant />} />
-        <Route path="customer-service" element={<CustomerService />} />
-        <Route path="sales" element={<Sales />} />
-        <Route path="devices" element={<Devices />} />
-        <Route path="emails" element={<Emails />} />
-        <Route path="appeals" element={<Appeals />} />
-        <Route path="environment" element={<Environment />} />
-        <Route path="accounts" element={<Accounts />} />
-        <Route path="api-capabilities" element={<ApiCapabilities />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="logs" element={<Logs />} />
+        <Route path="workbench" element={<DeferredPage><Dashboard /></DeferredPage>} />
+        <Route path="dashboard" element={<DeferredPage><Dashboard /></DeferredPage>} />
+        <Route path="stores" element={<DeferredPage><Stores /></DeferredPage>} />
+        <Route path="products" element={<DeferredPage><Products /></DeferredPage>} />
+        <Route path="inventory" element={<DeferredPage><InventoryAlerts /></DeferredPage>} />
+        <Route path="orders" element={<DeferredPage><Orders /></DeferredPage>} />
+        <Route path="shipping" element={<DeferredPage><ShippingAssistant /></DeferredPage>} />
+        <Route path="customer-service" element={<DeferredPage><CustomerService /></DeferredPage>} />
+        <Route path="sales" element={<DeferredPage><Sales /></DeferredPage>} />
+        <Route path="devices" element={<DeferredPage><Devices /></DeferredPage>} />
+        <Route path="emails" element={<DeferredPage><Emails /></DeferredPage>} />
+        <Route path="appeals" element={<DeferredPage><Appeals /></DeferredPage>} />
+        <Route path="environment" element={<DeferredPage><Environment /></DeferredPage>} />
+        <Route path="accounts" element={<DeferredPage><Accounts /></DeferredPage>} />
+        <Route path="api-capabilities" element={<DeferredPage><ApiCapabilities /></DeferredPage>} />
+        <Route path="settings" element={<DeferredPage><Settings /></DeferredPage>} />
+        <Route path="logs" element={<DeferredPage><Logs /></DeferredPage>} />
       </Route>
       <Route path="*" element={<Navigate to="/workbench" replace />} />
     </Routes>

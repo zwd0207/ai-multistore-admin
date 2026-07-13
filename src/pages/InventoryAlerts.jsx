@@ -103,7 +103,7 @@ export default function InventoryAlerts() {
       setLoading(true);
       setError('');
       try {
-        const params = { page: 1, pageSize: 200 };
+        const params = { page: 1, pageSize: 100 };
         if (isBackendSource && (query.storeId || selectedStoreId)) params.storeId = query.storeId || selectedStoreId;
         const result = await dataProvider.getProducts(params);
         const normalized = (result.data || result.items || []).map((item) => normalizeProduct(item, stores));

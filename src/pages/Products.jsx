@@ -146,7 +146,7 @@ export default function Products() {
       setLoading(true);
       setError('');
       try {
-        const params = { page: 1, pageSize: 200 };
+        const params = { page: 1, pageSize: 100 };
         if (isBackendSource && (query.storeId || selectedStoreId)) params.storeId = query.storeId || selectedStoreId;
         if (query.platform) params.platform = query.platform;
         const result = await dataProvider.getProducts(params);

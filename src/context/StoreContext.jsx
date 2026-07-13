@@ -1,12 +1,17 @@
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useState,
 } from 'react';
-import dataProvider, { isBackendSource } from '../services/dataProvider';
+import { isBackendSource } from '../services/dataSource';
 import { filterVisibleBusinessStores } from '../utils/storeDisplay';
 import { useAuthContext } from './AuthContext';
 
 const STORAGE_KEY = 'codex2.selectedStoreId';
 const StoreContext = createContext(null);
+
+async function getStores(params) {
+  const { default: dataProvider } = await import('../services/dataProvider');
+  return dataProvider.getStores(params);
+}
 
 function readStoredStoreId() {
   try {
@@ -45,7 +50,7 @@ export function StoreProvider({ children }) {
     setError('');
 
     try {
-      const response = await dataProvider.getStores({ page: 1, pageSize: 100 });
+      const response = await getStores({ page: 1, pageSize: 100 });
       const nextStores = filterVisibleBusinessStores(response.data || response.items || []);
       setStores(nextStores);
 
@@ -76,7 +81,7 @@ export function StoreProvider({ children }) {
     setLoading(true);
     setError('');
 
-    dataProvider.getStores({ page: 1, pageSize: 100 })
+    getStores({ page: 1, pageSize: 100 })
       .then((response) => {
         if (cancelled) return;
         const nextStores = filterVisibleBusinessStores(response.data || response.items || []);

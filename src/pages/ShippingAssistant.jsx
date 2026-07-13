@@ -129,7 +129,7 @@ export default function ShippingAssistant() {
       if (storeLoading) return;
       setLoading(true); setError('');
       try {
-        const params = { page: 1, pageSize: 200 };
+        const params = { page: 1, pageSize: 100 };
         if (isBackendSource && (query.storeId || selectedStoreId)) params.storeId = query.storeId || selectedStoreId;
         const result = await dataProvider.getOrders(params);
         const next = (result.data || result.items || []).filter(isPending).map(normalizeOrder).filter((row) => {

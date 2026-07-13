@@ -1,10 +1,7 @@
 import adapters from './adapters';
 import backendApi from './backendApi';
 import mockApi from './mockApi';
-
-const requestedSource = String(import.meta.env?.VITE_DATA_SOURCE || 'mock').toLowerCase();
-const DATA_SOURCE = requestedSource === 'backend' ? 'backend' : 'mock';
-const isBackendSource = DATA_SOURCE === 'backend';
+import { DATA_SOURCE, isBackendSource } from './dataSource';
 let backendStoresPromise;
 
 const comparable = (value) => String(value ?? '').toLowerCase();

@@ -7,6 +7,7 @@
     "dev": "vite",
     "encoding:scan": "node scripts/scan-encoding.mjs",
     "session:verify": "node scripts/verify-session-security.mjs",
+    "bundle:verify": "node scripts/verify-bundle-budget.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
