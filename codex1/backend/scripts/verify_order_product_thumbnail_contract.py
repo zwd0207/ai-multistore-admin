@@ -21,6 +21,7 @@ os.environ["SESSION_TOKEN_PEPPER"] = "test-only-session-pepper-32-characters-min
 os.environ["CREDENTIAL_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
 os.environ["CORS_ALLOWED_ORIGINS"] = '["https://erp.test"]'
 os.environ["LOCAL_PRODUCT_THUMBNAIL_ROOT"] = str(THUMBNAIL_ROOT)
+os.environ["LIFECYCLE_SCHEDULERS_ENABLED"] = "false"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -28,42 +29,18 @@ if str(BACKEND_DIR) not in sys.path:
 
 from fastapi.testclient import TestClient
 
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.core.timezone import get_utc_now
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.config import Settings
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.database import Base, SessionLocal, engine
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.main import app
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.models.order import Order
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.models.product import Product
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.models.store import Store
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.services.encryption import encrypt_value
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.services.order_service import product_display_contract, serialize_order_summary
 import app.services.product_thumbnail_service as thumbnail_service
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.schemas.pxg_naver_readonly import PxgNaverReadonlyProductCandidate
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.services.product_thumbnail_service import (
     THUMBNAIL_ACCESS_RETENTION,
     THUMBNAIL_MAX_BYTES,
@@ -76,11 +53,7 @@ from app.services.product_thumbnail_service import (
     store_thumbnail_from_approved_product_read,
     thumbnail_requires_invalidation,
 )
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
-os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
-
 from app.services.sync_service import _build_naver_order_internal_detail
 
 

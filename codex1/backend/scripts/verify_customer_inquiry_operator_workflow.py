@@ -23,6 +23,7 @@ os.environ["OPERATOR_TRIAL_ENABLED"] = "true"
 os.environ["OPERATOR_TRIAL_ARTIFICIAL_DATA_ONLY"] = "true"
 os.environ["OPERATOR_TRIAL_REAL_READ_ENABLED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
+os.environ["LIFECYCLE_SCHEDULERS_ENABLED"] = "false"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -48,7 +49,7 @@ from app.models.pxg_naver_readonly import (
 from app.models.store import Store
 from app.models.sync_log import SyncLog
 from app.services.encryption import encrypt_value
-from app.services import sync_service
+from app.services import naver_readonly_inquiry_service, sync_service
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
 
@@ -353,10 +354,24 @@ def main() -> None:
             db.query(PxgNaverReadonlySyncBackup).filter_by(backup_ref="t10-expired-backup").one().deleted_at = get_utc_now()
             db.commit()
 
-        original_credential_lookup = sync_service._ensure_naver_product_preview_credential
+        original_legacy_sync = sync_service.sync_naver_customer_inquiries
+        original_readonly_refresh = naver_readonly_inquiry_service.refresh_naver_readonly_inquiries
+
         def unexpected_legacy_inquiry_work(*_args, **_kwargs):
-            raise AssertionError("legacy inquiry sync reached token, network, or local-write work")
-        sync_service._ensure_naver_product_preview_credential = unexpected_legacy_inquiry_work
+            raise AssertionError("manual batch reached the permanently disabled legacy inquiry sync")
+
+        def controlled_readonly_refresh(*_args, **_kwargs):
+            return {
+                "status": "success",
+                "message": "controlled readonly inquiry refresh completed",
+                "created_count": 0,
+                "updated_count": 0,
+                "skipped_count": 0,
+                "source_type": "pxg_naver_readonly_customer_inquiries",
+            }
+
+        sync_service.sync_naver_customer_inquiries = unexpected_legacy_inquiry_work
+        naver_readonly_inquiry_service.refresh_naver_readonly_inquiries = controlled_readonly_refresh
         try:
             with SessionLocal() as db:
                 inquiry_count_before = db.query(CustomerInquiry).filter_by(store_id=1).count()
@@ -386,7 +401,8 @@ def main() -> None:
                     include_customer_inquiries=True,
                 )
             inquiry_item = next(item for item in manual["items"] if item["resource"] == "customer_inquiries")
-            assert inquiry_item["error_code"] == "legacy_naver_customer_inquiry_sync_disabled", manual
+            assert inquiry_item["status"] == "success", manual
+            assert inquiry_item["source_type"] == "pxg_naver_readonly_customer_inquiries", manual
             with SessionLocal() as db:
                 assert db.query(CustomerInquiry).filter_by(store_id=1).count() == inquiry_count_before
                 assert db.query(SyncLog).filter_by(
@@ -394,7 +410,8 @@ def main() -> None:
                     sync_type="naver_customer_inquiry_real_sync",
                 ).count() == legacy_sync_log_count_before
         finally:
-            sync_service._ensure_naver_product_preview_credential = original_credential_lookup
+            sync_service.sync_naver_customer_inquiries = original_legacy_sync
+            naver_readonly_inquiry_service.refresh_naver_readonly_inquiries = original_readonly_refresh
 
         repeated = client.get("/api/v1/customer-inquiries", params={"store_id": 1})
         assert repeated.status_code == 200, repeated.text
