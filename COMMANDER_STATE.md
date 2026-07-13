@@ -93,6 +93,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `7589f2f` and `11e0a3e`: the dashboard store table is fully operable at 390px and the existing order page recognizes backend `rawStatus` during abnormal-order deep links.
 - Actual browser QA passed exactly two authorized stores (`pxg球包店` and `[FICTIONAL][LOCAL][T12] Naver Multi-store Demo`), aggregate task uniqueness, single-store isolation, abnormal-order and inquiry deep links, desktop layout, 390px layout, and a clean application console. All observed business traffic stayed on localhost; no sync, reply, writeback, platform write, or AI action was called.
 - `15975f7`, `975a481`, `279e0c8`, `8c36797`, and `9c1fce7`: local-only graphical MFA display, strict backend gates, unified response contract, stable trial ports, and correct pending-session timing passed focused tests, full verification, desktop login, and 390px browser QA. Both legacy `.cmd` entries now use the same stable configuration-admin credential source.
+- `065ac83`, `d864f28`, `424b16f`, `f5ce53e`, `a1f03b2`, `c499b08`, `1e534d3`, and `7a6bc54`: T13 delivers resumable Naver store onboarding, automatic recent-30-day product/order import, and store-scoped historical order query/backfill through the existing order system. Secret validation output is redacted, configuration writes require store-level `credentials.manage`, historical backfill is strictly older than the current 30-day window, and historical sources are excluded from today's workbench and metrics. Focused tests, frontend contracts/build, full `verify_all.py`, desktop/390px browser QA, and Sol final review passed.
 
 ## Worktree Registry
 
@@ -119,6 +120,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 12. T12-R1 actual local multi-store rehearsal is accepted. Keep the fictional second store for repeatable operator testing; use its guarded cleanup script when the fixture is no longer needed.
 13. The next product phase may build on verified multi-store visibility and navigation. It must not treat this fictional-store rehearsal as approval for a second real marketplace connection or any platform write.
 14. Operators no longer need a `.cmd` file to obtain the local trial MFA code. Use the code displayed on the confirmation page; keep the `.cmd` entries only as a fallback for the same stable account.
+15. T13 is accepted. The next controlled operator action is to add one Naver store through `店铺与平台连接 -> 添加 Naver 店铺` with its real Client ID/Secret and observe automatic validation and the initial 30-day import. Do not enable platform writes.
 
 ## Compact Reporting Contract
 
