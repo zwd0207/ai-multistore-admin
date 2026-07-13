@@ -233,11 +233,35 @@ def _order_delivery_fields(
         max_length=120,
     )
     trace_status = "local_tracking_trace" if tracking_number else "tracking_number_missing"
+    delivery_status = _first_text(
+        readonly_logistics.shipment_status if readonly_logistics else None,
+        _find_nested_text(raw_data, ("delivery_status", "deliveryStatus"), max_length=60),
+        max_length=60,
+    )
+    delivery_status_label = _first_text(
+        _find_nested_text(raw_data, ("delivery_status_label_zh", "deliveryStatusLabelZh"), max_length=120),
+        delivery_status,
+        max_length=120,
+    )
+    logistics_updated_at = (
+        readonly_logistics.source_updated_at
+        if readonly_logistics is not None
+        else tracking_row.created_at if tracking_row is not None else None
+    )
     return {
         "delivery_company": _display_delivery_company(delivery_company),
         "delivery_company_code": delivery_company_code,
         "tracking_number": _mask_tracking_number(tracking_number),
         "logistics_trace_status": trace_status,
+        "delivery_status": delivery_status,
+        "delivery_status_label_zh": delivery_status_label,
+        "logistics_updated_at": logistics_updated_at,
+        "logistics_stale": bool(readonly_logistics and readonly_logistics.is_stale),
+        "logistics_source": (
+            "pxg_naver_readonly_logistics"
+            if readonly_logistics is not None
+            else "shipping_tracking_import_rows" if tracking_row is not None else None
+        ),
     }
 
 
@@ -639,7 +663,10 @@ def get_order_logistics_timeline(db: Session, *, store_id: int, order_id: int) -
         "delivery_company": delivery_fields.get("delivery_company"),
         "delivery_company_code": delivery_fields.get("delivery_company_code"),
         "tracking_number": delivery_fields.get("tracking_number"),
-        "tracking_source": "shipping_tracking_import_rows" if tracking_row else "orders.raw_data",
+        "tracking_source": delivery_fields.get("logistics_source") or "orders.raw_data",
+        "logistics_updated_at": delivery_fields.get("logistics_updated_at"),
+        "logistics_stale": delivery_fields.get("logistics_stale", False),
+        "is_stale": delivery_fields.get("logistics_stale", False),
         "realtime_tracking_open": False,
         "message": (
             "实时快递轨迹暂未接入；当前显示本地订单同步、物流单号导入和发货状态记录。"

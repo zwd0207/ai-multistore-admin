@@ -250,6 +250,10 @@ def main():
         timeline = order_service.get_order_logistics_timeline(db, store_id=store.id, order_id=primary.id)
         assert TRACKING not in str(payload) and TRACKING not in str(timeline)
         assert payload["tracking_number"] and "*" in payload["tracking_number"]
+        assert payload["logistics_updated_at"] and payload["logistics_stale"] is False
+        assert payload["delivery_status"] == "DELIVERED"
+        assert timeline["tracking_source"] == "pxg_naver_readonly_logistics"
+        assert timeline["logistics_updated_at"] and timeline["realtime_tracking_open"] is False
 
         cleanup = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(PxgNaverReadonlyCleanupStatus.store_id == store.id))
         cleanup.status = "failed"; db.commit()
