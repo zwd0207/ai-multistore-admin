@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     shipping,
     stats,
     stores,
+    store_onboardings,
     sync,
     sync_logs,
 )
@@ -48,6 +49,7 @@ api_router.include_router(platform_logins.router)
 api_router.include_router(pxg_naver_readonly.router)
 api_router.include_router(permissions.router)
 api_router.include_router(stores.router)
+api_router.include_router(store_onboardings.router)
 api_router.include_router(products.router)
 api_router.include_router(orders.router)
 api_router.include_router(shipping.router)

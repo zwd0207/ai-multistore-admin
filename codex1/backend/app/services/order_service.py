@@ -3,7 +3,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.order import Order
@@ -14,6 +14,7 @@ from app.schemas.order import OrderRead
 from app.services.store_service import ensure_store_exists
 
 TEST_ORDER_SOURCE_TYPES = {"mock_sync", "local_frontend_mock"}
+HISTORICAL_ORDER_SOURCE_TYPE = "naver_historical_backfill"
 SAFE_PRODUCT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
 SAFE_PRODUCT_TEXT_PATTERN = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 DELIVERY_COMPANY_LABELS = {
@@ -382,6 +383,67 @@ def list_orders(
     tracking_lookup = _build_tracking_lookup(db.scalars(tracking_statement).all())
 
     return [serialize_order_summary(item, _tracking_row_for_order(item, tracking_lookup), db=db) for item in orders]
+
+
+def query_orders(
+    db: Session,
+    *,
+    store_id: int,
+    view: str,
+    page: int,
+    page_size: int,
+    platform: str | None = None,
+    include_test_orders: bool = False,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    order_id: str | None = None,
+    product_order_id: str | None = None,
+    product_id: str | None = None,
+    product_name: str | None = None,
+    status: str | None = None,
+    buyer_name: str | None = None,
+    buyer_phone: str | None = None,
+) -> dict:
+    ensure_store_exists(db, store_id)
+    statement = select(Order).where(Order.store_id == store_id)
+    if view == "historical":
+        statement = statement.where(Order.source_type == HISTORICAL_ORDER_SOURCE_TYPE)
+    else:
+        statement = statement.where(Order.source_type != HISTORICAL_ORDER_SOURCE_TYPE)
+    if platform:
+        statement = statement.where(Order.platform == platform)
+    if not include_test_orders:
+        statement = statement.where(Order.source_type.notin_(TEST_ORDER_SOURCE_TYPES))
+    if start_at:
+        statement = statement.where(Order.ordered_at >= start_at)
+    if end_at:
+        statement = statement.where(Order.ordered_at <= end_at)
+    if order_id:
+        statement = statement.where(Order.external_order_id.ilike(f"%{order_id.strip()}%"))
+    if product_order_id:
+        statement = statement.where(Order.external_product_order_id.ilike(f"%{product_order_id.strip()}%"))
+    if product_id:
+        statement = statement.where(Order.raw_data["platform_product_id"].as_string() == product_id.strip())
+    if product_name:
+        statement = statement.where(Order.product_name.ilike(f"%{product_name.strip()}%"))
+    if status:
+        statement = statement.where(Order.order_status == status.strip())
+    if buyer_name:
+        statement = statement.where(Order.buyer_name.ilike(f"%{buyer_name.strip()}%"))
+    if buyer_phone:
+        statement = statement.where(or_(Order.buyer_phone.ilike(f"%{buyer_phone.strip()}%"), Order.buyer_masked_phone.ilike(f"%{buyer_phone.strip()}%")))
+
+    total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    orders = db.scalars(statement.order_by(Order.ordered_at.desc(), Order.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    tracking_rows = db.scalars(select(ShippingTrackingImportRow).where(ShippingTrackingImportRow.store_id == store_id).order_by(ShippingTrackingImportRow.created_at.desc(), ShippingTrackingImportRow.id.desc())).all()
+    tracking_lookup = _build_tracking_lookup(tracking_rows)
+    return {
+        "items": [serialize_order_summary(order, _tracking_row_for_order(order, tracking_lookup), db=db) for order in orders],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "view": view,
+    }
 
 
 def list_operations_orders(db: Session, store_id: int, platform: str | None = None, include_test_orders: bool = False) -> list[dict]:

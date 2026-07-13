@@ -51,6 +51,10 @@ EXPECTED_API_PATHS = {
     "/api/v1/health",
     "/api/v1/stores",
     "/api/v1/stores/{store_id}",
+    "/api/v1/store-onboardings",
+    "/api/v1/store-onboardings/{onboarding_id}",
+    "/api/v1/store-onboardings/{onboarding_id}/resume",
+    "/api/v1/store-onboardings/{onboarding_id}/historical-backfill",
     "/api/v1/credentials",
     "/api/v1/api-credentials/readiness",
     "/api/v1/api-credentials/smoke-test",
@@ -20206,6 +20210,7 @@ def main() -> None:
         verify_shipping_mapping_schema_and_local_write()
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t13_onboarding.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

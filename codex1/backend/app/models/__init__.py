@@ -37,6 +37,7 @@ from app.models.shipping import (
 )
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.store import Store
+from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_log import SyncLog
 
 __all__ = [
@@ -81,5 +82,6 @@ __all__ = [
     "WarehouseShippingApprovalGrant",
     "SyncCheckpoint",
     "Store",
+    "StoreOnboarding",
     "SyncLog",
 ]

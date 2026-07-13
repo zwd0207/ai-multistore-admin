@@ -163,6 +163,8 @@ def _requires_write_protection(request: Request) -> bool:
 
 
 def _write_permission_for_path(path: str) -> str:
+    if path.startswith("/api/v1/store-onboardings"):
+        return "store_membership.assign"
     if path.startswith("/api/v1/shipping/"):
         return "shipping.writeback.approve" if "writeback" in path else "shipping.batch.manage"
     if path.startswith("/api/v1/sync/"):
