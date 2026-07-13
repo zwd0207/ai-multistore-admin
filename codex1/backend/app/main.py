@@ -337,8 +337,16 @@ async def _enforce_write_protection(request: Request) -> None:
         from app.services.operator_trial_service import DISABLED_TRIAL_WRITE_PATHS
         if request.url.path in DISABLED_TRIAL_WRITE_PATHS:
             raise ApiError("legacy real platform write is disabled", "legacy_platform_write_disabled", 403)
-        if settings.operator_trial_enabled and request.url.path.endswith("/writeback"):
-            raise ApiError("platform writeback is disabled for the trial", "trial_platform_write_disabled", 403)
+        if settings.operator_trial_enabled:
+            from app.services.operator_trial_service import assert_t18_trial_writeback_request_allowed
+
+            assert_t18_trial_writeback_request_allowed(
+                db,
+                settings=settings,
+                path=request.url.path,
+                body=body,
+                store_id=store_id,
+            )
     finally:
         db.close()
 

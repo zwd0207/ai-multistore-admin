@@ -49,8 +49,6 @@ class Settings(BaseSettings):
     customer_platform_write_enabled: bool = False
     shipping_platform_write_enabled: bool = False
     pxg_naver_shipping_pilot_enabled: bool = False
-    pxg_naver_shipping_pilot_max_rows: int = 1
-    pxg_naver_shipping_pilot_max_attempts: int = 1
     allow_dev_auth: bool = False
     local_mfa_code_display_enabled: bool = False
     session_token_pepper: str | None = None

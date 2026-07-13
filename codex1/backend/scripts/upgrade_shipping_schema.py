@@ -672,7 +672,7 @@ def create_shipping_schema(connection: sqlite3.Connection) -> list[str]:
             candidate_hash VARCHAR(128) NOT NULL,
             expires_at DATETIME NOT NULL,
             used_at DATETIME,
-            attempt_status VARCHAR(20) NOT NULL DEFAULT 'not_started',
+            attempt_status VARCHAR(32) NOT NULL DEFAULT 'prepared',
             attempt_token_hash VARCHAR(128),
             attempt_started_at DATETIME,
             attempt_finished_at DATETIME,
@@ -682,7 +682,10 @@ def create_shipping_schema(connection: sqlite3.Connection) -> list[str]:
             created_at DATETIME NOT NULL,
             FOREIGN KEY(batch_id) REFERENCES warehouse_shipping_batches(id),
             FOREIGN KEY(user_id) REFERENCES erp_users(id),
-            CHECK (attempt_status IN ('not_started', 'pending', 'success', 'failed', 'unknown', 'reconciled'))
+            CHECK (attempt_status IN (
+                'not_started', 'pending', 'prepared', 'requesting', 'success', 'failed',
+                'unknown', 'reconciled', 'reconciled_success', 'reconciled_not_applied'
+            ))
         )
     """)
 
@@ -691,7 +694,7 @@ def create_shipping_schema(connection: sqlite3.Connection) -> list[str]:
             connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_shipping_grant_pilot_attempt_scope "
                 "ON warehouse_shipping_approval_grants (attempt_scope) "
-                "WHERE attempt_scope IS NOT NULL AND attempt_status != 'not_started'"
+                "WHERE attempt_scope IS NOT NULL AND attempt_status NOT IN ('prepared', 'not_started')"
             )
             continue
         unique_sql = "UNIQUE " if unique else ""
@@ -775,7 +778,7 @@ def upgrade_existing_shipping_columns(connection: sqlite3.Connection) -> None:
             row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_approval_grants)").fetchall()
         }
         approval_column_upgrades = {
-            "attempt_status": "VARCHAR(20) NOT NULL DEFAULT 'not_started'",
+            "attempt_status": "VARCHAR(32) NOT NULL DEFAULT 'prepared'",
             "attempt_token_hash": "VARCHAR(128)",
             "attempt_started_at": "DATETIME",
             "attempt_finished_at": "DATETIME",
@@ -788,6 +791,78 @@ def upgrade_existing_shipping_columns(connection: sqlite3.Connection) -> None:
                 connection.execute(
                     f"ALTER TABLE warehouse_shipping_approval_grants ADD COLUMN {column_name} {column_sql}"
                 )
+        _rebuild_warehouse_shipping_approval_grants_for_t18(connection)
+
+
+def _rebuild_warehouse_shipping_approval_grants_for_t18(connection: sqlite3.Connection) -> None:
+    """Upgrade SQLite's immutable attempt-status CHECK without losing approvals."""
+
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'warehouse_shipping_approval_grants'"
+    ).fetchone()
+    table_sql = str(row[0] or "") if row else ""
+    if not table_sql or "reconciled_not_applied" in table_sql:
+        return
+    connection.execute("DROP INDEX IF EXISTS uq_warehouse_shipping_grant_pilot_attempt_scope")
+    connection.execute("ALTER TABLE warehouse_shipping_approval_grants RENAME TO warehouse_shipping_approval_grants_legacy")
+    connection.execute("""
+        CREATE TABLE warehouse_shipping_approval_grants (
+            id INTEGER PRIMARY KEY,
+            batch_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            grant_scope VARCHAR(40) NOT NULL,
+            token_hash VARCHAR(128) NOT NULL,
+            batch_version INTEGER NOT NULL,
+            candidate_hash VARCHAR(128) NOT NULL,
+            expires_at DATETIME NOT NULL,
+            used_at DATETIME,
+            attempt_status VARCHAR(32) NOT NULL DEFAULT 'prepared',
+            attempt_token_hash VARCHAR(128),
+            attempt_started_at DATETIME,
+            attempt_finished_at DATETIME,
+            attempt_error_code VARCHAR(80),
+            attempt_response_hash VARCHAR(128),
+            attempt_scope VARCHAR(160),
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES warehouse_shipping_batches(id),
+            FOREIGN KEY(user_id) REFERENCES erp_users(id),
+            CHECK (attempt_status IN (
+                'not_started', 'pending', 'prepared', 'requesting', 'success', 'failed',
+                'unknown', 'reconciled', 'reconciled_success', 'reconciled_not_applied'
+            ))
+        )
+    """)
+    legacy_columns = {row[1] for row in connection.execute(
+        "PRAGMA table_info(warehouse_shipping_approval_grants_legacy)"
+    ).fetchall()}
+    def legacy_or_default(column: str, default_sql: str = "NULL") -> str:
+        return column if column in legacy_columns else default_sql
+    connection.execute(f"""
+        INSERT INTO warehouse_shipping_approval_grants (
+            id, batch_id, user_id, grant_scope, token_hash, batch_version, candidate_hash,
+            expires_at, used_at, attempt_status, attempt_token_hash, attempt_started_at,
+            attempt_finished_at, attempt_error_code, attempt_response_hash, attempt_scope, created_at
+        )
+        SELECT
+            id, batch_id, user_id, grant_scope, token_hash, batch_version, candidate_hash,
+            expires_at, used_at,
+            CASE
+                WHEN {legacy_or_default('attempt_status', "'not_started'")} = 'not_started'
+                    AND used_at IS NULL THEN 'prepared'
+                WHEN {legacy_or_default('attempt_status', "'not_started'")} = 'pending' THEN 'requesting'
+                WHEN {legacy_or_default('attempt_status', "'not_started'")} = 'reconciled' THEN 'reconciled_success'
+                ELSE {legacy_or_default('attempt_status', "'prepared'")}
+            END,
+            {legacy_or_default('attempt_token_hash')},
+            {legacy_or_default('attempt_started_at')},
+            {legacy_or_default('attempt_finished_at')},
+            {legacy_or_default('attempt_error_code')},
+            {legacy_or_default('attempt_response_hash')},
+            {legacy_or_default('attempt_scope')},
+            created_at
+        FROM warehouse_shipping_approval_grants_legacy
+    """)
+    connection.execute("DROP TABLE warehouse_shipping_approval_grants_legacy")
 
 
 def upgrade(*, run_create_all: bool = True) -> dict[str, object]:

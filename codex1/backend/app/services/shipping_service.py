@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import re
+import secrets
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +29,8 @@ from app.models.shipping import (
     ShippingExportBatchRow,
     ShippingTrackingImportBatch,
     ShippingTrackingImportRow,
+    WarehouseShippingApprovalGrant,
+    WarehouseShippingBatch,
 )
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
@@ -2766,10 +2769,15 @@ def _build_naver_dispatch_candidates(
     for row in normalized_rows or []:
         order_reference = row["order_reference"]
         product_order_reference = row["product_order_reference"]
+        # A supplied product-order reference is authoritative. Falling back to
+        # its shared platform-order reference can update a sibling line item.
         order = (
-            orders_by_external_reference.get(order_reference)
-            or orders_by_local_reference.get(order_reference)
-            or orders_by_product_order_id.get(product_order_reference)
+            orders_by_product_order_id.get(product_order_reference)
+            if product_order_reference
+            else (
+                orders_by_external_reference.get(order_reference)
+                or orders_by_local_reference.get(order_reference)
+            )
         )
         if order is None:
             skipped.append({"row_index": row["row_index"], "skip_reason": "no_local_order_match"})
@@ -2945,6 +2953,189 @@ def _audit_row_for_naver_shipment_writeback(
     }
 
 
+T18_PILOT_SCOPE_PREFIX = "pxg-naver-shipping-pilot-v1"
+T18_PREPARED_ATTEMPT_STATUSES = {"prepared", "not_started"}
+
+
+def _t18_attempt_scope(store_id: int) -> str:
+    return f"{T18_PILOT_SCOPE_PREFIX}:store:{store_id}"
+
+
+def _t18_write_gate_skip_reason(settings: Any) -> str | None:
+    if not settings.real_api_write_enabled:
+        return "real_api_write_disabled"
+    if not settings.shipping_platform_write_enabled:
+        return "shipping_platform_write_disabled"
+    if not settings.pxg_naver_shipping_pilot_enabled:
+        return "pxg_naver_shipping_pilot_disabled"
+    if bool(getattr(settings, "platform_order_write_enabled", False)):
+        return "platform_order_write_must_remain_disabled"
+    return None
+
+
+def _t18_dispatch_candidate_hash(*, store_id: int, tracking_rows: list[dict[str, Any]]) -> str:
+    """Hash exactly the data the dispatch POST will use, never retaining it."""
+
+    bindings = []
+    for row in tracking_rows:
+        tracking_number = _clean_text(row.get("tracking_number"), max_length=120)
+        bindings.append({
+            "product_order_id": _clean_text(row.get("product_order_reference"), max_length=120),
+            "carrier_code": _normalize_naver_delivery_company_code(row.get("carrier")),
+            "tracking_number_hash": _safe_hash_identifier(tracking_number),
+            "dispatch_date": _naver_dispatch_datetime(row.get("shipped_at")),
+        })
+    payload = {"scope": T18_PILOT_SCOPE_PREFIX, "store_id": store_id, "candidates": bindings}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _t18_credential_binding(credential: ApiCredential) -> str:
+    updated_at = getattr(credential, "updated_at", None)
+    if updated_at is not None and getattr(updated_at, "tzinfo", None) is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    elif updated_at is not None:
+        updated_at = updated_at.astimezone(timezone.utc)
+    marker = {
+        "credential_id": int(credential.id),
+        "client_id": str(credential.client_id or ""),
+        "updated_at": updated_at.isoformat() if updated_at is not None else None,
+    }
+    return hashlib.sha256(
+        json.dumps(marker, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _validate_t18_execution_proof(
+    db: Session,
+    *,
+    store_id: int,
+    expected_credential_id: int | None,
+    proof: dict[str, Any] | None,
+) -> tuple[WarehouseShippingApprovalGrant | None, str | None]:
+    """Validate the private, one-use proof before touching credentials or network."""
+
+    if not isinstance(proof, dict):
+        return None, "t18_execution_proof_required"
+    try:
+        grant_id = int(proof.get("grant_id"))
+        batch_id = int(proof.get("batch_id"))
+    except (TypeError, ValueError):
+        return None, "t18_execution_proof_invalid"
+    candidate_hash = str(proof.get("candidate_hash") or "")
+    attempt_nonce = str(proof.get("attempt_nonce") or "")
+    if (
+        int(proof.get("store_id") or 0) != store_id
+        or not candidate_hash
+        or not attempt_nonce
+        or expected_credential_id is None
+        or int(proof.get("expected_credential_id") or 0) != int(expected_credential_id)
+    ):
+        return None, "t18_execution_proof_invalid"
+    grant = db.get(WarehouseShippingApprovalGrant, grant_id)
+    batch = db.get(WarehouseShippingBatch, batch_id)
+    if (
+        grant is None
+        or batch is None
+        or grant.batch_id != batch.id
+        or batch.store_id != store_id
+        or grant.attempt_scope != _t18_attempt_scope(store_id)
+        or grant.candidate_hash != candidate_hash
+        or grant.attempt_status != "requesting"
+        or not grant.attempt_token_hash
+    ):
+        return None, "t18_execution_grant_invalid"
+    nonce_hash = hashlib.sha256(attempt_nonce.encode("utf-8")).hexdigest()
+    if not secrets.compare_digest(grant.attempt_token_hash, nonce_hash):
+        return None, "t18_execution_attempt_token_invalid"
+    return grant, None
+
+
+def prepare_t18_naver_shipment_writeback(
+    db: Session,
+    *,
+    store_id: int,
+    expected_credential_id: int,
+    grant_id: int,
+    batch_id: int,
+    candidate_hash: str,
+    user_id: int,
+    approval_token: str,
+    expected_credential_binding: str,
+    t18_pilot_execution: bool,
+) -> dict[str, Any]:
+    """Acquire write authentication before reserving the irreversible POST attempt."""
+
+    result: dict[str, Any] = {
+        "status": "blocked",
+        "token_request_count": 0,
+        "http_request_count": 0,
+        "real_api_called": False,
+    }
+    settings = get_settings()
+    if not t18_pilot_execution:
+        result["skip_reason"] = "t18_shipping_pilot_execution_required"
+        return result
+    gate_error = _t18_write_gate_skip_reason(settings)
+    if gate_error:
+        result["skip_reason"] = gate_error
+        return result
+    grant = db.get(WarehouseShippingApprovalGrant, grant_id)
+    batch = db.get(WarehouseShippingBatch, batch_id)
+    approval_token_hash = hashlib.sha256(str(approval_token or "").encode("utf-8")).hexdigest()
+    if (
+        grant is None
+        or batch is None
+        or batch.store_id != store_id
+        or grant.batch_id != batch.id
+        or grant.candidate_hash != candidate_hash
+        or grant.user_id != user_id
+        or not secrets.compare_digest(grant.token_hash, approval_token_hash)
+        or grant.attempt_scope != _t18_attempt_scope(store_id)
+        or grant.attempt_status not in T18_PREPARED_ATTEMPT_STATUSES
+        or grant.used_at is not None
+    ):
+        result["skip_reason"] = "t18_prepared_grant_invalid"
+        return result
+    try:
+        credential = _ensure_naver_shipping_credential(
+            db,
+            store_id,
+            expected_credential_id=expected_credential_id,
+        )
+        if int(credential.id) != int(expected_credential_id):
+            result["skip_reason"] = "t18_expected_credential_mismatch"
+            return result
+        if not secrets.compare_digest(_t18_credential_binding(credential), str(expected_credential_binding or "")):
+            result["skip_reason"] = "t18_credential_binding_changed"
+            return result
+        token_context = _build_naver_shipping_token_context(credential)
+        result["token_request_count"] = 1
+        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(token_context)
+    except ApiError as exc:
+        result["skip_reason"] = str(exc.error_code or "credential_not_ready")[:80]
+        return result
+    except Exception as exc:
+        result["skip_reason"] = str(getattr(exc, "error_code", None) or getattr(exc, "code", None) or "naver_write_authentication_failed")[:80]
+        return result
+    result.update({
+        "status": "ready",
+        "token_http_status": token_status,
+        # This short-lived value never leaves the warehouse-to-service call chain.
+        "auth_context": {
+            "access_token": access_token,
+            "api_base": token_context["api_base"],
+            "credential_id": int(credential.id),
+            "credential_binding": str(expected_credential_binding),
+            "store_id": store_id,
+            "token_request_count": 1,
+            "token_http_status": token_status,
+        },
+    })
+    return result
+
+
 def execute_naver_shipment_writeback(
     db: Session,
     *,
@@ -2969,6 +3160,8 @@ def execute_naver_shipment_writeback(
     t18_pilot_execution: bool = False,
     commit_local_changes: bool = True,
     expected_credential_id: int | None = None,
+    t18_execution_proof: dict[str, Any] | None = None,
+    t18_prepared_auth: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_store_exists(db, store_id)
     normalized_platform = _normalize_platform(platform)
@@ -3020,18 +3213,24 @@ def execute_naver_shipment_writeback(
             "shipment_writeback_open": False,
         })
         return result
-    disabled_gates = [
-        name for name, enabled in (
-            ("real_api_write_disabled", settings.real_api_write_enabled),
-            ("shipping_platform_write_disabled", settings.shipping_platform_write_enabled),
-            ("pxg_naver_shipping_pilot_disabled", settings.pxg_naver_shipping_pilot_enabled),
-        ) if not enabled
-    ]
-    if disabled_gates:
+    gate_error = _t18_write_gate_skip_reason(settings)
+    if gate_error:
         result.update({
             "status": "blocked",
-            "skip_reason": disabled_gates[0],
-            "disabled_write_gates": disabled_gates,
+            "skip_reason": gate_error,
+            "shipment_writeback_open": False,
+        })
+        return result
+    _grant, proof_error = _validate_t18_execution_proof(
+        db,
+        store_id=store_id,
+        expected_credential_id=expected_credential_id,
+        proof=t18_execution_proof,
+    )
+    if proof_error:
+        result.update({
+            "status": "blocked",
+            "skip_reason": proof_error,
             "shipment_writeback_open": False,
         })
         return result
@@ -3097,16 +3296,35 @@ def execute_naver_shipment_writeback(
         })
         return result
 
-    credential = _ensure_naver_shipping_credential(
-        db,
-        store_id,
-        expected_credential_id=expected_credential_id,
-    )
-    context = _build_naver_shipping_token_context(credential)
+    if not isinstance(t18_execution_proof, dict) or not secrets.compare_digest(
+        str(t18_execution_proof.get("dispatch_candidate_hash") or ""),
+        _t18_dispatch_candidate_hash(store_id=store_id, tracking_rows=list(tracking_rows or [])),
+    ):
+        result.update({"status": "blocked", "skip_reason": "t18_execution_candidate_binding_invalid"})
+        return result
+    if not isinstance(t18_prepared_auth, dict):
+        result.update({"status": "blocked", "skip_reason": "t18_prepared_authentication_required"})
+        return result
+    access_token = t18_prepared_auth.get("access_token")
+    api_base = t18_prepared_auth.get("api_base")
+    if (
+        not isinstance(access_token, str)
+        or not access_token
+        or not isinstance(api_base, str)
+        or not api_base
+        or int(t18_prepared_auth.get("credential_id") or 0) != int(expected_credential_id or 0)
+        or int(t18_prepared_auth.get("store_id") or 0) != store_id
+        or not secrets.compare_digest(
+            str(t18_prepared_auth.get("credential_binding") or ""),
+            str(t18_execution_proof.get("credential_binding") or ""),
+        )
+    ):
+        result.update({"status": "blocked", "skip_reason": "t18_prepared_authentication_invalid"})
+        return result
     try:
-        result["token_request_count"] = 1
-        result["token_call_count"] = 1
-        access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        result["token_request_count"] = int(t18_prepared_auth.get("token_request_count") or 1)
+        result["token_call_count"] = result["token_request_count"]
+        result["token_http_status"] = t18_prepared_auth.get("token_http_status")
         # The write call starts here. A timeout after this point is ambiguous and
         # must be reconciled by the warehouse workflow instead of retried.
         result["platform_write_attempted"] = True
@@ -3115,11 +3333,10 @@ def execute_naver_shipment_writeback(
         result["http_request_count"] = 1
         result["http_call_count"] = 1
         dispatch_result = _post_naver_shipment_dispatch(
-            api_base=context["api_base"],
+            api_base=api_base,
             headers={"Authorization": f"Bearer {access_token}"},
             candidates=candidates,
         )
-        result["token_http_status"] = token_status
         result["http_status"] = dispatch_result.get("http_status")
         if not dispatch_result.get("success"):
             result.update({
@@ -3132,7 +3349,20 @@ def execute_naver_shipment_writeback(
             })
             return result
 
-        success_ids = set(dispatch_result.get("success_product_order_ids") or [])
+        success_ids = {str(item) for item in (dispatch_result.get("success_product_order_ids") or [])}
+        expected_success_ids = {str(item["product_order_id"]) for item in candidates}
+        if success_ids != expected_success_ids or dispatch_result.get("fail_product_order_infos"):
+            result.update({
+                "status": "unknown",
+                "skip_reason": "shipment_dispatch_exact_success_not_confirmed",
+                "dispatch_candidate_count": len(candidates),
+                "success_count": len(success_ids & expected_success_ids),
+                "failed_count": max(len(expected_success_ids - success_ids), 0),
+                "platform_write": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+            })
+            return result
         successful_candidates = [
             item for item in candidates
             if item["product_order_id"] in success_ids
@@ -3246,7 +3476,7 @@ def execute_naver_shipment_writeback(
         if audit_result.get("status") != "audit_row_written":
             db.rollback()
             result.update({
-                "status": "failed",
+                "status": "unknown",
                 "skip_reason": audit_result.get("skip_reason") or "audit_write_failed",
                 "platform_write": True,
                 "orders_updated": False,
@@ -3286,13 +3516,12 @@ def execute_naver_shipment_writeback(
     except api_credential_readiness_service.NaverReadonlyAuthError as exc:
         db.rollback()
         result.update({
-            "status": "failed",
+            "status": "unknown",
             "skip_reason": exc.error_code,
             "error_code": exc.error_code,
             "http_status": exc.http_status,
             "business_message": "Naver 发货回填未提交：平台连接或权限未通过。",
             "platform_write": False,
-            "platform_write_attempted": False,
             "raw_response_saved": False,
             "secrets_saved": False,
         })
@@ -3300,9 +3529,9 @@ def execute_naver_shipment_writeback(
     except Exception as exc:
         db.rollback()
         result.update({
-            "status": "failed",
-            "skip_reason": getattr(exc, "error_code", None) or "shipment_writeback_failed",
-            "error_code": getattr(exc, "error_code", None) or "shipment_writeback_failed",
+            "status": "unknown",
+            "skip_reason": getattr(exc, "error_code", None) or "shipment_dispatch_invalid_response",
+            "error_code": getattr(exc, "error_code", None) or "shipment_dispatch_invalid_response",
             "business_message": "Naver shipment dispatch did not receive a verifiable result.",
             "platform_write": False,
             "raw_response_saved": False,

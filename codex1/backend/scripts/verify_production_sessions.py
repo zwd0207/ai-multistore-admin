@@ -257,7 +257,7 @@ def main() -> None:
             headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
             json={"confirmation": True},
         )
-        assert writeback_permission.status_code == 403 and writeback_permission.json()["error_code"] == "trial_platform_write_disabled", writeback_permission.text
+        assert writeback_permission.status_code == 403 and writeback_permission.json()["error_code"] == "trial_t18_write_gates_required", writeback_permission.text
 
         readonly_success = client.post(
             "/api/v1/pxg-naver-readonly/refresh",

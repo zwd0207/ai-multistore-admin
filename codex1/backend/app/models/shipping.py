@@ -317,8 +317,8 @@ class WarehouseShippingApprovalGrant(Base):
             "uq_warehouse_shipping_grant_pilot_attempt_scope",
             "attempt_scope",
             unique=True,
-            sqlite_where=text("attempt_scope IS NOT NULL AND attempt_status != 'not_started'"),
-            postgresql_where=text("attempt_scope IS NOT NULL AND attempt_status != 'not_started'"),
+            sqlite_where=text("attempt_scope IS NOT NULL AND attempt_status NOT IN ('prepared', 'not_started')"),
+            postgresql_where=text("attempt_scope IS NOT NULL AND attempt_status NOT IN ('prepared', 'not_started')"),
         ),
     )
 
@@ -331,7 +331,7 @@ class WarehouseShippingApprovalGrant(Base):
     candidate_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    attempt_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_started", server_default="not_started")
+    attempt_status: Mapped[str] = mapped_column(String(32), nullable=False, default="prepared", server_default="prepared")
     attempt_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempt_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

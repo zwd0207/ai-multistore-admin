@@ -44,14 +44,31 @@ WAREHOUSE_BATCH_REMOVE_REASON_CODES = {
     "stock_unavailable",
     "warehouse_exception",
 }
-T18_PILOT_SCOPE_PREFIX = "pxg-naver-shipping-pilot-v1"
+T18_PILOT_SCOPE_PREFIX = shipping_service.T18_PILOT_SCOPE_PREFIX
 T18_ALLOWED_PLATFORM_STATUSES = {"PAYED", "PLACE_PRODUCT_ORDER", "READY", "DELIVERY_READY"}
 T18_RECONCILED_PLATFORM_STATUSES = {
     "DISPATCHED", "DELIVERING", "SHIPPING", "IN_DELIVERY", "DELIVERED",
     "DELIVERY_COMPLETION", "DELIVERY_COMPLETED", "DELIVERY_COMPLETE",
 }
 T18_NO_CLAIM_STATUSES = {"", "NONE", "NO_CLAIM", "NO_CLAIMS", "NOT_APPLIED", "NO"}
-T18_ATTEMPT_TERMINAL_STATUSES = {"success", "failed", "unknown", "reconciled"}
+T18_PREPARED_ATTEMPT_STATUSES = {"prepared", "not_started"}
+T18_RECONCILABLE_ATTEMPT_STATUSES = {"requesting", "pending", "unknown"}
+T18_ATTEMPT_TERMINAL_STATUSES = {
+    "success", "failed", "unknown", "reconciled", "reconciled_success", "reconciled_not_applied",
+}
+
+T18_ATTEMPT_OPERATOR_STATUS = {
+    "prepared": "已审批，等待最终核对",
+    "not_started": "已审批，等待最终核对",
+    "requesting": "平台请求已发出，等待结果核对",
+    "pending": "平台请求已发出，等待结果核对",
+    "success": "平台回填已确认",
+    "failed": "平台明确拒绝，需人工处理",
+    "unknown": "平台结果不明确，必须先核对",
+    "reconciled": "平台结果已核对",
+    "reconciled_success": "平台已确认回填成功",
+    "reconciled_not_applied": "平台确认未生效，需负责人重新批准",
+}
 
 
 def _role_allowed(actor_context: dict[str, Any] | None) -> bool:
@@ -185,7 +202,7 @@ def _as_iso(value: Any) -> str | None:
 
 
 def _t18_attempt_scope(store_id: int) -> str:
-    return f"{T18_PILOT_SCOPE_PREFIX}:store:{store_id}"
+    return shipping_service._t18_attempt_scope(store_id)
 
 
 def _t18_gate_skip_reason(settings: Any) -> str | None:
@@ -195,6 +212,8 @@ def _t18_gate_skip_reason(settings: Any) -> str | None:
         return "shipping_platform_write_disabled"
     if not settings.pxg_naver_shipping_pilot_enabled:
         return "pxg_naver_shipping_pilot_disabled"
+    if bool(getattr(settings, "platform_order_write_enabled", False)):
+        return "platform_order_write_must_remain_disabled"
     return None
 
 
@@ -208,6 +227,7 @@ def _t18_capability(
     approval_expires_at: Any = None,
     reconciliation_required: bool = False,
     allowed_action: str | None = None,
+    attempt_status: str | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
@@ -220,6 +240,8 @@ def _t18_capability(
         "approval_expires_at": _as_iso(approval_expires_at),
         "reconciliation_required": bool(reconciliation_required),
         "allowed_action": allowed_action,
+        "attempt_status": attempt_status,
+        "attempt_operator_status": T18_ATTEMPT_OPERATOR_STATUS.get(attempt_status or "", None),
     }
 
 
@@ -262,6 +284,37 @@ def _t18_status(value: Any) -> str:
     return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
 
 
+def _t18_platform_carrier_code(detail: dict[str, Any]) -> str | None:
+    return shipping_service._normalize_naver_delivery_company_code(
+        detail.get("delivery_company_code")
+        or detail.get("delivery_company")
+        or detail.get("carrier")
+        or detail.get("deliveryCompanyCode")
+        or detail.get("deliveryCompany")
+    )
+
+
+def _t18_platform_tracking_hash(detail: dict[str, Any]) -> str | None:
+    tracking_number = (
+        detail.get("tracking_number")
+        or detail.get("trackingNumber")
+        or detail.get("invoice_number")
+        or detail.get("invoiceNo")
+    )
+    if not str(tracking_number or "").strip():
+        return None
+    return shipping_service._safe_hash_identifier(tracking_number)
+
+
+def _t18_platform_writeback_state(detail: dict[str, Any]) -> str:
+    return _t18_status(
+        detail.get("writeback_status")
+        or detail.get("dispatch_status")
+        or detail.get("dispatchStatus")
+        or detail.get("shipment_writeback_status")
+    )
+
+
 def _t18_platform_preflight(
     db: Session,
     *,
@@ -294,7 +347,7 @@ def _t18_platform_preflight(
         if product_order_id:
             by_product_order_id.setdefault(product_order_id, []).append(detail)
 
-    states: list[dict[str, str]] = []
+    states: list[dict[str, str | None]] = []
     for product_order_id in product_order_ids:
         matches = by_product_order_id.get(product_order_id, [])
         if len(matches) != 1:
@@ -304,6 +357,9 @@ def _t18_platform_preflight(
             "product_order_id": product_order_id,
             "order_status": _t18_status(detail.get("order_status")),
             "claim_status": _t18_status(detail.get("claim_status")),
+            "carrier_code": _t18_platform_carrier_code(detail),
+            "tracking_number_hash": _t18_platform_tracking_hash(detail),
+            "writeback_state": _t18_platform_writeback_state(detail),
         })
     checked_at = get_utc_now()
     credential = db.get(ApiCredential, context.credential_id)
@@ -355,6 +411,7 @@ def _t18_candidate_hash(
                 "product_order_id": str(item.get("product_order_reference") or ""),
                 "carrier": str(item.get("carrier") or ""),
                 "tracking_number_hash": item.get("tracking_number_hash"),
+                "shipped_at": str(item.get("shipped_at") or "").strip(),
                 "platform_state": states.get(str(item.get("product_order_reference") or "")),
             }
             for item in candidates
@@ -372,7 +429,7 @@ def _t18_attempt_limit_reached(db: Session, *, store_id: int) -> bool:
         .where(
             WarehouseShippingBatch.store_id == store_id,
             WarehouseShippingApprovalGrant.attempt_scope == _t18_attempt_scope(store_id),
-            WarehouseShippingApprovalGrant.attempt_status != "not_started",
+            WarehouseShippingApprovalGrant.attempt_status.not_in(T18_PREPARED_ATTEMPT_STATUSES),
         )
     ) or 0
     return int(count) >= 1
@@ -513,6 +570,7 @@ def _issue_t18_writeback_approval(
         candidate_hash=_t18_candidate_hash(batch=batch, candidates=candidates, preflight=preflight),
         expires_at=expires_at,
         attempt_scope=_t18_attempt_scope(batch.store_id),
+        attempt_status="prepared",
     ))
     db.commit()
     return {
@@ -637,6 +695,75 @@ def _serialize_batch(batch: WarehouseShippingBatch, *, include_rows: bool = True
             "failed": sum(row["row_status"] == "platform_failed" for row in rows),
         }
     return data
+
+
+def _t18_batch_capability_snapshot(db: Session, batch: WarehouseShippingBatch) -> dict[str, Any]:
+    """Return local-only writeback readiness without exposing tracking or calling Naver."""
+
+    settings = get_settings()
+    candidates, candidate_error = _t18_candidates(db, batch)
+    candidate_count = len(candidates or [])
+    grant = db.scalar(
+        select(WarehouseShippingApprovalGrant)
+        .where(
+            WarehouseShippingApprovalGrant.batch_id == batch.id,
+            WarehouseShippingApprovalGrant.attempt_scope == _t18_attempt_scope(batch.store_id),
+        )
+        .order_by(WarehouseShippingApprovalGrant.id.desc())
+    )
+    attempt_status = grant.attempt_status if grant else None
+    if attempt_status in T18_RECONCILABLE_ATTEMPT_STATUSES:
+        return _t18_capability(
+            settings=settings,
+            status="reconciliation_required",
+            candidate_count=candidate_count,
+            operator_message="A previous platform request requires read-only reconciliation before any further action.",
+            approval_expires_at=grant.expires_at,
+            reconciliation_required=True,
+            allowed_action="reconcile",
+            attempt_status=attempt_status,
+        )
+    store_matches, _store_error = _t18_trial_store_matches(db, batch)
+    if not store_matches:
+        return _t18_capability(
+            settings=settings,
+            status="not_available",
+            candidate_count=candidate_count,
+            operator_message="This batch is outside the constrained PXG/Naver pilot scope.",
+            attempt_status=attempt_status,
+        )
+    if candidate_error or candidates is None:
+        return _t18_capability(
+            settings=settings,
+            status="blocked",
+            candidate_count=candidate_count,
+            operator_message="The batch does not contain exactly one confirmed pilot tracking record.",
+            attempt_status=attempt_status,
+        )
+    gate_error = _t18_gate_skip_reason(settings)
+    if gate_error:
+        return _t18_capability(
+            settings=settings,
+            status="disabled",
+            candidate_count=candidate_count,
+            operator_message="The pilot write gates are closed.",
+            attempt_status=attempt_status,
+        )
+    if _t18_attempt_limit_reached(db, store_id=batch.store_id):
+        return _t18_capability(
+            settings=settings,
+            status="blocked",
+            candidate_count=candidate_count,
+            operator_message="The pilot request limit has already been consumed and requires owner review.",
+            attempt_status=attempt_status,
+        )
+    return _t18_capability(
+        settings=settings,
+        status="approval_required",
+        candidate_count=candidate_count,
+        operator_message="A fresh final Naver preflight and operator approval are required before execution.",
+        attempt_status=attempt_status,
+    )
 
 
 def _find_mapping(db: Session, order: Order) -> LogisticsInventoryMapping | None:
@@ -765,7 +892,12 @@ def list_warehouse_batches(db: Session, *, store_id: int, platform: str, include
             WarehouseShippingBatch.platform == normalized_platform,
         ).order_by(WarehouseShippingBatch.created_at.desc())
     ).unique().all()
-    return {"status": "ready", "items": [_serialize_batch(batch, include_rows=include_rows) for batch in batches], "real_api_called": False}
+    items: list[dict[str, Any]] = []
+    for batch in batches:
+        item = _serialize_batch(batch, include_rows=include_rows)
+        item["writeback_capability"] = _t18_batch_capability_snapshot(db, batch)
+        items.append(item)
+    return {"status": "ready", "items": items, "real_api_called": False}
 
 
 def get_warehouse_batch_tracking_details(db: Session, *, batch_id: int) -> dict[str, Any]:
@@ -1103,7 +1235,7 @@ def _t18_record_attempt(
     return grant
 
 
-def _t18_claim_attempt(
+def _t18_load_prepared_approval(
     db: Session,
     *,
     batch: WarehouseShippingBatch,
@@ -1124,23 +1256,45 @@ def _t18_claim_attempt(
     now = get_utc_now()
     if _as_utc(grant.expires_at) < now or grant.batch_version != batch.version:
         return None, "shipping_approval_token_invalid"
-    if grant.attempt_status != "not_started" or grant.used_at is not None:
+    if grant.attempt_status not in T18_PREPARED_ATTEMPT_STATUSES or grant.used_at is not None:
         return grant, "shipping_approval_attempt_already_claimed"
-    if _t18_attempt_limit_reached(db, store_id=batch.store_id):
-        return grant, "pxg_naver_pilot_attempt_limit_reached"
+    return grant, None
 
-    claim_nonce_hash = hashlib.sha256(secrets.token_urlsafe(32).encode("utf-8")).hexdigest()
+
+def _t18_claim_attempt(
+    db: Session,
+    *,
+    batch: WarehouseShippingBatch,
+    grant_id: int,
+    candidate_hash: str,
+) -> tuple[WarehouseShippingApprovalGrant | None, str | None, str | None]:
+    """Atomically consume the sole pilot POST slot immediately before POST."""
+
+    grant = db.get(WarehouseShippingApprovalGrant, grant_id)
+    if grant is None or grant.batch_id != batch.id or grant.attempt_scope != _t18_attempt_scope(batch.store_id):
+        return None, None, "shipping_approval_token_invalid"
+    if grant.candidate_hash != candidate_hash:
+        return grant, None, "shipping_approval_candidate_changed"
+    if grant.attempt_status not in T18_PREPARED_ATTEMPT_STATUSES or grant.used_at is not None:
+        return grant, None, "shipping_approval_attempt_already_claimed"
+    if _t18_attempt_limit_reached(db, store_id=batch.store_id):
+        return grant, None, "pxg_naver_pilot_attempt_limit_reached"
+
+    attempt_nonce = secrets.token_urlsafe(32)
+    claim_nonce_hash = hashlib.sha256(attempt_nonce.encode("utf-8")).hexdigest()
+    now = get_utc_now()
     try:
         claimed = db.execute(
             update(WarehouseShippingApprovalGrant)
             .where(
                 WarehouseShippingApprovalGrant.id == grant.id,
                 WarehouseShippingApprovalGrant.used_at.is_(None),
-                WarehouseShippingApprovalGrant.attempt_status == "not_started",
+                WarehouseShippingApprovalGrant.attempt_status.in_(T18_PREPARED_ATTEMPT_STATUSES),
+                WarehouseShippingApprovalGrant.candidate_hash == candidate_hash,
             )
             .values(
                 used_at=now,
-                attempt_status="pending",
+                attempt_status="requesting",
                 attempt_token_hash=claim_nonce_hash,
                 attempt_started_at=now,
                 attempt_error_code=None,
@@ -1150,10 +1304,34 @@ def _t18_claim_attempt(
         db.commit()
     except IntegrityError:
         db.rollback()
-        return grant, "pxg_naver_pilot_attempt_limit_reached"
+        return grant, None, "pxg_naver_pilot_attempt_limit_reached"
     if claimed.rowcount != 1:
-        return grant, "shipping_approval_attempt_already_claimed"
-    return db.get(WarehouseShippingApprovalGrant, grant.id), None
+        return grant, None, "shipping_approval_attempt_already_claimed"
+    return db.get(WarehouseShippingApprovalGrant, grant.id), attempt_nonce, None
+
+
+def _t18_release_unposted_attempt(db: Session, *, grant_id: int, attempt_nonce: str) -> None:
+    """Release a claimed slot only when the lower layer proves no POST began."""
+
+    attempt_token_hash = hashlib.sha256(attempt_nonce.encode("utf-8")).hexdigest()
+    db.execute(
+        update(WarehouseShippingApprovalGrant)
+        .where(
+            WarehouseShippingApprovalGrant.id == grant_id,
+            WarehouseShippingApprovalGrant.attempt_status == "requesting",
+            WarehouseShippingApprovalGrant.attempt_token_hash == attempt_token_hash,
+        )
+        .values(
+            used_at=None,
+            attempt_status="prepared",
+            attempt_token_hash=None,
+            attempt_started_at=None,
+            attempt_finished_at=None,
+            attempt_error_code=None,
+            attempt_response_hash=None,
+        )
+    )
+    db.commit()
 
 
 def _remove_full_tracking_from_order_metadata(order: Order) -> dict[str, Any]:
@@ -1251,11 +1429,19 @@ def _apply_t18_reconciled_local_state(
 def _t18_unknown_after_post(result: dict[str, Any]) -> bool:
     if not result.get("real_api_called"):
         return False
-    if not result.get("http_status"):
+    http_status = result.get("http_status")
+    if not http_status:
+        return True
+    try:
+        if int(http_status) >= 500:
+            return True
+    except (TypeError, ValueError):
         return True
     return result.get("skip_reason") in {
         "shipment_writeback_failed",
         "no_successful_dispatch_items",
+        "shipment_dispatch_invalid_response",
+        "shipment_dispatch_exact_success_not_confirmed",
     } or result.get("status") not in {"success", "failed"}
 
 
@@ -1328,13 +1514,13 @@ def _t18_execute_writeback(
             ),
         }
 
-    grant, claim_error = _t18_claim_attempt(
+    grant, approval_error = _t18_load_prepared_approval(
         db, batch=batch, user_id=user_id, approval_token=approval_token,
     )
-    if claim_error or grant is None:
-        reconciliation_required = bool(grant and grant.attempt_status in {"pending", "unknown"})
+    if approval_error or grant is None:
+        reconciliation_required = bool(grant and grant.attempt_status in T18_RECONCILABLE_ATTEMPT_STATUSES)
         return {
-            "status": "blocked", "skip_reason": claim_error or "shipping_approval_token_invalid", "real_api_called": False,
+            "status": "blocked", "skip_reason": approval_error or "shipping_approval_token_invalid", "real_api_called": False,
             "writeback_capability": _t18_capability(
                 settings=settings,
                 status="reconciliation_required" if reconciliation_required else "blocked",
@@ -1343,6 +1529,7 @@ def _t18_execute_writeback(
                 approval_expires_at=grant.expires_at if grant else None,
                 reconciliation_required=reconciliation_required,
                 allowed_action="reconcile" if reconciliation_required else None,
+                attempt_status=grant.attempt_status if grant else None,
             ),
         }
 
@@ -1350,28 +1537,26 @@ def _t18_execute_writeback(
     eligibility_error = _t18_preflight_eligible(preflight) if preflight is not None else None
     if preflight_error or eligibility_error or preflight is None:
         error_code = preflight_error or eligibility_error or "naver_platform_preflight_failed"
-        _t18_record_attempt(db, grant_id=grant.id, attempt_status="failed", error_code=error_code)
         return {
-            "status": "failed", "skip_reason": error_code, "real_api_called": False,
+            "status": "blocked", "skip_reason": error_code, "real_api_called": False,
             "writeback_capability": _t18_capability(
-                settings=settings, status="failed", candidate_count=candidate_count,
+                settings=settings, status="blocked", candidate_count=candidate_count,
                 operator_message="The final Naver preflight did not permit a platform writeback.",
                 platform_checked_at=preflight.get("platform_checked_at") if preflight else None,
                 approval_expires_at=grant.expires_at,
+                attempt_status=grant.attempt_status,
             ),
         }
     current_candidate_hash = _t18_candidate_hash(batch=batch, candidates=candidates, preflight=preflight)
     if grant.candidate_hash != current_candidate_hash:
-        _t18_record_attempt(
-            db, grant_id=grant.id, attempt_status="failed", error_code="shipping_approval_candidate_changed",
-        )
         return {
-            "status": "failed", "skip_reason": "shipping_approval_candidate_changed", "real_api_called": False,
+            "status": "blocked", "skip_reason": "shipping_approval_candidate_changed", "real_api_called": False,
             "writeback_capability": _t18_capability(
-                settings=settings, status="failed", candidate_count=candidate_count,
+                settings=settings, status="blocked", candidate_count=candidate_count,
                 operator_message="Batch, tracking, credential, or platform state changed after approval.",
                 platform_checked_at=preflight["platform_checked_at"],
                 approval_expires_at=grant.expires_at,
+                attempt_status=grant.attempt_status,
             ),
         }
 
@@ -1382,6 +1567,72 @@ def _t18_execute_writeback(
         "tracking_number": item["tracking_number"],
         "shipped_at": item["shipped_at"],
     } for item in candidates]
+    prepared_auth = shipping_service.prepare_t18_naver_shipment_writeback(
+        db,
+        store_id=batch.store_id,
+        expected_credential_id=int(preflight["credential_id"]),
+        grant_id=grant.id,
+        batch_id=batch.id,
+        candidate_hash=current_candidate_hash,
+        user_id=user_id,
+        approval_token=str(approval_token or ""),
+        expected_credential_binding=str(preflight["credential_binding"]),
+        t18_pilot_execution=True,
+    )
+    if prepared_auth.get("status") != "ready":
+        return {
+            "status": "blocked",
+            "skip_reason": prepared_auth.get("skip_reason") or "naver_writeback_authentication_failed",
+            "real_api_called": False,
+            "token_request_count": int(prepared_auth.get("token_request_count") or 0),
+            "http_request_count": 0,
+            "writeback_capability": _t18_capability(
+                settings=settings,
+                status="blocked",
+                candidate_count=candidate_count,
+                operator_message="Naver write authentication could not be completed before any platform request.",
+                platform_checked_at=preflight["platform_checked_at"],
+                approval_expires_at=grant.expires_at,
+                attempt_status=grant.attempt_status,
+            ),
+        }
+
+    claimed_grant, attempt_nonce, claim_error = _t18_claim_attempt(
+        db,
+        batch=batch,
+        grant_id=grant.id,
+        candidate_hash=current_candidate_hash,
+    )
+    if claim_error or claimed_grant is None or attempt_nonce is None:
+        reconciliation_required = bool(claimed_grant and claimed_grant.attempt_status in T18_RECONCILABLE_ATTEMPT_STATUSES)
+        return {
+            "status": "blocked", "skip_reason": claim_error or "shipping_approval_attempt_already_claimed", "real_api_called": False,
+            "writeback_capability": _t18_capability(
+                settings=settings,
+                status="reconciliation_required" if reconciliation_required else "blocked",
+                candidate_count=candidate_count,
+                operator_message="The approval is no longer available for a new platform request.",
+                approval_expires_at=claimed_grant.expires_at if claimed_grant else grant.expires_at,
+                reconciliation_required=reconciliation_required,
+                allowed_action="reconcile" if reconciliation_required else None,
+                attempt_status=claimed_grant.attempt_status if claimed_grant else None,
+            ),
+        }
+
+    grant = claimed_grant
+    execution_proof = {
+        "grant_id": grant.id,
+        "batch_id": batch.id,
+        "store_id": batch.store_id,
+        "candidate_hash": current_candidate_hash,
+        "attempt_nonce": attempt_nonce,
+        "expected_credential_id": int(preflight["credential_id"]),
+        "credential_binding": str(preflight["credential_binding"]),
+        "dispatch_candidate_hash": shipping_service._t18_dispatch_candidate_hash(
+            store_id=batch.store_id,
+            tracking_rows=tracking_rows,
+        ),
+    }
     result = shipping_service.execute_naver_shipment_writeback(
         db,
         store_id=batch.store_id,
@@ -1404,6 +1655,8 @@ def _t18_execute_writeback(
         t18_pilot_execution=True,
         commit_local_changes=False,
         expected_credential_id=int(preflight["credential_id"]),
+        t18_execution_proof=execution_proof,
+        t18_prepared_auth=prepared_auth.get("auth_context"),
     )
     success = (
         result.get("status") == "success"
@@ -1412,6 +1665,23 @@ def _t18_execute_writeback(
         and int(result.get("dispatch_candidate_count") or 0) == 1
     )
     if not success:
+        if not result.get("platform_write_attempted") and not result.get("real_api_called"):
+            _t18_release_unposted_attempt(db, grant_id=grant.id, attempt_nonce=attempt_nonce)
+            return {
+                "status": "blocked",
+                "skip_reason": str(result.get("skip_reason") or "t18_prepost_execution_blocked")[:80],
+                "writeback": result,
+                "real_api_called": False,
+                "writeback_capability": _t18_capability(
+                    settings=settings,
+                    status="blocked",
+                    candidate_count=candidate_count,
+                    operator_message="The platform request did not start; the approval remains available after correction.",
+                    platform_checked_at=preflight["platform_checked_at"],
+                    approval_expires_at=grant.expires_at,
+                    attempt_status="prepared",
+                ),
+            }
         attempt_status = (
             "failed"
             if result.get("skipped_candidates")
@@ -1451,6 +1721,7 @@ def _t18_execute_writeback(
                 approval_expires_at=grant.expires_at if grant else None,
                 reconciliation_required=attempt_status == "unknown",
                 allowed_action="reconcile" if attempt_status == "unknown" else None,
+                attempt_status=attempt_status,
             ),
         }
 
@@ -1498,6 +1769,7 @@ def _t18_execute_writeback(
                 approval_expires_at=grant.expires_at if grant else None,
                 reconciliation_required=True,
                 allowed_action="reconcile",
+                attempt_status="unknown",
             ),
         }
     db.refresh(batch)
@@ -1513,6 +1785,7 @@ def _t18_execute_writeback(
             operator_message="The single pilot writeback was confirmed by Naver and recorded locally.",
             platform_checked_at=preflight["platform_checked_at"],
             approval_expires_at=grant.expires_at,
+            attempt_status="success",
         ),
     }
 
@@ -1529,14 +1802,13 @@ def _t18_reconcile_writeback(
         return {"status": "blocked", "skip_reason": "shipping_batch_not_found", "real_api_called": False}
     candidates, candidate_error = _t18_candidates(db, batch)
     candidate_count = len(candidates or [])
-    gate_error = _t18_gate_skip_reason(settings)
-    if gate_error:
+    if not _role_allowed(actor_context):
         return {
-            "status": "blocked", "skip_reason": gate_error, "real_api_called": False,
+            "status": "blocked", "skip_reason": "operator_role_required", "real_api_called": False,
             "token_request_count": 0, "http_request_count": 0,
             "writeback_capability": _t18_capability(
                 settings=settings, status="blocked", candidate_count=candidate_count,
-                operator_message="PXG/Naver pilot reconciliation is disabled by a required safety gate.",
+                operator_message="An authorized operator is required for read-only reconciliation.",
             ),
         }
     store_matches, store_error = _t18_trial_store_matches(db, batch)
@@ -1551,7 +1823,7 @@ def _t18_reconcile_writeback(
     grant = db.scalar(select(WarehouseShippingApprovalGrant).where(
         WarehouseShippingApprovalGrant.batch_id == batch.id,
         WarehouseShippingApprovalGrant.attempt_scope == _t18_attempt_scope(batch.store_id),
-        WarehouseShippingApprovalGrant.attempt_status.in_({"unknown", "pending"}),
+        WarehouseShippingApprovalGrant.attempt_status.in_(T18_RECONCILABLE_ATTEMPT_STATUSES),
     ).order_by(WarehouseShippingApprovalGrant.id.desc()))
     if grant is None:
         return {
@@ -1574,28 +1846,84 @@ def _t18_reconcile_writeback(
             ),
         }
     state = (preflight.get("states") or [{}])[0]
+    candidate = candidates[0]
+    expected_product_order_id = str(candidate.get("product_order_reference") or "").strip()
+    expected_carrier_code = shipping_service._normalize_naver_delivery_company_code(candidate.get("carrier"))
+    expected_tracking_hash = str(candidate.get("tracking_number_hash") or "")
+    exact_logistics_match = (
+        state.get("product_order_id") == expected_product_order_id
+        and state.get("carrier_code") == expected_carrier_code
+        and state.get("tracking_number_hash") == expected_tracking_hash
+    )
     reconciled = (
         state.get("order_status") in T18_RECONCILED_PLATFORM_STATUSES
         and state.get("claim_status") in T18_NO_CLAIM_STATUSES
+        and exact_logistics_match
     )
     if not reconciled:
+        if state.get("writeback_state") == "NOT_APPLIED":
+            try:
+                grant.attempt_status = "reconciled_not_applied"
+                grant.attempt_finished_at = get_utc_now()
+                grant.attempt_error_code = "naver_reconciliation_not_applied"
+                grant.attempt_response_hash = _t18_attempt_response_hash({
+                    "status": "reconciled_not_applied",
+                    "skip_reason": "naver_reconciliation_not_applied",
+                })
+                _write_workflow_audit(
+                    db,
+                    batch=batch,
+                    actor_context=actor_context,
+                    action="platform_writeback_reconciled_not_applied",
+                    row_count=candidate_count,
+                    reason_code="platform_writeback_not_applied",
+                    real_api_called=False,
+                    platform_request_count=0,
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                return {
+                    "status": "unknown", "skip_reason": "local_reconciliation_commit_failed", "real_api_called": False,
+                    "writeback_capability": _t18_capability(
+                        settings=settings, status="reconciliation_required", candidate_count=candidate_count,
+                        operator_message="The platform state could not be safely recorded for reconciliation.",
+                        platform_checked_at=preflight["platform_checked_at"],
+                        approval_expires_at=grant.expires_at,
+                        reconciliation_required=True,
+                        allowed_action="reconcile",
+                        attempt_status="unknown",
+                    ),
+                }
+            return {
+                "status": "reconciled_not_applied",
+                "real_api_called": False,
+                "writeback_capability": _t18_capability(
+                    settings=settings, status="completed", candidate_count=candidate_count,
+                    operator_message="Naver confirmed that the request was not applied. A new owner approval is required before any future attempt.",
+                    platform_checked_at=preflight["platform_checked_at"],
+                    approval_expires_at=grant.expires_at,
+                    attempt_status="reconciled_not_applied",
+                ),
+            }
         return {
-            "status": "unknown", "skip_reason": "naver_reconciliation_not_confirmed", "real_api_called": False,
+            "status": "unknown", "skip_reason": "naver_reconciliation_exact_logistics_not_confirmed", "real_api_called": False,
             "writeback_capability": _t18_capability(
                 settings=settings, status="reconciliation_required", candidate_count=candidate_count,
-                operator_message="Naver has not confirmed a dispatched state; do not resend this pilot writeback.",
+                operator_message="Naver has not confirmed the exact product order, carrier, and tracking record; do not resend.",
                 platform_checked_at=preflight["platform_checked_at"],
                 approval_expires_at=grant.expires_at,
                 reconciliation_required=True,
                 allowed_action="reconcile",
+                attempt_status=grant.attempt_status,
             ),
         }
     try:
         _apply_t18_reconciled_local_state(db, batch=batch, candidates=candidates)
-        grant.attempt_status = "reconciled"
+        grant.attempt_status = "reconciled_success"
         grant.attempt_finished_at = get_utc_now()
         grant.attempt_error_code = None
-        grant.attempt_response_hash = _t18_attempt_response_hash({"status": "reconciled"})
+        grant.attempt_response_hash = _t18_attempt_response_hash({"status": "reconciled_success"})
         _write_workflow_audit(
             db,
             batch=batch,
@@ -1622,7 +1950,7 @@ def _t18_reconcile_writeback(
         }
     db.refresh(batch)
     return {
-        "status": "reconciled",
+        "status": "reconciled_success",
         "batch": _serialize_batch(batch),
         "real_api_called": False,
         "writeback_capability": _t18_capability(
@@ -1630,6 +1958,7 @@ def _t18_reconcile_writeback(
             operator_message="The ambiguous pilot attempt was confirmed from Naver's latest read-only state.",
             platform_checked_at=preflight["platform_checked_at"],
             approval_expires_at=grant.expires_at,
+            attempt_status="reconciled_success",
         ),
     }
 
@@ -1691,6 +2020,10 @@ def execute_warehouse_batch_writeback(
         execution_approval=True, dry_run_evidence_acknowledged=True, permission_evidence_acknowledged=True,
         final_operator_confirmation=True, real_api_call_requested=True, actor_context=actor_context,
     )
+    # The retired non-T18 path must not turn a rejected lower-level write into
+    # a local failure transition or any other durable business-side effect.
+    if result.get("status") == "blocked":
+        return result
     if result.get("status") == "success":
         for row in batch.rows:
             if row.row_status == "ready_for_writeback":

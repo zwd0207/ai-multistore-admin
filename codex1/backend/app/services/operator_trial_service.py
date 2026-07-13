@@ -35,15 +35,79 @@ TRIAL_PERMISSION_KEYS = {
     "recipient_pii.view",
     "recipient_pii.export",
     "shipping.batch.manage",
+    "shipping.writeback.approve",
     "platform.sync",
     "customer.inquiries.content.read",
 }
-FORBIDDEN_TRIAL_PERMISSION_KEYS = {"*", "system.configure", "shipping.writeback.approve", "customer.inquiries.reply"}
+FORBIDDEN_TRIAL_PERMISSION_KEYS = {"*", "system.configure", "customer.inquiries.reply"}
 DISABLED_TRIAL_WRITE_PATHS = {
     "/api/v1/shipping/shipment-writeback/execute",
     "/api/v1/sync/customer-inquiries/naver",
     "/api/v1/sync/customer-inquiries/naver/reply",
 }
+
+T18_TRIAL_WRITEBACK_PREFIX = "/api/v1/shipping/warehouse-batches/"
+T18_TRIAL_WRITEBACK_SUFFIX = "/writeback"
+T18_TRIAL_APPROVAL_SUFFIX = "/approval/writeback"
+
+
+def t18_trial_write_gates_enabled(settings: Settings) -> bool:
+    return all((
+        bool(getattr(settings, "real_api_write_enabled", False)),
+        bool(getattr(settings, "shipping_platform_write_enabled", False)),
+        bool(getattr(settings, "pxg_naver_shipping_pilot_enabled", False)),
+    ))
+
+
+def is_t18_trial_writeback_path(path: str) -> bool:
+    if not path.startswith(T18_TRIAL_WRITEBACK_PREFIX) or not path.endswith(T18_TRIAL_WRITEBACK_SUFFIX):
+        return False
+    batch_text = path[len(T18_TRIAL_WRITEBACK_PREFIX):-len(T18_TRIAL_WRITEBACK_SUFFIX)]
+    return batch_text.isdigit()
+
+
+def is_t18_trial_approval_path(path: str) -> bool:
+    if not path.startswith(T18_TRIAL_WRITEBACK_PREFIX) or not path.endswith(T18_TRIAL_APPROVAL_SUFFIX):
+        return False
+    batch_text = path[len(T18_TRIAL_WRITEBACK_PREFIX):-len(T18_TRIAL_APPROVAL_SUFFIX)]
+    return batch_text.isdigit()
+
+
+def assert_t18_trial_writeback_request_allowed(
+    db: Session,
+    *,
+    settings: Settings,
+    path: str,
+    body: dict,
+    store_id: int | None,
+) -> None:
+    """Allow exactly the constrained T18 warehouse route during an operator trial."""
+
+    if path in DISABLED_TRIAL_WRITE_PATHS:
+        raise ApiError("legacy real platform write is disabled", "legacy_platform_write_disabled", 403)
+    is_t18_execution = is_t18_trial_writeback_path(path)
+    is_t18_approval = is_t18_trial_approval_path(path)
+    if not is_t18_execution and not is_t18_approval:
+        if path.endswith("/writeback"):
+            raise ApiError("platform writeback is disabled for the trial", "trial_platform_write_disabled", 403)
+        return
+
+    if store_id is None:
+        raise ApiError("trial shipping store scope is required", "trial_t18_store_required", 403)
+    store = resolve_trial_store(db)
+    if store.id != store_id or store.platform != TRIAL_PLATFORM:
+        raise ApiError("T18 requires the unique PXG/Naver trial store", "trial_t18_store_required", 403)
+
+    if is_t18_approval:
+        if not t18_trial_write_gates_enabled(settings):
+            raise ApiError("T18 writeback requires all three pilot write gates", "trial_t18_write_gates_required", 403)
+        return
+
+    action = str(body.get("action") or "execute").strip().lower()
+    if action not in {"execute", "reconcile"}:
+        raise ApiError("T18 writeback action is invalid", "trial_t18_action_invalid", 403)
+    if action == "execute" and not t18_trial_write_gates_enabled(settings):
+        raise ApiError("T18 writeback requires all three pilot write gates", "trial_t18_write_gates_required", 403)
 
 
 def assert_legacy_naver_customer_inquiry_sync_closed(settings: Settings) -> None:
@@ -77,18 +141,30 @@ def assert_trial_runtime_closed(settings: Settings) -> None:
             raise ApiError("real readonly trial flags are inconsistent", "trial_readonly_flags_invalid", 409)
     elif settings.real_api_test_enabled or not settings.operator_trial_artificial_data_only:
         raise ApiError("artificial trial flags are inconsistent", "trial_artificial_flags_invalid", 409)
-    flags = {
-        "real_api_write_enabled": settings.real_api_write_enabled,
-        "ai_automatic_operations_enabled": settings.ai_automatic_operations_enabled,
-        "platform_product_write_enabled": settings.platform_product_write_enabled,
-        "platform_inventory_write_enabled": settings.platform_inventory_write_enabled,
-        "platform_order_write_enabled": settings.platform_order_write_enabled,
-        "customer_platform_write_enabled": settings.customer_platform_write_enabled,
-        "shipping_platform_write_enabled": settings.shipping_platform_write_enabled,
+    t18_flags = {
+        "real_api_write_enabled": bool(getattr(settings, "real_api_write_enabled", False)),
+        "shipping_platform_write_enabled": bool(getattr(settings, "shipping_platform_write_enabled", False)),
+        "pxg_naver_shipping_pilot_enabled": bool(getattr(settings, "pxg_naver_shipping_pilot_enabled", False)),
     }
-    enabled = sorted(key for key, value in flags.items() if value)
-    if enabled:
+    other_write_flags = {
+        "ai_automatic_operations_enabled": bool(getattr(settings, "ai_automatic_operations_enabled", False)),
+        "platform_product_write_enabled": bool(getattr(settings, "platform_product_write_enabled", False)),
+        "platform_inventory_write_enabled": bool(getattr(settings, "platform_inventory_write_enabled", False)),
+        # T18 dispatch must not widen generic platform-order mutation authority.
+        "platform_order_write_enabled": bool(getattr(settings, "platform_order_write_enabled", False)),
+        "customer_platform_write_enabled": bool(getattr(settings, "customer_platform_write_enabled", False)),
+    }
+    if any(other_write_flags.values()):
+        enabled = sorted(key for key, value in other_write_flags.items() if value)
         raise ApiError("trial real operations must remain disabled", "trial_real_operation_enabled", 409, {"enabled_flags": enabled})
+    enabled_t18 = sorted(key for key, value in t18_flags.items() if value)
+    if enabled_t18 and not all(t18_flags.values()):
+        raise ApiError(
+            "T18 pilot write flags must be enabled as one constrained set",
+            "trial_t18_write_flags_incomplete",
+            409,
+            {"enabled_flags": enabled_t18},
+        )
 
 
 def assert_store_has_only_artificial_customer_data(db: Session, store_id: int) -> None:
