@@ -178,3 +178,15 @@ Commander verification passed T13-T16, production sessions, frontend contracts, 
 Business pages, the administrative layout, and the full data provider must remain demand-loaded. The production entry JavaScript chunk may not exceed 300 KiB and no JavaScript chunk may exceed 500 KiB. `npm run bundle:verify` is required after the production build for frontend phases. Raising Vite's warning threshold does not satisfy this gate.
 
 Commit `8937d2d` establishes the baseline: the entry chunk decreased from 901 KB to 253 KB, the demand-loaded data provider is 351 KB, all 37 JavaScript chunks pass the budget, and unauthenticated browser requests omit the data provider. The same change aligns product, inventory, and warehouse order queries with the backend page-size maximum of 100. All frontend contracts, browser route checks, mobile containment, and full `verify_all.py` passed.
+
+## D038 - T17 Naver logistics readonly loop accepted
+
+T17 extends the existing Naver order-detail adapter, logistics record, order-status event, T15 checkpoint/log scheduler, T16 attention flow, order trace, inquiry context, and existing frontend pages. It adds no logistics table, global API, page, scheduler, or platform-write path. Recent 30-day eligible orders run about every 30 minutes; historical logistics is saved only while the existing bounded historical backfill reads the same order details.
+
+Association requires the same store, Naver platform, and a unique exact product-order ID. New T13 orders use the platform-order hash. The original T13 product-order-hash mapping remains compatible only after the exact unique product-order match, so it cannot widen cross-store or name-based association.
+
+A Commander-controlled real PXG validation was bounded to 6 previously saved product-order candidates. It saved 5 encrypted logistics snapshots and produced one honest no-logistics result. The checkpoint finished at `success`; no platform write occurred. Ordinary APIs and UI show only masked tracking values. Expiry is evaluated at serialization time, stale snapshots hide tracking, and a newer no-logistics snapshot clears old encrypted, hashed, and masked tracking values.
+
+Sol's first final review found and blocked stale/no-logistics display and a pre-existing customer-reply service gate. Commit `f60a754` closes both: expired/no-logistics records fail closed, and customer reply requires both global real-write and customer-write settings before inquiry, credential, token, or network work. Sol re-review passed B1, B2, and the write boundary with no blocker.
+
+T13-T17 focused verification, production sessions, all frontend contracts, build, encoding, session security, bundle budget, desktop and 390px browser QA, and final `verify_all.py` passed. Platform shipment writeback, customer reply, product/inventory mutation, and AI actions remain disabled. The next write-capable phase requires a separate owner decision and must trial only one manual operation at a time.

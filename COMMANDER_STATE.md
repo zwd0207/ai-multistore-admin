@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T17 logistics readonly implementation resumed after frontend bundle optimization
+Status: T17 Naver logistics readonly loop accepted
 
 ## Mission
 
@@ -16,8 +16,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `8937d2d` (route-level code splitting and enforced frontend bundle budget).
-- Last accepted backend integration: `144d00e` (T16 recovery access and response-redaction boundary).
+- Last accepted integration: `8199f2e` (T17 operator logistics visibility and explicit Naver snapshot labeling).
+- Last accepted backend integration: `f60a754` (stale/no-logistics failure closure and unconditional customer-reply write gates).
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
@@ -34,6 +34,10 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - T16 is accepted. The existing store overview now surfaces safe automatic-read attention counts and resource guidance; credential and permission blocks can be verified and released through the existing T15 scheduler without running synchronization in the HTTP request.
 - Ordinary operators receive only safe status and guidance. Recovery requires same-store `credentials.manage`, `platform.sync`, recent authentication, MFA, and CSRF; cursor, conflict, cleanup, retention, and unknown failures remain nonrecoverable.
 - Frontend routes and the administrative layout now load on demand. The production entry chunk is limited to 300 KiB and every JavaScript chunk to 500 KiB; unauthenticated sessions do not download the full data provider.
+- T17 is accepted. Naver order-detail reads now populate the existing logistics record and order-event models for recent 30-day orders through the existing T15 scheduler. The task runs about every 30 minutes with a 20-minute lease and a 75-minute checkpoint freshness window.
+- Ordinary orders, customer inquiries, the workbench, and logistics traces expose only masked tracking numbers. Expired snapshots are evaluated at serialization time, marked stale, and do not return tracking values. A newer explicit no-logistics snapshot clears the previous encrypted/hash/masked tracking values and fails closed.
+- The legacy T13 product-order-hash identifier is accepted only after an exact same-store, same-platform, unique product-order match. New T13 records use the correct platform-order hash.
+- Customer platform replies now require both global real-write and customer-write settings inside the service before inquiry lookup, credential access, token retrieval, or network work. The approved trial keeps both switches off.
 
 ## Active Trial Boundary
 
@@ -101,15 +105,16 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `d55bebc`, `dae8fd2`, `471456e`, `24092c9`, `ae001f1`, and `0a56e39`: T15 adds one store-isolated Naver readonly scheduler using existing checkpoints, logs, T13 readers, and T14 inquiry service. Real PXG orders and inquiries run about every 10 minutes, products about every 2 hours, and logistics remains explicitly unsupported. The pre-T13 PXG store is admitted only through an active configured credential plus successful approved readonly evidence; the fictional store remains disabled. Real browser QA showed successful reads, next-run times in KST, desktop and 390px containment, and no platform writes. T13/T14/T15, production sessions, frontend build/encoding, and full `verify_all.py` passed.
 - `1c9fcc7` through `9975db6`: T16 extends the existing store overview, T15 checkpoints/scheduler, connection editor, and workbench status panel. It adds safe exception summaries, store-scoped verify-and-recover, connection deep links, administrator/ordinary-operator response separation, and 68-second recovery polling without a new table, scheduler, log, page, or platform write path. T13-T16, production sessions, frontend contracts/build/encoding, full `verify_all.py`, desktop browser QA, 390px browser QA, and Sol final review passed.
 - `8937d2d`: frontend business routes, the administrative layout, and the large data provider load on demand. The entry bundle fell from 901 KB to 253 KB, the data-provider chunk is 351 KB, all 37 JavaScript chunks pass enforced budgets, and the production build no longer emits the 500 KB warning. Browser QA passed login, workbench, orders, shipping, customer service, and 390px containment; invalid 200-row list requests were corrected to the backend limit of 100.
+- `35b6f54` through `f60a754` and `fccb90b` through `8199f2e`: T17 reuses Naver order-detail reads, existing logistics records/events, T15 checkpoints/logs, order trace, inquiry context, and existing frontend pages. A bounded real PXG read checked 6 saved product-order candidates, produced 5 valid encrypted logistics snapshots and one honest no-logistics result, and ended with the logistics checkpoint at `success` and `platform_write=false`. T13-T17, production sessions, all frontend contracts, build, encoding, session security, bundle budget, final `verify_all.py`, desktop QA, 390px QA, and Sol final review passed.
 
 ## Worktree Registry
 
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | review-only | T16 final review passed; paused |
-| Terra | `codex2-terra` | `task/t16-terra` | T16 backend integrated and verified; paused |
-| Luna | `codex2-luna` | `task/t16-luna` | T16 frontend integrated and verified; paused |
+| Sol | review-only | final gate | T17 final review passed; closed |
+| Terra | `codex2-terra` | `task/t17-terra` | T17 backend integrated and verified; paused |
+| Luna | `codex2-luna` | `task/t17-luna` | T17 frontend integrated and verified; paused |
 
 ## Next Action
 
@@ -130,11 +135,12 @@ AI automation is deferred until the manual operator workflow is stable and measu
 15. T13 is accepted. The next controlled operator action is to add one Naver store through `店铺与平台连接 -> 添加 Naver 店铺` with its real Client ID/Secret and observe automatic validation and the initial 30-day import. Do not enable platform writes.
 16. T14 is accepted. Naver inquiry refresh uses only the approved inquiry endpoint and local encrypted storage. Keep the legacy inquiry sync and every customer reply/platform write path closed.
 17. T15 is Commander-verified in the isolated local trial. Keep `AUTOMATIC_READ_SYNC_ENABLED=true` only for this approved runtime; global/default configuration remains false.
-18. Do not implement Naver logistics automatic reads until an approved readonly adapter exists. Never substitute warehouse writeback records or a platform write endpoint.
+18. T17 Naver logistics readonly is accepted. Keep it on the existing T15 scheduler and Naver order-detail read path; never substitute warehouse writeback or a platform write endpoint.
 19. T16 automatic-read exception recovery is accepted. Keep transient failures on automatic retry; only credential and known permission blocks may use verify-and-recover.
-20. Logistics automatic read remains `not_supported` and is excluded from exception counts until an approved Naver readonly logistics adapter exists.
+20. Logistics automatic read is supported for approved Naver stores. Missing checkpoints and stores without approved credentials remain disabled; failures continue through T15 retry and T16 attention handling.
 21. The next phase should improve operator handling of the refreshed order, inquiry, product, and warehouse data without creating a second scheduler, task table, order table, inquiry service, or platform-write path.
-22. T17 Naver logistics readonly work resumes from `8937d2d`; keep the bundle budget check in every frontend acceptance run.
+22. The next product decision is a separately approved single-store manual write trial: either shipment writeback or customer reply, not both at once. Until that decision, all real platform writes remain closed.
+23. Keep `npm run bundle:verify` in every frontend acceptance run. Current baseline: 253,249-byte entry, 37 JavaScript chunks, all within budget.
 
 ## Compact Reporting Contract
 
