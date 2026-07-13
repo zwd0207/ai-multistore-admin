@@ -29,6 +29,7 @@ if str(BACKEND_DIR) not in sys.path:
 from fastapi.testclient import TestClient
 
 from app.core.timezone import get_utc_now
+from app.config import Settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
@@ -37,11 +38,19 @@ from app.models.product import Product
 from app.models.store import Store
 from app.services.encryption import encrypt_value
 from app.services.order_service import product_display_contract, serialize_order_summary
+import app.services.product_thumbnail_service as thumbnail_service
+from app.schemas.pxg_naver_readonly import PxgNaverReadonlyProductCandidate
 from app.services.product_thumbnail_service import (
+    THUMBNAIL_ACCESS_RETENTION,
     THUMBNAIL_MAX_BYTES,
     THUMBNAIL_MAX_DIMENSION,
+    THUMBNAIL_MAX_SOURCE_PIXELS,
     approved_pstatic_product_image_url,
+    cleanup_local_product_thumbnail_cache,
+    generate_thumbnails_from_approved_product_read,
+    local_thumbnail_url,
     store_thumbnail_from_approved_product_read,
+    thumbnail_requires_invalidation,
 )
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 from app.services.sync_service import _build_naver_order_internal_detail
@@ -50,8 +59,8 @@ from app.services.sync_service import _build_naver_order_internal_detail
 ORIGIN = "https://erp.test"
 PASSWORD = "UI-01A-test-password-not-production"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
-def create_source_image() -> bytes:
-    image = Image.new("RGB", (640, 320), color=(32, 96, 160))
+def create_source_image(color: tuple[int, int, int] = (32, 96, 160)) -> bytes:
+    image = Image.new("RGB", (640, 320), color=color)
     output = BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
@@ -148,7 +157,11 @@ def seed() -> tuple[int, int]:
             rejected = getattr(exc, "error_code", None) == "product_thumbnail_source_forbidden"
         assert rejected
         assert approved_pstatic_product_image_url("https://evilpstatic.net/image.webp") is None
+        assert approved_pstatic_product_image_url("https://pstatic.net/image.webp") is None
+        assert approved_pstatic_product_image_url("https://other.pstatic.net/image.webp") is None
+        assert approved_pstatic_product_image_url("https://shop-phinf.pstatic.net/image.webp")
         assert approved_pstatic_product_image_url("http://shopping-phinf.pstatic.net/image.webp") is None
+        assert THUMBNAIL_MAX_SOURCE_PIXELS == 16_000_000
         rejected_host = False
         try:
             store_thumbnail_from_approved_product_read(
@@ -219,6 +232,89 @@ def seed() -> tuple[int, int]:
         assert product_display_contract(db, unmatched_same_name_order)["product_url"] is None
         summary = serialize_order_summary(order, db=db)
         assert "raw_data" not in summary
+
+        # Source changes invalidate the old local file before a replacement can be generated.
+        old_ref = product.raw_data["thumbnail"]["ref"]
+        assert thumbnail_requires_invalidation(product, "https://shop-phinf.pstatic.net/main/changed.jpg")
+
+        # A 30-day unaccessed file is removed and its product metadata is cleared.
+        old_path = THUMBNAIL_ROOT / old_ref
+        os.utime(old_path, (old_path.stat().st_atime, old_path.stat().st_mtime - THUMBNAIL_ACCESS_RETENTION.total_seconds() - 1))
+        cleanup = cleanup_local_product_thumbnail_cache(db=db, settings=Settings(local_product_thumbnail_root=str(THUMBNAIL_ROOT)))
+        assert cleanup["expired_removed"] == 1 and cleanup["metadata_cleared"] == 1, cleanup
+        assert not old_path.exists() and local_thumbnail_url(product) is None
+
+        # Capacity eviction removes the least-recent thumbnail and clears its stale URL contract.
+        store_thumbnail_from_approved_product_read(
+            db,
+            product=product,
+            source_image_url="https://shopping-phinf.pstatic.net/main/10001.jpg",
+            image_bytes=create_source_image((32, 96, 160)),
+        )
+        original_item_limit = thumbnail_service.THUMBNAIL_CACHE_MAX_ITEMS
+        thumbnail_service.THUMBNAIL_CACHE_MAX_ITEMS = 1
+        try:
+            store_thumbnail_from_approved_product_read(
+                db,
+                product=same_name_other_id,
+                source_image_url="https://shop-phinf.pstatic.net/main/10002.jpg",
+                image_bytes=create_source_image((160, 96, 32)),
+            )
+        finally:
+            thumbnail_service.THUMBNAIL_CACHE_MAX_ITEMS = original_item_limit
+        assert local_thumbnail_url(product) is None
+        assert local_thumbnail_url(same_name_other_id) is not None
+
+        approved_candidate = PxgNaverReadonlyProductCandidate(
+            external_product_id="10001",
+            name="PXG Test Bag",
+            status="active",
+            thumbnail_source_url="https://shopping-phinf.pstatic.net/main/10001-new.jpg",
+            source_updated_at=get_utc_now(),
+        )
+        disabled_fetches: list[str] = []
+        disabled = generate_thumbnails_from_approved_product_read(
+            db,
+            store_id=store.id,
+            candidates=[approved_candidate],
+            settings=Settings(local_product_thumbnail_root=str(THUMBNAIL_ROOT)),
+            image_fetcher=lambda url: disabled_fetches.append(url) or create_source_image(),
+        )
+        assert disabled == {"status": "disabled", "generated": 0, "skipped": 0}
+        assert not disabled_fetches
+        approved_fetches: list[str] = []
+        enabled = generate_thumbnails_from_approved_product_read(
+            db,
+            store_id=store.id,
+            candidates=[approved_candidate],
+            settings=Settings(
+                local_product_thumbnail_root=str(THUMBNAIL_ROOT),
+                pxg_naver_local_read_thumbnail_generation_enabled=True,
+            ),
+            image_fetcher=lambda url: approved_fetches.append(url) or create_source_image((20, 80, 180)),
+        )
+        assert enabled == {"status": "completed", "generated": 1, "skipped": 0}
+        assert approved_fetches == ["https://shopping-phinf.pstatic.net/main/10001-new.jpg"]
+
+        # Invalid products and unbound stores invalidate a previously generated file.
+        product.status = "inactive"
+        assert local_thumbnail_url(product) is None
+        product.status = "active"
+        store_thumbnail_from_approved_product_read(
+            db,
+            product=product,
+            source_image_url="https://shopping-phinf.pstatic.net/main/10001-new.jpg",
+            image_bytes=create_source_image((20, 80, 180)),
+        )
+        store.status = "inactive"
+        assert local_thumbnail_url(product) is None
+        store.status = "active"
+        store_thumbnail_from_approved_product_read(
+            db,
+            product=product,
+            source_image_url="https://shopping-phinf.pstatic.net/main/10001-new.jpg",
+            image_bytes=create_source_image((20, 80, 180)),
+        )
         db.commit()
         product_id = product.id
         store_id = store.id

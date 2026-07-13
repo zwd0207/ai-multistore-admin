@@ -1536,6 +1536,7 @@ def verify_stage_scripts() -> None:
         "verify_pxg_naver_readonly_retention_cleanup.py",
         "verify_pxg_naver_readonly_scheduler.py",
         "verify_pxg_naver_readonly_sync_safety.py",
+        "verify_order_product_thumbnail_contract.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",

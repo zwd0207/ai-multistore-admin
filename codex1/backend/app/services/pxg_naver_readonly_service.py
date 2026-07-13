@@ -27,6 +27,7 @@ from app.schemas.pxg_naver_readonly import (
 )
 from app.services import api_credential_readiness_service, sync_service
 from app.services.operator_trial_service import assert_trial_runtime_closed, resolve_trial_store
+from app.services.product_thumbnail_service import approved_pstatic_product_image_url
 
 
 MAX_REAL_ORDER_PREVIEW = 3
@@ -237,6 +238,39 @@ def preview_pxg_naver_real_reads(db: Session, settings: Settings) -> dict:
     return result
 
 
+def _approved_product_thumbnail_sources(payload: object) -> dict[str, str]:
+    """Extract transient, explicitly-approved image URLs from a product read.
+
+    The returned URLs stay in the server-only adapter batch. They are never
+    persisted in product metadata, audit records, or API responses.
+    """
+    sources: dict[str, str] = {}
+    for content in sync_service._iter_naver_product_contents(payload):
+        channel_products = content.get("channelProducts")
+        if not isinstance(channel_products, list) or len(channel_products) != 1:
+            continue
+        channel_product = channel_products[0]
+        if not isinstance(channel_product, dict):
+            continue
+        external_product_id = sync_service._bounded_text(
+            sync_service._extract_scalar_by_keys(channel_product, ("channelProductNo", "channelProductId")),
+            120,
+        )
+        if not external_product_id:
+            continue
+        source_url = None
+        for container in (channel_product, content):
+            for key in ("representativeImageUrl", "imageUrl", "image"):
+                source_url = approved_pstatic_product_image_url(container.get(key))
+                if source_url:
+                    break
+            if source_url:
+                break
+        if source_url:
+            sources[external_product_id] = source_url
+    return sources
+
+
 def collect_pxg_naver_readonly_adapter_batch(db: Session, settings: Settings) -> PxgNaverReadonlyAdapterBatch:
     """Read and normalize a bounded Naver batch entirely on the server.
 
@@ -263,6 +297,7 @@ def collect_pxg_naver_readonly_adapter_batch(db: Session, settings: Settings) ->
     if not product_result.get("success"):
         raise ApiError("Naver product readonly adapter failed", "readonly_adapter_product_read_failed", 502)
     raw_products, _skip_reasons = sync_service._extract_naver_product_sync_candidates(product_result.get("payload"))
+    thumbnail_sources = _approved_product_thumbnail_sources(product_result.get("payload"))
     products = [
         PxgNaverReadonlyProductCandidate(
             external_product_id=item["external_product_id"],
@@ -274,6 +309,7 @@ def collect_pxg_naver_readonly_adapter_batch(db: Session, settings: Settings) ->
             price=item.get("price") or 0,
             currency=item.get("currency") or "KRW",
             stock_quantity=item.get("stock_quantity") or 0,
+            thumbnail_source_url=thumbnail_sources.get(item["external_product_id"]),
             source_updated_at=now,
         )
         for item in raw_products[:3]

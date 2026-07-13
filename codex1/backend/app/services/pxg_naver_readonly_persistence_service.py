@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -283,7 +283,7 @@ def _safe_product_metadata(existing_raw_data: object = None) -> dict[str, object
             if isinstance(ref, str) and re.fullmatch(r"[a-f0-9]{64}\.webp", ref):
                 metadata["thumbnail"] = {
                     key: thumbnail[key]
-                    for key in ("ref", "format", "width", "height", "bytes", "generated_at")
+                    for key in ("ref", "format", "width", "height", "bytes", "generated_at", "source_url_hash")
                     if key in thumbnail
                 }
     return metadata
@@ -344,6 +344,13 @@ def _product_outcome(
         product.currency = candidate.currency
         product.stock_quantity = candidate.stock_quantity
         product.last_synced_at = observed_at
+        from app.services.product_thumbnail_service import (
+            invalidate_product_thumbnail,
+            thumbnail_requires_invalidation,
+        )
+
+        if thumbnail_requires_invalidation(product, candidate.thumbnail_source_url):
+            invalidate_product_thumbnail(product, settings=settings)
         product.raw_data = _safe_product_metadata(product.raw_data)
     db.flush()
     _refresh_state(
@@ -822,6 +829,7 @@ def persist_pxg_naver_readonly_adapter_batch(
     batch: PxgNaverReadonlyAdapterBatch,
     actor_id: str | None,
     manual_approval: bool,
+    thumbnail_fetcher: Callable[[str], bytes] | None = None,
 ) -> dict[str, Any]:
     """Persist a server-generated readonly adapter batch without platform writes."""
 
@@ -836,6 +844,7 @@ def persist_pxg_naver_readonly_adapter_batch(
         "logistics": {},
         "customer_inquiries": {},
     }
+    thumbnail_result: dict[str, int | str] = {"status": "disabled", "generated": 0, "skipped": 0}
     try:
         mark_pxg_naver_readonly_stale(db, store_id=store.id, settings=settings, now=observed_at)
         for candidate in batch.products:
@@ -855,6 +864,15 @@ def persist_pxg_naver_readonly_adapter_batch(
             _count_outcome(counts, "customer_inquiries", _inquiry_outcome(
                 db, store_id=store.id, candidate=candidate, observed_at=observed_at, settings=settings,
             ))
+        from app.services.product_thumbnail_service import generate_thumbnails_from_approved_product_read
+
+        thumbnail_result = generate_thumbnails_from_approved_product_read(
+            db,
+            store_id=store.id,
+            candidates=batch.products,
+            settings=settings,
+            image_fetcher=thumbnail_fetcher,
+        )
         _audit_local_ingestion(
             db,
             store_id=store.id,
@@ -888,6 +906,7 @@ def persist_pxg_naver_readonly_adapter_batch(
             "customer_send": False,
             "ai_automatic_operation": False,
         },
+        "thumbnails": thumbnail_result,
     }
 
 

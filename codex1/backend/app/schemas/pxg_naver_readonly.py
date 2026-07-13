@@ -47,6 +47,9 @@ class PxgNaverReadonlyProductCandidate(_StrictReadonlyCandidate):
     price: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
     currency: str = Field(default="KRW", min_length=1, max_length=10)
     stock_quantity: int = Field(default=0, ge=0)
+    # Server-only transient input for the approved thumbnail worker. It is
+    # intentionally never persisted into Product.raw_data or returned by APIs.
+    thumbnail_source_url: str | None = Field(default=None, max_length=1000)
     source_updated_at: datetime
 
 
