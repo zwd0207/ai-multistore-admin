@@ -83,7 +83,6 @@ export const backendApi = {
   getShippingLogisticsMappings: (params) => getData('/shipping/logistics-mappings', params),
   getWarehouseShippingBatches: (params) => getData('/shipping/warehouse-batches', params),
   getWarehouseShippingTrackingDetails: (batchId, params) => getData(`/shipping/warehouse-batches/${batchId}/tracking-details`, params),
-  getWarehouseShippingWritebackCapability: (batchId) => getData(`/shipping/warehouse-batches/${batchId}/writeback-capability`),
   createWarehouseShippingBatch: (payload) => sendData('post', '/shipping/warehouse-batches', payload),
   requestWarehouseShippingApproval: (batchId, scope, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/approval/${scope}`, payload),
   downloadWarehouseShippingManifest: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/manifest`, payload),

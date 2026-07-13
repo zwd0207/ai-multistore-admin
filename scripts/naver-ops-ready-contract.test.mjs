@@ -44,42 +44,20 @@ includesAll('codex1/backend/app/services/sync_service.py', [
   'raw_response_saved": False',
 ]);
 
-includesAll('codex1/backend/app/schemas/shipping.py', [
-  'ShippingShipmentWritebackExecuteRequest',
-  'final_operator_confirmation: bool = False',
-  'real_api_call_requested: bool = False',
-]);
-
-includesAll('codex1/backend/app/api/v1/endpoints/shipping.py', [
-  '@router.post("/shipment-writeback/execute")',
-  'execute_shipment_writeback',
-]);
-
-includesAll('codex1/backend/app/services/shipping_service.py', [
-  'execute_naver_shipment_writeback',
-  '/v1/pay-order/seller/product-orders/dispatch',
-  'dispatchProductOrders',
-  'deliveryCompanyCode',
-  'trackingNumber',
-  'manual_approval',
-  'final_operator_confirmation',
-  'platform_write',
-  'raw_response_saved',
-]);
-
 includesAll('src/services/backendApi.js', [
   'syncNaverCustomerInquiries',
   "'/sync/customer-inquiries/naver'",
   'replyNaverCustomerInquiry',
   "'/sync/customer-inquiries/naver/reply'",
-  'executeShippingShipmentWriteback',
-  "'/shipping/shipment-writeback/execute'",
+  'confirmWarehouseShippingWriteback',
+  "`/shipping/warehouse-batches/${batchId}/writeback`",
 ]);
 
 includesAll('src/services/dataProvider.js', [
   'syncNaverCustomerInquiries',
   'replyNaverCustomerInquiry',
-  'executeShippingShipmentWriteback',
+  "action: 'reconcile'",
+  'real_api_call_requested: false',
 ]);
 
 includesAll('src/pages/CustomerService.jsx', [
@@ -91,9 +69,21 @@ includesAll('src/pages/CustomerService.jsx', [
 
 includesAll('src/pages/ShippingAssistant.jsx', [
   '待确认平台回填',
-  '确认并回填平台',
-  '我已确认店铺、订单、商品、快递公司和物流单号无误，并同意提交到当前平台。',
+  '申请平台回填审批',
+  '确认执行平台回填',
+  'writebackCapability',
+  '平台结果待核对',
   '发货信息已成功回填平台。',
 ]);
+
+const backendApi = read('src/services/backendApi.js');
+const dataProvider = read('src/services/dataProvider.js');
+const shippingPage = read('src/pages/ShippingAssistant.jsx');
+assert.doesNotMatch(backendApi, /shipment-writeback\/execute|writeback-capability|executeShippingShipmentWriteback/);
+assert.doesNotMatch(dataProvider, /executeShippingShipmentWriteback|toBackendShippingShipmentWriteback/);
+assert.doesNotMatch(shippingPage, /healthCheck\(|getWarehouseShippingWritebackCapability|platformWriteEnabled/);
+assert.match(shippingPage, /data-action="reconcile"/);
+assert.match(shippingPage, /unknown \? <button[^>]+data-action="reconcile"/);
+assert.match(shippingPage, /failed && capability\?\.allowedAction === 'approve'/);
 
 console.log('naver ops ready contract checks passed');

@@ -24,7 +24,9 @@ assert.match(storeContext, /useAuthContext/, 'backend store loading must follow 
 assert.match(storeContext, /isBackendSource\s*&&\s*!isAuthenticated/, 'backend stores must not load before login');
 const shippingPage = await readFile(new URL('../src/pages/ShippingAssistant.jsx', import.meta.url), 'utf8');
 const customerPage = await readFile(new URL('../src/pages/CustomerService.jsx', import.meta.url), 'utf8');
-assert.match(shippingPage, /platformWriteEnabled/, 'shipping UI must fail closed when platform writes are disabled');
+assert.match(shippingPage, /writebackCapability/, 'shipping UI must fail closed from backend capability');
+assert.doesNotMatch(shippingPage, /healthCheck\(|getWarehouseShippingWritebackCapability|shipment-writeback\/execute/, 'shipping UI must not use health or legacy writeback authorization');
+assert.match(shippingPage, /data-action="reconcile"/, 'unknown writeback results must expose reconcile only');
 assert.match(customerPage, /platformReplyEnabled/, 'customer reply UI must fail closed when platform sends are disabled');
 assert.match(customerPage, /relatedOrder/, 'customer inquiry detail must display its related order and logistics context');
 assert.match(await readFile(new URL('../src/routes/index.jsx', import.meta.url), 'utf8'), /type="unavailable"/, 'unavailable sessions must not render operator routes');

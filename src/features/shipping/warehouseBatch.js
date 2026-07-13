@@ -27,6 +27,7 @@ export function adaptWarehouseBatch(batch = {}) {
     shippedAt: batch.warehouse_sent_at ?? batch.warehouseSentAt ?? null,
     requiresWarehouseStop: ['warehouse_sent', 'warehouse_returned', 'ready_to_writeback', 'writeback_partial'].includes(status),
     failed: status === 'writeback_partial' || Number(batch.counts?.failed || 0) > 0,
+    writebackCapability: adaptWarehouseWritebackCapability(batch.writeback_capability),
     rows: Array.isArray(batch.rows) ? batch.rows.map((row) => ({
       id: row.id,
       orderId: row.local_order_id ?? row.localOrderId,
@@ -53,6 +54,7 @@ export const warehouseRequest = {
   remove: ({ reasonCode, warehouseStoppedShipping }) => ({ manual_approval: true, reason_code: reasonCode, warehouse_stopped_shipping: Boolean(warehouseStoppedShipping) }),
   manifest: (approvalToken) => ({ manual_approval: true, privacy_access_acknowledged: true, approval_token: approvalToken }),
   writeback: (approvalToken, realApiCallRequested = true) => ({ manual_approval: true, final_operator_confirmation: true, real_api_call_requested: Boolean(realApiCallRequested), approval_token: approvalToken }),
+  reconcile: () => ({ action: 'reconcile', manual_approval: true, final_operator_confirmation: false, real_api_call_requested: false }),
 };
 
 export function adaptWarehouseTrackingDetail(row = {}) {
@@ -77,16 +79,19 @@ export function adaptWarehouseWritebackCapability(data = {}) {
   if (!capability || typeof capability !== 'object') return null;
   return {
     status: capability.status || 'unknown',
-    allowed: capability.allowed,
-    singleOrderOnly: capability.single_order_only,
-    storeId: capability.store_id ?? capability.storeId,
+    pilotEnabled: capability.pilot_enabled,
+    maxRows: capability.max_rows,
+    candidateCount: capability.candidate_count,
+    operatorMessage: capability.operator_message || '',
+    platformCheckedAt: capability.platform_checked_at || '-',
+    approvalExpiresAt: capability.approval_expires_at || '-',
+    reconciliationRequired: capability.reconciliation_required,
+    allowedAction: capability.allowed_action || 'none',
     storeName: capability.store_name || capability.storeName || '-',
-    productOrderNo: capability.product_order_reference || capability.productOrderReference || '-',
+    productOrderNo: capability.product_order_reference || '-',
     carrier: capability.carrier || '-',
-    platformLatestStatus: capability.platform_latest_status || capability.platformLatestStatus || '-',
-    approvalExpiresAt: capability.approval_expires_at || capability.approvalExpiresAt || capability.expires_at || capability.expiresAt || '-',
-    safeReason: capability.safe_failure_reason || capability.safeFailureReason || capability.safe_reason || '',
-    candidateChanged: capability.candidate_changed,
+    trackingNumberMasked: capability.tracking_number_masked || '-',
+    platformLatestStatus: capability.platform_latest_status || '-',
   };
 }
 
@@ -95,6 +100,7 @@ export function writebackResultLabel(status = '') {
   if (['failed', 'platform_failed', 'partial_success'].includes(status)) return '失败';
   if (status === 'platform_written') return '完成';
   if (status === 'ready_for_writeback') return '待提交';
+  if (status === 'reconciled_success') return '完成';
   if (status === 'unknown') return '平台结果待核对';
   return status || '平台结果待核对';
 }

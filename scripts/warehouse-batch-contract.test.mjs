@@ -11,7 +11,7 @@ assert.equal(warehouseStage('created'), 'warehouse');
 assert.equal(warehouseStage('warehouse_returned'), 'review');
 assert.equal(warehouseStage('ready_to_writeback'), 'confirm');
 assert.equal(warehouseStage('completed'), 'result');
-const batch = adaptWarehouseBatch({ id: 2, batch_no: 'SHIP-2', status: 'warehouse_returned', warehouse_sent_at: '2026-07-10', rows: [{ id: 9, local_order_id: 8, order_reference: 'O-1', product_order_reference: 'P-1', row_status: 'removed', is_active: false }] });
+const batch = adaptWarehouseBatch({ id: 2, batch_no: 'SHIP-2', status: 'warehouse_returned', warehouse_sent_at: '2026-07-10', writeback_capability: { status: 'blocked', max_rows: 1, allowed_action: 'approve', store_name: '店铺 A' }, rows: [{ id: 9, local_order_id: 8, order_reference: 'O-1', product_order_reference: 'P-1', row_status: 'removed', is_active: false }] });
 assert.equal(batch.stage, 'review');
 assert.equal(batch.rows[0].productOrderNo, 'P-1');
 assert.equal(batch.rows[0].orderId, 8);
@@ -19,6 +19,8 @@ assert.equal(batch.rows[0].removed, true);
 assert.equal(batch.rows[0].isActive, false);
 assert.equal(batch.requiresWarehouseStop, true);
 assert.equal(batch.shippedAt, '2026-07-10');
+assert.equal(batch.writebackCapability.maxRows, 1);
+assert.equal(batch.writebackCapability.allowedAction, 'approve');
 assert.deepEqual(warehouseRequest.create({ storeId: '1', platform: 'naver', orderIds: ['4'] }), { store_id: 1, platform: 'naver', order_ids: [4], manual_approval: true });
 assert.deepEqual(warehouseRequest.importSheet({ fileName: 'return.xlsx', fileContentBase64: 'YWJj' }), { source_file_name: 'return.xlsx', file_content_base64: 'YWJj', manual_approval: true });
 assert.deepEqual(warehouseRequest.confirm(['9']), { confirmed_row_ids: [9], manual_approval: true });
@@ -32,29 +34,38 @@ assert.deepEqual(adaptWarehouseTrackingDetail({ tracking_record_id: 3, batch_row
 const capability = adaptWarehouseWritebackCapability({
   writeback_capability: {
     status: 'ready',
-    allowed: true,
-    single_order_only: true,
+    pilot_enabled: true,
+    max_rows: 1,
+    candidate_count: 1,
+    operator_message: '可申请审批',
+    platform_checked_at: '2026-07-13T12:00:00+09:00',
+    reconciliation_required: false,
+    allowed_action: 'approve',
     store_name: '店铺 A',
     product_order_reference: 'P-1',
     carrier: 'CJ',
+    tracking_number_masked: '******1234',
     platform_latest_status: '已付款 / 新订单',
     approval_expires_at: '2026-07-13T12:10:00+09:00',
   },
 });
 assert.deepEqual(capability, {
-  status: 'ready', allowed: true, singleOrderOnly: true, storeId: undefined, storeName: '店铺 A',
-  productOrderNo: 'P-1', carrier: 'CJ', platformLatestStatus: '已付款 / 新订单',
-  approvalExpiresAt: '2026-07-13T12:10:00+09:00', safeReason: '', candidateChanged: undefined,
+  status: 'ready', pilotEnabled: true, maxRows: 1, candidateCount: 1, operatorMessage: '可申请审批',
+  platformCheckedAt: '2026-07-13T12:00:00+09:00', approvalExpiresAt: '2026-07-13T12:10:00+09:00',
+  reconciliationRequired: false, allowedAction: 'approve', storeName: '店铺 A', productOrderNo: 'P-1',
+  carrier: 'CJ', trackingNumberMasked: '******1234', platformLatestStatus: '已付款 / 新订单',
 });
 const shippingPage = fs.readFileSync('src/pages/ShippingAssistant.jsx', 'utf8');
 const backendApi = fs.readFileSync('src/services/backendApi.js', 'utf8');
 const dataProvider = fs.readFileSync('src/services/dataProvider.js', 'utf8');
-assert.doesNotMatch(shippingPage, /healthCheck\(|platformWriteEnabled|shipment-writeback\/execute/);
-assert.match(shippingPage, /getWarehouseShippingWritebackCapability/);
+assert.doesNotMatch(shippingPage, /healthCheck\(|platformWriteEnabled|getWarehouseShippingWritebackCapability|\/writeback-capability|shipment-writeback\/execute/);
+assert.doesNotMatch(shippingPage, /capability\.allowed\b|singleOrderOnly|single_order_only/);
+assert.match(shippingPage, /writebackCapability/);
 assert.match(shippingPage, /data-action="reconcile"/);
 assert.match(shippingPage, /申请平台回填审批/);
 assert.match(shippingPage, /确认执行平台回填/);
-assert.match(backendApi, /getWarehouseShippingWritebackCapability/);
-assert.doesNotMatch(backendApi, /shipment-writeback\/execute/);
-assert.match(dataProvider, /legacy_shipment_writeback_route_disabled/);
+assert.match(backendApi, /confirmWarehouseShippingWriteback/);
+assert.doesNotMatch(backendApi, /writeback-capability|shipment-writeback\/execute/);
+assert.match(dataProvider, /action: 'reconcile'/);
+assert.match(dataProvider, /real_api_call_requested: false/);
 console.log('warehouse batch contract checks passed');

@@ -60,9 +60,12 @@ function WritebackCapabilityReview({
   onRequestApproval,
   onExecute,
 }) {
-  const singleOrderText = capability?.singleOrderOnly === true
+  const singleOrderText = capability?.maxRows === 1
     ? '仅支持 1 个商品订单'
-    : capability?.singleOrderOnly === false ? '支持多个商品订单' : '后端未提供限制信息';
+    : capability?.maxRows ? `最多支持 ${capability.maxRows} 个商品订单` : '后端未提供限制信息';
+  const canExecute = approval?.status === 'approval_granted'
+    && capability?.allowedAction === 'execute'
+    && Boolean(approval?.token);
   return (
     <div className="writeback-capability-review">
       {loading ? <div className="form-info">正在读取平台回填能力...</div> : null}
@@ -73,33 +76,36 @@ function WritebackCapabilityReview({
           <div><span>店铺</span><strong>{capability.storeName}</strong></div>
           <div><span>商品订单</span><strong>{capability.productOrderNo}</strong></div>
           <div><span>承运商</span><strong>{capability.carrier}</strong></div>
+          <div><span>物流单号</span><strong>{capability.trackingNumberMasked}</strong></div>
           <div><span>平台最新状态</span><strong>{capability.platformLatestStatus}</strong></div>
           <div><span>审批有效期</span><strong>{approval?.expiresAt || capability.approvalExpiresAt}</strong></div>
+          <div><span>平台检查时间</span><strong>{capability.platformCheckedAt}</strong></div>
         </div>
       ) : !loading ? <div className="form-error">平台回填能力未能确认，操作已停止。</div> : null}
       {approvalExpired ? <div className="form-error">信息已变化，请重新确认。</div> : null}
       {!approval ? (
         <>
           <label className="checkbox-line"><input type="checkbox" checked={writebackConfirm} onChange={(event) => setWritebackConfirm(event.target.checked)} /><span>我已完成唯一复核：店铺、商品订单、承运商、平台最新状态和物流信息均无误。</span></label>
-          <button className="button primary" type="button" disabled={loading || !capability || capability.allowed !== true} onClick={onRequestApproval}>申请平台回填审批</button>
+          <button className="button primary" type="button" disabled={loading || !capability || capability.allowedAction !== 'approve'} onClick={onRequestApproval}>申请平台回填审批</button>
         </>
-      ) : (
+      ) : canExecute ? (
         <>
           <div className="form-info">审批已通过，请完成二次确认后执行；审批有效期：{approval.expiresAt || capability?.approvalExpiresAt || '-'}</div>
           <label className="checkbox-line"><input type="checkbox" checked={finalConfirm} onChange={(event) => setFinalConfirm(event.target.checked)} /><span>我已再次确认以上信息，并同意执行本次平台回填。</span></label>
           <button className="button primary" type="button" disabled={!finalConfirm} onClick={onExecute}>确认执行平台回填</button>
         </>
-      )}
+      ) : <div className="form-error">当前审批不能执行平台回填，请以最新能力状态为准。</div>}
     </div>
   );
 }
 
-function WritebackResultReview({ activeBatch, trackingDetails, writebackResult, onReconcile, onReapprove }) {
+function WritebackResultReview({ activeBatch, capability, trackingDetails, writebackResult, onReconcile, onReapprove }) {
   const resultStatus = writebackResult?.status || (activeBatch?.failed ? 'failed' : 'success');
   const unknown = resultStatus === 'unknown' || trackingDetails.some((item) => item.status === 'unknown');
-  const failed = !unknown && ['failed', 'partial_success'].includes(resultStatus);
+  const failed = !unknown && ['failed', 'partial_success', 'writeback_failed'].includes(resultStatus);
   const safeReason = writebackResult?.safe_failure_reason || writebackResult?.safeFailureReason
-    || trackingDetails.find((item) => item.reason)?.reason || '平台回填未完成，请重新申请审批。';
+    || writebackResult?.safe_reason || writebackResult?.safeReason
+    || trackingDetails.find((item) => item.reason)?.reason || capability?.operatorMessage || '平台回填未完成。';
   return (
     <div className="writeback-result-review">
       <EmptyState
@@ -110,7 +116,7 @@ function WritebackResultReview({ activeBatch, trackingDetails, writebackResult, 
         <table className="data-table"><thead><tr><th>商品订单号</th><th>承运商</th><th>物流单号</th><th>平台结果</th></tr></thead><tbody>{trackingDetails.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.carrier}</td><td>{row.trackingNumberTail}</td><td><StatusBadge value={writebackResultLabel(row.status)} /></td></tr>)}</tbody></table>
       ) : null}
       {unknown ? <button className="button primary" type="button" data-action="reconcile" onClick={onReconcile}>核对平台结果</button> : null}
-      {failed ? <button className="button primary" type="button" onClick={onReapprove}>重新申请审批</button> : null}
+      {failed && capability?.allowedAction === 'approve' ? <button className="button primary" type="button" onClick={onReapprove}>重新申请审批</button> : null}
     </div>
   );
 }
@@ -173,20 +179,21 @@ export default function ShippingAssistant() {
 
   const refreshBatches = async ({ restoreUrgent = false } = {}) => {
     const storeId = query.storeId || selectedStoreId;
-    if (!storeId) return;
+    if (!storeId) return [];
     const result = await dataProvider.getWarehouseShippingBatches({ storeId, platform: query.platform || 'naver' });
     const next = (result.items || []).map(adaptWarehouseBatch);
     setBatches(next);
     if (deepLinkBatchId) {
       setActiveStage(deepLinkStage);
       setActiveBatchId(deepLinkBatchId);
-      return;
+      return next;
     }
     if (restoreUrgent) {
       const urgent = ['review', 'confirm', 'warehouse'].map((stage) => next.find((batch) => batch.stage === stage)).find(Boolean);
       if (urgent) { setActiveStage(urgent.stage); setActiveBatchId(String(urgent.id)); }
       else { setActiveStage('prepare'); setActiveBatchId(''); }
     }
+    return next;
   };
 
   const refreshTrackingDetails = async (batchId) => {
@@ -254,18 +261,8 @@ export default function ShippingAssistant() {
       setWritebackCapabilityLoading(false);
       return () => { cancelled = true; };
     }
-    setWritebackCapabilityLoading(true);
-    dataProvider.getWarehouseShippingWritebackCapability(activeBatch.id)
-      .then((result) => {
-        if (!cancelled) setWritebackCapability(adaptWarehouseWritebackCapability(result));
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setWritebackCapability(null);
-          setNotice(writebackSafeMessage(error, '平台回填能力暂时无法确认，操作已停止。'));
-        }
-      })
-      .finally(() => { if (!cancelled) setWritebackCapabilityLoading(false); });
+    setWritebackCapabilityLoading(false);
+    setWritebackCapability(adaptWarehouseWritebackCapability(activeBatch.writebackCapability));
     return () => { cancelled = true; };
   }, [activeBatch?.id, activeStage]);
 
@@ -304,15 +301,15 @@ export default function ShippingAssistant() {
   const requestWritebackApproval = async () => {
     if (!activeBatch) return;
     if (approvalExpired || !writebackConfirm) return setNotice('请先完成唯一复核并勾选确认。');
-    if (!writebackCapability || writebackCapability.allowed !== true) return setNotice('当前平台回填能力未开放，操作已停止。');
+    if (!writebackCapability || writebackCapability.allowedAction !== 'approve') return setNotice(writebackCapability?.operatorMessage || '当前平台回填能力未开放，操作已停止。');
     try {
       const approval = await dataProvider.requestWarehouseShippingApproval(activeBatch.id, 'writeback', { confirmation: true });
       const approvalToken = approval.approval_token || approval.token;
       const approvedCapability = adaptWarehouseWritebackCapability(approval.writeback_capability || approval.writebackCapability || writebackCapability);
       if (approvedCapability) setWritebackCapability(approvedCapability);
-      if (approval.status !== 'approval_granted' || !approvalToken) {
+      if (approval.status !== 'approval_granted' || !approvalToken || approvedCapability?.allowedAction !== 'execute') {
         setApprovalExpired(true);
-        return setNotice(writebackSafeMessage(approval, '信息已变化，请重新核对后再次确认。'));
+        return setNotice(approvedCapability?.operatorMessage || writebackSafeMessage(approval, '审批未能进入执行阶段，请重新核对。'));
       }
       setWritebackApproval({ token: approvalToken, status: approval.status, expiresAt: approval.expires_at || approval.expiresAt || approvedCapability?.approvalExpiresAt || '-' });
       setFinalWritebackConfirm(false);
@@ -351,9 +348,16 @@ export default function ShippingAssistant() {
     const targetBatch = activeBatch || resultBatch;
     if (!targetBatch) return;
     try {
-      await dataProvider.reconcileWarehouseShippingWriteback(targetBatch.id);
+      const result = await dataProvider.reconcileWarehouseShippingWriteback(targetBatch.id);
+      setWritebackResult(result);
+      const nextCapability = adaptWarehouseWritebackCapability(result.writeback_capability || result.writebackCapability);
+      if (nextCapability) setWritebackCapability(nextCapability);
+      if (result.batch) setResultBatch(adaptWarehouseBatch(result.batch));
+      const nextBatches = await refreshBatches();
+      const refreshedBatch = nextBatches?.find((batch) => String(batch.id) === String(targetBatch.id));
+      if (refreshedBatch) setResultBatch(refreshedBatch);
       await refreshTrackingDetails(targetBatch.id);
-      setNotice('已提交平台结果核对。');
+      setNotice(result.status === 'reconciled_success' ? '平台结果已核对完成。' : '已提交平台结果核对。');
     } catch (error) {
       setNotice(writebackSafeMessage(error, '平台结果核对暂时无法完成，请稍后再试。'));
     }
@@ -394,7 +398,7 @@ export default function ShippingAssistant() {
         {activeStage === 'warehouse' ? <><p>下载前请确认：本次会导出完整收件信息，仅供仓库发货使用。</p><label className="checkbox-line"><input type="checkbox" checked={downloadConfirm} onChange={(event) => setDownloadConfirm(event.target.checked)} /><span>我已核对店铺、订单数量和收件信息范围。</span></label><button className="button primary" type="button" disabled={!downloadConfirm} onClick={async () => { const approval = await dataProvider.requestWarehouseShippingApproval(activeBatch.id, 'manifest', { confirmation: true }); const approvalToken = approval.approval_token || approval.token; if (approval.status !== 'approval_granted' || !approvalToken) return setNotice('信息已变化，请重新确认。'); const result = await dataProvider.downloadWarehouseShippingManifest(activeBatch.id, warehouseRequest.manifest(approvalToken)); if (result.status !== 'warehouse_manifest_ready') return setNotice('信息已变化，请重新确认。'); const link = document.createElement('a'); link.href = `data:${result.content_type};base64,${result.file_content_base64}`; link.download = result.file_name; link.click(); await refreshBatches(); setNotice('仓库发货表已下载。'); }}>下载仓库发货表</button><div className="modal-actions-inline"><input ref={fileInput} type="file" accept=".xlsx" onChange={onFile} /><button className="button ghost" type="button" onClick={() => fileInput.current?.click()}>上传仓库回传表</button></div></> : null}
         {activeStage === 'review' ? <><div className="summary-grid"><SummaryCard title="可以正常处理" value={activeBatch.counts.normal} tone="success" /><SummaryCard title="需要人工确认" value={activeBatch.counts.needs_confirmation} tone="warning" /><SummaryCard title="无法处理" value={activeBatch.counts.blocked} tone="danger" /></div><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>快递公司</th><th>物流单号</th><th>结果</th><th>原因</th></tr></thead><tbody>{trackingDetails.map((row) => <tr key={row.id}><td>{row.productOrderNo}</td><td>{row.productName}</td><td>{row.carrier}</td><td>{row.trackingNumber}</td><td><StatusBadge value={row.status} /></td><td>{row.reason || '无'}</td></tr>)}</tbody></table><button className="button primary" type="button" onClick={confirmImport}>确认可处理记录</button></> : null}
         {activeStage === 'confirm' ? <><p>请逐条核对以下商品订单的物流信息。数据变化后必须重新确认。</p><table className="data-table"><thead><tr><th>商品订单号</th><th>商品</th><th>承运商</th><th>物流单号</th><th>处理</th></tr></thead><tbody>{trackingDetails.filter((item) => ['ready_for_writeback', 'platform_failed'].includes(item.status)).map((item) => { const batchRow = activeBatch.rows.find((row) => String(row.id) === String(item.batchRowId)); return <tr key={item.id}><td>{item.productOrderNo}</td><td>{item.productName}</td><td>{item.carrier}</td><td>{item.trackingNumberTail}</td><td>{batchRow && !batchRow.removed ? <button type="button" onClick={() => setRemoveRow(batchRow)}>移出批次</button> : '-'}</td></tr>; })}</tbody></table><WritebackCapabilityReview capability={writebackCapability} loading={writebackCapabilityLoading} approval={writebackApproval} approvalExpired={approvalExpired} writebackConfirm={writebackConfirm} setWritebackConfirm={setWritebackConfirm} finalConfirm={finalWritebackConfirm} setFinalConfirm={setFinalWritebackConfirm} onRequestApproval={requestWritebackApproval} onExecute={submitWriteback} /></> : null}
-        {activeStage === 'result' ? <WritebackResultReview activeBatch={activeBatch || resultBatch} trackingDetails={trackingDetails} writebackResult={writebackResult} onReconcile={reconcileUnknown} onReapprove={() => { setActiveStage('confirm'); setResultBatch(null); setWritebackResult(null); setWritebackConfirm(false); }} /> : null}
+        {activeStage === 'result' ? <WritebackResultReview activeBatch={activeBatch || resultBatch} capability={(activeBatch || resultBatch)?.writebackCapability} trackingDetails={trackingDetails} writebackResult={writebackResult} onReconcile={reconcileUnknown} onReapprove={() => { setActiveStage('confirm'); setResultBatch(null); setWritebackResult(null); setWritebackConfirm(false); }} /> : null}
       </>}
     </section>}
     {removeRow ? <section className="content-card"><h2>移出商品订单</h2><p>商品订单 {removeRow.productOrderNo} 将从 {activeBatch?.code} 移出。</p><select value={removeReason} onChange={(event) => setRemoveReason(event.target.value)}><option value="">选择移出原因</option>{REMOVE_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}</select>{activeBatch?.requiresWarehouseStop ? <label className="checkbox-line"><input type="checkbox" checked={warehouseStopped} onChange={(event) => setWarehouseStopped(event.target.checked)} /><span>我已确认仓库已经停止发货。</span></label> : null}<div className="modal-actions-inline"><button type="button" className="button ghost" onClick={() => setRemoveRow(null)}>取消</button><button type="button" className="button danger" onClick={removeFromBatch}>确认移出</button></div></section> : null}
