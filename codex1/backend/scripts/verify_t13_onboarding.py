@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.database import SessionLocal, init_db
+from app.core.exceptions import ApiError
 from app.main import create_app
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
@@ -34,7 +35,7 @@ from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingCredentialUpdate
-from app.services import api_credential_readiness_service, credential_service, order_service, store_onboarding_service
+from app.services import api_credential_readiness_service, credential_service, order_service, stats_service, store_onboarding_service
 
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
@@ -212,6 +213,37 @@ def main() -> None:
         assert list_response.status_code == 200
         assert list_response.json()["data"]["items"][0]["store_id"] == store_id
 
+        invalid_secret = "t13-client-secret-must-never-appear-in-a-422-response"
+        invalid_secret_response = client.patch(
+            f"/api/v1/store-onboardings/{submitted['id']}",
+            json={"client_secret": invalid_secret * 30},
+            headers={"X-ERP-User-Key": creator.user_key_hash},
+        )
+        assert invalid_secret_response.status_code == 422
+        assert invalid_secret not in invalid_secret_response.text
+        assert all("input" not in detail for detail in invalid_secret_response.json()["detail"])
+
+        member_patch = client.patch(
+            f"/api/v1/store-onboardings/{submitted['id']}",
+            json={"client_secret": "member-must-not-change-secret"},
+            headers={"X-ERP-User-Key": outsider.user_key_hash},
+        )
+        member_resume = client.post(
+            f"/api/v1/store-onboardings/{submitted['id']}/resume",
+            headers={"X-ERP-User-Key": outsider.user_key_hash},
+        )
+        member_backfill = client.post(
+            f"/api/v1/store-onboardings/{submitted['id']}/historical-backfill",
+            json={
+                "start_at": (NOW - timedelta(days=61)).isoformat(),
+                "end_at": (NOW - timedelta(days=31)).isoformat(),
+            },
+            headers={"X-ERP-User-Key": outsider.user_key_hash},
+        )
+        assert member_patch.status_code == 403
+        assert member_resume.status_code == 403
+        assert member_backfill.status_code == 403
+
         credential = db.get(ApiCredential, credential_id)
         assert credential.client_id == "client-id-for-test"
         assert credential.encrypted_access_key is None
@@ -235,9 +267,25 @@ def main() -> None:
         assert revalidated["store_id"] == store_id and revalidated["credential_id"] == credential_id
         assert db.query(Store).count() == 1 and db.query(ApiCredential).count() == 1
 
+        current_window_start = order_service.current_order_window_start(as_of=NOW)
+        try:
+            store_onboarding_service.run_historical_order_backfill(
+                db,
+                onboarding_id=submitted["id"],
+                payload=HistoricalBackfillCreate(
+                    start_at=current_window_start - timedelta(days=1),
+                    end_at=current_window_start + timedelta(seconds=1),
+                ),
+                reader=reads.adapter(),
+                now=NOW,
+            )
+            raise AssertionError("historical/current boundary overlap must be rejected")
+        except ApiError as exc:
+            assert exc.error_code == "historical_backfill_current_window_overlap"
+
         history_payload = HistoricalBackfillCreate(start_at=NOW - timedelta(days=61), end_at=NOW - timedelta(days=31))
         history_result = store_onboarding_service.run_historical_order_backfill(
-            db, onboarding_id=submitted["id"], payload=history_payload, reader=reads.adapter(),
+            db, onboarding_id=submitted["id"], payload=history_payload, reader=reads.adapter(), now=NOW,
         )
         assert history_result["platform_write"] is False
         assert history_result["unsynced_history_retrieved"] is True
@@ -262,6 +310,44 @@ def main() -> None:
         assert db.query(Order).filter_by(store_id=store_id).count() == before_count
         assert order_service.query_orders(db, store_id=store_id, view="current", page=1, page_size=100, as_of=NOW)["total"] == 30
         assert order_service.query_orders(db, store_id=store_id, view="historical", page=1, page_size=100, as_of=NOW)["total"] == 30
+
+        workbench_before = stats_service._build_operator_workbench(
+            db, store_id=store_id, platform="naver", include_test_orders=False,
+        )
+        today_metrics_before = stats_service._store_order_metrics(
+            db, store_id, "naver", {"data_status": "confirmed"},
+        )
+        order_service.upsert_orders(db, store_id, "naver", [{
+            "external_order_id": "history-source-must-not-be-a-today-task",
+            "external_product_order_id": "history-source-must-not-be-a-today-task",
+            "product_name": "Historical source regression",
+            "quantity": 1,
+            "order_amount": 1000,
+            "currency": "KRW",
+            "order_status": "PAID",
+            "ordered_at": NOW - timedelta(hours=1),
+            "source_type": "legacy",
+            "raw_data": {"source_type": order_service.HISTORICAL_BACKFILL_SOURCE_TYPE},
+        }])
+        historical_source_order = db.scalar(select(Order).where(
+            Order.store_id == store_id,
+            Order.external_order_id == "history-source-must-not-be-a-today-task",
+        ))
+        assert historical_source_order is not None
+        workbench_after = stats_service._build_operator_workbench(
+            db, store_id=store_id, platform="naver", include_test_orders=False,
+        )
+        today_metrics_after = stats_service._store_order_metrics(
+            db, store_id, "naver", {"data_status": "confirmed"},
+        )
+        task_order_ids = {
+            task.get("related_order_id")
+            for section in workbench_after["sections"].values()
+            for task in section
+        }
+        assert historical_source_order.id not in task_order_ids
+        assert workbench_after["summary"] == workbench_before["summary"]
+        assert today_metrics_after == today_metrics_before
 
         serialized_rows = str([
             product.raw_data for product in db.scalars(select(Product).where(Product.store_id == store_id)).all()

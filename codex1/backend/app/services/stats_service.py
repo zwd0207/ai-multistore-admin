@@ -65,6 +65,17 @@ def _order_filters(
     return filters
 
 
+def _historical_backfill_order_ids(db: Session, *, store_id: int, platform: str) -> set[int]:
+    return {
+        order.id
+        for order in db.scalars(select(Order).where(
+            Order.store_id == store_id,
+            Order.platform == platform,
+        )).all()
+        if order_service.is_historical_backfill_order(order)
+    }
+
+
 def _business_scope_metadata(target_date: date | None = None) -> dict[str, str]:
     business_date = target_date or get_business_date()
     start, end = get_business_day_range(business_date)
@@ -682,6 +693,10 @@ def _build_operator_workbench(
             platform=platform,
             include_test_orders=include_test_orders,
         )
+        historical_backfill_order_ids = _historical_backfill_order_ids(
+            db, store_id=store_id, platform=platform,
+        )
+        orders = [order for order in orders if order.get("id") not in historical_backfill_order_ids]
     except ApiError as exc:
         sources["orders"] = {"status": "blocked", "reason_code": exc.error_code.lower()}
         orders = []
@@ -845,6 +860,7 @@ def _store_order_metrics(db: Session, store_id: int, platform: str, data_status:
         end_date=today,
         include_test_orders=False,
     ))).all()
+    orders = [order for order in orders if not order_service.is_historical_backfill_order(order)]
     return {
         "today_orders": _metric(len(orders), "confirmed"),
         "pending_shipments": _metric(sum(1 for order in orders if _order_is_pending_shipment(order)), "confirmed"),

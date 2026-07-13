@@ -15,6 +15,8 @@ from app.schemas.order import OrderRead
 from app.services.store_service import ensure_store_exists
 
 TEST_ORDER_SOURCE_TYPES = {"mock_sync", "local_frontend_mock"}
+HISTORICAL_BACKFILL_SOURCE_TYPE = "naver_historical_backfill"
+CURRENT_ORDER_WINDOW_DAYS = 30
 SAFE_PRODUCT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
 SAFE_PRODUCT_TEXT_PATTERN = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 DELIVERY_COMPANY_LABELS = {
@@ -361,6 +363,24 @@ def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) 
     return {"created": created, "updated": updated, "total": len(items)}
 
 
+def current_order_window_start(*, as_of: datetime | None = None) -> datetime:
+    return (as_of or get_utc_now()) - timedelta(days=CURRENT_ORDER_WINDOW_DAYS)
+
+
+def is_historical_backfill_order(order: Order | dict[str, Any]) -> bool:
+    if isinstance(order, dict):
+        source_type = order.get("source_type")
+        raw_data = order.get("raw_data")
+    else:
+        source_type = order.source_type
+        raw_data = order.raw_data
+    raw_source_type = raw_data.get("source_type") if isinstance(raw_data, dict) else None
+    return HISTORICAL_BACKFILL_SOURCE_TYPE in {
+        str(source_type or "").strip().lower(),
+        str(raw_source_type or "").strip().lower(),
+    }
+
+
 def list_orders(
     db: Session,
     store_id: int,
@@ -409,7 +429,7 @@ def query_orders(
 ) -> dict:
     ensure_store_exists(db, store_id)
     statement = select(Order).where(Order.store_id == store_id)
-    current_cutoff = (as_of or get_utc_now()) - timedelta(days=30)
+    current_cutoff = current_order_window_start(as_of=as_of)
     if view == "historical":
         statement = statement.where(Order.ordered_at < current_cutoff)
     else:

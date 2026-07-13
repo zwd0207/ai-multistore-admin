@@ -602,13 +602,18 @@ def run_historical_order_backfill(
     onboarding_id: int,
     payload: HistoricalBackfillCreate,
     reader: NaverReadAdapter | None = None,
+    now: datetime | None = None,
 ) -> dict:
     onboarding = _get_onboarding(db, onboarding_id)
     if onboarding.store_id is None or onboarding.credential_id is None:
         raise ApiError("onboarding has not provisioned a store", "onboarding_not_provisioned", 409)
     if onboarding.status == "cancelled":
         raise ApiError("onboarding is cancelled", "onboarding_cancelled", 409)
-    start_at, end_at = _normalize_window(payload.start_at, payload.end_at, max_days=HISTORY_MAX_DAYS)
+    start_at, end_at = _normalize_historical_backfill_window(
+        payload.start_at,
+        payload.end_at,
+        now=now,
+    )
     reader = reader or get_naver_read_adapter()
     result = _sync_dataset(
         db,
@@ -913,9 +918,10 @@ def _canonical_orders(items: list[dict], scope: str) -> list[dict]:
             "receiver_name": _text(item.get("receiver_name"), 120), "receiver_phone": _text(item.get("receiver_phone"), 40), "receiver_address": _text(item.get("receiver_address"), 300), "zip_code": _text(item.get("zip_code"), 30),
             "product_name": product_name[:300], "quantity": int(item.get("quantity") or 1), "order_amount": item.get("order_amount") or 0, "currency": _text(item.get("currency"), 10) or "KRW",
             "order_status": _text(order_status, 30) or "UNKNOWN", "paid_at": _parse_business_datetime(item.get("paid_at")), "ordered_at": ordered_at,
-            "source_type": "naver_historical_backfill" if scope == "historical" else "naver_onboarding_sync", "last_synced_at": now,
+            "source_type": order_service.HISTORICAL_BACKFILL_SOURCE_TYPE if scope == "historical" else "naver_onboarding_sync", "last_synced_at": now,
             "raw_data": {
                 "sync_scope": scope,
+                "source_type": order_service.HISTORICAL_BACKFILL_SOURCE_TYPE if scope == "historical" else "naver_onboarding_sync",
                 "platform_product_id": _text(item.get("platform_product_id"), 120),
                 "option_name": _text(item.get("option_name"), 160),
                 "external_order_id_hash": _text(item.get("external_order_id_hash"), 120),
@@ -961,6 +967,23 @@ def _normalize_window(start_at: datetime, end_at: datetime, *, max_days: int) ->
         raise ApiError("backfill dates must be timezone-aware and increasing", "invalid_backfill_window", 400)
     if end_at - start_at > timedelta(days=max_days):
         raise ApiError("backfill date window exceeds the bounded limit", "invalid_backfill_window", 400, {"max_days": max_days})
+    return start_at, end_at
+
+
+def _normalize_historical_backfill_window(
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    start_at, end_at = _normalize_window(start_at, end_at, max_days=HISTORY_MAX_DAYS)
+    current_window_start = order_service.current_order_window_start(as_of=now)
+    if end_at > current_window_start:
+        raise ApiError(
+            "historical backfill must end before the current order window",
+            "historical_backfill_current_window_overlap",
+            400,
+        )
     return start_at, end_at
 
 

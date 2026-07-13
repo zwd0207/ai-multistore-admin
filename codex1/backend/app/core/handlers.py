@@ -7,14 +7,13 @@ from app.core.exceptions import ApiError
 
 
 def _safe_validation_errors(exc: RequestValidationError) -> list[dict]:
-    errors = []
-    for error in exc.errors():
-        normalized = dict(error)
-        ctx = normalized.get("ctx")
-        if isinstance(ctx, dict) and "error" in ctx:
-            normalized["ctx"] = {**ctx, "error": str(ctx["error"])}
-        errors.append(normalized)
-    return errors
+    # Pydantic's ``input`` field can contain the whole request body, including
+    # credentials. Validation responses are public API output, so keep only
+    # structural error information.
+    return [
+        {key: error[key] for key in ("type", "loc", "msg") if key in error}
+        for error in exc.errors()
+    ]
 
 
 def register_exception_handlers(app: FastAPI) -> None:

@@ -300,6 +300,15 @@ async def _enforce_write_protection(request: Request) -> None:
                 onboarding = db.get(StoreOnboarding, onboarding_id)
                 if onboarding is not None:
                     require_onboarding_access(db, onboarding=onboarding, user_id=principal.user_id)
+                    if onboarding.store_id is None:
+                        require_any_store_permission(db, identity=identity, permission_key="credentials.manage")
+                    else:
+                        require_store_permission(
+                            db,
+                            identity=identity,
+                            store_id=onboarding.store_id,
+                            permission_key="credentials.manage",
+                        )
         elif store_id is None:
             require_any_store_permission(db, identity=identity, permission_key=permission_key)
         else:

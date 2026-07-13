@@ -5,10 +5,34 @@ from app.core.responses import success_response
 from app.database import get_db
 from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingCredentialUpdate
 from app.services import store_onboarding_service
-from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_any_store_permission
+from app.services.operator_access_service import (
+    OperatorIdentity,
+    get_operator_identity,
+    require_any_store_permission,
+    require_store_permission,
+)
 
 
 router = APIRouter(prefix="/store-onboardings", tags=["store-onboardings"])
+
+
+def _require_onboarding_configuration_admin(
+    db: Session,
+    *,
+    identity: OperatorIdentity,
+    onboarding,
+) -> None:
+    # A pre-provisioning onboarding has no store scope yet. Preserve the
+    # existing configuration-admin gate until a store can be resolved.
+    if onboarding.store_id is None:
+        require_any_store_permission(db, identity=identity, permission_key="credentials.manage")
+        return
+    require_store_permission(
+        db,
+        identity=identity,
+        store_id=onboarding.store_id,
+        permission_key="credentials.manage",
+    )
 
 
 @router.get("")
@@ -59,6 +83,7 @@ def resume_store_onboarding(
 ) -> dict:
     onboarding = store_onboarding_service._get_onboarding(db, onboarding_id)
     store_onboarding_service.require_onboarding_access(db, onboarding=onboarding, user_id=identity.user_id)
+    _require_onboarding_configuration_admin(db, identity=identity, onboarding=onboarding)
     result = store_onboarding_service.request_onboarding_resume(db, onboarding_id=onboarding_id)
     if result["status"] not in {"partially_synced", "active_incremental", "cancelled"}:
         background_tasks.add_task(store_onboarding_service.run_onboarding_worker, onboarding_id)
@@ -75,6 +100,7 @@ def update_store_onboarding_credentials(
 ) -> dict:
     onboarding = store_onboarding_service._get_onboarding(db, onboarding_id)
     store_onboarding_service.require_onboarding_access(db, onboarding=onboarding, user_id=identity.user_id)
+    _require_onboarding_configuration_admin(db, identity=identity, onboarding=onboarding)
     result = store_onboarding_service.update_onboarding_credentials(db, onboarding_id=onboarding_id, payload=payload)
     background_tasks.add_task(store_onboarding_service.run_onboarding_worker, onboarding_id)
     return success_response(data=result, message="onboarding credentials updated")
@@ -89,5 +115,6 @@ def historical_order_backfill(
 ) -> dict:
     onboarding = store_onboarding_service._get_onboarding(db, onboarding_id)
     store_onboarding_service.require_onboarding_access(db, onboarding=onboarding, user_id=identity.user_id)
+    _require_onboarding_configuration_admin(db, identity=identity, onboarding=onboarding)
     result = store_onboarding_service.run_historical_order_backfill(db, onboarding_id=onboarding_id, payload=payload)
     return success_response(data=result, message="historical order backfill completed")
