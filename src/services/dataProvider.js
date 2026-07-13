@@ -4456,7 +4456,9 @@ const sourceMethods = {
   },
   getStoreOnboarding: async (onboardingId) => {
     if (!isBackendSource) return null;
-    return adapters.storeOnboarding(await backendApi.getStoreOnboarding(onboardingId));
+    const result = adapters.storeOnboarding(await backendApi.getStoreOnboarding(onboardingId));
+    if (result.storeId) resetBackendStoresCache();
+    return result;
   },
   updateStoreOnboarding: async (onboardingId, payload) => {
     if (!isBackendSource) return null;
