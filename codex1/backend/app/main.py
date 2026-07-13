@@ -12,7 +12,7 @@ from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.handlers import register_exception_handlers
-from app.database import SessionLocal, engine, init_db
+from app.database import SessionLocal, init_db
 from app.routers import health
 
 
@@ -121,9 +121,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     for task in tasks:
         with suppress(asyncio.CancelledError):
             await task
-    # Release pooled SQLite connections after scheduler cancellation so a
-    # stopped application cannot retain a test database file handle.
-    engine.dispose()
 
 
 def create_app() -> FastAPI:
