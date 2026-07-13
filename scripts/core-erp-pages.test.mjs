@@ -157,6 +157,33 @@ includesAll('src/pages/Orders.jsx', [
   'Pagination',
 ]);
 
+const ordersPageText = read('src/pages/Orders.jsx');
+assert.match(ordersPageText, /product-cell/, 'orders must use one combined product cell');
+assert.match(ordersPageText, /target="_blank"/, 'product links must open in a new tab');
+assert.match(ordersPageText, /rel="noopener noreferrer"/, 'product links must prevent opener access');
+assert.match(ordersPageText, /productUrl\s*&&\s*platformProductId/, 'product links require both URL and product id');
+assert.match(ordersPageText, /onError=/, 'product images need a deterministic failure fallback');
+assert.match(ordersPageText, /buildApiAssetUrl\(order\.productImageUrl\)/, 'orders must resolve only the protected local image field');
+assert.match(ordersPageText, /productUrl/, 'orders must render the frozen product URL field');
+assert.match(ordersPageText, /商品编号/, 'orders must label the platform product id');
+
+const { adaptOrder } = await import('../src/services/adapters.js');
+const adaptedOrderProduct = adaptOrder({
+  id: 77,
+  platform: 'naver',
+  product_name: 'Contract product',
+  option_name: 'Contract option',
+  platform_product_id: 'P-77',
+  product_image_url: '/api/v1/products/77/thumbnail?store_id=8',
+  product_url: 'https://shop.example.test/products/77',
+});
+assert.equal(adaptedOrderProduct.platformProductId, 'P-77');
+assert.equal(adaptedOrderProduct.optionName, 'Contract option');
+assert.equal(adaptedOrderProduct.productImageUrl, '/api/v1/products/77/thumbnail?store_id=8');
+assert.equal(adaptedOrderProduct.productUrl, 'https://shop.example.test/products/77');
+assert.equal(adaptOrder({ raw_data: { product_image_url: 'https://remote.example/image.jpg' } }).productImageUrl, '');
+assert.doesNotMatch(ordersPageText, /smartstore\.naver\.com|search\.naver\.com|naver\.com\/main/, 'orders must not construct platform URLs');
+
 includesAll('src/pages/CustomerService.jsx', [
   '客户咨询',
   '更新客户咨询',

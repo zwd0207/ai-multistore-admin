@@ -331,7 +331,7 @@ export function adaptOrder(item = {}) {
     || item.buyer_masked_phone
     || rawData.buyer_phone_masked;
   const productOrderHash = rawData.external_product_order_id_hash || (isNaver && isHashOrderId ? item.external_order_id : null);
-  const platformProductId = item.platform_product_id || item.external_product_id || rawData.platform_product_id || rawData.external_product_id || '';
+  const platformProductId = item.platform_product_id || '';
   const statusEvents = item.status_events
     || item.statusEvents
     || item.order_status_events
@@ -382,7 +382,9 @@ export function adaptOrder(item = {}) {
     platformProductId,
     product: item.product_name,
     productName: item.product_name,
-    optionName: item.option_name || rawData.option_name,
+    optionName: item.option_name || '',
+    productImageUrl: item.product_image_url || '',
+    productUrl: item.product_url || '',
     customer: displayCustomer,
     customerName: displayCustomer,
     buyerName: item.buyer_name || rawData.buyer_name,

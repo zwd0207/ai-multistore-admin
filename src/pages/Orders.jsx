@@ -13,6 +13,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
+import { buildApiAssetUrl } from '../services/http';
 import { classifyCoreDataSource } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 20;
@@ -46,6 +47,9 @@ function normalizedOrder(row = {}) {
     store: row.store || row.storeName || row.store_name || '-',
     product,
     option,
+    platformProductId: row.platformProductId || '',
+    productImageUrl: row.productImageUrl || '',
+    productUrl: row.productUrl || '',
     quantity: row.quantity || row.qty || 1,
     amount: row.amount ?? row.order_amount ?? row.totalAmount ?? 0,
     statusText: statusText || '-',
@@ -67,6 +71,50 @@ function normalizedOrder(row = {}) {
 function hasDisplayValue(value) {
   const text = String(value || '').trim();
   return Boolean(text && text !== '-');
+}
+
+function ProductCell({ order = {}, detail = false }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const productName = order.product || order.productName || '-';
+  const optionName = order.option || order.optionName || '-';
+  const platformProductId = order.platformProductId || '';
+  const productUrl = order.productUrl || '';
+  const canOpenProduct = productUrl && platformProductId;
+  const imageUrl = buildApiAssetUrl(order.productImageUrl);
+
+  useEffect(() => setImageFailed(false), [imageUrl]);
+
+  return (
+    <div className={`product-cell${detail ? ' product-cell-detail' : ''}`}>
+      <div className="product-thumb">
+        {imageUrl && !imageFailed ? (
+          <img
+            src={imageUrl}
+            alt={`${productName} 商品缩略图`}
+            loading="lazy"
+            width={detail ? 72 : 48}
+            height={detail ? 72 : 48}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <span className="product-thumb-placeholder" role="img" aria-label="暂无商品图片">-</span>
+        )}
+      </div>
+      <div className="product-cell-content">
+        <strong className="product-cell-name" title={productName}>{productName}</strong>
+        <span className="product-cell-option" title={optionName}>{optionName}</span>
+        {platformProductId ? (
+          canOpenProduct ? (
+            <a className="product-cell-id" href={productUrl} target="_blank" rel="noopener noreferrer">
+              商品编号 {platformProductId} &#8599;
+            </a>
+          ) : (
+            <span className="product-cell-id">商品编号 {platformProductId}</span>
+          )
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function matchesStatus(row, statusKey) {
@@ -104,8 +152,7 @@ const columns = [
   { key: 'orderNo', title: '订单号', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
   { key: 'store', title: '店铺' },
-  { key: 'product', title: '商品名' },
-  { key: 'option', title: '规格' },
+  { key: 'productCell', title: '商品和选项', render: (_, row) => <ProductCell order={row} /> },
   { key: 'quantity', title: '数量' },
   { key: 'amount', title: '订单金额', render: (value, row) => `${Number(value || 0).toLocaleString()} ${row.currency || 'KRW'}` },
   { key: 'statusText', title: '订单状态', render: (value) => <StatusBadge value={value} /> },
@@ -412,12 +459,13 @@ export default function Orders() {
       >
         {activeOrder ? (
           <>
+            <div className="detail-product">
+              <ProductCell order={activeOrder} detail />
+            </div>
             <div className="detail-grid">
               {[
                 ['平台', activeOrder.platform],
                 ['店铺', activeOrder.store],
-                ['商品', activeOrder.product],
-                ['规格', activeOrder.option],
                 ['数量', activeOrder.quantity],
                 ['订单金额', `${Number(activeOrder.amount || 0).toLocaleString()} ${activeOrder.currency || 'KRW'}`],
                 ['订单状态', <StatusBadge value={activeOrder.statusText} />],

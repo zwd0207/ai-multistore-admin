@@ -304,7 +304,25 @@ tbody tr:hover { background: #fafbff; }
 .shipping-approval-item { display: flex; align-items: center; gap: 8px; border: 1px solid #e6edf6; background: #fbfcff; border-radius: 8px; padding: 10px 12px; color: #344054; font-size: 13px; font-weight: 600; }
 .shipping-approval-item input { width: 16px; height: 16px; accent-color: var(--primary); }
 .table-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.product-cell { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 10px; width: min(360px, 100%); min-width: 220px; }
+.product-thumb { width: 48px; height: 48px; overflow: hidden; display: grid; place-items: center; flex: 0 0 48px; border: 1px solid var(--border); border-radius: 6px; background: #f3f5f8; color: var(--muted); }
+.product-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.product-thumb-placeholder { font-size: 13px; line-height: 1; }
+.product-cell-content { min-width: 0; display: grid; gap: 3px; }
+.product-cell-name, .product-cell-option { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-cell-name { color: var(--ink); font-size: 13px; }
+.product-cell-option { color: var(--muted); font-size: 12px; }
+.product-cell-id { width: fit-content; max-width: 100%; overflow-wrap: anywhere; color: var(--primary-dark); font-size: 12px; text-decoration: none; }
+a.product-cell-id:hover { text-decoration: underline; }
+.detail-product { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.product-cell-detail { grid-template-columns: 72px minmax(0, 1fr); width: 100%; }
+.product-cell-detail .product-thumb { width: 72px; height: 72px; }
 @media (max-width: 1400px) { .shipping-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .shipping-step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1200px) { .shipping-summary-grid, .shipping-step-grid, .shipping-approval-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1400px) { .summary-grid { grid-template-columns: repeat(3, 1fr); } .panel-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .template-list, .detail-grid, .form-grid, .summary-grid, .info-grid, .binding-item, .settings-grid, .mini-grid, .readiness-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .product-cell { min-width: 210px; max-width: 280px; }
+  .product-cell-detail { min-width: 0; max-width: 100%; }
+  .product-cell-detail .product-cell-name, .product-cell-detail .product-cell-option { white-space: normal; overflow-wrap: anywhere; }
+}

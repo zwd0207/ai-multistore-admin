@@ -68,6 +68,16 @@ function buildUrl(path, params) {
   return url.toString();
 }
 
+function buildApiAssetUrl(value) {
+  const path = typeof value === 'string' ? value.trim() : '';
+  if (!path.startsWith('/api/v1/')) return '';
+  const suffix = path.slice('/api/v1'.length);
+  return new URL(
+    `${API_BASE_URL}${suffix}`,
+    typeof window === 'undefined' ? 'http://127.0.0.1' : window.location.origin,
+  ).toString();
+}
+
 async function request(path, options = {}) {
   const { params, timeout = 10000, headers, body, ...fetchOptions } = options;
   const method = String(fetchOptions.method || 'GET').toUpperCase();
@@ -136,5 +146,5 @@ export const http = {
   delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
 };
 
-export { API_BASE_URL, DEFAULT_API_BASE_URL, buildUrl, sanitizeForError };
+export { API_BASE_URL, DEFAULT_API_BASE_URL, buildApiAssetUrl, buildUrl, sanitizeForError };
 export default http;
