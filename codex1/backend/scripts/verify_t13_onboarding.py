@@ -12,100 +12,262 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-VERIFY_DB_PATH = Path(tempfile.gettempdir()) / f"codex1-t13-{os.getpid()}-{uuid.uuid4().hex[:8]}.db"
+VERIFY_DB_PATH = Path(tempfile.gettempdir()) / f"codex1-t13-r1-{os.getpid()}-{uuid.uuid4().hex[:8]}.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{VERIFY_DB_PATH.as_posix()}"
 os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["CREDENTIAL_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
+os.environ["APP_ENV"] = "development"
+os.environ["ALLOW_DEV_AUTH"] = "true"
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.database import SessionLocal, init_db
+from app.main import create_app
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
 from app.models.order import Order
+from app.models.product import Product
+from app.models.store import Store
 from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
-from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate
-from app.services import order_service, store_onboarding_service
+from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingCredentialUpdate
+from app.services import api_credential_readiness_service, credential_service, order_service, store_onboarding_service
 
 
-class FakeNaverReader:
+NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+
+
+class InjectedNaverReads:
     def __init__(self) -> None:
-        self.product_reads = 0
-        self.order_reads = 0
+        self.product_pages: list[int] = []
+        self.feed_windows: list[tuple[datetime, datetime]] = []
+        self.detail_batches: list[list[str]] = []
+        self.fail_feed_call: int | None = 11
+        self.platform_write_count = 0
 
     def validate(self, *, client_id: str, client_secret: str, channel_no: str | None):
-        assert client_id == "client-id-for-test"
-        assert client_secret == "secret-for-test"
+        if client_id.startswith("invalid") or client_secret.startswith("invalid"):
+            raise store_onboarding_service.NaverReadFailure("auth_failed")
         return store_onboarding_service.NaverValidation(True, True, True, True, True, channel_no or "1001")
 
-    def read_products(self, context, *, start_at, end_at, cursor):
-        self.product_reads += 1
-        assert context.client_secret == "secret-for-test"
-        return store_onboarding_service.NaverReadPage([{
-            "external_product_id": "product-1", "name": "Onboarding product", "price": 12000, "stock_quantity": 4,
-        }])
+    def token(self, context: dict) -> tuple[str, int]:
+        assert context["client_id"] in {"client-id-for-test", "client-id-after-provision"}
+        assert context["secret_key"] in {"secret-for-test", "secret-after-provision"}
+        return "injected-read-token", 200
 
-    def read_orders(self, context, *, start_at, end_at, cursor):
-        self.order_reads += 1
-        ordered_at = start_at + timedelta(hours=1)
-        return store_onboarding_service.NaverReadPage([{
-            "external_order_id": f"order-{self.order_reads}", "external_product_order_id": f"product-order-{self.order_reads}",
-            "platform_product_id": "product-1", "product_name": "Onboarding product", "quantity": 1,
-            "order_amount": 12000, "order_status": "PAID", "ordered_at": ordered_at,
-            "buyer_name": "Buyer", "buyer_phone": "01012345678",
-        }])
+    def products(self, *, api_base: str, headers: dict, page: int, size: int) -> dict:
+        assert headers == {"Authorization": "Bearer injected-read-token"}
+        assert size == store_onboarding_service.PRODUCT_PAGE_SIZE
+        self.product_pages.append(page)
+        return {
+            "success": True,
+            "http_status": 200,
+            "payload": {
+                "contents": [{
+                    "originProductNo": f"origin-{page}",
+                    "channelProducts": [{
+                        "channelProductNo": f"product-{page}",
+                        "productName": f"Product {page}",
+                        "salePrice": page * 1000,
+                        "stockQuantity": page,
+                        "statusType": "SALE",
+                    }],
+                }],
+                "hasMore": page < 2,
+            },
+        }
+
+    def orders(self, *, api_base: str, headers: dict, start_kst: datetime, end_kst: datetime, **kwargs) -> dict:
+        assert headers == {"Authorization": "Bearer injected-read-token"}
+        assert end_kst - start_kst <= timedelta(days=1)
+        self.feed_windows.append((start_kst, end_kst))
+        if self.fail_feed_call == len(self.feed_windows):
+            self.fail_feed_call = None
+            return {"success": False, "http_status": 503, "error_code": "readonly_request_failed"}
+        day_key = start_kst.date().isoformat()
+        return {
+            "success": True,
+            "http_status": 200,
+            "payload": {
+                "data": {"lastChangeStatuses": [{
+                    "productOrderId": f"po-{day_key}",
+                    "lastChangedDate": (start_kst + timedelta(minutes=10)).isoformat(),
+                }]},
+                "hasMore": False,
+            },
+        }
+
+    def details(self, *, api_base: str, headers: dict, product_order_ids: list[str]) -> dict:
+        assert len(product_order_ids) <= store_onboarding_service.ORDER_DETAIL_BATCH_SIZE
+        self.detail_batches.append(list(product_order_ids))
+        records = []
+        for product_order_id in product_order_ids:
+            day = product_order_id.removeprefix("po-")
+            records.append({
+                "productOrderId": product_order_id,
+                "orderId": f"order-{day}",
+                "channelProductNo": "product-1",
+                "productName": "Product 1",
+                "quantity": 1,
+                "totalPaymentAmount": "1000",
+                "orderStatus": "PAID",
+                "orderedAt": f"{day}T03:00:00+09:00",
+                "paidAt": f"{day}T03:01:00+09:00",
+                "lastChangedDate": f"{day}T03:10:00+09:00",
+                "buyerName": "Test Buyer",
+                "buyerTelNo": "01012345678",
+                "receiverName": "Receiver",
+                "receiverTelNo": "01087654321",
+            })
+        return {"success": True, "http_status": 200, "payload": {"data": records}}
+
+    def adapter(self) -> store_onboarding_service.DefaultNaverReadAdapter:
+        return store_onboarding_service.DefaultNaverReadAdapter(
+            token_request=self.token,
+            product_search=self.products,
+            order_feed=self.orders,
+            order_detail=self.details,
+            validation=self.validate,
+        )
 
 
 def main() -> None:
     init_db()
-    reader = FakeNaverReader()
+    reads = InjectedNaverReads()
     with SessionLocal() as db:
-        owner_role = db.query(ErpRole).filter_by(role_key="owner").one()
-        creator = ErpUser(user_key_hash="t13-creator", display_name="T13 Creator", status="active", auth_provider="api_operator")
-        db.add(creator)
+        owner_role = db.scalar(select(ErpRole).where(ErpRole.role_key == "owner"))
+        creator = ErpUser(user_key_hash="t13-r1-creator", display_name="T13 Creator", status="active", auth_provider="api_operator")
+        outsider = ErpUser(user_key_hash="t13-r1-outsider", display_name="T13 Outsider", status="active", auth_provider="api_operator")
+        db.add_all((creator, outsider))
         db.commit()
 
-        now = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
         payload = StoreOnboardingCreate(
-            idempotency_key="t13-idempotency-key",
-            store_name="T13 Naver Store",
-            client_id="client-id-for-test",
-            client_secret="secret-for-test",
+            idempotency_key="t13-r1-idempotency-key",
+            store_name="T13 R1 Naver Store",
+            client_id="invalid-client-id",
+            client_secret="invalid-secret",
             channel_no="1001",
         )
-        result = store_onboarding_service.submit_onboarding(db, payload=payload, creator_user_id=creator.id, reader=reader, now=now)
-        assert result["status"] == "partially_synced", result
-        assert result["store_id"] and result["credential_id"]
+        submitted = store_onboarding_service.submit_onboarding(db, payload=payload, creator_user_id=creator.id, now=NOW)
+        assert submitted["status"] == "validating"
+        assert submitted["store_id"] is None and reads.product_pages == [] and reads.feed_windows == []
+        duplicate = store_onboarding_service.submit_onboarding(db, payload=payload, creator_user_id=creator.id, now=NOW)
+        assert duplicate["id"] == submitted["id"]
 
-        duplicate = store_onboarding_service.submit_onboarding(db, payload=payload, creator_user_id=creator.id, reader=reader, now=now)
-        assert duplicate["id"] == result["id"]
-        assert reader.product_reads == 1 and reader.order_reads == 1
+        client = TestClient(create_app())
+        creator_poll = client.get(f"/api/v1/store-onboardings/{submitted['id']}", headers={"X-ERP-User-Key": creator.user_key_hash})
+        outsider_poll = client.get(f"/api/v1/store-onboardings/{submitted['id']}", headers={"X-ERP-User-Key": outsider.user_key_hash})
+        assert creator_poll.status_code == 200
+        assert outsider_poll.status_code == 403
 
-        onboarding = db.get(StoreOnboarding, result["id"])
-        credential = db.get(ApiCredential, result["credential_id"])
-        assert onboarding.encrypted_client_secret is None
-        assert credential.client_id is None
-        assert credential.encrypted_access_key and "client-id-for-test" not in credential.encrypted_access_key
+        blocked = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        db.expire_all()
+        assert blocked["status"] == "blocked" and blocked["last_error_code"] == "auth_failed"
+        corrected = store_onboarding_service.update_onboarding_credentials(
+            db,
+            onboarding_id=submitted["id"],
+            payload=StoreOnboardingCredentialUpdate(client_id="client-id-for-test", client_secret="secret-for-test"),
+        )
+        assert corrected["id"] == submitted["id"] and corrected["configuration_version"] == 2
+        assert "invalid-secret" not in str(corrected) and "secret-for-test" not in str(corrected)
+
+        interrupted = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        db.expire_all()
+        assert interrupted["status"] == "retry_wait", interrupted
+        assert interrupted["progress_summary"]["products"]["status"] == "success"
+        assert interrupted["progress_summary"]["orders"]["pages"] == 10
+        store_id = interrupted["store_id"]
+        credential_id = interrupted["credential_id"]
+        assert store_id and credential_id
+        checkpoint = db.scalar(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store_id, SyncCheckpoint.sync_type == store_onboarding_service.ONBOARDING_ORDER_SYNC))
+        assert checkpoint and '"slice":10' in checkpoint.cursor_value
+
+        store_onboarding_service.request_onboarding_resume(db, onboarding_id=submitted["id"])
+        completed = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        db.expire_all()
+        assert completed["status"] == "partially_synced", completed
+        assert completed["store_id"] == store_id and completed["credential_id"] == credential_id
+        assert completed["progress_summary"]["orders"]["pages"] == 30, completed["progress_summary"]["orders"]
+        assert reads.product_pages == [1, 2]
+        assert len(reads.feed_windows) == 31
+        assert all(end - start <= timedelta(days=1) for start, end in reads.feed_windows)
+        assert db.query(Store).filter_by(name="T13 R1 Naver Store").count() == 1
+        assert db.query(ApiCredential).filter_by(store_id=store_id, platform="naver").count() == 1
+        assert db.query(ErpStoreMembership).filter_by(user_id=creator.id, store_id=store_id, role_id=owner_role.id).count() == 1
+        viewer_role = db.scalar(select(ErpRole).where(ErpRole.role_key == "viewer"))
+        db.add(ErpStoreMembership(user_id=outsider.id, store_id=store_id, role_id=viewer_role.id, membership_status="active", scope_type="assigned", assigned_by_user_id=creator.id))
+        db.commit()
+        member_poll = client.get(f"/api/v1/store-onboardings/{submitted['id']}", headers={"X-ERP-User-Key": outsider.user_key_hash})
+        assert member_poll.status_code == 200
+
+        credential = db.get(ApiCredential, credential_id)
+        assert credential.client_id == "client-id-for-test"
+        assert credential.encrypted_access_key is None
         assert credential.encrypted_secret_key and "secret-for-test" not in credential.encrypted_secret_key
-        assert "secret-for-test" not in str(store_onboarding_service.serialize_onboarding(onboarding))
-        membership = db.query(ErpStoreMembership).filter_by(user_id=creator.id, store_id=result["store_id"], role_id=owner_role.id).one_or_none()
-        assert membership is not None and membership.membership_status == "active"
-        assert db.query(SyncLog).filter_by(store_id=result["store_id"], platform="naver").count() == 2
-        assert db.query(SyncCheckpoint).filter_by(store_id=result["store_id"], platform="naver").count() == 2
-        assert onboarding.snapshot_end_at.replace(tzinfo=timezone.utc) == now
-        assert onboarding.initial_window_start_at.replace(tzinfo=timezone.utc) == now - timedelta(days=30)
+        listed = credential_service.list_credentials(db, store_id=store_id)
+        assert listed[0]["client_id"] == "client-id-for-test"
+        readiness = api_credential_readiness_service.get_api_credential_readiness(db, store_id)["store_bound_readiness"]
+        assert readiness["configured"] is True and readiness["client_id_configured"] is True
+        assert api_credential_readiness_service._get_active_store_credential(db, store_id, "naver").id == credential_id
 
-        current = order_service.query_orders(db, store_id=result["store_id"], view="current", page=1, page_size=20)
-        assert current["total"] == 1
-        historical_payload = HistoricalBackfillCreate(start_at=now - timedelta(days=61), end_at=now - timedelta(days=31))
-        historical = store_onboarding_service.run_historical_order_backfill(db, onboarding_id=result["id"], payload=historical_payload, reader=reader)
-        assert historical["platform_write"] is False and historical["unsynced_history_retrieved"] is False
-        history = order_service.query_orders(db, store_id=result["store_id"], view="historical", page=1, page_size=20, product_id="product-1", status="PAID")
-        assert history["total"] == 1, history
-        assert db.query(Order).filter_by(store_id=result["store_id"], source_type="naver_historical_backfill").count() == 1
-        assert db.query(SyncCheckpoint).filter_by(store_id=result["store_id"], sync_type=store_onboarding_service.HISTORICAL_ORDER_SYNC).count() == 1
-    print("t13 onboarding: ok")
+        corrected_after_store = store_onboarding_service.update_onboarding_credentials(
+            db,
+            onboarding_id=submitted["id"],
+            payload=StoreOnboardingCredentialUpdate(client_id="client-id-after-provision", client_secret="secret-after-provision"),
+        )
+        assert corrected_after_store["configuration_version"] == 3
+        assert "secret-for-test" not in str(corrected_after_store) and "secret-after-provision" not in str(corrected_after_store)
+        revalidated = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        db.expire_all()
+        assert revalidated["status"] == "partially_synced"
+        assert revalidated["store_id"] == store_id and revalidated["credential_id"] == credential_id
+        assert db.query(Store).count() == 1 and db.query(ApiCredential).count() == 1
+
+        history_payload = HistoricalBackfillCreate(start_at=NOW - timedelta(days=61), end_at=NOW - timedelta(days=31))
+        history_result = store_onboarding_service.run_historical_order_backfill(
+            db, onboarding_id=submitted["id"], payload=history_payload, reader=reads.adapter(),
+        )
+        assert history_result["platform_write"] is False
+        assert history_result["unsynced_history_retrieved"] is True
+        history = order_service.query_orders(db, store_id=store_id, view="historical", page=1, page_size=100, as_of=NOW)
+        current = order_service.query_orders(db, store_id=store_id, view="current", page=1, page_size=100, as_of=NOW)
+        assert history["total"] == 31 and current["total"] == 29, (history["total"], current["total"])
+
+        overlap = db.scalar(select(Order).where(Order.store_id == store_id, Order.ordered_at < NOW - timedelta(days=30)).limit(1))
+        before_count = db.query(Order).filter_by(store_id=store_id).count()
+        order_service.upsert_orders(db, store_id, "naver", [{
+            "external_order_id": overlap.external_order_id,
+            "external_product_order_id": overlap.external_product_order_id,
+            "product_name": overlap.product_name,
+            "quantity": 1,
+            "order_amount": 1000,
+            "currency": "KRW",
+            "order_status": "PAID",
+            "ordered_at": NOW - timedelta(days=1),
+            "source_type": "naver_onboarding_sync",
+            "raw_data": {"sync_scope": "initial_30_day", "raw_response_saved": False, "platform_write": False},
+        }])
+        assert db.query(Order).filter_by(store_id=store_id).count() == before_count
+        assert order_service.query_orders(db, store_id=store_id, view="current", page=1, page_size=100, as_of=NOW)["total"] == 30
+        assert order_service.query_orders(db, store_id=store_id, view="historical", page=1, page_size=100, as_of=NOW)["total"] == 30
+
+        serialized_rows = str([
+            product.raw_data for product in db.scalars(select(Product).where(Product.store_id == store_id)).all()
+        ] + [
+            order.raw_data for order in db.scalars(select(Order).where(Order.store_id == store_id)).all()
+        ] + [
+            log.raw_summary for log in db.scalars(select(SyncLog).where(SyncLog.store_id == store_id)).all()
+        ])
+        assert "injected-read-token" not in serialized_rows
+        assert "secret-for-test" not in serialized_rows and "secret-after-provision" not in serialized_rows
+        assert "raw_response_saved': True" not in serialized_rows
+        assert reads.platform_write_count == 0
+        assert completed["progress_summary"]["customer_inquiries"]["adapter_called"] is False
+        assert completed["progress_summary"]["logistics"]["adapter_called"] is False
+    print("t13-r1 onboarding: ok")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class StoreOnboardingCreate(BaseModel):
@@ -22,6 +22,23 @@ class HistoricalBackfillCreate(BaseModel):
     end_at: datetime
 
 
+class StoreOnboardingCredentialUpdate(BaseModel):
+    client_id: str | None = Field(default=None, min_length=1, max_length=120)
+    client_secret: str | None = Field(default=None, min_length=1, max_length=1000)
+    channel_no: str | None = Field(default=None, max_length=120)
+
+    @field_validator("client_id", "client_secret", "channel_no", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def require_change(self) -> "StoreOnboardingCredentialUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one credential field must be supplied")
+        return self
+
+
 class StoreOnboardingRead(BaseModel):
     id: int
     idempotency_key: str
@@ -35,6 +52,7 @@ class StoreOnboardingRead(BaseModel):
     snapshot_end_at: datetime | None
     initial_window_start_at: datetime | None
     retry_count: int
+    configuration_version: int
     next_retry_at: datetime | None
     last_error_code: str | None
     validation_summary: dict[str, Any] | None

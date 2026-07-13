@@ -23,9 +23,9 @@ def upgrade() -> list[str]:
         exists = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='store_onboardings'"
         ).fetchone()
-        if exists:
-            return []
-        connection.execute("""
+        changed: list[str] = []
+        if not exists:
+            connection.execute("""
             CREATE TABLE store_onboardings (
                 id INTEGER PRIMARY KEY,
                 idempotency_key VARCHAR(120) NOT NULL UNIQUE,
@@ -40,8 +40,11 @@ def upgrade() -> list[str]:
                 snapshot_end_at DATETIME,
                 initial_window_start_at DATETIME,
                 retry_count INTEGER NOT NULL DEFAULT 0,
+                configuration_version INTEGER NOT NULL DEFAULT 1,
                 next_retry_at DATETIME,
                 last_error_code VARCHAR(80),
+                worker_claim_token VARCHAR(64),
+                worker_claimed_at DATETIME,
                 validation_summary JSON,
                 progress_summary JSON,
                 created_at DATETIME NOT NULL,
@@ -51,12 +54,23 @@ def upgrade() -> list[str]:
                 FOREIGN KEY(credential_id) REFERENCES api_credentials(id),
                 CHECK(status IN ('validating', 'blocked', 'provisioning', 'backfilling', 'partially_synced', 'active_incremental', 'retry_wait', 'cancelled'))
             )
-        """)
-        connection.execute("CREATE INDEX ix_store_onboardings_idempotency_key ON store_onboardings(idempotency_key)")
-        connection.execute("CREATE INDEX ix_store_onboardings_creator_user_id ON store_onboardings(creator_user_id)")
-        connection.execute("CREATE INDEX ix_store_onboardings_status ON store_onboardings(status)")
+            """)
+            changed.append("store_onboardings")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(store_onboardings)").fetchall()}
+        for name, definition in {
+            "worker_claim_token": "VARCHAR(64)",
+            "worker_claimed_at": "DATETIME",
+            "configuration_version": "INTEGER NOT NULL DEFAULT 1",
+        }.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE store_onboardings ADD COLUMN {name} {definition}")
+                changed.append(name)
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_idempotency_key ON store_onboardings(idempotency_key)")
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_creator_user_id ON store_onboardings(creator_user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_status ON store_onboardings(status)")
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_worker_claim_token ON store_onboardings(worker_claim_token)")
         connection.commit()
-        return ["store_onboardings"]
+        return changed
     finally:
         connection.close()
 

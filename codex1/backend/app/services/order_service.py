@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from typing import Any
 from urllib.parse import quote
@@ -6,6 +6,7 @@ from urllib.parse import quote
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.timezone import get_utc_now
 from app.models.order import Order
 from app.models.product import Product
 from app.models.order_status_event import OrderStatusEvent
@@ -14,7 +15,6 @@ from app.schemas.order import OrderRead
 from app.services.store_service import ensure_store_exists
 
 TEST_ORDER_SOURCE_TYPES = {"mock_sync", "local_frontend_mock"}
-HISTORICAL_ORDER_SOURCE_TYPE = "naver_historical_backfill"
 SAFE_PRODUCT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
 SAFE_PRODUCT_TEXT_PATTERN = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 DELIVERY_COMPANY_LABELS = {
@@ -337,7 +337,9 @@ def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) 
             Order.store_id == store_id,
             Order.platform == platform,
         )
-        if external_product_order_id and item.get("source_type") == "pxg_naver_readonly_local_v1":
+        if external_product_order_id and (
+            item.get("source_type") == "pxg_naver_readonly_local_v1" or platform == "naver"
+        ):
             statement = statement.where(Order.external_product_order_id == external_product_order_id)
         else:
             statement = statement.where(Order.external_order_id == external_order_id)
@@ -403,13 +405,15 @@ def query_orders(
     status: str | None = None,
     buyer_name: str | None = None,
     buyer_phone: str | None = None,
+    as_of: datetime | None = None,
 ) -> dict:
     ensure_store_exists(db, store_id)
     statement = select(Order).where(Order.store_id == store_id)
+    current_cutoff = (as_of or get_utc_now()) - timedelta(days=30)
     if view == "historical":
-        statement = statement.where(Order.source_type == HISTORICAL_ORDER_SOURCE_TYPE)
+        statement = statement.where(Order.ordered_at < current_cutoff)
     else:
-        statement = statement.where(Order.source_type != HISTORICAL_ORDER_SOURCE_TYPE)
+        statement = statement.where(Order.ordered_at >= current_cutoff)
     if platform:
         statement = statement.where(Order.platform == platform)
     if not include_test_orders:
@@ -443,6 +447,7 @@ def query_orders(
         "page": page,
         "page_size": page_size,
         "view": view,
+        "current_window_start_at": current_cutoff.isoformat(),
     }
 
 

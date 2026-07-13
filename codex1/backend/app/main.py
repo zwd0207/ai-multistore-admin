@@ -219,6 +219,7 @@ def _request_store_id(request: Request, body: dict, db) -> int | None:
         from app.models.email_account import EmailAccount
         from app.models.important_email import ImportantEmail
         from app.models.platform_login_credential import PlatformLoginCredential
+        from app.models.store_onboarding import StoreOnboarding
 
         model_by_prefix = {
             "credentials": ApiCredential,
@@ -227,6 +228,7 @@ def _request_store_id(request: Request, body: dict, db) -> int | None:
             "important-emails": ImportantEmail,
             "appeal-cases": AppealCase,
             "platform-logins": PlatformLoginCredential,
+            "store-onboardings": StoreOnboarding,
         }
         model = model_by_prefix.get(parts[2])
         record = db.get(model, resource_id) if model else None
@@ -259,7 +261,20 @@ async def _enforce_write_protection(request: Request) -> None:
         )
         permission_key = _write_permission_for_path(request.url.path)
         store_id = _request_store_id(request, body, db)
-        if store_id is None:
+        if request.url.path.startswith("/api/v1/store-onboardings/"):
+            parts = [part for part in request.url.path.split("/") if part]
+            try:
+                onboarding_id = int(parts[3])
+            except (IndexError, ValueError):
+                onboarding_id = None
+            if onboarding_id is not None:
+                from app.models.store_onboarding import StoreOnboarding
+                from app.services.store_onboarding_service import require_onboarding_access
+
+                onboarding = db.get(StoreOnboarding, onboarding_id)
+                if onboarding is not None:
+                    require_onboarding_access(db, onboarding=onboarding, user_id=principal.user_id)
+        elif store_id is None:
             require_any_store_permission(db, identity=identity, permission_key=permission_key)
         else:
             require_store_permission(db, identity=identity, store_id=store_id, permission_key=permission_key)
@@ -295,6 +310,20 @@ def _enforce_read_protection(request: Request) -> None:
             last_reauthenticated_at=principal.last_reauthenticated_at,
         )
         request.state.authenticated_user_id = principal.user_id
+        if request.url.path.startswith("/api/v1/store-onboardings/"):
+            parts = [part for part in request.url.path.split("/") if part]
+            try:
+                onboarding_id = int(parts[3])
+            except (IndexError, ValueError):
+                onboarding_id = None
+            if onboarding_id is not None:
+                from app.models.store_onboarding import StoreOnboarding
+                from app.services.store_onboarding_service import require_onboarding_access
+
+                onboarding = db.get(StoreOnboarding, onboarding_id)
+                if onboarding is not None:
+                    require_onboarding_access(db, onboarding=onboarding, user_id=principal.user_id)
+            return
         store_id = _request_store_id(request, {}, db)
         if store_id is not None:
             require_store_membership(db, identity=identity, store_id=store_id)

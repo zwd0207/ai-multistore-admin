@@ -1,24 +1,27 @@
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Callable, Protocol
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ApiError
-from app.core.timezone import get_utc_now
+from app.core.timezone import get_business_timezone, get_utc_now
+from app.database import SessionLocal
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpRole, ErpStoreMembership
 from app.models.store import Store
 from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
-from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingRead
-from app.services import api_credential_readiness_service, order_service, product_service
+from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingCredentialUpdate, StoreOnboardingRead
+from app.services import api_credential_readiness_service, order_service, product_service, sync_service
 from app.services.encryption import decrypt_value, encrypt_value
 
 
@@ -26,6 +29,9 @@ NAVER_PLATFORM = "naver"
 INITIAL_SYNC_DAYS = 30
 HISTORY_MAX_DAYS = 31
 MAX_READ_PAGES = 100
+PRODUCT_PAGE_SIZE = 5
+ORDER_DETAIL_BATCH_SIZE = sync_service.NAVER_ORDER_MANUAL_BATCH_MAX_COUNT
+WORKER_CLAIM_TTL = timedelta(minutes=15)
 ONBOARDING_PRODUCT_SYNC = "naver_onboarding_products"
 ONBOARDING_ORDER_SYNC = "naver_onboarding_orders"
 HISTORICAL_ORDER_SYNC = "naver_historical_orders"
@@ -38,6 +44,9 @@ class NaverReadContext:
     client_id: str
     client_secret: str
     channel_no: str | None
+    api_base: str
+    grant_type_used: str = "SELF"
+    seller_account_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,9 +94,27 @@ class NaverReadAdapter(Protocol):
 
 
 class DefaultNaverReadAdapter:
-    """Uses only approved token and seller/channel read calls; dataset adapters remain closed."""
+    """Approved Naver read-only adapter composed from the existing sync helpers."""
+
+    def __init__(
+        self,
+        *,
+        token_request: Callable[[dict], tuple[str, int]] | None = None,
+        product_search: Callable[..., dict] | None = None,
+        order_feed: Callable[..., dict] | None = None,
+        order_detail: Callable[..., dict] | None = None,
+        validation: Callable[..., NaverValidation] | None = None,
+    ) -> None:
+        self._token_request = token_request or api_credential_readiness_service._request_naver_token_from_context
+        self._product_search = product_search or sync_service._request_naver_product_search
+        self._order_feed = order_feed or sync_service._request_naver_order_last_changed_feed
+        self._order_detail = order_detail or sync_service._request_naver_order_detail_query
+        self._validation = validation
+        self._tokens: dict[int, str] = {}
 
     def validate(self, *, client_id: str, client_secret: str, channel_no: str | None) -> NaverValidation:
+        if self._validation is not None:
+            return self._validation(client_id=client_id, client_secret=client_secret, channel_no=channel_no)
         context = {
             "client_id": client_id,
             "secret_key": client_secret,
@@ -121,10 +148,87 @@ class DefaultNaverReadAdapter:
             raise NaverReadFailure("network_error", retryable=True) from exc
 
     def read_products(self, context: NaverReadContext, *, start_at: datetime, end_at: datetime, cursor: str | None) -> NaverReadPage:
-        raise NaverReadFailure("product_read_adapter_not_approved")
+        state = _decode_cursor(cursor, expected_kind="products", default={"page": 1})
+        page_number = int(state.get("page") or 1)
+        result = self._product_search(
+            api_base=context.api_base,
+            headers=self._headers(context),
+            page=page_number,
+            size=PRODUCT_PAGE_SIZE,
+        )
+        _raise_for_read_result(result, scope="product")
+        payload = result.get("payload")
+        candidates, _skip_reasons = sync_service._extract_naver_product_sync_candidates(payload)
+        has_more = sync_service._naver_product_preview_has_more(payload)
+        next_cursor = _encode_cursor("products", {"page": page_number + 1}) if has_more else None
+        return NaverReadPage(items=candidates, next_cursor=next_cursor)
 
     def read_orders(self, context: NaverReadContext, *, start_at: datetime, end_at: datetime, cursor: str | None) -> NaverReadPage:
-        raise NaverReadFailure("order_read_adapter_not_approved")
+        start_kst = _as_aware_utc(start_at).astimezone(get_business_timezone())
+        end_kst = _as_aware_utc(end_at).astimezone(get_business_timezone())
+        state = _decode_cursor(cursor, expected_kind="orders", default={"slice": 0, "after": None})
+        slice_index = int(state.get("slice") or 0)
+        slice_start = start_kst + timedelta(days=slice_index)
+        if slice_start >= end_kst:
+            return NaverReadPage(items=[])
+        slice_end = min(slice_start + timedelta(days=1), end_kst)
+        after = _parse_cursor_datetime(state.get("after")) or slice_start
+        if after < slice_start or after >= slice_end:
+            after = slice_start
+        feed = self._order_feed(
+            api_base=context.api_base,
+            headers=self._headers(context),
+            start_kst=after,
+            end_kst=slice_end,
+            size=ORDER_DETAIL_BATCH_SIZE,
+            attempt="onboarding_daily_read",
+            include_last_changed_to=True,
+            datetime_format_shape="offset_milliseconds",
+        )
+        _raise_for_read_result(feed, scope="order")
+        feed_payload = feed.get("payload")
+        product_order_ids = sync_service._extract_naver_product_order_ids(feed_payload)
+        details: list[dict] = []
+        for offset in range(0, len(product_order_ids), ORDER_DETAIL_BATCH_SIZE):
+            batch = product_order_ids[offset:offset + ORDER_DETAIL_BATCH_SIZE]
+            detail_result = self._order_detail(
+                api_base=context.api_base,
+                headers=self._headers(context),
+                product_order_ids=batch,
+            )
+            _raise_for_read_result(detail_result, scope="order")
+            records = sync_service._extract_naver_order_detail_records(detail_result.get("payload"), batch)
+            details.extend(sync_service._build_naver_order_internal_detail(item, store_id=context.store_id) for item in records)
+
+        if sync_service._naver_order_feed_has_more(feed_payload):
+            latest = _latest_order_change_at(feed_payload)
+            if latest is None or latest <= after.astimezone(latest.tzinfo) or latest >= slice_end.astimezone(latest.tzinfo):
+                raise NaverReadFailure("order_feed_cursor_not_advanced", retryable=True)
+            next_cursor = _encode_cursor("orders", {"slice": slice_index, "after": (latest + timedelta(milliseconds=1)).isoformat()})
+        else:
+            next_slice = slice_index + 1
+            next_cursor = _encode_cursor("orders", {"slice": next_slice, "after": None}) if start_kst + timedelta(days=next_slice) < end_kst else None
+        return NaverReadPage(items=details, next_cursor=next_cursor)
+
+    def _headers(self, context: NaverReadContext) -> dict[str, str]:
+        token = self._tokens.get(context.credential_id)
+        if token is None:
+            try:
+                token, _ = self._token_request({
+                    "client_id": context.client_id,
+                    "secret_key": context.client_secret,
+                    "api_base": context.api_base,
+                    "grant_type_used": context.grant_type_used,
+                    "seller_account_id": context.seller_account_id,
+                })
+            except api_credential_readiness_service.NaverReadonlyAuthError as exc:
+                raise NaverReadFailure(exc.error_code) from exc
+            except httpx.TimeoutException as exc:
+                raise NaverReadFailure("network_timeout", retryable=True) from exc
+            except httpx.HTTPError as exc:
+                raise NaverReadFailure("network_error", retryable=True) from exc
+            self._tokens[context.credential_id] = token
+        return {"Authorization": f"Bearer {token}"}
 
 
 def _read_failure_from_response(response: httpx.Response, *, scope: str) -> NaverReadFailure:
@@ -136,6 +240,78 @@ def _read_failure_from_response(response: httpx.Response, *, scope: str) -> Nave
             code = "ip_not_allowed"
         return NaverReadFailure(code)
     return NaverReadFailure("auth_failed" if response.status_code == 401 else "naver_read_failed")
+
+
+def _raise_for_read_result(result: dict, *, scope: str) -> None:
+    if result.get("success"):
+        return
+    code = str(result.get("error_code") or f"{scope}_read_failed")
+    status = result.get("http_status")
+    raise NaverReadFailure(code, retryable=status == 429 or isinstance(status, int) and status >= 500)
+
+
+def _encode_cursor(kind: str, state: dict) -> str:
+    return json.dumps({"kind": kind, **state}, sort_keys=True, separators=(",", ":"))
+
+
+def _decode_cursor(cursor: str | None, *, expected_kind: str, default: dict) -> dict:
+    if not cursor:
+        return dict(default)
+    try:
+        state = json.loads(cursor)
+    except (TypeError, ValueError) as exc:
+        raise NaverReadFailure("checkpoint_cursor_invalid") from exc
+    if not isinstance(state, dict) or state.get("kind") != expected_kind:
+        raise NaverReadFailure("checkpoint_cursor_invalid")
+    return state
+
+
+def _sanitized_cursor(cursor: str | None) -> dict | None:
+    if not cursor:
+        return None
+    try:
+        state = json.loads(cursor)
+    except ValueError:
+        return {"status": "invalid"}
+    if not isinstance(state, dict):
+        return {"status": "invalid"}
+    return {key: value for key, value in state.items() if key in {"kind", "page", "slice", "after"}}
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    from datetime import timezone
+
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _parse_cursor_datetime(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise NaverReadFailure("checkpoint_cursor_invalid") from exc
+    return _as_aware_utc(parsed).astimezone(get_business_timezone())
+
+
+def _latest_order_change_at(payload: object) -> datetime | None:
+    values: list[datetime] = []
+
+    def walk(item: object) -> None:
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if key in {"lastChangedAt", "lastChangedDate", "lastChangeDate"}:
+                    parsed = sync_service._extract_datetime_by_keys({key: value}, (key,))
+                    if parsed is not None:
+                        values.append(parsed)
+                else:
+                    walk(value)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(payload)
+    return max(values) if values else None
 
 
 def get_naver_read_adapter() -> NaverReadAdapter:
@@ -151,7 +327,6 @@ def submit_onboarding(
     *,
     payload: StoreOnboardingCreate,
     creator_user_id: int,
-    reader: NaverReadAdapter | None = None,
     now: datetime | None = None,
 ) -> dict:
     existing = db.scalar(select(StoreOnboarding).where(StoreOnboarding.idempotency_key == payload.idempotency_key))
@@ -159,6 +334,7 @@ def submit_onboarding(
         if existing.creator_user_id != creator_user_id:
             raise ApiError("idempotency key is owned by another operator", "onboarding_idempotency_conflict", 409)
         return serialize_onboarding(existing)
+    frozen_end = now or get_utc_now()
     onboarding = StoreOnboarding(
         idempotency_key=payload.idempotency_key,
         requested_store_name=payload.store_name,
@@ -168,6 +344,8 @@ def submit_onboarding(
         requested_channel_no=payload.channel_no,
         status="validating",
         progress_summary=_empty_progress(),
+        snapshot_end_at=frozen_end,
+        initial_window_start_at=frozen_end - timedelta(days=INITIAL_SYNC_DAYS),
     )
     db.add(onboarding)
     try:
@@ -175,10 +353,25 @@ def submit_onboarding(
     except IntegrityError as exc:
         db.rollback()
         raise ApiError("onboarding idempotency conflict", "onboarding_idempotency_conflict", 409) from exc
-    return resume_onboarding(db, onboarding_id=onboarding.id, reader=reader, now=now)
+    db.refresh(onboarding)
+    return serialize_onboarding(onboarding)
 
 
-def resume_onboarding(
+def request_onboarding_resume(db: Session, *, onboarding_id: int) -> dict:
+    onboarding = _get_onboarding(db, onboarding_id)
+    if onboarding.status == "cancelled":
+        raise ApiError("onboarding is cancelled", "onboarding_cancelled", 409)
+    if onboarding.status in {"partially_synced", "active_incremental"}:
+        return serialize_onboarding(onboarding)
+    if onboarding.status != "validating":
+        onboarding.status = "validating" if onboarding.store_id is None else "backfilling"
+    onboarding.next_retry_at = None
+    db.commit()
+    db.refresh(onboarding)
+    return serialize_onboarding(onboarding)
+
+
+def run_onboarding_work(
     db: Session,
     *,
     onboarding_id: int,
@@ -204,6 +397,9 @@ def resume_onboarding(
         except NaverReadFailure as exc:
             _set_failure(db, onboarding, exc.code, retryable=exc.retryable, now=now)
             return serialize_onboarding(onboarding)
+        except Exception:
+            _set_failure(db, onboarding, "naver_validation_unexpected_failure", retryable=True, now=now)
+            return serialize_onboarding(onboarding)
         if not validation.ready:
             _set_failure(db, onboarding, "naver_validation_not_ready", retryable=False, now=now)
             return serialize_onboarding(onboarding)
@@ -218,8 +414,136 @@ def resume_onboarding(
         )
         if not provisioned:
             return serialize_onboarding(_get_onboarding(db, onboarding.id))
+    elif onboarding.status == "validating":
+        context = _read_context(db, onboarding)
+        try:
+            validation = reader.validate(
+                client_id=context.client_id,
+                client_secret=context.client_secret,
+                channel_no=context.channel_no,
+            )
+        except NaverReadFailure as exc:
+            _set_failure(db, onboarding, exc.code, retryable=exc.retryable, now=now)
+            return serialize_onboarding(onboarding)
+        except Exception:
+            _set_failure(db, onboarding, "naver_validation_unexpected_failure", retryable=True, now=now)
+            return serialize_onboarding(onboarding)
+        if not validation.ready:
+            _set_failure(db, onboarding, "naver_validation_not_ready", retryable=False, now=now)
+            return serialize_onboarding(onboarding)
+        onboarding.validation_summary = validation.sanitized()
+        credential = db.get(ApiCredential, onboarding.credential_id)
+        if credential is not None:
+            credential.auth_status = "test_passed"
+        db.commit()
 
     return _run_initial_backfill(db, onboarding=onboarding, reader=reader, now=now)
+
+
+def run_onboarding_worker(
+    onboarding_id: int,
+    *,
+    reader: NaverReadAdapter | None = None,
+    session_factory: Callable[[], Session] = SessionLocal,
+) -> dict | None:
+    claim_token = uuid.uuid4().hex
+    now = get_utc_now()
+    stale_before = now - WORKER_CLAIM_TTL
+    with session_factory() as db:
+        claimed = db.execute(
+            update(StoreOnboarding)
+            .where(
+                StoreOnboarding.id == onboarding_id,
+                or_(StoreOnboarding.worker_claim_token.is_(None), StoreOnboarding.worker_claimed_at < stale_before),
+            )
+            .values(worker_claim_token=claim_token, worker_claimed_at=now)
+        )
+        db.commit()
+        if claimed.rowcount != 1:
+            return None
+        try:
+            return run_onboarding_work(db, onboarding_id=onboarding_id, reader=reader, now=now)
+        finally:
+            db.execute(
+                update(StoreOnboarding)
+                .where(StoreOnboarding.id == onboarding_id, StoreOnboarding.worker_claim_token == claim_token)
+                .values(worker_claim_token=None, worker_claimed_at=None)
+            )
+            db.commit()
+
+
+def update_onboarding_credentials(
+    db: Session,
+    *,
+    onboarding_id: int,
+    payload: StoreOnboardingCredentialUpdate,
+) -> dict:
+    onboarding = _get_onboarding(db, onboarding_id)
+    if onboarding.status == "cancelled":
+        raise ApiError("onboarding is cancelled", "onboarding_cancelled", 409)
+    if onboarding.worker_claim_token and onboarding.worker_claimed_at:
+        claimed_at = _as_aware_utc(onboarding.worker_claimed_at)
+        if claimed_at >= get_utc_now() - WORKER_CLAIM_TTL:
+            raise ApiError("onboarding worker is active", "onboarding_worker_busy", 409)
+    updates = payload.model_dump(exclude_unset=True)
+    if onboarding.credential_id is None:
+        if "client_id" in updates:
+            onboarding.encrypted_client_id = encrypt_value(updates["client_id"])
+        if "client_secret" in updates:
+            onboarding.encrypted_client_secret = encrypt_value(updates["client_secret"])
+        if "channel_no" in updates:
+            onboarding.requested_channel_no = updates["channel_no"] or None
+    else:
+        credential = db.get(ApiCredential, onboarding.credential_id)
+        if credential is None:
+            raise ApiError("onboarding credential is unavailable", "onboarding_credential_missing", 409)
+        if "client_id" in updates:
+            credential.client_id = updates["client_id"]
+        if "client_secret" in updates:
+            credential.encrypted_secret_key = encrypt_value(updates["client_secret"])
+        extra = dict(credential.extra_config or {})
+        if "channel_no" in updates:
+            if updates["channel_no"]:
+                extra["channel_no"] = updates["channel_no"]
+            else:
+                extra.pop("channel_no", None)
+        extra.pop("encrypted_client_id", None)
+        credential.extra_config = extra
+        credential.auth_status = "needs_test"
+    onboarding.configuration_version += 1
+    onboarding.last_error_code = None
+    onboarding.next_retry_at = None
+    onboarding.validation_summary = None
+    onboarding.status = "validating"
+    onboarding.worker_claim_token = None
+    onboarding.worker_claimed_at = None
+    db.commit()
+    db.refresh(onboarding)
+    return serialize_onboarding(onboarding)
+
+
+def onboarding_access_allowed(db: Session, *, onboarding: StoreOnboarding, user_id: int) -> bool:
+    if onboarding.creator_user_id == user_id:
+        return True
+    if onboarding.store_id is None:
+        return False
+    membership = db.scalar(
+        select(ErpStoreMembership.id)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .where(
+            ErpStoreMembership.user_id == user_id,
+            ErpStoreMembership.store_id == onboarding.store_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+        )
+        .limit(1)
+    )
+    return membership is not None
+
+
+def require_onboarding_access(db: Session, *, onboarding: StoreOnboarding, user_id: int) -> None:
+    if not onboarding_access_allowed(db, onboarding=onboarding, user_id=user_id):
+        raise ApiError("store onboarding is outside assigned scope", "store_onboarding_scope_forbidden", 403)
 
 
 def run_historical_order_backfill(
@@ -255,7 +579,7 @@ def run_historical_order_backfill(
         "backfill": result,
         "platform_write": False,
         "local_only": True,
-        "unsynced_history_retrieved": False,
+        "unsynced_history_retrieved": result.get("status") == "success" and int(result.get("remote_items") or 0) > 0,
     }
 
 
@@ -265,8 +589,25 @@ def _run_initial_backfill(db: Session, *, onboarding: StoreOnboarding, reader: N
         onboarding.initial_window_start_at = now - timedelta(days=INITIAL_SYNC_DAYS)
     onboarding.status = "backfilling"
     db.commit()
-    results: dict[str, dict] = {}
+    results: dict[str, dict] = dict(onboarding.progress_summary or _empty_progress())
     for dataset, sync_type in (("products", ONBOARDING_PRODUCT_SYNC), ("orders", ONBOARDING_ORDER_SYNC)):
+        if results.get(dataset, {}).get("status") == "success":
+            continue
+        previous = dict(results.get(dataset) or {})
+        results[dataset] = {
+            **previous,
+            "status": "running",
+            "created": int(previous.get("created") or 0),
+            "updated": int(previous.get("updated") or 0),
+            "pages": int(previous.get("pages") or 0),
+            "remote_items": int(previous.get("remote_items") or 0),
+        }
+        onboarding.progress_summary = {
+            **results,
+            "customer_inquiries": _optional_not_approved(),
+            "logistics": _optional_not_approved(),
+        }
+        db.commit()
         results[dataset] = _sync_dataset(
             db,
             onboarding=onboarding,
@@ -284,7 +625,7 @@ def _run_initial_backfill(db: Session, *, onboarding: StoreOnboarding, reader: N
                 results[dataset]["error_code"] or "mandatory_dataset_sync_failed",
                 retryable=bool(results[dataset].get("retryable")),
                 now=now,
-                progress={**_empty_progress(), **results, "customer_inquiries": _optional_not_approved(), "logistics": _optional_not_approved()},
+                progress={**results, "customer_inquiries": _optional_not_approved(), "logistics": _optional_not_approved()},
             )
             return serialize_onboarding(onboarding)
 
@@ -294,7 +635,6 @@ def _run_initial_backfill(db: Session, *, onboarding: StoreOnboarding, reader: N
     onboarding.last_error_code = None
     onboarding.next_retry_at = None
     onboarding.progress_summary = {
-        **_empty_progress(),
         **results,
         "customer_inquiries": _optional_not_approved(),
         "logistics": _optional_not_approved(),
@@ -330,10 +670,15 @@ def _sync_dataset(
     )
     db.add(sync_log)
     db.commit()
-    created = updated = pages = 0
+    existing_progress = dict((onboarding.progress_summary or {}).get(dataset) or {})
+    created = int(existing_progress.get("created") or 0)
+    updated = int(existing_progress.get("updated") or 0)
+    pages = int(existing_progress.get("pages") or 0)
+    remote_items = int(existing_progress.get("remote_items") or 0)
+    pages_this_run = 0
     try:
         while True:
-            if pages >= MAX_READ_PAGES:
+            if pages_this_run >= MAX_READ_PAGES:
                 raise NaverReadFailure("read_page_limit_reached", retryable=True)
             page = (
                 reader.read_products(context, start_at=start_at, end_at=end_at, cursor=cursor)
@@ -342,14 +687,30 @@ def _sync_dataset(
             )
             if not isinstance(page, NaverReadPage):
                 raise NaverReadFailure("invalid_read_adapter_page")
+            remote_items += len(page.items)
             items = _canonical_products(page.items, scope) if dataset == "products" else _canonical_orders(page.items, scope)
             outcome = product_service.upsert_products(db, onboarding.store_id, NAVER_PLATFORM, items) if dataset == "products" else order_service.upsert_orders(db, onboarding.store_id, NAVER_PLATFORM, items)
             created += outcome["created"]
             updated += outcome["updated"]
             pages += 1
+            pages_this_run += 1
             cursor = page.next_cursor
             checkpoint.cursor_value = cursor
             checkpoint.last_synced_at = get_utc_now()
+            progress = dict(onboarding.progress_summary or _empty_progress())
+            progress[dataset] = {
+                "status": "running" if cursor else "success",
+                "created": created,
+                "updated": updated,
+                "pages": pages,
+                "remote_items": remote_items,
+                "cursor": _sanitized_cursor(cursor),
+                "window_start_at": start_at.isoformat(),
+                "window_end_at": end_at.isoformat(),
+                "raw_response_saved": False,
+                "platform_write": False,
+            }
+            onboarding.progress_summary = progress
             db.commit()
             if not cursor:
                 break
@@ -357,15 +718,34 @@ def _sync_dataset(
         sync_log.finished_at = get_utc_now()
         sync_log.raw_summary = {"scope": scope, "dataset": dataset, "created": created, "updated": updated, "pages": pages, "raw_response_saved": False, "platform_write": False}
         db.commit()
-        return {"status": "success", "created": created, "updated": updated, "pages": pages, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": None, "retryable": False}
-    except NaverReadFailure as exc:
+        return {"status": "success", "created": created, "updated": updated, "pages": pages, "remote_items": remote_items, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": None, "retryable": False, "raw_response_saved": False, "platform_write": False}
+    except Exception as exc:
+        db.rollback()
+        failure = exc if isinstance(exc, NaverReadFailure) else NaverReadFailure(
+            "readonly_adapter_unexpected_failure",
+            retryable=True,
+        )
         sync_log.status = "failed"
         sync_log.finished_at = get_utc_now()
         sync_log.message = "sanitized Naver read failure"
-        sync_log.error_detail = exc.code
-        sync_log.raw_summary = {"scope": scope, "dataset": dataset, "raw_response_saved": False, "platform_write": False, "error_code": exc.code}
+        sync_log.error_detail = failure.code
+        sync_log.raw_summary = {"scope": scope, "dataset": dataset, "raw_response_saved": False, "platform_write": False, "error_code": failure.code}
+        progress = dict(onboarding.progress_summary or _empty_progress())
+        progress[dataset] = {
+            "status": "failed",
+            "created": created,
+            "updated": updated,
+            "pages": pages,
+            "remote_items": remote_items,
+            "cursor": _sanitized_cursor(cursor),
+            "error_code": failure.code,
+            "retryable": failure.retryable,
+            "raw_response_saved": False,
+            "platform_write": False,
+        }
+        onboarding.progress_summary = progress
         db.commit()
-        return {"status": "failed", "created": created, "updated": updated, "pages": pages, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": exc.code, "retryable": exc.retryable}
+        return {"status": "failed", "created": created, "updated": updated, "pages": pages, "remote_items": remote_items, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": failure.code, "retryable": failure.retryable, "raw_response_saved": False, "platform_write": False}
 
 
 def _provision_validated_store(db: Session, *, onboarding: StoreOnboarding, client_id: str, client_secret: str, selected_channel_no: str | None, now: datetime) -> bool:
@@ -379,11 +759,11 @@ def _provision_validated_store(db: Session, *, onboarding: StoreOnboarding, clie
         store=store,
         platform=NAVER_PLATFORM,
         credential_name=f"Naver onboarding {onboarding.requested_store_name}",
-        encrypted_access_key=encrypt_value(client_id),
+        client_id=client_id,
         encrypted_secret_key=encrypt_value(client_secret),
         auth_status="test_passed",
         status="active",
-        extra_config={"api_base": api_credential_readiness_service.NAVER_DEFAULT_API_BASE, "channel_no": selected_channel_no, "onboarded": True, "encrypted_client_id": True},
+        extra_config={"api_base": api_credential_readiness_service.NAVER_DEFAULT_API_BASE, "channel_no": selected_channel_no, "onboarded": True},
     )
     membership = ErpStoreMembership(user_id=onboarding.creator_user_id, store=store, role=owner_role, scope_type="assigned", membership_status="active", assigned_by_user_id=onboarding.creator_user_id)
     db.add_all((store, credential, membership))
@@ -410,13 +790,28 @@ def _read_context(db: Session, onboarding: StoreOnboarding) -> NaverReadContext:
     if credential is None:
         raise ApiError("onboarding credential is unavailable", "onboarding_credential_missing", 409)
     extra = credential.extra_config if isinstance(credential.extra_config, dict) else {}
-    client_id = decrypt_value(credential.encrypted_access_key) if extra.get("encrypted_client_id") else credential.client_id
+    client_id = credential.client_id
+    # Compatibility for rows created by the original T13 preview commit.
+    if not client_id and extra.get("encrypted_client_id"):
+        client_id = decrypt_value(credential.encrypted_access_key)
     if not client_id:
         raise ApiError("onboarding credential is unavailable", "onboarding_credential_missing", 409)
     secret = decrypt_value(credential.encrypted_secret_key)
     if not secret:
         raise ApiError("onboarding credential cannot be decrypted", "onboarding_credential_decrypt_failed", 409)
-    return NaverReadContext(onboarding.store_id or 0, credential.id, client_id, secret, extra.get("channel_no"))
+    grant_type = str(extra.get("grant_type") or "SELF").strip().upper()
+    if grant_type not in {"SELF", "SELLER"}:
+        grant_type = "SELF"
+    return NaverReadContext(
+        onboarding.store_id or 0,
+        credential.id,
+        client_id,
+        secret,
+        extra.get("channel_no"),
+        str(extra.get("api_base") or api_credential_readiness_service.NAVER_DEFAULT_API_BASE).rstrip("/"),
+        grant_type,
+        extra.get("seller_account_id"),
+    )
 
 
 def _checkpoint(db: Session, *, store_id: int, sync_type: str) -> SyncCheckpoint:
@@ -449,21 +844,49 @@ def _canonical_orders(items: list[dict], scope: str) -> list[dict]:
     now = get_utc_now()
     normalized = []
     for item in items:
-        external_order_id = str(item.get("external_order_id") or "").strip()
+        external_product_order_id = _text(item.get("external_product_order_id"), 120)
+        external_order_id = str(
+            item.get("external_product_order_id_hash")
+            or item.get("external_order_id")
+            or ""
+        ).strip()
         product_name = str(item.get("product_name") or "").strip()
-        ordered_at = item.get("ordered_at")
-        if not external_order_id or not product_name or not isinstance(ordered_at, datetime):
+        ordered_at = _parse_business_datetime(item.get("ordered_at"))
+        if not external_order_id or not external_product_order_id or not product_name or ordered_at is None:
             raise NaverReadFailure("invalid_order_read_record")
+        order_status = item.get("order_status")
+        if isinstance(order_status, dict):
+            order_status = order_status.get("raw")
         normalized.append({
-            "external_order_id": external_order_id, "external_product_order_id": _text(item.get("external_product_order_id"), 120),
-            "buyer_name": _text(item.get("buyer_name"), 120), "buyer_phone": _text(item.get("buyer_phone"), 40), "buyer_masked_phone": _text(item.get("buyer_masked_phone"), 30),
+            "external_order_id": external_order_id, "external_product_order_id": external_product_order_id,
+            "buyer_name": _text(item.get("buyer_name_masked") or item.get("buyer_name"), 120), "buyer_phone": None, "buyer_masked_phone": _text(item.get("buyer_phone_masked"), 30),
             "receiver_name": _text(item.get("receiver_name"), 120), "receiver_phone": _text(item.get("receiver_phone"), 40), "receiver_address": _text(item.get("receiver_address"), 300), "zip_code": _text(item.get("zip_code"), 30),
             "product_name": product_name[:300], "quantity": int(item.get("quantity") or 1), "order_amount": item.get("order_amount") or 0, "currency": _text(item.get("currency"), 10) or "KRW",
-            "order_status": _text(item.get("order_status"), 30) or "UNKNOWN", "paid_at": item.get("paid_at") if isinstance(item.get("paid_at"), datetime) else None, "ordered_at": ordered_at,
+            "order_status": _text(order_status, 30) or "UNKNOWN", "paid_at": _parse_business_datetime(item.get("paid_at")), "ordered_at": ordered_at,
             "source_type": "naver_historical_backfill" if scope == "historical" else "naver_onboarding_sync", "last_synced_at": now,
-            "raw_data": {"sync_scope": scope, "platform_product_id": _text(item.get("platform_product_id"), 120), "raw_response_saved": False},
+            "raw_data": {
+                "sync_scope": scope,
+                "platform_product_id": _text(item.get("platform_product_id"), 120),
+                "option_name": _text(item.get("option_name"), 160),
+                "external_order_id_hash": _text(item.get("external_order_id_hash"), 120),
+                "mapping_version": _text(item.get("mapping_version"), 80),
+                "raw_response_saved": False,
+                "platform_write": False,
+            },
         })
     return normalized
+
+
+def _parse_business_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return _as_aware_utc(value)
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _as_aware_utc(parsed)
 
 
 def _set_failure(db: Session, onboarding: StoreOnboarding, code: str, *, retryable: bool, now: datetime, progress: dict | None = None) -> None:
