@@ -23,12 +23,11 @@ from app.services import naver_readonly_inquiry_service, order_service, product_
 
 NAVER = "naver"
 RESOURCE_CONFIG = {
-    "orders": {"sync_type": "naver_automatic_orders", "interval": timedelta(minutes=10)},
-    "customer_inquiries": {"sync_type": "naver_automatic_inquiries", "interval": timedelta(minutes=10)},
-    "products": {"sync_type": "naver_automatic_products", "interval": timedelta(hours=2)},
-    "logistics": {"sync_type": "naver_automatic_logistics", "interval": None},
+    "orders": {"sync_type": "naver_automatic_orders", "interval": timedelta(minutes=10), "freshness": timedelta(minutes=25), "lease": timedelta(minutes=15)},
+    "customer_inquiries": {"sync_type": "naver_automatic_inquiries", "interval": timedelta(minutes=10), "freshness": timedelta(minutes=25), "lease": timedelta(minutes=15)},
+    "products": {"sync_type": "naver_automatic_products", "interval": timedelta(hours=2), "freshness": timedelta(hours=4), "lease": timedelta(minutes=30)},
+    "logistics": {"sync_type": "naver_automatic_logistics", "interval": None, "freshness": timedelta(minutes=75), "lease": None},
 }
-LEASE_DURATION = timedelta(minutes=5)
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
 
@@ -40,7 +39,8 @@ def _utc(value: datetime) -> datetime:
 def _stagger(store_id: int, resource: str, interval: timedelta) -> timedelta:
     seconds = max(1, int(interval.total_seconds()))
     digest = hashlib.sha256(f"{store_id}:{resource}".encode("ascii")).digest()
-    return timedelta(seconds=int.from_bytes(digest[:4], "big") % min(60, seconds))
+    ratio = (int.from_bytes(digest[:8], "big") / (2**64 - 1)) * 0.2 - 0.1
+    return timedelta(seconds=round(seconds * ratio))
 
 
 def _checkpoint(db: Session, *, store_id: int, resource: str, now: datetime) -> SyncCheckpoint:
@@ -101,11 +101,18 @@ def _claim(db: Session, *, checkpoint_id: int, now: datetime) -> str | None:
         or_(SyncCheckpoint.next_run_at.is_(None), SyncCheckpoint.next_run_at <= now),
         or_(SyncCheckpoint.lease_expires_at.is_(None), SyncCheckpoint.lease_expires_at <= now),
     ).values(
-        status="running", lease_token=token, lease_expires_at=now + LEASE_DURATION,
+        status="running", lease_token=token, lease_expires_at=now + _resource_lease(checkpoint_id, db),
         last_attempt_at=now, last_error_code=None,
     ).execution_options(synchronize_session=False)).rowcount
     db.commit()
     return token if claimed == 1 else None
+
+
+def _resource_lease(checkpoint_id: int, db: Session) -> timedelta:
+    checkpoint = db.get(SyncCheckpoint, checkpoint_id)
+    if checkpoint is None:
+        return timedelta(minutes=15)
+    return RESOURCE_CONFIG.get(_resource_for_checkpoint(checkpoint), {}).get("lease") or timedelta(minutes=15)
 
 
 def _context(db: Session, store_id: int) -> store_onboarding_service.NaverReadContext:
@@ -181,7 +188,7 @@ def _finish_success(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
     interval = RESOURCE_CONFIG[resource]["interval"]
     checkpoint.status = "success"
     checkpoint.last_synced_at = now
-    checkpoint.fresh_until = now + interval
+    checkpoint.fresh_until = now + RESOURCE_CONFIG[resource]["freshness"]
     checkpoint.next_run_at = now + interval + _stagger(checkpoint.store_id, resource, interval)
     checkpoint.retry_count = 0
     checkpoint.last_error_code = None
@@ -196,10 +203,15 @@ def _finish_success(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
 def _finish_failure(db: Session, *, checkpoint: SyncCheckpoint, token: str, now: datetime, exc: Exception) -> bool:
     if checkpoint.lease_token != token:
         return False
-    checkpoint.retry_count += 1
-    checkpoint.status = "retry_wait"
     checkpoint.last_error_code = _safe_error_code(exc)
-    checkpoint.next_run_at = now + timedelta(seconds=min(1800, 60 * (2 ** min(checkpoint.retry_count - 1, 5))))
+    if _retryable_error(checkpoint.last_error_code):
+        checkpoint.retry_count += 1
+        checkpoint.status = "retry_wait"
+        checkpoint.next_run_at = now + timedelta(minutes=min(60, 2 ** min(checkpoint.retry_count - 1, 6)))
+    else:
+        checkpoint.status = "blocked"
+        checkpoint.automatic_read_enabled = False
+        checkpoint.next_run_at = None
     checkpoint.lease_token = None
     checkpoint.lease_expires_at = None
     db.add(SyncLog(store_id=checkpoint.store_id, platform=NAVER, sync_type=checkpoint.sync_type, status="failed", finished_at=now,
@@ -207,6 +219,32 @@ def _finish_failure(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
                    raw_summary={"error_code": checkpoint.last_error_code, "raw_response_saved": False, "platform_write": False}))
     db.commit()
     return True
+
+
+def _retryable_error(code: str) -> bool:
+    normalized = code.lower()
+    return normalized in {"naver_read_retryable", "network_timeout", "network_error", "readonly_request_failed"} or any(
+        marker in normalized for marker in ("timeout", "rate_limit", "http_429", "http_5", "retryable")
+    )
+
+
+def _safe_failure_reason(code: str | None) -> str | None:
+    if not code:
+        return None
+    normalized = code.lower()
+    if normalized == "not_supported":
+        return "not_supported"
+    if _retryable_error(normalized):
+        return "temporary_platform_or_network_failure"
+    if any(marker in normalized for marker in ("auth", "credential", "permission", "forbidden")):
+        return "authentication_or_permission_required"
+    if "cursor" in normalized:
+        return "cursor_requires_manual_review"
+    if "cleanup" in normalized or "retention" in normalized:
+        return "privacy_cleanup_gate_blocked"
+    if "conflict" in normalized:
+        return "source_conflict_requires_manual_review"
+    return "manual_review_required"
 
 
 def run_automatic_checkpoint(
@@ -261,19 +299,27 @@ def run_due_automatic_read_syncs(
     return counts
 
 
-def automatic_read_status(db: Session, *, store_id: int) -> dict[str, dict[str, Any]]:
+def automatic_read_status(db: Session, *, store_id: int, now: datetime | None = None) -> dict[str, dict[str, Any]]:
     rows = db.scalars(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store_id, SyncCheckpoint.platform == NAVER)).all()
     by_type = {row.sync_type: row for row in rows}
     result: dict[str, dict[str, Any]] = {}
+    current = _utc(now or get_utc_now())
     for resource, config in RESOURCE_CONFIG.items():
         row = by_type.get(config["sync_type"])
         if resource == "logistics":
-            result[resource] = {"status": "blocked", "error_code": "not_supported", "automatic_read_enabled": False}
+            result[resource] = _status_item("blocked", False, None, None, None, 0, "not_supported", None, current)
         elif row is None:
-            result[resource] = {"status": "pending", "automatic_read_enabled": False}
+            result[resource] = _status_item("pending", False, None, None, None, 0, None, None, current)
         else:
-            result[resource] = {"status": row.status, "automatic_read_enabled": row.automatic_read_enabled,
-                                "next_run_at": row.next_run_at, "fresh_until": row.fresh_until,
-                                "retry_count": row.retry_count, "last_error_code": row.last_error_code,
-                                "last_attempt_at": row.last_attempt_at}
+            result[resource] = _status_item(row.status, row.automatic_read_enabled, row.last_synced_at, row.next_run_at, row.fresh_until, row.retry_count, row.last_error_code, row.last_attempt_at, current)
     return result
+
+
+def _status_item(status: str, enabled: bool, last_success_at: datetime | None, next_run_at: datetime | None, data_fresh_until: datetime | None, retry_count: int, last_error_code: str | None, last_attempt_at: datetime | None, now: datetime) -> dict[str, Any]:
+    stale = bool(data_fresh_until and _utc(data_fresh_until) < now)
+    due = bool(next_run_at and _utc(next_run_at) <= now)
+    display_status = "blocked" if status == "blocked" else ("stale" if stale else ("due" if due and status not in {"running", "retry_wait"} else status))
+    return {"status": display_status, "automatic_read_enabled": enabled, "last_success_at": last_success_at,
+            "next_run_at": next_run_at, "data_fresh_until": data_fresh_until, "retry_count": retry_count,
+            "last_error_code": last_error_code, "safe_failure_reason": _safe_failure_reason(last_error_code),
+            "is_stale": stale, "last_attempt_at": last_attempt_at}

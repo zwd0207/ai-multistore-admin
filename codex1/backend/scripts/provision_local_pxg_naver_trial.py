@@ -61,6 +61,10 @@ def _restrict_handoff_acl(path: Path) -> None:
 
 def _write_runtime_env() -> None:
     if RUNTIME_ENV_PATH.exists():
+        values = _read_key_values(RUNTIME_ENV_PATH)
+        if values.get("AUTOMATIC_READ_SYNC_ENABLED", "").lower() != "true":
+            values["AUTOMATIC_READ_SYNC_ENABLED"] = "true"
+            _write_text(RUNTIME_ENV_PATH, "\n".join(f"{key}={value}" for key, value in values.items()) + "\n")
         return
     db_url = f"sqlite:///{DATABASE_PATH.as_posix()}"
     _write_text(RUNTIME_ENV_PATH, "\n".join([
@@ -82,6 +86,7 @@ def _write_runtime_env() -> None:
         "PLATFORM_ORDER_WRITE_ENABLED=false",
         "CUSTOMER_PLATFORM_WRITE_ENABLED=false",
         "SHIPPING_PLATFORM_WRITE_ENABLED=false",
+        "AUTOMATIC_READ_SYNC_ENABLED=true",
         "NAVER_API_BASE=http://127.0.0.1:9/platform-network-disabled",
         "NAVER_CLIENT_ID=",
         "NAVER_CLIENT_SECRET=",
