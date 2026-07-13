@@ -113,7 +113,12 @@ def main():
         historical = seed_order(db, store, "po-history", "o-history", ordered_at=NOW - timedelta(days=61), source_type="naver_historical_backfill")
         test_order = seed_order(db, store, "po-test", "o-test", source_type="mock_sync")
         seed_order(db, other, "po-primary", "o-other")
+        later_id = seed_order(db, other, "po-ordering-late", "o-ordering-late", ordered_at=NOW - timedelta(days=20))
+        earlier_id = seed_order(db, other, "po-ordering-early", "o-ordering-early", ordered_at=NOW - timedelta(days=2))
         db.commit()
+        ordered_candidates = automatic_read_sync_service._t17_logistics_candidates(db, store_id=other.id, now=NOW)
+        assert [row.id for row in ordered_candidates] == sorted(row.id for row in ordered_candidates)
+        assert later_id.id < earlier_id.id and ordered_candidates[-2:] == [later_id, earlier_id]
 
         # Exact legacy placeholder upgrade is idempotent; unrelated blocks stay blocked.
         legacy_checkpoint = SyncCheckpoint(

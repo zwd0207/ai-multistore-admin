@@ -1,12 +1,14 @@
 import os
 import sys
 import tempfile
+import gc
 from datetime import timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.orm import close_all_sessions
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -28,6 +30,8 @@ os.environ["REAL_API_TEST_ENABLED"] = "false"
 os.environ["REAL_API_WRITE_ENABLED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_PERSISTENCE_ENABLED"] = "true"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
+os.environ["AUTOMATIC_READ_SYNC_ENABLED"] = "false"
+os.environ["LIFECYCLE_SCHEDULERS_ENABLED"] = "false"
 
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
@@ -365,7 +369,9 @@ def main() -> None:
             assert status.status_code == 200, status.text
             assert status.json()["data"]["alert_status"] is None, status.text
 
+    close_all_sessions()
     engine.dispose()
+    gc.collect()
     if TEMP_DB.exists():
         TEMP_DB.unlink()
     print("verify_pxg_naver_readonly_retention_cleanup: ok")
@@ -375,6 +381,8 @@ if __name__ == "__main__":
     try:
         main()
     finally:
+        close_all_sessions()
         engine.dispose()
+        gc.collect()
         if TEMP_DB.exists():
             TEMP_DB.unlink(missing_ok=True)

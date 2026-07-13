@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import gc
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
@@ -13,6 +14,7 @@ from zipfile import ZipFile
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select
+from sqlalchemy.orm import close_all_sessions
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -38,6 +40,8 @@ os.environ["PXG_NAVER_LOCAL_READ_LOGISTICS_STALE_AFTER_MINUTES"] = "30"
 os.environ["PXG_NAVER_LOCAL_READ_PRODUCT_STALE_AFTER_HOURS"] = "6"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_DAYS"] = "90"
 os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
+os.environ["AUTOMATIC_READ_SYNC_ENABLED"] = "false"
+os.environ["LIFECYCLE_SCHEDULERS_ENABLED"] = "false"
 
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
@@ -627,7 +631,9 @@ def main() -> None:
 
         assert db.query(OperationAuditLog).filter(OperationAuditLog.store_id == store.id).count() >= 4
 
+    close_all_sessions()
     engine.dispose()
+    gc.collect()
     if TEMP_DB.exists():
         TEMP_DB.unlink()
     print("verify_pxg_naver_readonly_persistence: ok")
@@ -637,7 +643,9 @@ if __name__ == "__main__":
     try:
         main()
     finally:
+        close_all_sessions()
         engine.dispose()
+        gc.collect()
         if TEMP_DB.exists():
             try:
                 TEMP_DB.unlink()

@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     pxg_naver_local_read_thumbnail_generation_enabled: bool = False
     automatic_read_sync_enabled: bool = False
     automatic_read_sync_interval_seconds: int = 45
+    lifecycle_schedulers_enabled: bool = True
     pxg_naver_local_read_first_sync_limit: int = 3
     ai_automatic_operations_enabled: bool = False
     platform_product_write_enabled: bool = False

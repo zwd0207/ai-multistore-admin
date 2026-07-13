@@ -310,7 +310,7 @@ def _decode_logistics_cursor(value: str | None) -> dict[str, int]:
 
 def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime, after_order_id: int = 0) -> list[Order]:
     cutoff = _utc(now) - timedelta(days=30)
-    rows = db.scalars(select(Order).where(
+    conditions = (
         Order.store_id == store_id,
         Order.platform == NAVER,
         Order.ordered_at >= cutoff,
@@ -318,19 +318,21 @@ def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime, afte
         Order.source_type != order_service.HISTORICAL_BACKFILL_SOURCE_TYPE,
         Order.external_product_order_id.is_not(None),
         Order.external_product_order_id != "",
-    ).order_by(Order.ordered_at.asc(), Order.id.asc())).all()
+    )
+    all_rows = db.scalars(select(Order).where(*conditions)).all()
     by_product_order_id: dict[str, list[Order]] = {}
-    for row in rows:
+    for row in all_rows:
         key = str(row.external_product_order_id or "").strip()
         if key:
             by_product_order_id.setdefault(key, []).append(row)
     candidates: list[Order] = []
     stop_statuses = pxg_naver_readonly_persistence_service.NAVER_LOGISTICS_STOP_STATUSES
     terminal_statuses = pxg_naver_readonly_persistence_service.NAVER_DELIVERY_TERMINAL_STATUSES
-    for product_rows in by_product_order_id.values():
+    rows = db.scalars(select(Order).where(*conditions, Order.id > after_order_id).order_by(Order.id.asc())).all()
+    for order in rows:
+        product_rows = by_product_order_id[str(order.external_product_order_id).strip()]
         if len(product_rows) != 1:
             raise ApiError("Naver logistics product-order ID is duplicated", "naver_logistics_duplicate_product_order_id", 409)
-        order = product_rows[0]
         if str(order.order_status or "").upper() in stop_statuses:
             continue
         record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(

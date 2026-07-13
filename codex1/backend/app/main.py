@@ -12,7 +12,7 @@ from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.handlers import register_exception_handlers
-from app.database import SessionLocal, init_db
+from app.database import SessionLocal, engine, init_db
 from app.routers import health
 
 
@@ -109,16 +109,21 @@ def _validate_production_configuration() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
-    tasks = [
-        asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings)),
-        asyncio.create_task(run_store_onboarding_scheduler(runtime_settings=settings)),
-    ]
+    tasks = []
+    if settings.lifecycle_schedulers_enabled:
+        tasks = [
+            asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings)),
+            asyncio.create_task(run_store_onboarding_scheduler(runtime_settings=settings)),
+        ]
     yield
     for task in tasks:
         task.cancel()
     for task in tasks:
         with suppress(asyncio.CancelledError):
             await task
+    # Release pooled SQLite connections after scheduler cancellation so a
+    # stopped application cannot retain a test database file handle.
+    engine.dispose()
 
 
 def create_app() -> FastAPI:
