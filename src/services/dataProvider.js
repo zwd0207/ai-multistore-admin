@@ -4585,7 +4585,9 @@ const sourceMethods = {
     }));
   },
   getWarehouseShippingBatches: async (params = {}) => backendApi.getWarehouseShippingBatches({ ...params, includeRows: true }),
-  getWarehouseShippingTrackingDetails: async (batchId) => backendApi.getWarehouseShippingTrackingDetails(batchId),
+  getWarehouseShippingTrackingDetails: async (batchId, params) => backendApi.getWarehouseShippingTrackingDetails(batchId, params),
+  getWarehouseShippingWritebackCapability: async (batchId) => backendApi.getWarehouseShippingWritebackCapability(batchId),
+  reconcileWarehouseShippingWriteback: async (batchId) => backendApi.getWarehouseShippingTrackingDetails(batchId, { action: 'reconcile' }),
   createWarehouseShippingBatch: async (payload = {}) => backendApi.createWarehouseShippingBatch(payload),
   requestWarehouseShippingApproval: async (batchId, scope, payload = {}) => backendApi.requestWarehouseShippingApproval(batchId, scope, payload),
   downloadWarehouseShippingManifest: async (batchId, payload = {}) => backendApi.downloadWarehouseShippingManifest(batchId, payload),
@@ -5213,6 +5215,7 @@ const sourceMethods = {
     );
   },
   checkShippingShipmentWritebackBoundary: async (payload = {}) => {
+    return { status: 'blocked', skipReason: 'legacy_shipment_writeback_route_disabled', realApiCalled: false, platformWritesEnabled: false };
     const request = toBackendShippingShipmentWritebackBoundaryPayload(payload);
     if (!isBackendSource) {
       const missingActions = request.manual_approval
@@ -5269,6 +5272,7 @@ const sourceMethods = {
     }));
   },
   checkShippingShipmentWritebackDryRunGate: async (payload = {}) => {
+    return { status: 'blocked', skipReason: 'legacy_shipment_writeback_route_disabled', realApiCalled: false, platformWritesEnabled: false };
     const request = toBackendShippingShipmentWritebackDryRunGatePayload(payload);
     if (!isBackendSource) {
       const missingReason = !request.manual_approval
@@ -5350,6 +5354,7 @@ const sourceMethods = {
     );
   },
   checkShippingShipmentWritebackExecutionMockGate: async (payload = {}) => {
+    return { status: 'blocked', skipReason: 'legacy_shipment_writeback_route_disabled', realApiCalled: false, platformWritesEnabled: false };
     const request = toBackendShippingShipmentWritebackExecutionMockGatePayload(payload);
     if (!isBackendSource) {
       const missingReason = !request.execution_approval
@@ -5434,6 +5439,7 @@ const sourceMethods = {
     );
   },
   executeShippingShipmentWriteback: async (payload = {}) => {
+    return { status: 'blocked', skipReason: 'legacy_shipment_writeback_route_disabled', realApiCalled: false, platformWritesEnabled: false };
     const request = {
       ...toBackendShippingShipmentWritebackExecutionMockGatePayload(payload),
       real_api_call_requested: Boolean(payload.realApiCallRequested ?? payload.real_api_call_requested),

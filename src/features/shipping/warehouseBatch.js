@@ -56,6 +56,7 @@ export const warehouseRequest = {
 };
 
 export function adaptWarehouseTrackingDetail(row = {}) {
+  const trackingNumber = row.tracking_number ?? row.trackingNumber ?? '';
   return {
     id: row.tracking_record_id ?? row.trackingRecordId ?? row.batch_row_id ?? row.batchRowId,
     batchRowId: row.batch_row_id ?? row.batchRowId,
@@ -63,9 +64,37 @@ export function adaptWarehouseTrackingDetail(row = {}) {
     orderNo: row.order_reference ?? row.orderReference ?? '-',
     productName: row.product_name ?? row.productName ?? '-',
     carrier: row.carrier ?? '-',
-    trackingNumber: row.tracking_number ?? row.trackingNumber ?? '-',
+    trackingNumber: trackingNumber || '-',
+    trackingNumberTail: row.tracking_number_tail ?? row.trackingNumberTail ?? (trackingNumber ? `...${trackingNumber.slice(-4)}` : '-'),
     shippedAt: row.shipped_at ?? row.shippedAt ?? null,
     status: row.validation_status ?? row.validationStatus ?? 'blocked',
     reason: row.exception_reason ?? row.exceptionReason ?? '',
   };
+}
+
+export function adaptWarehouseWritebackCapability(data = {}) {
+  const capability = data.writeback_capability || data.writebackCapability || data;
+  if (!capability || typeof capability !== 'object') return null;
+  return {
+    status: capability.status || 'unknown',
+    allowed: capability.allowed,
+    singleOrderOnly: capability.single_order_only,
+    storeId: capability.store_id ?? capability.storeId,
+    storeName: capability.store_name || capability.storeName || '-',
+    productOrderNo: capability.product_order_reference || capability.productOrderReference || '-',
+    carrier: capability.carrier || '-',
+    platformLatestStatus: capability.platform_latest_status || capability.platformLatestStatus || '-',
+    approvalExpiresAt: capability.approval_expires_at || capability.approvalExpiresAt || capability.expires_at || capability.expiresAt || '-',
+    safeReason: capability.safe_failure_reason || capability.safeFailureReason || capability.safe_reason || '',
+    candidateChanged: capability.candidate_changed,
+  };
+}
+
+export function writebackResultLabel(status = '') {
+  if (status === 'success') return '完成';
+  if (['failed', 'platform_failed', 'partial_success'].includes(status)) return '失败';
+  if (status === 'platform_written') return '完成';
+  if (status === 'ready_for_writeback') return '待提交';
+  if (status === 'unknown') return '平台结果待核对';
+  return status || '平台结果待核对';
 }

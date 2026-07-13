@@ -82,7 +82,8 @@ export const backendApi = {
   getOrderLogisticsTrace: (orderId, params) => getData(`/orders/${orderId}/logistics-trace`, params),
   getShippingLogisticsMappings: (params) => getData('/shipping/logistics-mappings', params),
   getWarehouseShippingBatches: (params) => getData('/shipping/warehouse-batches', params),
-  getWarehouseShippingTrackingDetails: (batchId) => getData(`/shipping/warehouse-batches/${batchId}/tracking-details`),
+  getWarehouseShippingTrackingDetails: (batchId, params) => getData(`/shipping/warehouse-batches/${batchId}/tracking-details`, params),
+  getWarehouseShippingWritebackCapability: (batchId) => getData(`/shipping/warehouse-batches/${batchId}/writeback-capability`),
   createWarehouseShippingBatch: (payload) => sendData('post', '/shipping/warehouse-batches', payload),
   requestWarehouseShippingApproval: (batchId, scope, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/approval/${scope}`, payload),
   downloadWarehouseShippingManifest: (batchId, payload) => sendData('post', `/shipping/warehouse-batches/${batchId}/manifest`, payload),
@@ -106,12 +107,6 @@ export const backendApi = {
   writeShippingTrackingOrderStatusLocalUpdate: (payload) => (
     sendData('post', '/shipping/tracking-order-status/local-update', payload)
   ),
-  checkShippingShipmentWritebackBoundary: (payload) => sendData('post', '/shipping/shipment-writeback/approval-boundary', payload),
-  checkShippingShipmentWritebackDryRunGate: (payload) => sendData('post', '/shipping/shipment-writeback/dry-run-gate', payload),
-  checkShippingShipmentWritebackExecutionMockGate: (payload) => (
-    sendData('post', '/shipping/shipment-writeback/execution-mock-gate', payload)
-  ),
-  executeShippingShipmentWriteback: (payload) => sendData('post', '/shipping/shipment-writeback/execute', payload),
   getCustomerInquiries: (params) => getData('/customer-inquiries', params),
   refreshNaverCustomerInquiries: (storeId) => sendData('post', '/customer-inquiries/naver/refresh', undefined, { store_id: storeId }),
   getCustomerInquiryDetail: (readonlyId, storeId) => getData(`/customer-inquiries/${encodeURIComponent(readonlyId)}`, { store_id: storeId }),
