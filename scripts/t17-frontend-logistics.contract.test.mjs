@@ -27,6 +27,10 @@ assert.equal(order.logisticsUpdatedAt, '2026-07-13T08:00:00+09:00');
 assert.equal(order.logisticsStale, true);
 assert.notEqual(order.trackingNumber, 'MUST_NOT_BE_USED');
 
+const orderWithoutLogistics = adaptOrder({ id: 18, updated_at: '2026-07-13T09:00:00+09:00' });
+assert.equal(orderWithoutLogistics.logisticsUpdatedAt, '');
+assert.equal(orderWithoutLogistics.logisticsStale, false);
+
 const trace = adaptOrderLogisticsTrace({
   tracking_number: '123****789',
   realtime_tracking_open: false,

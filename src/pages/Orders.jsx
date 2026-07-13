@@ -92,11 +92,11 @@ function normalizedOrder(row = {}) {
     logisticsTraceStatus: row.logisticsTraceStatus || row.logistics_trace_status || '',
     logisticsCompany: deliveryCompany || '-',
     trackingNo: trackingNumber || '-',
-    logisticsUpdatedAt: row.logisticsUpdatedAt || row.logistics_updated_at || row.updatedAt || row.updated_at || '',
+    logisticsUpdatedAt: row.logisticsUpdatedAt || row.logistics_updated_at || '',
     logisticsStale: Boolean(row.logisticsStale ?? row.logistics_stale ?? row.isStale ?? row.is_stale ?? false),
     logisticsValidity: row.logisticsStale ?? row.logistics_stale ?? row.isStale ?? row.is_stale
       ? '已过期'
-      : (row.logisticsUpdatedAt || row.logistics_updated_at || row.updatedAt || row.updated_at ? '有效' : '尚未发货或平台暂无物流信息'),
+      : (row.logisticsUpdatedAt || row.logistics_updated_at ? '有效' : '尚未发货或平台暂无物流信息'),
     createdAt: row.createdAt || row.ordered_at || row.orderDate || row.paid_at || '',
     receiverName: row.receiverName || row.receiver_name || row.customer || row.buyer_name || '',
     receiverPhone: row.receiverPhone || row.receiver_phone || row.phone || row.buyer_phone || '',

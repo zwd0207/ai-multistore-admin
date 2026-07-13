@@ -364,8 +364,6 @@ export function adaptOrder(item = {}) {
     || item.logisticsUpdatedAt
     || rawData.logistics_updated_at
     || rawData.logisticsUpdatedAt
-    || item.updated_at
-    || rawData.updated_at
     || '';
   const logisticsStale = Boolean(item.logistics_stale ?? item.is_stale ?? rawData.logistics_stale ?? rawData.is_stale ?? false);
   const statusLabel = isNaver
@@ -470,7 +468,7 @@ export function adaptOrderLogisticsTrace(data = {}) {
     trackingNumber: data.tracking_number || data.trackingNumber || '',
     trackingSource: data.tracking_source || data.trackingSource || '',
     realtimeTrackingOpen: Boolean(data.realtime_tracking_open ?? data.realtimeTrackingOpen),
-    logisticsUpdatedAt: data.logistics_updated_at || data.logisticsUpdatedAt || data.updated_at || data.updatedAt || '',
+    logisticsUpdatedAt: data.logistics_updated_at || data.logisticsUpdatedAt || '',
     logisticsStale: Boolean(data.logistics_stale ?? data.is_stale ?? false),
     isStale: Boolean(data.is_stale ?? data.logistics_stale ?? false),
     message: data.message || '',
