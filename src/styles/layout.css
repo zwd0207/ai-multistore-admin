@@ -149,7 +149,9 @@
 .workbench-view-switch button.active { background: var(--primary); color: white; }
 .source-notices { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-notices span { overflow-wrap: anywhere; }
-.dashboard-store-table .table-wrap { overflow-x: visible; }
+.dashboard-store-table .table-wrap { overflow-x: auto; }
+.panel-grid > * { min-width: 0; }
+.panel-grid .table-wrap { overflow-x: auto; }
 @media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(2, 1fr); }.dashboard-grid { grid-template-columns: 1fr; }.financial-summary-grid, .financial-boundary-list, .business-capability-grid, .business-capability-grid.compact, .workbench-grid { grid-template-columns: 1fr; }.store-sync-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) {
   .store-sync-resource-grid { grid-template-columns: 1fr; }
