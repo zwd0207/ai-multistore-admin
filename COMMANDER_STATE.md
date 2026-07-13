@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T13 Naver one-click onboarding and historical orders in progress
+Status: T16 automatic-read exception recovery accepted
 
 ## Mission
 
@@ -16,8 +16,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `8e48607` (protected order product display and responsive operator shell).
-- Last accepted backend integration: `66074a8`
+- Last accepted integration: `9975db6` (T16 automatic-read exception recovery and 68-second status convergence).
+- Last accepted backend integration: `144d00e` (T16 recovery access and response-redaction boundary).
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
@@ -31,6 +31,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - T13 historical orders extend the existing Orders page and orders table. Queried history is locally indexed for after-sales and follow-up, excluded from today's workbench, and cannot invoke platform writes, customer sends, inventory writes, or AI actions.
 - Products and orders are mandatory onboarding datasets. Customer inquiries and logistics may report partially available while their approved Naver read adapters remain incomplete; they must never report false success or block use of successfully imported products and orders.
 - Credential handoff exists only in ignored local storage with a current-user Windows ACL.
+- T16 is accepted. The existing store overview now surfaces safe automatic-read attention counts and resource guidance; credential and permission blocks can be verified and released through the existing T15 scheduler without running synchronization in the HTTP request.
+- Ordinary operators receive only safe status and guidance. Recovery requires same-store `credentials.manage`, `platform.sync`, recent authentication, MFA, and CSRF; cursor, conflict, cleanup, retention, and unknown failures remain nonrecoverable.
 
 ## Active Trial Boundary
 
@@ -96,15 +98,16 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `065ac83`, `d864f28`, `424b16f`, `f5ce53e`, `a1f03b2`, `c499b08`, `1e534d3`, and `7a6bc54`: T13 delivers resumable Naver store onboarding, automatic recent-30-day product/order import, and store-scoped historical order query/backfill through the existing order system. Secret validation output is redacted, configuration writes require store-level `credentials.manage`, historical backfill is strictly older than the current 30-day window, and historical sources are excluded from today's workbench and metrics. Focused tests, frontend contracts/build, full `verify_all.py`, desktop/390px browser QA, and Sol final review passed.
 - `be091e8`, `e92bc18`, `5afcfa4`, `fe84b43`, `c290e70`, and `ca915b5`: T14 replaces the blocked legacy Naver inquiry sync with a store-scoped inquiry-only readonly path. Inquiry content is encrypted at rest, retained for an immutable maximum of 30 days, omitted from list/log/audit output, and decrypted only through a permission-gated detail request. Real PXG browser verification imported 19 Naver inquiries, displayed a real detail with preserved store/order context, kept reply disabled, and passed 390px layout. Focused tests, build, full `verify_all.py`, and Sol final review passed.
 - `d55bebc`, `dae8fd2`, `471456e`, `24092c9`, `ae001f1`, and `0a56e39`: T15 adds one store-isolated Naver readonly scheduler using existing checkpoints, logs, T13 readers, and T14 inquiry service. Real PXG orders and inquiries run about every 10 minutes, products about every 2 hours, and logistics remains explicitly unsupported. The pre-T13 PXG store is admitted only through an active configured credential plus successful approved readonly evidence; the fictional store remains disabled. Real browser QA showed successful reads, next-run times in KST, desktop and 390px containment, and no platform writes. T13/T14/T15, production sessions, frontend build/encoding, and full `verify_all.py` passed.
+- `1c9fcc7` through `9975db6`: T16 extends the existing store overview, T15 checkpoints/scheduler, connection editor, and workbench status panel. It adds safe exception summaries, store-scoped verify-and-recover, connection deep links, administrator/ordinary-operator response separation, and 68-second recovery polling without a new table, scheduler, log, page, or platform write path. T13-T16, production sessions, frontend contracts/build/encoding, full `verify_all.py`, desktop browser QA, 390px browser QA, and Sol final review passed.
 
 ## Worktree Registry
 
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | `codex2-sol` | `task/t03-6-session-contract` | paused; T10 final review passed |
-| Terra | `codex2-terra` | `task/terra-shipping-backend` | paused; T10 R1 is integrated and verified |
-| Luna | `codex2-luna` | `task/luna-operator-ux` | paused; T10 operator UI passed Gate B |
+| Sol | `codex2-sol` | review-only | T16 final review passed; paused |
+| Terra | `codex2-terra` | `task/t16-terra` | T16 backend integrated and verified; paused |
+| Luna | `codex2-luna` | `task/t16-luna` | T16 frontend integrated and verified; paused |
 
 ## Next Action
 
@@ -126,7 +129,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 16. T14 is accepted. Naver inquiry refresh uses only the approved inquiry endpoint and local encrypted storage. Keep the legacy inquiry sync and every customer reply/platform write path closed.
 17. T15 is Commander-verified in the isolated local trial. Keep `AUTOMATIC_READ_SYNC_ENABLED=true` only for this approved runtime; global/default configuration remains false.
 18. Do not implement Naver logistics automatic reads until an approved readonly adapter exists. Never substitute warehouse writeback records or a platform write endpoint.
-19. The next phase should focus on operator-facing use of automatically refreshed data and honest failure recovery; do not create a second scheduler, task table, order table, or inquiry service.
+19. T16 automatic-read exception recovery is accepted. Keep transient failures on automatic retry; only credential and known permission blocks may use verify-and-recover.
+20. Logistics automatic read remains `not_supported` and is excluded from exception counts until an approved Naver readonly logistics adapter exists.
+21. The next phase should improve operator handling of the refreshed order, inquiry, product, and warehouse data without creating a second scheduler, task table, order table, inquiry service, or platform-write path.
 
 ## Compact Reporting Contract
 
