@@ -978,7 +978,7 @@ def _normalize_historical_backfill_window(
 ) -> tuple[datetime, datetime]:
     start_at, end_at = _normalize_window(start_at, end_at, max_days=HISTORY_MAX_DAYS)
     current_window_start = order_service.current_order_window_start(as_of=now)
-    if end_at > current_window_start:
+    if end_at >= current_window_start:
         raise ApiError(
             "historical backfill must end before the current order window",
             "historical_backfill_current_window_overlap",

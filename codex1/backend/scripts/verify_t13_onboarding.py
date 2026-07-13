@@ -268,20 +268,21 @@ def main() -> None:
         assert db.query(Store).count() == 1 and db.query(ApiCredential).count() == 1
 
         current_window_start = order_service.current_order_window_start(as_of=NOW)
-        try:
-            store_onboarding_service.run_historical_order_backfill(
-                db,
-                onboarding_id=submitted["id"],
-                payload=HistoricalBackfillCreate(
-                    start_at=current_window_start - timedelta(days=1),
-                    end_at=current_window_start + timedelta(seconds=1),
-                ),
-                reader=reads.adapter(),
-                now=NOW,
-            )
-            raise AssertionError("historical/current boundary overlap must be rejected")
-        except ApiError as exc:
-            assert exc.error_code == "historical_backfill_current_window_overlap"
+        for end_at in (current_window_start, current_window_start + timedelta(seconds=1)):
+            try:
+                store_onboarding_service.run_historical_order_backfill(
+                    db,
+                    onboarding_id=submitted["id"],
+                    payload=HistoricalBackfillCreate(
+                        start_at=current_window_start - timedelta(days=1),
+                        end_at=end_at,
+                    ),
+                    reader=reads.adapter(),
+                    now=NOW,
+                )
+                raise AssertionError("historical/current boundary overlap must be rejected")
+            except ApiError as exc:
+                assert exc.error_code == "historical_backfill_current_window_overlap"
 
         history_payload = HistoricalBackfillCreate(start_at=NOW - timedelta(days=61), end_at=NOW - timedelta(days=31))
         history_result = store_onboarding_service.run_historical_order_backfill(
