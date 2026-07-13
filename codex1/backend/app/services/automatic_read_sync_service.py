@@ -49,7 +49,6 @@ RECOVERABLE_ERROR_CODES = frozenset({
     "product_api_not_allowed",
     "order_api_not_allowed",
     "ip_not_allowed",
-    "unknown_forbidden",
 })
 
 

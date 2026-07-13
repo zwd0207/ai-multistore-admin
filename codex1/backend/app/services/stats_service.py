@@ -923,6 +923,44 @@ def _automatic_read_status(db: Session, store_id: int) -> dict[str, Any]:
     return automatic_read_status(db, store_id=store_id)
 
 
+_AUTOMATIC_READ_ADMIN_FIELDS = {
+    "last_error_code",
+    "safe_failure_reason",
+    "admin_action",
+    "recovery_eligible",
+    "action_path",
+    "retry_count",
+    "last_attempt_at",
+}
+
+
+def _has_automatic_read_admin_access(db: Session, *, user_id: int, store_id: int) -> bool:
+    granted = set(db.scalars(
+        select(ErpPermission.permission_key)
+        .select_from(ErpStoreMembership)
+        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+        .join(ErpRolePermission, ErpRolePermission.role_id == ErpRole.id)
+        .join(ErpPermission, ErpPermission.id == ErpRolePermission.permission_id)
+        .join(Store, Store.id == ErpStoreMembership.store_id)
+        .where(
+            ErpStoreMembership.user_id == user_id,
+            ErpStoreMembership.store_id == store_id,
+            ErpStoreMembership.membership_status == "active",
+            ErpRole.status == "active",
+            ErpPermission.status == "active",
+            Store.status == "active",
+        )
+    ).all())
+    return "*" in granted or {"credentials.manage", "platform.sync"}.issubset(granted)
+
+
+def _redact_automatic_read_admin_fields(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        resource: {key: value for key, value in item.items() if key not in _AUTOMATIC_READ_ADMIN_FIELDS}
+        for resource, item in status.items()
+    }
+
+
 def _automatic_read_attention_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
     attention = [
         (row["store_id"], item)
@@ -1036,6 +1074,10 @@ def get_store_overview(
     store_workbenches: list[tuple[Store, dict[str, Any]]] = []
     for store in stores:
         row = _store_overview_row(db, store)
+        if row.get("automatic_read_status") and not _has_automatic_read_admin_access(
+            db, user_id=operator_user_id, store_id=store.id,
+        ):
+            row["automatic_read_status"] = _redact_automatic_read_admin_fields(row["automatic_read_status"])
         workbench = _build_operator_workbench(
             db,
             store_id=store.id,

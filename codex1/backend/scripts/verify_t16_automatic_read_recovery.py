@@ -62,6 +62,7 @@ def seed():
     init_db()
     with SessionLocal() as db:
         store = Store(name="T16 Naver", platform="naver", status="active")
+        other_store = Store(name="T16 Unassigned", platform="naver", status="active")
         user = ErpUser(
             user_key_hash="t16-operator-hash",
             display_name="T16 Operator",
@@ -70,12 +71,20 @@ def seed():
             status="active",
             auth_provider="password",
         )
+        ordinary_user = ErpUser(
+            user_key_hash="t16-ordinary-hash",
+            display_name="T16 Ordinary",
+            login_identifier_hash=hash_login_identifier("ordinary-t16@example.test"),
+            login_identifier_masked="o***@example.test",
+            status="active",
+            auth_provider="password",
+        )
         role = ErpRole(role_key="t16_operator", role_label_zh="test", role_label_en="test", status="active")
-        db.add_all([store, user, role])
+        ordinary_role = ErpRole(role_key="t16_ordinary", role_label_zh="test", role_label_en="test", status="active")
+        db.add_all([store, other_store, user, ordinary_user, role, ordinary_role])
         db.flush()
         permissions = []
         for key, group, sensitive in [
-            ("store.manage", "store", True),
             ("credentials.manage", "credential", True),
             ("platform.sync", "sync", False),
             ("dashboard.read", "dashboard", False),
@@ -94,9 +103,20 @@ def seed():
             mfa_enabled_at=get_utc_now(),
             password_changed_at=get_utc_now(),
         ))
+        db.add(ErpUserSecurity(
+            user_id=ordinary_user.id,
+            password_hash=hash_password(PASSWORD),
+            mfa_type="totp",
+            mfa_secret_encrypted=encrypt_value(TOTP_SECRET),
+            mfa_enabled_at=get_utc_now(),
+            password_changed_at=get_utc_now(),
+        ))
         db.add(ErpStoreMembership(user_id=user.id, store_id=store.id, role_id=role.id, membership_status="active"))
+        db.add(ErpStoreMembership(user_id=ordinary_user.id, store_id=store.id, role_id=ordinary_role.id, membership_status="active"))
         for permission in permissions:
             db.add(ErpRolePermission(role_id=role.id, permission_id=permission.id, can_approve_sensitive=True))
+            if permission.permission_key == "dashboard.read":
+                db.add(ErpRolePermission(role_id=ordinary_role.id, permission_id=permission.id, can_approve_sensitive=False))
         credential = ApiCredential(
             store_id=store.id, platform="naver", credential_name="T16 readonly", client_id="t16-client",
             encrypted_secret_key=encrypt_value("t16-secret-never-returned"), auth_status="test_passed",
@@ -126,11 +146,11 @@ def seed():
                 last_error_code=error_code,
             ))
         db.commit()
-        return store.id, role.id, credential.id
+        return store.id, other_store.id, role.id, credential.id, user.id, ordinary_user.id
 
 
-def authenticate(client):
-    login = client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={"login_identifier": "t16@example.test", "password": PASSWORD})
+def authenticate(client, login_identifier="t16@example.test"):
+    login = client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={"login_identifier": login_identifier, "password": PASSWORD})
     assert login.status_code == 200, login.text
     mfa = client.post("/api/v1/auth/mfa/verify", headers={"Origin": ORIGIN}, json={"code": generate_totp(TOTP_SECRET)})
     assert mfa.status_code == 200, mfa.text
@@ -154,7 +174,7 @@ def failed_smoke(**kwargs):
 
 
 def main():
-    store_id, role_id, credential_id = seed()
+    store_id, other_store_id, role_id, credential_id, admin_user_id, ordinary_user_id = seed()
     with SessionLocal() as db:
         capability_before = db.query(ApiCapabilityTestResult).count()
         credential_before = db.get(ApiCredential, credential_id).extra_config.copy()
@@ -176,11 +196,25 @@ def main():
         assert status["products"]["operator_message"] == "自动读取已暂停，需要管理员处理。"
         assert status["products"]["action_path"] == f"/stores?storeId={store_id}&focus=connection"
         assert status["logistics"]["attention_state"] == "none" and status["logistics"]["operator_message"] == "暂未接入自动读取"
-        for code in ("product_api_not_allowed", "unknown_forbidden"):
+        for code in ("product_api_not_allowed",):
             assert automatic_read_sync_service._recovery_eligible_error(code) is True
-        for code in ("invalid_cursor", "unknown_internal"):
+        for code in ("invalid_cursor", "unknown_forbidden", "unknown_internal", "unexpected_auth_failure", "permission_backend_error"):
             assert automatic_read_sync_service._recovery_eligible_error(code) is False
-        overview = stats_service.get_store_overview(db, operator_user_id=1)
+        admin_grants = set(db.scalars(
+            select(ErpPermission.permission_key)
+            .join(ErpRolePermission, ErpRolePermission.permission_id == ErpPermission.id)
+            .where(ErpRolePermission.role_id == role_id)
+        ).all())
+        assert admin_grants == {"credentials.manage", "platform.sync", "dashboard.read"}
+        overview = stats_service.get_store_overview(db, operator_user_id=admin_user_id)
+        assert [row["store_id"] for row in overview["stores"]] == [store_id] and other_store_id not in {row["store_id"] for row in overview["stores"]}
+        ordinary_overview = stats_service.get_store_overview(db, operator_user_id=ordinary_user_id)
+        assert [row["store_id"] for row in ordinary_overview["stores"]] == [store_id]
+        restricted_fields = {"last_error_code", "safe_failure_reason", "admin_action", "recovery_eligible", "action_path", "retry_count", "last_attempt_at"}
+        safe_fields = {"status", "attention_state", "operator_message", "last_success_at", "next_run_at", "data_fresh_until"}
+        for item in ordinary_overview["stores"][0]["automatic_read_status"].values():
+            assert not restricted_fields.intersection(item)
+            assert safe_fields.issubset(item)
         summary = overview["automatic_read_attention_summary"]
         assert set(summary) == {"affected_store_count", "affected_resource_count", "retrying_count", "stale_count", "admin_required_count"}
         assert summary == {"affected_store_count": 1, "affected_resource_count": 3, "retrying_count": 0, "stale_count": 0, "admin_required_count": 3}, summary
@@ -202,6 +236,12 @@ def main():
     with TestClient(app, base_url=ORIGIN) as client:
         csrf = authenticate(client)
         headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
+        admin_dashboard = client.get("/api/v1/dashboard/store-overview")
+        assert admin_dashboard.status_code == 200, admin_dashboard.text
+        admin_rows = admin_dashboard.json()["data"]["stores"]
+        assert [row["store_id"] for row in admin_rows] == [store_id]
+        assert admin_rows[0]["automatic_read_status"]["orders"]["admin_action"] == "verify_and_recover"
+        assert admin_rows[0]["automatic_read_status"]["orders"]["last_error_code"] == "token_auth_failed"
         missing_confirmation = client.post(f"/api/v1/stores/{store_id}/automatic-read/recover", headers=headers, json={"confirmation": False})
         assert missing_confirmation.status_code == 422, missing_confirmation.text
         with SessionLocal() as db:
@@ -216,6 +256,18 @@ def main():
         with SessionLocal() as db:
             permission_id = db.scalar(select(ErpPermission.id).where(ErpPermission.permission_key == "platform.sync"))
             db.add(ErpRolePermission(role_id=role_id, permission_id=permission_id, can_approve_sensitive=True))
+            credential_permission_id = db.scalar(select(ErpPermission.id).where(ErpPermission.permission_key == "credentials.manage"))
+            credential_grant = db.scalar(select(ErpRolePermission).where(
+                ErpRolePermission.role_id == role_id,
+                ErpRolePermission.permission_id == credential_permission_id,
+            ))
+            db.delete(credential_grant)
+            db.commit()
+        credentials_denied = client.post(f"/api/v1/stores/{store_id}/automatic-read/recover", headers=headers, json={"confirmation": True})
+        assert credentials_denied.status_code == 403 and credentials_denied.json()["error_code"] == "credentials_manage_forbidden", credentials_denied.text
+        with SessionLocal() as db:
+            credential_permission_id = db.scalar(select(ErpPermission.id).where(ErpPermission.permission_key == "credentials.manage"))
+            db.add(ErpRolePermission(role_id=role_id, permission_id=credential_permission_id, can_approve_sensitive=True))
             session = db.scalar(select(ErpSession).where(ErpSession.revoked_at.is_(None)))
             session.last_reauthenticated_at = get_utc_now() - timedelta(hours=1)
             db.commit()
@@ -235,6 +287,17 @@ def main():
         assert recovery_data["automatic_read_status"]["orders"]["attention_state"] == "automatic_retry"
         assert recovery_data["safety_flags"] == {"platform_write": False, "sync_started": False, "smoke_persisted": False}
         assert mocked_smoke.call_count == 1
+
+        client.cookies.clear()
+        authenticate(client, "ordinary-t16@example.test")
+        ordinary_dashboard = client.get("/api/v1/dashboard/store-overview")
+        assert ordinary_dashboard.status_code == 200, ordinary_dashboard.text
+        ordinary_rows = ordinary_dashboard.json()["data"]["stores"]
+        assert [row["store_id"] for row in ordinary_rows] == [store_id]
+        assert other_store_id not in {row["store_id"] for row in ordinary_rows}
+        restricted_fields = {"last_error_code", "safe_failure_reason", "admin_action", "recovery_eligible", "action_path", "retry_count", "last_attempt_at"}
+        for item in ordinary_rows[0]["automatic_read_status"].values():
+            assert not restricted_fields.intersection(item), item
 
     with SessionLocal() as db:
         orders = _checkpoint(db, store_id, "orders")
