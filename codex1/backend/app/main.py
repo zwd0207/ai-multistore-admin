@@ -54,6 +54,7 @@ async def run_pxg_naver_cleanup_scheduler(
 
 async def run_store_onboarding_scheduler(
     *,
+    runtime_settings: Any = settings,
     runner: Callable[..., Any] | None = None,
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
     interval_seconds: float = 60,
@@ -70,7 +71,14 @@ async def run_store_onboarding_scheduler(
         except Exception:
             # The durable onboarding row keeps its last safe state for the next pass.
             pass
-        await sleep_fn(interval_seconds)
+        if runtime_settings.automatic_read_sync_enabled:
+            try:
+                from app.services.automatic_read_sync_service import run_due_automatic_read_syncs
+
+                await asyncio.to_thread(run_due_automatic_read_syncs, session_factory=SessionLocal)
+            except Exception:
+                pass
+        await sleep_fn(max(30, min(60, runtime_settings.automatic_read_sync_interval_seconds, interval_seconds)))
 
 
 def _validate_production_configuration() -> None:
@@ -103,7 +111,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
     tasks = [
         asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings)),
-        asyncio.create_task(run_store_onboarding_scheduler()),
+        asyncio.create_task(run_store_onboarding_scheduler(runtime_settings=settings)),
     ]
     yield
     for task in tasks:

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     pxg_naver_local_read_backup_root: str | None = None
     local_product_thumbnail_root: str | None = None
     pxg_naver_local_read_thumbnail_generation_enabled: bool = False
+    automatic_read_sync_enabled: bool = True
+    automatic_read_sync_interval_seconds: int = 45
     pxg_naver_local_read_first_sync_limit: int = 3
     ai_automatic_operations_enabled: bool = False
     platform_product_write_enabled: bool = False

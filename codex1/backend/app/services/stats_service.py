@@ -917,6 +917,12 @@ def _connection_status(resources: dict[str, dict[str, Any]], credential: ApiCred
     return {"label": "同步状态未确认", "tone": "warning", "reason": ordered_resources[0]["message"]}
 
 
+def _automatic_read_status(db: Session, store_id: int) -> dict[str, Any]:
+    from app.services.automatic_read_sync_service import automatic_read_status
+
+    return automatic_read_status(db, store_id=store_id)
+
+
 def _store_overview_row(db: Session, store: Store) -> dict[str, Any]:
     try:
         platform = normalize_platform(store.platform)
@@ -974,6 +980,7 @@ def _store_overview_row(db: Session, store: Store) -> dict[str, Any]:
         "connection_reason": connection["reason"],
         "last_sync_at": last_sync_at,
         "latest_manual_sync_status": (latest_log.raw_summary or {}).get("status") if latest_log and isinstance(latest_log.raw_summary, dict) else None,
+        "automatic_read_status": _automatic_read_status(db, store.id) if platform == "naver" else {},
         "resources": resources,
         "metrics": metrics,
     }

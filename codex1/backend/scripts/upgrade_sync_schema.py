@@ -26,6 +26,18 @@ PRODUCT_COLUMNS = {
     "last_synced_at": "DATETIME",
 }
 
+SYNC_CHECKPOINT_COLUMNS = {
+    "automatic_read_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "status": "VARCHAR(30) NOT NULL DEFAULT 'idle'",
+    "next_run_at": "DATETIME",
+    "fresh_until": "DATETIME",
+    "retry_count": "INTEGER NOT NULL DEFAULT 0",
+    "last_error_code": "VARCHAR(80)",
+    "last_attempt_at": "DATETIME",
+    "lease_token": "VARCHAR(64)",
+    "lease_expires_at": "DATETIME",
+}
+
 FINANCIAL_TABLES = {
     "platform_sales_details",
     "platform_settlement_details",
@@ -92,6 +104,9 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, list[str]]:
     try:
         orders_added = add_missing_columns(connection, "orders", ORDER_COLUMNS)
         products_added = add_missing_columns(connection, "products", PRODUCT_COLUMNS)
+        checkpoints_added = add_missing_columns(connection, "sync_checkpoints", SYNC_CHECKPOINT_COLUMNS)
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_sync_checkpoint_due ON sync_checkpoints (platform, automatic_read_enabled, next_run_at)")
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_sync_checkpoint_lease ON sync_checkpoints (lease_expires_at)")
         connection.commit()
         current_tables = get_existing_tables(connection)
         financial_tables_added = sorted(FINANCIAL_TABLES - existing_tables)
@@ -101,6 +116,7 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, list[str]]:
         return {
             "orders": orders_added,
             "products": products_added,
+            "sync_checkpoints": checkpoints_added,
             "tables": ["sync_checkpoints"] if "sync_checkpoints" not in existing_tables else [],
             "financial_tables": financial_tables_added,
         }
