@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { adaptStoreOverview } from '../src/services/adapters.js';
 import { adaptAutomaticReadAttentionSummary, adaptAutomaticReadStatus } from '../src/utils/automaticReadStatus.js';
 
 const read = (path) => fs.readFileSync(path, 'utf8');
@@ -15,9 +16,9 @@ const layout = read('src/layouts/AdminLayout.jsx');
 const status = adaptAutomaticReadStatus({
   orders: {
     attention_state: 'admin_action',
-    operator_message: '请检查连接资料。',
-    admin_action: 'manual_review',
-    recovery_eligible: false,
+    operator_message: '连接资料需要验证，请联系管理员处理。',
+    admin_action: 'verify_and_recover',
+    recovery_eligible: true,
     action_path: '/stores?storeId=8&focus=connection',
   },
 });
@@ -33,22 +34,43 @@ assert.deepEqual(status.orders, {
   isStale: undefined,
   lastAttemptAt: '',
   attentionState: 'admin_action',
-  operatorMessage: '请检查连接资料。',
-  adminAction: 'manual_review',
-  recoveryEligible: false,
+    operatorMessage: '连接资料需要验证，请联系管理员处理。',
+    adminAction: 'verify_and_recover',
+    recoveryEligible: true,
   actionPath: '/stores?storeId=8&focus=connection',
 });
-assert.deepEqual(adaptAutomaticReadAttentionSummary({ attention_count: 1, attention_state: 'admin_action' }), {
-  attentionState: 'admin_action',
-  attentionCount: 1,
-  attentionResources: [],
-  operatorMessage: '',
-  adminAction: 'none',
-  recoveryEligible: false,
-  actionPath: '',
+assert.deepEqual(adaptAutomaticReadAttentionSummary({
+  affected_store_count: 2,
+  affected_resource_count: 3,
+  retrying_count: 1,
+  stale_count: 1,
+  admin_required_count: 1,
+}), {
+  affectedStoreCount: 2,
+  affectedResourceCount: 3,
+  retryingCount: 1,
+  staleCount: 1,
+  adminRequiredCount: 1,
+});
+assert.deepEqual(adaptStoreOverview({
+  automatic_read_attention_summary: {
+    affected_store_count: 2,
+    affected_resource_count: 3,
+    retrying_count: 1,
+    stale_count: 1,
+    admin_required_count: 1,
+  },
+}).automaticReadAttentionSummary, {
+  affectedStoreCount: 2,
+  affectedResourceCount: 3,
+  retryingCount: 1,
+  staleCount: 1,
+  adminRequiredCount: 1,
 });
 
 assert.match(adapters, /automaticReadAttentionSummary: adaptAutomaticReadAttentionSummary/);
+const rowAdapter = adapters.slice(adapters.indexOf('function adaptStoreOverviewRow'), adapters.indexOf('export function adaptStoreOverview'));
+assert.doesNotMatch(rowAdapter, /automaticReadAttentionSummary/);
 assert.match(adapters, /automaticReadStatus: adaptAutomaticReadStatus\(item\.automatic_read_status\)/);
 assert.match(backendApi, /`\/stores\/\$\{encodeURIComponent\(storeId\)\}\/automatic-read\/recover`/);
 assert.match(backendApi, /\{ confirmation: true \}/);
@@ -59,8 +81,10 @@ assert.match(panel, /MAX_RECOVERY_POLLS = 8/);
 assert.match(panel, /dataProvider\.getStoreOverview\(\{ includeInactive: false \}\)/);
 assert.match(panel, /actionPath \|\| connectionActionPath/);
 assert.match(panel, /operatorMessage/);
-assert.match(panel, /automaticReadAttentionSummary/);
-assert.doesNotMatch(panel, /safeFailureReason|lastErrorCode/);
+assert.match(panel, /attentionSummary\.affectedStoreCount/);
+assert.match(panel, /attentionSummary\.affectedResourceCount/);
+assert.doesNotMatch(panel, /row\.automaticReadAttentionSummary/);
+assert.match(panel, /safeFailureReason === 'not_supported'/);
 assert.match(dashboard, /credentials\.manage/);
 assert.match(dashboard, /platform\.sync/);
 assert.match(stores, /useSearchParams/);

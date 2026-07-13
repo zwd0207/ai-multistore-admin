@@ -1424,9 +1424,6 @@ function adaptStoreOverviewRow(item = {}) {
       customerInquiries: adaptOverviewResource(resources.customer_inquiries || resources.customerInquiries),
     },
     automaticReadStatus: adaptAutomaticReadStatus(item.automatic_read_status),
-    automaticReadAttentionSummary: adaptAutomaticReadAttentionSummary(
-      item.automatic_read_attention_summary || item.automaticReadAttentionSummary,
-    ),
     workbenchSummary: adaptOperatorWorkbench({
       summary: item.workbench_summary || item.workbenchSummary || {},
     }).summary,
@@ -1444,6 +1441,9 @@ export function adaptStoreOverview(data = {}) {
     businessDayStart: data.business_day_start || data.businessDayStart || '',
     businessDayEnd: data.business_day_end || data.businessDayEnd || '',
     stores,
+    automaticReadAttentionSummary: adaptAutomaticReadAttentionSummary(
+      data.automatic_read_attention_summary || data.automaticReadAttentionSummary,
+    ),
     operatorWorkbench: adaptOperatorWorkbench(data.operator_workbench || data.operatorWorkbench || {}),
     summary: {
       storeCount: numberValue(summary.store_count ?? data.store_count ?? stores.length),

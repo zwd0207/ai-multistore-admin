@@ -32,13 +32,11 @@ function adaptAutomaticReadResource(source = {}) {
 export function adaptAutomaticReadAttentionSummary(value = {}) {
   const source = value || {};
   return {
-    attentionState: source.attention_state || source.attentionState || 'none',
-    attentionCount: source.attention_count ?? source.attentionCount ?? source.count ?? 0,
-    attentionResources: source.attention_resources || source.attentionResources || source.resources || [],
-    operatorMessage: source.operator_message || source.operatorMessage || '',
-    adminAction: source.admin_action || source.adminAction || 'none',
-    recoveryEligible: source.recovery_eligible ?? source.recoveryEligible ?? false,
-    actionPath: source.action_path || source.actionPath || '',
+    affectedStoreCount: source.affected_store_count ?? source.affectedStoreCount ?? 0,
+    affectedResourceCount: source.affected_resource_count ?? source.affectedResourceCount ?? 0,
+    retryingCount: source.retrying_count ?? source.retryingCount ?? 0,
+    staleCount: source.stale_count ?? source.staleCount ?? 0,
+    adminRequiredCount: source.admin_required_count ?? source.adminRequiredCount ?? 0,
   };
 }
 

@@ -18,12 +18,13 @@ function connectionActionPath(storeId) {
 }
 
 function ResourceStatus({ resource, showOperatorMessage }) {
-  const label = storeSyncStatusLabel(resource?.status);
+  const unavailable = resource?.safeFailureReason === 'not_supported';
+  const label = unavailable ? (resource.safeFailureLabel || '暂未接入自动读取') : storeSyncStatusLabel(resource?.status);
   return (
     <article className="store-sync-resource">
       <div className="store-sync-resource-heading">
         <strong>{label}</strong>
-        <StatusBadge value={label} />
+        <StatusBadge value={unavailable ? '暂未接入' : label} />
       </div>
       <dl>
         <div><dt>最后成功</dt><dd>{formatStoreSyncTime(resource?.lastSuccessAt)}</dd></div>
@@ -37,13 +38,7 @@ function ResourceStatus({ resource, showOperatorMessage }) {
 }
 
 function attentionResources(row) {
-  const summaryResources = Array.isArray(row.automaticReadAttentionSummary?.attentionResources)
-    ? row.automaticReadAttentionSummary.attentionResources
-    : [];
-  return RESOURCE_ROWS.filter(([key]) => (
-    row.automaticReadStatus?.[key]?.attentionState !== 'none'
-    || summaryResources.includes(key)
-  ));
+  return RESOURCE_ROWS.filter(([key]) => row.automaticReadStatus?.[key]?.attentionState !== 'none');
 }
 
 function updateRow(rows, nextRow) {
@@ -56,7 +51,7 @@ function waitForPoll() {
   return new Promise((resolve) => setTimeout(resolve, RECOVERY_POLL_DELAY_MS));
 }
 
-export default function StoreSyncStatusPanel({ rows = [], canManageRecovery = () => false }) {
+export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {}, canManageRecovery = () => false }) {
   const [visibleRows, setVisibleRows] = useState(rows);
   const [recoveringStoreId, setRecoveringStoreId] = useState('');
   const [feedback, setFeedback] = useState({});
@@ -107,8 +102,15 @@ export default function StoreSyncStatusPanel({ rows = [], canManageRecovery = ()
     <section className="content-card store-sync-panel">
       <div className="card-title">
         <div>
-          <h2>店铺自动同步状态</h2>
-          <p>按店铺查看订单、客服、商品和物流的自动读取状态。</p>
+          <h2>
+            店铺自动同步状态
+            {attentionSummary.affectedStoreCount ? `（${attentionSummary.affectedStoreCount} 个店铺需关注）` : ''}
+          </h2>
+          <p>
+            {attentionSummary.affectedResourceCount
+              ? `有 ${attentionSummary.affectedResourceCount} 个资源需要关注，按店铺查看订单、客服、商品和物流的自动读取状态。`
+              : '按店铺查看订单、客服、商品和物流的自动读取状态。'}
+          </p>
         </div>
       </div>
       {!visibleRows.length ? (

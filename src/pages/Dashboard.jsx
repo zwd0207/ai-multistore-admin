@@ -137,6 +137,14 @@ export default function Dashboard() {
         <SummaryCard title="等待中" value={visibleWorkbench.summary.waiting || 0} note="等待仓库或管理员" tone="info" />
         <SummaryCard title="今日完成" value={visibleWorkbench.summary.completedToday || 0} note="按业务日期统计" tone="success" />
       </div>
+      <StoreSyncStatusPanel
+        rows={overviewRows}
+        attentionSummary={state.overview?.automaticReadAttentionSummary}
+        canManageRecovery={(storeId) => (
+          canAccessStore(storeId, 'credentials.manage')
+          && canAccessStore(storeId, 'platform.sync')
+        )}
+      />
       <section className="content-card">
         <div className="card-title"><div><h2>今天先处理什么</h2><p>任务分类和优先级由后端工作台聚合提供。</p></div></div>
         {sourceNotices.length ? <div className="form-info source-notices">
@@ -161,13 +169,6 @@ export default function Dashboard() {
         <div className="card-title"><div><h2>按店铺查看</h2><p>选择店铺后查看该店铺的聚合任务和数据状态。</p></div></div>
         <div className="dashboard-store-table"><DataTable columns={storeColumns} rows={overviewRows} renderActions={(row) => <><button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button><Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link><Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link></>} /></div>
       </section>
-      <StoreSyncStatusPanel
-        rows={overviewRows}
-        canManageRecovery={(storeId) => (
-          canAccessStore(storeId, 'credentials.manage')
-          && canAccessStore(storeId, 'platform.sync')
-        )}
-      />
       <section className="content-card">
         <div className="card-title"><div><h2>核心快捷入口</h2><p>常用任务集中在这里。</p></div></div>
         <div className="business-capability-grid compact"><Link className="business-capability-card info" to="/orders">处理订单</Link><Link className="business-capability-card info" to="/shipping">仓库发货</Link><Link className="business-capability-card info" to="/customer-service">客户咨询</Link><Link className="business-capability-card info" to="/inventory">库存预警</Link></div>
