@@ -32,15 +32,35 @@ if str(BACKEND_DIR) not in sys.path:
 from fastapi.testclient import TestClient
 from sqlalchemy import event
 
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.core.exceptions import ApiError
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.core.timezone import get_utc_now
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.database import Base, SessionLocal, engine
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.main import app
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.order import Order
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.store import Store
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.encryption import encrypt_value
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services import stats_service
 
 

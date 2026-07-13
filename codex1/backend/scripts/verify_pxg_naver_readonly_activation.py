@@ -32,16 +32,38 @@ os.environ["PXG_NAVER_LOCAL_READ_RETENTION_APPROVED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_BACKUP_ROLLBACK_APPROVED"] = "false"
 os.environ["PXG_NAVER_LOCAL_READ_FIRST_SYNC_LIMIT"] = "3"
 
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.config import get_settings
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.database import SessionLocal, engine, init_db
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.main import app
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.operation_audit_log import OperationAuditLog
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.order import Order
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.product import Product
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.store import Store
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.schemas.pxg_naver_readonly import PxgNaverReadonlyAdapterBatch
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.operator_trial_service import TRIAL_STORE_NAME
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.pxg_naver_readonly_activation_service import (
     readonly_activation_precheck,
     run_fictional_activation_simulation,

@@ -29,9 +29,17 @@ if str(BACKEND_DIR) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.core.timezone import get_utc_now
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.database import Base, SessionLocal, engine
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.main import app
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.auth import (
     ErpPermission,
     ErpRole,
@@ -41,12 +49,26 @@ from app.models.auth import (
     ErpUser,
     ErpUserSecurity,
 )
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.shipping import WarehouseShippingBatch
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.store import Store
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.operation_audit_log import OperationAuditLog
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.sync_log import SyncLog
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services import shipping_service, sync_service
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.encryption import encrypt_value
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
 

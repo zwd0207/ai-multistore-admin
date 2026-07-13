@@ -31,13 +31,29 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.requests import Request
 
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.config import Settings, get_settings
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.core.timezone import get_utc_now
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.database import Base, SessionLocal, engine
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.main import app
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.auth import ErpRole, ErpSession, ErpStoreMembership, ErpUser, ErpUserSecurity
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.models.store import Store
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.encryption import encrypt_value
+os.environ['LIFECYCLE_SCHEDULERS_ENABLED'] = 'false'
+
 from app.services.session_service import _peppered_hash, generate_totp, hash_login_identifier, hash_password, is_loopback_socket_peer
 
 
