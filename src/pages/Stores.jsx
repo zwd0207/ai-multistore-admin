@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
 import ResourcePage from '../components/common/ResourcePage';
@@ -380,6 +381,9 @@ function OnboardingProgress({ onboarding }) {
 
 export default function Stores() {
   const { selectedStoreId, setSelectedStoreId, refreshStores } = useStoreContext();
+  const [searchParams] = useSearchParams();
+  const queryStoreId = searchParams.get('storeId') || '';
+  const queryFocus = searchParams.get('focus') || '';
   const [wizardOpen, setWizardOpen] = useState(false);
   const [onboardingId, setOnboardingId] = useState(readStoredOnboardingId);
   const [onboarding, setOnboarding] = useState(null);
@@ -390,6 +394,10 @@ export default function Stores() {
   const [editingBlocked, setEditingBlocked] = useState(false);
   const [pollVersion, setPollVersion] = useState(0);
   const idempotencyKeyRef = useRef(generateIdempotencyKey());
+
+  useEffect(() => {
+    if (queryStoreId) setSelectedStoreId(queryStoreId);
+  }, [queryStoreId, setSelectedStoreId]);
 
   useEffect(() => {
     if (!isBackendSource || !onboardingId) return undefined;
@@ -513,6 +521,10 @@ export default function Stores() {
       resourceName="店铺"
       api={api}
       columns={columns}
+      initialQuery={{ pageSize: 100 }}
+      initialQueryKey={`${queryStoreId}:${queryFocus}`}
+      openRecordId={queryFocus === 'connection' ? queryStoreId : ''}
+      openRecordKey={queryFocus}
       fields={fields}
       statuses={statusOptions}
       platforms={platformOptions}
@@ -543,7 +555,7 @@ export default function Stores() {
       afterSave={saveStoreCredential}
       modalWidth="min(820px, 94vw)"
       extraActions={<button className="button ghost" type="button" onClick={openOnboardingWizard}>添加 Naver 店铺</button>}
-      onSaved={(store) => refreshStores({ preferredStoreId: selectedStoreId || normalizeStoreDisplay(store)?.id })}
+      onSaved={(store) => refreshStores({ preferredStoreId: normalizeStoreDisplay(store)?.id || selectedStoreId })}
       />
       <Modal
         open={wizardOpen}

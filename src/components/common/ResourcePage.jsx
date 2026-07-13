@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useMemo, useState,
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import DataTable from './DataTable';
 import EmptyState from './EmptyState';
@@ -37,6 +37,8 @@ export default function ResourcePage({
   afterSave,
   renderFormExtra,
   modalWidth,
+  openRecordId = '',
+  openRecordKey = '',
 }) {
   const baseQuery = useMemo(
     () => ({
@@ -151,6 +153,17 @@ export default function ResourcePage({
 
   const rows = result.data || [];
   const shouldShowEmptyState = !loading && !loadError && rows.length === 0 && emptyState;
+
+  const handledOpenRecordRef = useRef('');
+  useEffect(() => {
+    if (!openRecordId || loading || !rows.length) return;
+    const requestKey = `${openRecordKey || 'record'}:${openRecordId}`;
+    if (handledOpenRecordRef.current === requestKey) return;
+    const record = rows.find((item) => String(item.id) === String(openRecordId));
+    if (!record) return;
+    handledOpenRecordRef.current = requestKey;
+    openModal(record);
+  }, [openRecordId, openRecordKey, loading, rows]);
 
   return (
     <>

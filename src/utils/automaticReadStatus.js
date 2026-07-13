@@ -21,6 +21,24 @@ function adaptAutomaticReadResource(source = {}) {
     safeFailureLabel: SAFE_FAILURE_LABELS[safeFailureReason] || '',
     isStale: source.is_stale,
     lastAttemptAt: source.last_attempt_at || '',
+    attentionState: source.attention_state || source.attentionState || 'none',
+    operatorMessage: source.operator_message || source.operatorMessage || '',
+    adminAction: source.admin_action || source.adminAction || 'none',
+    recoveryEligible: source.recovery_eligible ?? source.recoveryEligible ?? false,
+    actionPath: source.action_path || source.actionPath || '',
+  };
+}
+
+export function adaptAutomaticReadAttentionSummary(value = {}) {
+  const source = value || {};
+  return {
+    attentionState: source.attention_state || source.attentionState || 'none',
+    attentionCount: source.attention_count ?? source.attentionCount ?? source.count ?? 0,
+    attentionResources: source.attention_resources || source.attentionResources || source.resources || [],
+    operatorMessage: source.operator_message || source.operatorMessage || '',
+    adminAction: source.admin_action || source.adminAction || 'none',
+    recoveryEligible: source.recovery_eligible ?? source.recoveryEligible ?? false,
+    actionPath: source.action_path || source.actionPath || '',
   };
 }
 

@@ -163,7 +163,10 @@ export default function Dashboard() {
       </section>
       <StoreSyncStatusPanel
         rows={overviewRows}
-        canViewFailureReason={(storeId) => canAccessStore(storeId, 'store_membership.assign')}
+        canManageRecovery={(storeId) => (
+          canAccessStore(storeId, 'credentials.manage')
+          && canAccessStore(storeId, 'platform.sync')
+        )}
       />
       <section className="content-card">
         <div className="card-title"><div><h2>核心快捷入口</h2><p>常用任务集中在这里。</p></div></div>

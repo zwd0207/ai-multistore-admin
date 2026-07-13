@@ -71,6 +71,11 @@ export const backendApi = {
   updateStore: (storeId, payload) => sendData('put', `/stores/${storeId}`, payload),
   getDashboardSummary: (params) => getData('/dashboard/summary', params),
   getStoreOverview: (params) => getData('/dashboard/store-overview', params),
+  recoverAutomaticRead: (storeId) => sendData(
+    'post',
+    `/stores/${encodeURIComponent(storeId)}/automatic-read/recover`,
+    { confirmation: true },
+  ),
   getAiDailyContext: (params) => getData('/ai/daily-context', params),
   getProducts: (params) => getData('/products', params),
   getOrders: (params) => getData('/orders', params),

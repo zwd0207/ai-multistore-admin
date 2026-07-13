@@ -88,7 +88,6 @@ export default function AdminLayout() {
             <ManualStoreSyncButton />
           </div>
           <div className="topbar-actions">
-            <span className="notification">3</span>
             <span className="avatar">运</span>
             <span>
               <strong>{user?.display_name || user?.name || user?.login_identifier_masked || '运营人员'}</strong>

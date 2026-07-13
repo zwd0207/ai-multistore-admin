@@ -1,5 +1,5 @@
 import { getNaverOrderStatusPresentation } from '../utils/naverOrderFulfillment.js';
-import { adaptAutomaticReadStatus } from '../utils/automaticReadStatus.js';
+import { adaptAutomaticReadAttentionSummary, adaptAutomaticReadStatus } from '../utils/automaticReadStatus.js';
 
 const numberValue = (value) => Number(value || 0);
 const emptyText = (value, fallback = '—') => value ?? fallback;
@@ -1424,6 +1424,9 @@ function adaptStoreOverviewRow(item = {}) {
       customerInquiries: adaptOverviewResource(resources.customer_inquiries || resources.customerInquiries),
     },
     automaticReadStatus: adaptAutomaticReadStatus(item.automatic_read_status),
+    automaticReadAttentionSummary: adaptAutomaticReadAttentionSummary(
+      item.automatic_read_attention_summary || item.automaticReadAttentionSummary,
+    ),
     workbenchSummary: adaptOperatorWorkbench({
       summary: item.workbench_summary || item.workbenchSummary || {},
     }).summary,

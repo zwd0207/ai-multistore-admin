@@ -4445,6 +4445,10 @@ const sourceMethods = {
       include_inactive: params.includeInactive ?? params.include_inactive ?? false,
     }));
   },
+  recoverAutomaticRead: async (storeId) => {
+    if (!isBackendSource) return { status: 'local_only', confirmation: true, storeId };
+    return backendApi.recoverAutomaticRead(storeId);
+  },
   getDashboardSalesTrend: mockApi.getDashboardSalesTrend,
   getStores: async (params) => {
     if (!isBackendSource) return mockApi.getStores(params);
