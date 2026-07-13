@@ -33,11 +33,31 @@ assert.equal(generic.content, 'safe generic summary');
 assert.equal(generic.detailLoaded, true);
 
 const detail = adaptCustomerInquiryDetail({
-  readonly_id: 'readonly-1',
-  decrypted_content: 'decrypted message',
+  id: 17,
+  store_id: 1,
+  platform: 'naver',
+  title: 'decrypted title',
+  content: 'decrypted message',
 });
 assert.equal(detail.content, 'decrypted message');
+assert.equal(detail.title, 'decrypted title');
 assert.equal(detail.detailLoaded, true);
+assert.equal(detail.id, undefined);
+
+const activeListRow = adaptCustomerInquiry({
+  inquiry_id: 'pxg_naver_readonly:17',
+  source: 'pxg_naver_readonly_local_v1',
+  store_id: 1,
+  store_name: 'Original Naver Store',
+  summary: 'safe summary',
+  order_context: { order_no: 'ORDER-17', product_name: 'Product 17' },
+});
+const mergedDetail = { ...activeListRow, ...detail };
+assert.equal(mergedDetail.ticketNo, 'pxg_naver_readonly:17');
+assert.equal(mergedDetail.store, 'Original Naver Store');
+assert.equal(mergedDetail.orderNo, 'ORDER-17');
+assert.equal(mergedDetail.productName, 'Product 17');
+assert.equal(mergedDetail.content, 'decrypted message');
 
 const unavailable = manualBatchSyncResult({
   status: 'partial_success',

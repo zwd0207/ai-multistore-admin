@@ -630,12 +630,17 @@ export function adaptCustomerInquiry(item = {}) {
 
 export function adaptCustomerInquiryDetail(item = {}) {
   const source = item.detail || item.item || item.inquiry || item;
-  const adapted = adaptCustomerInquiry(source);
-  return {
-    ...adapted,
-    content: source.decrypted_content ?? source.decryptedContent ?? source.content ?? source.message ?? '',
-    detailLoaded: true,
-  };
+  const detail = { detailLoaded: true };
+  const content = source.decrypted_content ?? source.decryptedContent ?? source.content ?? source.message;
+  const title = source.decrypted_title ?? source.decryptedTitle ?? source.title;
+  const readonlyId = source.readonly_id ?? source.readonlyId;
+  const storeId = source.store_id ?? source.storeId;
+  if (content !== undefined && content !== null) detail.content = content;
+  if (typeof title === 'string' && title.trim()) detail.title = title;
+  if (readonlyId !== undefined && readonlyId !== null && String(readonlyId).trim()) detail.readonlyId = readonlyId;
+  if (storeId !== undefined && storeId !== null) detail.storeId = storeId;
+  if (typeof source.platform === 'string' && source.platform.trim()) detail.platform = source.platform;
+  return detail;
 }
 
 export function naverCustomerInquiryRefresh(data = {}) {
