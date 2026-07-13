@@ -33,18 +33,19 @@ from app.models.store import Store
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.services import automatic_read_sync_service, order_service, pxg_naver_readonly_persistence_service
 from app.services.encryption import encrypt_value
-from app.services.store_onboarding_service import NaverReadPage
+from app.services.store_onboarding_service import NaverReadPage, _canonical_orders
 
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 TRACKING = "T17-TRACKING-99887766"
 
 
-def detail(product_order_id, order_id, *, changed=NOW, delivery="DELIVERING", tracking=TRACKING, carrier="CJ", order_hash=None):
+def detail(product_order_id, order_id, *, changed=NOW, delivery="DELIVERING", tracking=TRACKING, carrier="CJ", order_hash=None, product_order_hash=None):
     return {
         "external_product_order_id": product_order_id,
         "external_order_id_full": order_id,
         "external_order_id_hash": order_hash,
+        "external_product_order_id_hash": product_order_hash,
         "last_changed_at": changed.isoformat(),
         "delivery_status": {"raw": delivery, "derived_from_order_status": False} if delivery else None,
         "tracking_number": tracking,
@@ -205,6 +206,29 @@ def main():
         except ApiError as exc:
             assert exc.error_code == "naver_logistics_external_order_id_mismatch"
             db.rollback()
+        legacy_hash_order = seed_order(db, store, "po-legacy-hash", "legacy-product-order-hash")
+        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db,
+            store_id=store.id,
+            details=[detail(
+                "po-legacy-hash",
+                "full-legacy-order-id",
+                order_hash="correct-order-hash",
+                product_order_hash="legacy-product-order-hash",
+            )],
+            now=NOW,
+        )["saved"] == 1
+        db.commit()
+
+        canonical = _canonical_orders([{
+            "external_product_order_id": "po-canonical",
+            "external_product_order_id_hash": "product-order-hash",
+            "external_order_id_hash": "order-hash",
+            "product_name": "Canonical product",
+            "ordered_at": NOW.isoformat(),
+            "order_status": {"raw": "PAYED"},
+        }], "automatic_incremental")
+        assert canonical[0]["external_order_id"] == "order-hash"
         db.commit()
 
         # Idempotence, stale source protection, same-version conflict, and terminal non-regression.

@@ -923,7 +923,7 @@ def _canonical_orders(items: list[dict], scope: str) -> list[dict]:
     for item in items:
         external_product_order_id = _text(item.get("external_product_order_id"), 120)
         external_order_id = str(
-            item.get("external_product_order_id_hash")
+            item.get("external_order_id_hash")
             or item.get("external_order_id")
             or ""
         ).strip()
