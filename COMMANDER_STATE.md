@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T16 automatic-read exception recovery accepted
+Status: T17 logistics readonly implementation resumed after frontend bundle optimization
 
 ## Mission
 
@@ -16,7 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `9975db6` (T16 automatic-read exception recovery and 68-second status convergence).
+- Last accepted integration: `8937d2d` (route-level code splitting and enforced frontend bundle budget).
 - Last accepted backend integration: `144d00e` (T16 recovery access and response-redaction boundary).
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
@@ -33,6 +33,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Credential handoff exists only in ignored local storage with a current-user Windows ACL.
 - T16 is accepted. The existing store overview now surfaces safe automatic-read attention counts and resource guidance; credential and permission blocks can be verified and released through the existing T15 scheduler without running synchronization in the HTTP request.
 - Ordinary operators receive only safe status and guidance. Recovery requires same-store `credentials.manage`, `platform.sync`, recent authentication, MFA, and CSRF; cursor, conflict, cleanup, retention, and unknown failures remain nonrecoverable.
+- Frontend routes and the administrative layout now load on demand. The production entry chunk is limited to 300 KiB and every JavaScript chunk to 500 KiB; unauthenticated sessions do not download the full data provider.
 
 ## Active Trial Boundary
 
@@ -99,6 +100,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `be091e8`, `e92bc18`, `5afcfa4`, `fe84b43`, `c290e70`, and `ca915b5`: T14 replaces the blocked legacy Naver inquiry sync with a store-scoped inquiry-only readonly path. Inquiry content is encrypted at rest, retained for an immutable maximum of 30 days, omitted from list/log/audit output, and decrypted only through a permission-gated detail request. Real PXG browser verification imported 19 Naver inquiries, displayed a real detail with preserved store/order context, kept reply disabled, and passed 390px layout. Focused tests, build, full `verify_all.py`, and Sol final review passed.
 - `d55bebc`, `dae8fd2`, `471456e`, `24092c9`, `ae001f1`, and `0a56e39`: T15 adds one store-isolated Naver readonly scheduler using existing checkpoints, logs, T13 readers, and T14 inquiry service. Real PXG orders and inquiries run about every 10 minutes, products about every 2 hours, and logistics remains explicitly unsupported. The pre-T13 PXG store is admitted only through an active configured credential plus successful approved readonly evidence; the fictional store remains disabled. Real browser QA showed successful reads, next-run times in KST, desktop and 390px containment, and no platform writes. T13/T14/T15, production sessions, frontend build/encoding, and full `verify_all.py` passed.
 - `1c9fcc7` through `9975db6`: T16 extends the existing store overview, T15 checkpoints/scheduler, connection editor, and workbench status panel. It adds safe exception summaries, store-scoped verify-and-recover, connection deep links, administrator/ordinary-operator response separation, and 68-second recovery polling without a new table, scheduler, log, page, or platform write path. T13-T16, production sessions, frontend contracts/build/encoding, full `verify_all.py`, desktop browser QA, 390px browser QA, and Sol final review passed.
+- `8937d2d`: frontend business routes, the administrative layout, and the large data provider load on demand. The entry bundle fell from 901 KB to 253 KB, the data-provider chunk is 351 KB, all 37 JavaScript chunks pass enforced budgets, and the production build no longer emits the 500 KB warning. Browser QA passed login, workbench, orders, shipping, customer service, and 390px containment; invalid 200-row list requests were corrected to the backend limit of 100.
 
 ## Worktree Registry
 
@@ -132,6 +134,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 19. T16 automatic-read exception recovery is accepted. Keep transient failures on automatic retry; only credential and known permission blocks may use verify-and-recover.
 20. Logistics automatic read remains `not_supported` and is excluded from exception counts until an approved Naver readonly logistics adapter exists.
 21. The next phase should improve operator handling of the refreshed order, inquiry, product, and warehouse data without creating a second scheduler, task table, order table, inquiry service, or platform-write path.
+22. T17 Naver logistics readonly work resumes from `8937d2d`; keep the bundle budget check in every frontend acceptance run.
 
 ## Compact Reporting Contract
 
