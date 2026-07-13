@@ -28,6 +28,8 @@ from app.services.encryption import decrypt_value, encrypt_value
 INQUIRY_CONTENT_MAX_LENGTH = 4000
 INQUIRY_TITLE_MAX_LENGTH = 300
 INQUIRY_RETENTION_DAYS = 30
+INQUIRY_PAGE_SIZE = 50
+INQUIRY_MAX_PAGES = 10
 _SAFE_LABEL = re.compile(r"[^a-zA-Z0-9_.:-]+")
 
 
@@ -109,18 +111,11 @@ def run_naver_inquiry_retention_cleanup(
 
 
 def assert_naver_inquiry_cleanup_healthy(db: Session, *, store_id: int, settings: Settings | None = None) -> None:
-    settings = settings or get_settings()
-    if not settings.pxg_naver_local_read_retention_cleanup_enabled:
-        raise ApiError("inquiry retention cleanup is disabled", "readonly_retention_cleanup_disabled", 409)
-    status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
-        PxgNaverReadonlyCleanupStatus.store_id == store_id,
-        PxgNaverReadonlyCleanupStatus.platform == "naver",
-    ))
-    now = get_utc_now()
-    if status is None or status.last_success_at is None:
-        raise ApiError("inquiry cleanup has no successful run", "readonly_retention_cleanup_no_successful_run", 409)
-    if status.status != "healthy" or _utc(status.last_success_at) < _utc(now) - timedelta(hours=24):
-        raise ApiError("inquiry cleanup health is blocking content access", "readonly_retention_cleanup_failed", 409)
+    # Reuse the full established gate: cleanup state, safety locks, expired
+    # encrypted backups, and the 24-hour overdue deadline all apply equally.
+    from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
+
+    assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings or get_settings())
 
 
 def initialize_naver_inquiry_store(db: Session, *, store_id: int, settings: Settings | None = None) -> None:
@@ -150,11 +145,11 @@ def _related_order(db: Session, store_id: int, item: dict) -> Order | None:
     order_id = str(item.get("orderId") or item.get("order_id") or "").strip()
     product_ids = sync_service._split_naver_product_order_ids(item.get("productOrderIdList") or item.get("product_order_id_list"))
     statement = select(Order).where(Order.store_id == store_id, Order.platform == "naver")
-    if order_id:
-        return db.scalar(statement.where(Order.external_order_id == order_id))
-    if product_ids:
-        return db.scalar(statement.where(Order.external_product_order_id == product_ids[0]))
-    return None
+    for product_id in product_ids:
+        product_order = db.scalar(statement.where(Order.external_product_order_id == product_id))
+        if product_order is not None:
+            return product_order
+    return db.scalar(statement.where(Order.external_order_id == order_id)) if order_id else None
 
 
 def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
@@ -175,7 +170,8 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
     answered_at = sync_service._parse_preview_iso_datetime(sync_service._extract_scalar_by_keys(
         item, ("answerRegistrationDateTime", "answeredAt")
     ))
-    payload_hash = _hash(content)
+    payload_hash = _hash(content) if content else None
+    source_updated_at = answered_at or received_at or observed_at
     related_order = _related_order(db, store_id, item)
     values = {
         "related_order_id": related_order.id if related_order else None,
@@ -186,11 +182,11 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
         "content_available": bool(content),
         "encrypted_content": encrypt_value(content) if content else None,
         "encrypted_title": encrypt_value(title) if title else None,
-        "content_hash": payload_hash if content else None,
+        "content_hash": payload_hash,
         "content_length": len(content),
         "received_at": received_at,
         "answered_at": answered_at,
-        "source_updated_at": answered_at or received_at or observed_at,
+        "source_updated_at": source_updated_at,
         "source_observed_at": observed_at,
         "is_stale": False,
     }
@@ -201,7 +197,27 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
         )
         db.add(record)
         return "created"
-    # The immutable collection deadline is deliberately not refreshed on later reads.
+    existing_source_updated_at = _utc(record.source_updated_at)
+    incoming_source_updated_at = _utc(source_updated_at)
+    if incoming_source_updated_at < existing_source_updated_at:
+        return "skipped"
+    if incoming_source_updated_at == existing_source_updated_at:
+        if record.content_hash != payload_hash:
+            raise ApiError(
+                "same-timestamp inquiry content conflict is blocked",
+                "readonly_inquiry_source_conflict",
+                409,
+            )
+        # An identical source version is only observed again. Do not rotate
+        # ciphertext or alter the immutable first-collection deadline.
+        record.source_observed_at = observed_at
+        record.is_stale = False
+        return "skipped"
+    # The immutable collection deadline is deliberately never refreshed. Clamp
+    # older 90-day metadata rows down to the inquiry-specific 30-day maximum.
+    first_collection_at = _utc(record.created_at or record.source_observed_at)
+    max_deadline = first_collection_at + timedelta(days=INQUIRY_RETENTION_DAYS)
+    record.expires_at = min(_utc(record.expires_at), max_deadline)
     for key, value in values.items():
         setattr(record, key, value)
     return "updated"
@@ -217,14 +233,30 @@ def refresh_naver_readonly_inquiries(
     context = sync_service._build_naver_token_context_from_credential(credential)
     token, _ = api_credential_readiness_service._request_naver_token_from_context(context)
     now = get_utc_now()
-    result = sync_service._request_naver_customer_inquiries(
-        api_base=context["api_base"], headers={"Authorization": f"Bearer {token}"},
-        start_date=(now - timedelta(days=30)).date(), end_date=now.date(), answered=None, page=1, size=50,
-    )
-    if not result.get("success"):
-        raise ApiError("Naver inquiry readonly request failed", str(result.get("error_code") or "readonly_request_failed"), 502)
+    items: list[dict] = []
+    seen_pages: set[tuple[str, ...]] = set()
+    pages_read = 0
+    for page in range(1, INQUIRY_MAX_PAGES + 1):
+        result = sync_service._request_naver_customer_inquiries(
+            api_base=context["api_base"], headers={"Authorization": f"Bearer {token}"},
+            start_date=(now - timedelta(days=30)).date(), end_date=now.date(), answered=None,
+            page=page, size=INQUIRY_PAGE_SIZE,
+        )
+        if not result.get("success"):
+            raise ApiError("Naver inquiry readonly request failed", str(result.get("error_code") or "readonly_request_failed"), 502)
+        page_items = sync_service._extract_naver_customer_inquiry_items(result.get("payload"))[:INQUIRY_PAGE_SIZE]
+        if not page_items:
+            break
+        page_keys = tuple(str(item.get("inquiryNo") or item.get("inquiry_no") or "") for item in page_items)
+        if page_keys in seen_pages:
+            break
+        seen_pages.add(page_keys)
+        items.extend(page_items)
+        pages_read += 1
+        if len(page_items) < INQUIRY_PAGE_SIZE:
+            break
     counts = {"created": 0, "updated": 0, "skipped": 0}
-    for item in sync_service._extract_naver_customer_inquiry_items(result.get("payload"))[:50]:
+    for item in items:
         outcome = _upsert_item(db, store_id=store_id, item=item, observed_at=now)
         counts[outcome] += 1
     from app.services.pxg_naver_readonly_persistence_service import _audit_local_ingestion
@@ -238,9 +270,9 @@ def refresh_naver_readonly_inquiries(
     )
     db.add(SyncLog(store_id=store_id, platform="naver", sync_type="naver_readonly_inquiry_refresh", status="success",
                    message="Naver readonly inquiry refresh completed",
-                   raw_summary={"created": counts["created"], "updated": counts["updated"], "skipped": counts["skipped"], "actor_id_hash": _hash(actor_id or "authorized")[:64], "raw_response_saved": False, "platform_write": False}))
+                   raw_summary={"created": counts["created"], "updated": counts["updated"], "skipped": counts["skipped"], "pages_read": pages_read, "actor_id_hash": _hash(actor_id or "authorized")[:64], "raw_response_saved": False, "platform_write": False}))
     db.commit()
-    return {"status": "success", "store_id": store_id, "platform": "naver", "resource": "customer_inquiries", "created_count": counts["created"], "updated_count": counts["updated"], "skipped_count": counts["skipped"], "raw_response_saved": False, "platform_write": False, "reply_count": 0}
+    return {"status": "success", "store_id": store_id, "platform": "naver", "resource": "customer_inquiries", "created_count": counts["created"], "updated_count": counts["updated"], "skipped_count": counts["skipped"], "pages_read": pages_read, "raw_response_saved": False, "platform_write": False, "reply_count": 0}
 
 
 def inquiry_detail(db: Session, *, store_id: int, readonly_id: int, settings: Settings | None = None) -> dict[str, Any]:

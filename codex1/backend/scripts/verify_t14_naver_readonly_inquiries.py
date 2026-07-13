@@ -1,6 +1,9 @@
 import os
 import sys
 import tempfile
+import shutil
+import sqlite3
+from datetime import timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -30,9 +33,11 @@ from app.main import app
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.customer_inquiry import CustomerInquiry
-from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyCustomerInquiry
+from app.models.order import Order
+from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlySyncControl
 from app.models.store import Store
 from app.services import api_credential_readiness_service, sync_service
+from app.services.naver_readonly_inquiry_service import _related_order, _upsert_item
 from app.services.encryption import encrypt_value
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
@@ -81,19 +86,40 @@ def main():
     sync_service._build_naver_token_context_from_credential = lambda _credential: {"api_base": "https://test.invalid"}
     api_credential_readiness_service._request_naver_token_from_context = lambda _context: ("test-token", 200)
     calls = {"reply": 0}
-    sync_service._request_naver_customer_inquiries = lambda **_kwargs: {"success": True, "payload": {"content": [{"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": False}]}}
+    def paged_request(**kwargs):
+        page = kwargs["page"]
+        if page == 1:
+            return {"success": True, "payload": {"content": [
+                {"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": False, "createdAt": "2026-07-01T00:00:00+00:00"},
+                *[{"inquiryNo": f"page-one-{index}", "inquiryContent": "x", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(1, 50)],
+            ]}}
+        if page == 2:
+            return {"success": True, "payload": {"content": [{"inquiryNo": "page-two", "inquiryContent": "y", "createdAt": "2026-07-01T00:00:00+00:00"}]}}
+        raise AssertionError(f"unexpected page {page}")
+    sync_service._request_naver_customer_inquiries = paged_request
     try:
         client = TestClient(app, base_url=ORIGIN)
         headers = auth(client, "full@example.test")
         refreshed = client.post("/api/v1/customer-inquiries/naver/refresh", params={"store_id": 1}, headers=headers)
         assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["data"]["pages_read"] == 2, refreshed.text
         again = client.post("/api/v1/customer-inquiries/naver/refresh", params={"store_id": 1}, headers=headers)
-        assert again.json()["data"]["created_count"] == 0 and again.json()["data"]["updated_count"] == 1, again.text
+        assert again.json()["data"]["created_count"] == 0 and again.json()["data"]["skipped_count"] == 51, again.text
+        repeated_page = [{"inquiryNo": f"repeat-{index}", "inquiryContent": "z", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(50)]
+        sync_service._request_naver_customer_inquiries = lambda **kwargs: {"success": True, "payload": {"content": repeated_page}}
+        repeated = client.post("/api/v1/customer-inquiries/naver/refresh", params={"store_id": 1}, headers=headers)
+        assert repeated.status_code == 200 and repeated.json()["data"]["pages_read"] == 1, repeated.text
+        sync_service._request_naver_customer_inquiries = paged_request
         with SessionLocal() as db:
             record = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.store_id == 1))
             assert record and record.encrypted_content and CONTENT not in record.encrypted_content and record.content_hash and record.content_length == len(CONTENT)
             assert db.scalar(select(CustomerInquiry.id).where(CustomerInquiry.store_id == 1)) is None
             readonly_id, deadline = record.id, record.expires_at
+            # The local SQLite source and a raw copy contain ciphertext only.
+            backup_copy = DB_PATH.with_suffix(".backup.sqlite")
+            shutil.copy2(DB_PATH, backup_copy)
+            assert CONTENT.encode("utf-8") not in backup_copy.read_bytes()
+            backup_copy.unlink()
         listed = client.get("/api/v1/customer-inquiries", params={"store_id": 1}, headers=headers)
         assert listed.status_code == 200 and CONTENT not in listed.text and "Private title" not in listed.text, listed.text
         detail = client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers)
@@ -107,6 +133,10 @@ def main():
         assert client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers).status_code == 409
         with SessionLocal() as db:
             status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(PxgNaverReadonlyCleanupStatus.store_id == 1)); status.status = "healthy"; status.last_success_at = get_utc_now(); db.commit()
+            db.add(PxgNaverReadonlySyncControl(store_id=1, platform="naver", write_and_refresh_blocked=True, reason_code="test_lock")); db.commit()
+        assert client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers).status_code == 409
+        with SessionLocal() as db:
+            control = db.scalar(select(PxgNaverReadonlySyncControl).where(PxgNaverReadonlySyncControl.store_id == 1)); control.write_and_refresh_blocked = False; control.reason_code = None; db.commit()
         batch = client.post("/api/v1/sync/manual-batch", headers=headers, json={"store_id": 1, "platforms": ["naver"], "include_products": False, "include_orders": False, "include_customer_inquiries": True})
         assert batch.status_code == 200 and batch.json()["data"]["items"][0]["status"] == "success", batch.text
         legacy = client.post("/api/v1/sync/customer-inquiries/naver", headers=headers, json={"store_id": 1})
@@ -114,6 +144,44 @@ def main():
         with SessionLocal() as db:
             record = db.get(PxgNaverReadonlyCustomerInquiry, readonly_id)
             assert record.expires_at == deadline and calls["reply"] == 0
+            now = get_utc_now()
+            product_order = Order(store_id=1, platform="naver", external_order_id="order-product", external_product_order_id="product-preferred", product_name="t", quantity=1, order_amount=0, currency="KRW", order_status="paid", ordered_at=now)
+            order_fallback = Order(store_id=1, platform="naver", external_order_id="order-fallback", external_product_order_id="product-fallback", product_name="t", quantity=1, order_amount=0, currency="KRW", order_status="paid", ordered_at=now)
+            db.add_all([product_order, order_fallback]); db.flush()
+            assert _related_order(db, 1, {"productOrderIdList": ["product-preferred"], "orderId": "order-fallback"}).id == product_order.id
+            assert _related_order(db, 1, {"productOrderIdList": ["missing"], "orderId": "order-fallback"}).id == order_fallback.id
+            initial = {"inquiryNo": "ordering", "inquiryContent": "first", "title": "t", "createdAt": "2026-07-01T00:00:00+00:00"}
+            assert _upsert_item(db, store_id=1, item=initial, observed_at=now) == "created"
+            db.flush()
+            ordering = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.external_inquiry_id_hash == __import__("hashlib").sha256(b"customer-inquiry:ordering").hexdigest()))
+            ciphertext = ordering.encrypted_content
+            ordering.expires_at = now + timedelta(days=90)
+            assert _upsert_item(db, store_id=1, item=initial, observed_at=now + timedelta(minutes=1)) == "skipped"
+            assert ordering.encrypted_content == ciphertext
+            older = {**initial, "inquiryContent": "older", "createdAt": "2026-06-30T00:00:00+00:00"}
+            assert _upsert_item(db, store_id=1, item=older, observed_at=now + timedelta(minutes=2)) == "skipped"
+            newer = {**initial, "inquiryContent": "newer", "createdAt": "2026-07-02T00:00:00+00:00"}
+            assert _upsert_item(db, store_id=1, item=newer, observed_at=now + timedelta(minutes=3)) == "updated"
+            assert ordering.expires_at.replace(tzinfo=None) <= ordering.created_at.replace(tzinfo=None) + timedelta(days=30)
+            try:
+                _upsert_item(db, store_id=1, item={**newer, "inquiryContent": "conflict"}, observed_at=now + timedelta(minutes=4))
+            except Exception as exc:
+                assert getattr(exc, "error_code", None) == "readonly_inquiry_source_conflict"
+            else:
+                raise AssertionError("same-source timestamp conflict must fail closed")
+            db.rollback()
+        legacy_path = Path(tempfile.gettempdir()) / "verify-t14-legacy-inquiry-schema.db"
+        legacy_path.unlink(missing_ok=True)
+        connection = sqlite3.connect(legacy_path)
+        connection.executescript("""
+            CREATE TABLE pxg_naver_readonly_sync_backups (id INTEGER PRIMARY KEY, baseline_manifest JSON);
+            CREATE TABLE pxg_naver_order_recipient_secure_records (id INTEGER PRIMARY KEY);
+            CREATE TABLE pxg_naver_readonly_customer_inquiries (id INTEGER PRIMARY KEY);
+        """)
+        from scripts.upgrade_pxg_naver_readonly_schema import _upgrade_existing_sync_backup_columns
+        _upgrade_existing_sync_backup_columns(connection)
+        assert {"encrypted_content", "encrypted_title", "content_hash", "content_length"} <= {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)")}
+        connection.close(); legacy_path.unlink()
         print("verify_t14_naver_readonly_inquiries: ok")
     finally:
         sync_service._build_naver_token_context_from_credential, api_credential_readiness_service._request_naver_token_from_context, sync_service._request_naver_customer_inquiries = original_context, original_token, original_request
