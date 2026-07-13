@@ -4454,6 +4454,11 @@ const sourceMethods = {
     if (!isBackendSource) return { id: null, status: 'partially_synced', progressSummary: {} };
     return adapters.storeOnboarding(await backendApi.createStoreOnboarding(payload));
   },
+  getStoreOnboardings: async (params = {}) => {
+    if (!isBackendSource) return [];
+    const result = await backendApi.getStoreOnboardings({ storeId: params.storeId });
+    return adapters.list(result, adapters.storeOnboarding).data;
+  },
   getStoreOnboarding: async (onboardingId) => {
     if (!isBackendSource) return null;
     const result = adapters.storeOnboarding(await backendApi.getStoreOnboarding(onboardingId));

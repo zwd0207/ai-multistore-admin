@@ -17,7 +17,6 @@ import { buildApiAssetUrl } from '../services/http';
 import { classifyCoreDataSource } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 20;
-const HISTORY_ONBOARDING_STORAGE_KEY = 't13_store_onboarding_id';
 
 function dateDaysAgo(days) {
   return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -276,27 +275,18 @@ export default function Orders() {
   useEffect(() => {
     if (viewMode !== 'historical' || !isBackendSource) return undefined;
     const storeId = historyQuery.storeId || selectedStoreId;
-    let safeOnboardingId = '';
-    try {
-      safeOnboardingId = sessionStorage.getItem(HISTORY_ONBOARDING_STORAGE_KEY) || '';
-    } catch {
-      safeOnboardingId = '';
-    }
     setHistoryOnboarding(null);
     if (!storeId) {
       setHistoryOnboardingReason('请先选择店铺，再确认历史回填任务。');
       return undefined;
     }
-    if (!safeOnboardingId) {
-      setHistoryOnboardingReason('当前店铺没有可核对的 Naver 添加任务；为避免串店，历史回填已禁用。');
-      return undefined;
-    }
     let cancelled = false;
-    dataProvider.getStoreOnboarding(safeOnboardingId)
-      .then((result) => {
+    dataProvider.getStoreOnboardings({ storeId })
+      .then((items) => {
         if (cancelled) return;
-        if (String(result?.storeId || '') !== String(storeId)) {
-          setHistoryOnboardingReason('保存的添加任务不属于当前店铺；为避免串店，历史回填已禁用。');
+        const result = items.find((item) => String(item?.storeId || '') === String(storeId));
+        if (!result) {
+          setHistoryOnboardingReason('当前店铺没有已完成的 Naver 添加任务；历史回填暂不可用。');
           return;
         }
         setHistoryOnboarding(result);

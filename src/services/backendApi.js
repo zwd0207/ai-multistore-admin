@@ -62,6 +62,7 @@ export const backendApi = {
   healthCheck: () => getData('/health'),
   getStores: (params) => getData('/stores', params),
   createStoreOnboarding: (payload) => sendData('post', '/store-onboardings', payload),
+  getStoreOnboardings: (params) => getData('/store-onboardings', params),
   getStoreOnboarding: (onboardingId) => getData(`/store-onboardings/${onboardingId}`),
   updateStoreOnboarding: (onboardingId, payload) => sendData('patch', `/store-onboardings/${onboardingId}`, payload),
   resumeStoreOnboarding: (onboardingId) => sendData('post', `/store-onboardings/${onboardingId}/resume`),

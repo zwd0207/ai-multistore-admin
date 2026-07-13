@@ -68,14 +68,19 @@ assert.match(orders, /不提供平台更新、发货、复制收件信息、内�
 assert.match(orders, /单次最多 31 天/);
 assert.match(orders, /historicalOrderBackfill\(historyOnboarding\.id/);
 
-// A safe reconnect id may authorize backfill only after strict store association.
-assert.match(orders, /String\(result\?\.storeId \|\| ''\) !== String\(storeId\)/);
+// Backfill resolves durable onboarding state for the selected store and stays disabled without a match.
+assert.match(orders, /dataProvider\.getStoreOnboardings\(\{ storeId \}\)/);
+assert.match(orders, /items\.find\(\(item\) => String\(item\?\.storeId \|\| ''\) === String\(storeId\)\)/);
 assert.match(orders, /String\(historyOnboarding\.storeId\) !== String\(storeId\)/);
-assert.match(orders, /保存的添加任务不属于当前店铺/);
+assert.match(orders, /if \(!result\) \{[\s\S]*setHistoryOnboardingReason\(/);
 assert.doesNotMatch(orders, /historicalOrderBackfill\(safeOnboardingId/);
+assert.match(orders, /disabled=\{historyBackfilling \|\| !historyOnboarding\}/);
 
 assert.match(api, /updateStoreOnboarding: .*sendData\('patch'/);
+assert.match(api, /getStoreOnboardings: \(params\) => getData\('\/store-onboardings', params\)/);
 assert.match(api, /historicalOrderBackfill: .*historical-backfill/);
+assert.match(provider, /getStoreOnboardings: async \(params = \{\}\)/);
+assert.match(provider, /backendApi\.getStoreOnboardings\(\{ storeId: params\.storeId \}\)/);
 assert.match(provider, /view: params\?\.view/);
 assert.match(provider, /pageSize: params\?\.pageSize/);
 assert.match(http, /client\[_-\]\?secret/);
