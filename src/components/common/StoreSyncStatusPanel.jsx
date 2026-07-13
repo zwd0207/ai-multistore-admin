@@ -10,8 +10,8 @@ const RESOURCE_ROWS = [
   ['products', '商品'],
   ['logistics', '物流'],
 ];
-const MAX_RECOVERY_POLLS = 8;
-const RECOVERY_POLL_DELAY_MS = 1000;
+const MAX_RECOVERY_POLLS = 17;
+const RECOVERY_POLL_DELAY_MS = 4000;
 
 function connectionActionPath(storeId) {
   return `/stores?storeId=${encodeURIComponent(storeId)}&focus=connection`;
@@ -79,10 +79,12 @@ function AllStoreStatus({ rows, adminStoreIds }) {
 
 export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {}, canManageRecovery = () => false }) {
   const [visibleRows, setVisibleRows] = useState(rows);
+  const [visibleAttentionSummary, setVisibleAttentionSummary] = useState(attentionSummary);
   const [recoveringStoreId, setRecoveringStoreId] = useState('');
   const [feedback, setFeedback] = useState({});
 
   useEffect(() => setVisibleRows(rows), [rows]);
+  useEffect(() => setVisibleAttentionSummary(attentionSummary), [attentionSummary]);
 
   const adminStoreIds = useMemo(
     () => new Set(visibleRows.filter((row) => canManageRecovery(row.storeId)).map((row) => String(row.storeId))),
@@ -93,19 +95,25 @@ export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {},
     .filter(({ attention }) => attention.length);
 
   const pollStoreOverview = async (storeId) => {
+    let observedAutomaticRetry = false;
     for (let attempt = 0; attempt < MAX_RECOVERY_POLLS; attempt += 1) {
+      await waitForPoll();
       try {
         const overview = await dataProvider.getStoreOverview({ includeInactive: false });
+        setVisibleAttentionSummary(overview?.automaticReadAttentionSummary || {});
         const nextRow = (overview?.stores || []).find((item) => String(item.storeId) === String(storeId));
         if (!nextRow) return;
         setVisibleRows((current) => updateRow(current, nextRow));
         const attention = attentionResources(nextRow);
-        const reblocked = attention.some(([key]) => nextRow.automaticReadStatus?.[key]?.attentionState === 'admin_action');
+        if (attention.some(([key]) => nextRow.automaticReadStatus?.[key]?.attentionState === 'automatic_retry')) {
+          observedAutomaticRetry = true;
+        }
+        const reblocked = observedAutomaticRetry
+          && attention.some(([key]) => nextRow.automaticReadStatus?.[key]?.attentionState === 'admin_action');
         if (!attention.length || reblocked || attempt === MAX_RECOVERY_POLLS - 1) return;
       } catch {
         return;
       }
-      await waitForPoll();
     }
   };
 
@@ -133,11 +141,11 @@ export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {},
         <div>
           <h2>
             店铺自动同步状态
-            {attentionSummary.affectedStoreCount ? `（${attentionSummary.affectedStoreCount} 个店铺需关注）` : ''}
+            {visibleAttentionSummary.affectedStoreCount ? `（${visibleAttentionSummary.affectedStoreCount} 个店铺需关注）` : ''}
           </h2>
           <p>
-            {attentionSummary.affectedResourceCount
-              ? `有 ${attentionSummary.affectedResourceCount} 个资源需要关注，按店铺查看订单、客服、商品和物流的自动读取状态。`
+            {visibleAttentionSummary.affectedResourceCount
+              ? `有 ${visibleAttentionSummary.affectedResourceCount} 个资源需要关注，按店铺查看订单、客服、商品和物流的自动读取状态。`
               : '按店铺查看订单、客服、商品和物流的自动读取状态。'}
           </p>
         </div>

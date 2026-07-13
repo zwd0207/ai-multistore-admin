@@ -22,6 +22,12 @@ const status = adaptAutomaticReadStatus({
     action_path: '/stores?storeId=8&focus=connection',
   },
 });
+const ordinaryStatus = adaptAutomaticReadStatus({
+  orders: {
+    attention_state: 'automatic_retry',
+    operator_message: '系统正在自动重试，请稍后查看。',
+  },
+});
 assert.deepEqual(status.orders, {
   status: 'unknown',
   lastSuccessAt: '',
@@ -39,6 +45,10 @@ assert.deepEqual(status.orders, {
     recoveryEligible: true,
   actionPath: '/stores?storeId=8&focus=connection',
 });
+assert.equal(ordinaryStatus.orders.operatorMessage, '系统正在自动重试，请稍后查看。');
+assert.equal(ordinaryStatus.orders.adminAction, 'none');
+assert.equal(ordinaryStatus.orders.recoveryEligible, false);
+assert.equal(ordinaryStatus.orders.actionPath, '');
 assert.deepEqual(adaptAutomaticReadAttentionSummary({
   affected_store_count: 2,
   affected_resource_count: 3,
@@ -77,12 +87,17 @@ assert.match(backendApi, /\{ confirmation: true \}/);
 assert.match(dataProvider, /recoverAutomaticRead: async \(storeId\)/);
 assert.match(panel, /attentionState !== 'none'/);
 assert.match(panel, /验证通过，已安排恢复/);
-assert.match(panel, /MAX_RECOVERY_POLLS = 8/);
+assert.match(panel, /MAX_RECOVERY_POLLS = 17/);
+assert.match(panel, /RECOVERY_POLL_DELAY_MS = 4000/);
+assert.ok(17 * 4000 >= 65000, 'recovery polling window must cover at least 65 seconds');
 assert.match(panel, /dataProvider\.getStoreOverview\(\{ includeInactive: false \}\)/);
+assert.match(panel, /useState\(attentionSummary\)/);
+assert.match(panel, /setVisibleAttentionSummary\(overview\?\.automaticReadAttentionSummary \|\| \{\}\)/);
+assert.match(panel, /visibleAttentionSummary\.affectedStoreCount/);
+assert.match(panel, /visibleAttentionSummary\.affectedResourceCount/);
+assert.doesNotMatch(panel, /runManualStoreSync|runManualAllStoresSync/);
 assert.match(panel, /actionPath \|\| connectionActionPath/);
 assert.match(panel, /operatorMessage/);
-assert.match(panel, /attentionSummary\.affectedStoreCount/);
-assert.match(panel, /attentionSummary\.affectedResourceCount/);
 assert.doesNotMatch(panel, /row\.automaticReadAttentionSummary/);
 assert.match(panel, /safeFailureReason === 'not_supported'/);
 assert.match(panel, /const attentionRows =/);
