@@ -4,6 +4,8 @@ import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 import { useAuthContext } from '../context/AuthContext';
+import { useStoreContext } from '../context/StoreContext';
+import { filterMenuGroupsForStore } from './menuPermissions';
 
 const menuGroups = [
   {
@@ -34,19 +36,15 @@ const menuGroups = [
 ];
 
 export default function AdminLayout() {
-  const { user, stores, canAccessStore, logout } = useAuthContext();
+  const { user, canAccessStore, logout } = useAuthContext();
+  const { selectedStoreId } = useStoreContext();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const canAccessItem = (item) => {
-    const permission = item[3];
-    if (!stores.length) return false;
-    return stores.some((store) => canAccessStore(store.store_id, permission));
-  };
-
-  const visibleMenuGroups = useMemo(() => menuGroups
-    .map((group) => ({ ...group, items: group.items.filter(canAccessItem) }))
-    .filter((group) => group.items.length), [stores, canAccessStore]);
+  const visibleMenuGroups = useMemo(
+    () => filterMenuGroupsForStore(menuGroups, selectedStoreId, canAccessStore),
+    [selectedStoreId, canAccessStore],
+  );
   const primaryItems = visibleMenuGroups
     .find((group) => group.label === '每日运营')?.items.slice(0, 4) || [];
   const moreItems = visibleMenuGroups.flatMap((group) => group.items)
