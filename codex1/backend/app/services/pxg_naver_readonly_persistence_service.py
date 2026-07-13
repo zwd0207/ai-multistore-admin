@@ -847,9 +847,6 @@ def persist_naver_order_detail_logistics_page(
         tracking_number = _snapshot_text(detail.get("tracking_number"))
         shipment_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
         shipped_at = _snapshot_time(detail.get("shipped_at"), current) if detail.get("shipped_at") else None
-        if not any((carrier, tracking_number, shipment_status, shipped_at)):
-            not_available += 1
-            continue
         source_updated_at = _strict_snapshot_time(
             detail.get("last_changed_at") or detail.get("source_updated_at") or detail.get("shipped_at")
         )
@@ -868,6 +865,26 @@ def persist_naver_order_detail_logistics_page(
         if decision == "same_version_conflict":
             raise ApiError("Naver logistics source version conflicts", "naver_logistics_same_version_conflict", 409)
         record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.order_id == order.id))
+        if not any((carrier, tracking_number, shipment_status, shipped_at)):
+            if record is not None:
+                record.carrier = None
+                record.encrypted_tracking_number = ""
+                record.tracking_number_hash = ""
+                record.tracking_number_masked = ""
+                record.shipment_status = "not_available"
+                record.shipped_at = None
+                record.source_updated_at = source_updated_at
+                record.source_observed_at = current
+                record.expires_at = current
+                record.is_stale = True
+                db.flush()
+                _refresh_state(
+                    db, state=state, store_id=store_id, resource_type="logistics", source_key_hash=source_key_hash,
+                    local_record_id=record.id, source_updated_at=source_updated_at, content_fingerprint=fingerprint,
+                    observed_at=current, settings=settings,
+                )
+            not_available += 1
+            continue
         if decision == "unchanged":
             if state is not None:
                 _refresh_existing_state(state, observed_at=current, settings=settings)

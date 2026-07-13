@@ -1,9 +1,11 @@
 import re
+from datetime import timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.timezone import get_utc_now
 from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlyLogisticsRecord
@@ -63,13 +65,18 @@ def _order_context(db: Session, order: Order | None) -> tuple[dict, dict]:
         PxgNaverReadonlyLogisticsRecord.platform == order.platform,
     ).order_by(PxgNaverReadonlyLogisticsRecord.id.desc()))
     if readonly_logistics is not None:
+        expires_at = readonly_logistics.expires_at
+        if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        is_stale = bool(readonly_logistics.is_stale or expires_at <= get_utc_now())
         return order_context, {
             "carrier": readonly_logistics.carrier,
-            "tracking_number_masked": readonly_logistics.tracking_number_masked,
+            "tracking_number_masked": None if is_stale else readonly_logistics.tracking_number_masked,
             "shipment_status": readonly_logistics.shipment_status,
             "shipped_at": readonly_logistics.shipped_at,
-            "updated_at": readonly_logistics.updated_at,
-            "is_stale": readonly_logistics.is_stale,
+            "updated_at": readonly_logistics.source_updated_at,
+            "is_stale": is_stale,
+            "logistics_stale": is_stale,
         }
     if batch_row is None or batch_row.batch.tracking_import_batch_id is None:
         return order_context, {}

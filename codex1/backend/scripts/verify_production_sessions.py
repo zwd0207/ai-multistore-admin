@@ -30,6 +30,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.database import Base, SessionLocal, engine
 from app.main import app
@@ -233,6 +234,19 @@ def main() -> None:
         finally:
             shipping_service.execute_naver_shipment_writeback = original_shipping_write
             sync_service.reply_naver_customer_inquiry = original_customer_reply
+        with SessionLocal() as db:
+            try:
+                sync_service.reply_naver_customer_inquiry(
+                    db,
+                    store_id=1,
+                    external_inquiry_id="1",
+                    answer_comment="must remain closed",
+                    manual_approval=True,
+                    final_operator_confirmation=True,
+                )
+                raise AssertionError("disabled customer platform writes reached the reply workflow")
+            except ApiError as exc:
+                assert exc.error_code == "customer_platform_write_disabled"
         with SessionLocal() as db:
             assert db.query(Store).count() == store_count_before
             assert db.query(WarehouseShippingBatch).count() == 1

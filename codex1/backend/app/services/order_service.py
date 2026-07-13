@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 from urllib.parse import quote
@@ -24,6 +24,12 @@ DELIVERY_COMPANY_LABELS = {
     "CJ": "CJ대한통운",
     "CJGLS": "CJ대한통운",
 }
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _clean_text(value: object, max_length: int = 160) -> str | None:
@@ -195,6 +201,13 @@ def _order_delivery_fields(
         PxgNaverReadonlyLogisticsRecord.store_id == order.store_id,
         PxgNaverReadonlyLogisticsRecord.platform == order.platform,
     )) if db is not None else None
+    readonly_logistics_stale = bool(
+        readonly_logistics
+        and (
+            readonly_logistics.is_stale
+            or _utc_datetime(readonly_logistics.expires_at) <= get_utc_now()
+        )
+    )
     delivery_company = _first_text(
         _find_nested_text(raw_data, (
             "delivery_company",
@@ -216,17 +229,10 @@ def _order_delivery_fields(
         _find_nested_text(raw_data, ("delivery_company_code", "deliveryCompanyCode", "shipping_carrier_code")),
         max_length=80,
     )
-    tracking_number = _first_text(
+    tracking_number = None if readonly_logistics_stale else _first_text(
         _find_nested_text(raw_data, (
-            "tracking_number",
-            "trackingNumber",
-            "invoice_no",
-            "invoiceNo",
-            "invoiceNumber",
-            "waybill_no",
-            "waybillNo",
-            "waybillNumber",
-            "shipping_tracking_number",
+            "tracking_number", "trackingNumber", "invoice_no", "invoiceNo", "invoiceNumber",
+            "waybill_no", "waybillNo", "waybillNumber", "shipping_tracking_number",
         ), max_length=120),
         readonly_logistics.tracking_number_masked if readonly_logistics else None,
         tracking_row.tracking_number if tracking_row else None,
@@ -256,7 +262,7 @@ def _order_delivery_fields(
         "delivery_status": delivery_status,
         "delivery_status_label_zh": delivery_status_label,
         "logistics_updated_at": logistics_updated_at,
-        "logistics_stale": bool(readonly_logistics and readonly_logistics.is_stale),
+        "logistics_stale": readonly_logistics_stale,
         "logistics_source": (
             "pxg_naver_readonly_logistics"
             if readonly_logistics is not None

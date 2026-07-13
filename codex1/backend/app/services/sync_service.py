@@ -1472,6 +1472,13 @@ def reply_naver_customer_inquiry(
     actor_context: dict | None = None,
 ) -> dict:
     ensure_store_exists(db, store_id)
+    settings = get_settings()
+    if not settings.real_api_write_enabled or not settings.customer_platform_write_enabled:
+        raise ApiError(
+            "customer platform writes are disabled",
+            "customer_platform_write_disabled",
+            403,
+        )
     safe_answer = _bounded_text(str(answer_comment or "").strip(), 4000)
     inquiry = _find_customer_inquiry_for_reply(
         db,

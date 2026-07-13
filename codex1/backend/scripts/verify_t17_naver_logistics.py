@@ -31,7 +31,7 @@ from app.models.order_status_event import OrderStatusEvent
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyLogisticsRecord
 from app.models.store import Store
 from app.models.sync_checkpoint import SyncCheckpoint
-from app.services import automatic_read_sync_service, order_service, pxg_naver_readonly_persistence_service
+from app.services import automatic_read_sync_service, customer_inquiry_service, order_service, pxg_naver_readonly_persistence_service
 from app.services.encryption import encrypt_value
 from app.services.store_onboarding_service import NaverReadPage, _canonical_orders
 
@@ -169,9 +169,18 @@ def main():
         db.commit()
         missing_record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.order_id == second.id))
         assert missing_record and missing_record.encrypted_tracking_number == missing_record.tracking_number_hash == missing_record.tracking_number_masked == ""
-        unavailable = detail("po-second", "o-shared", tracking=None, carrier=None, delivery=None)
+        unavailable = detail("po-second", "o-shared", changed=NOW + timedelta(minutes=1), tracking=None, carrier=None, delivery=None)
         unavailable.pop("shipped_at")
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[unavailable], now=NOW)["not_available"] == 1
+        db.commit()
+        db.refresh(missing_record)
+        assert missing_record.is_stale is True
+        assert missing_record.encrypted_tracking_number == missing_record.tracking_number_hash == missing_record.tracking_number_masked == ""
+        assert missing_record.shipment_status == "not_available"
+        unavailable_payload = order_service.serialize_order(second, db=db)
+        _, unavailable_context = customer_inquiry_service._order_context(db, second)
+        assert unavailable_payload["logistics_stale"] is True and not unavailable_payload["tracking_number"]
+        assert unavailable_context["is_stale"] is True and not unavailable_context["tracking_number_masked"]
 
         # Exact association, multi-product orders, candidate filters, terminal exclusion, and historical side-save.
         try:
@@ -254,6 +263,13 @@ def main():
         assert payload["delivery_status"] == "DELIVERED"
         assert timeline["tracking_source"] == "pxg_naver_readonly_logistics"
         assert timeline["logistics_updated_at"] and timeline["realtime_tracking_open"] is False
+        record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        record.is_stale = False
+        db.commit()
+        expired_payload = order_service.serialize_order(primary, db=db)
+        _, expired_context = customer_inquiry_service._order_context(db, primary)
+        assert expired_payload["logistics_stale"] is True and not expired_payload["tracking_number"]
+        assert expired_context["is_stale"] is True and not expired_context["tracking_number_masked"]
 
         cleanup = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(PxgNaverReadonlyCleanupStatus.store_id == store.id))
         cleanup.status = "failed"; db.commit()
