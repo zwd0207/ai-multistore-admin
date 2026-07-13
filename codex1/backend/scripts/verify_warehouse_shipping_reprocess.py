@@ -169,7 +169,7 @@ def main():
         displayed_before_release = order_service.list_orders(
             db, store_id=store.id, platform="naver", include_test_orders=True,
         )[0]
-        assert displayed_before_release["tracking_number"] == "1234567890", displayed_before_release
+        assert displayed_before_release["tracking_number"] == "1234**7890", displayed_before_release
 
         blocked_release = warehouse_shipping_service.remove_warehouse_batch_row(
             db,

@@ -10,7 +10,6 @@ from app.schemas.shipping import (
     ShippingMappingWriteRequest,
     ShippingShipmentWritebackBoundaryRequest,
     ShippingShipmentWritebackDryRunGateRequest,
-    ShippingShipmentWritebackExecuteRequest,
     ShippingShipmentWritebackExecutionMockGateRequest,
     ShippingTrackingImportMockParseRequest,
     ShippingTrackingImportWriteGateRequest,
@@ -162,17 +161,15 @@ def execute_warehouse_shipping_writeback(
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key="shipping.writeback.approve")
     require_operator_recent_auth(identity)
-    approved_candidate_hash = warehouse_shipping_service.consume_approval_grant_with_candidate_hash(
-        db, batch_id=batch_id, user_id=identity.user_id, grant_scope="writeback", token=payload.approval_token,
-    ) if payload.approval_token else None
-    if not approved_candidate_hash:
-        return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_token_invalid"})
     return success_response(
         data=warehouse_shipping_service.execute_warehouse_batch_writeback(
             db, batch_id=batch_id, manual_approval=payload.manual_approval,
             final_operator_confirmation=payload.final_operator_confirmation,
             real_api_call_requested=payload.real_api_call_requested, actor_context={"role": "operator", "actor_id": identity.user_key_hash},
-            approved_candidate_hash=approved_candidate_hash,
+            action=payload.action,
+            approval_token=payload.approval_token,
+            user_id=identity.user_id,
+            t18_pilot_execution=True,
         ),
         message="warehouse shipping platform writeback completed",
     )
@@ -192,7 +189,13 @@ def issue_warehouse_shipping_approval(
     require_store_permission(db, identity=identity, store_id=batch.store_id, permission_key=permission)
     if grant_scope in {"manifest", "writeback"}:
         require_operator_recent_auth(identity)
-    return success_response(data=warehouse_shipping_service.issue_approval_grant(db, batch_id=batch_id, user_id=identity.user_id, grant_scope=grant_scope))
+    return success_response(data=warehouse_shipping_service.issue_approval_grant(
+        db,
+        batch_id=batch_id,
+        user_id=identity.user_id,
+        grant_scope=grant_scope,
+        t18_pilot_execution=grant_scope == "writeback",
+    ))
 
 
 @router.get("/logistics-mappings")
@@ -383,35 +386,6 @@ def check_shipment_writeback_execution_mock_gate(
         actor_context=payload.actor_context,
     )
     return success_response(data=result, message="shipping shipment writeback execution mock gate checked")
-
-
-@router.post("/shipment-writeback/execute")
-def execute_shipment_writeback(
-    payload: ShippingShipmentWritebackExecuteRequest,
-    db: Session = Depends(get_db),
-) -> dict:
-    result = shipping_service.execute_naver_shipment_writeback(
-        db,
-        store_id=payload.store_id,
-        platform=payload.platform,
-        import_batch_id=payload.import_batch_id,
-        tracking_rows=[item.model_dump() for item in payload.tracking_rows],
-        manual_approval=payload.manual_approval,
-        matching_contract_acknowledged=payload.matching_contract_acknowledged,
-        backup_evidence_acknowledged=payload.backup_evidence_acknowledged,
-        audit_evidence_acknowledged=payload.audit_evidence_acknowledged,
-        local_status_evidence_acknowledged=payload.local_status_evidence_acknowledged,
-        naver_writeback_boundary_acknowledged=payload.naver_writeback_boundary_acknowledged,
-        operator_checklist_acknowledged=payload.operator_checklist_acknowledged,
-        target_delivery_status=payload.target_delivery_status,
-        execution_approval=payload.execution_approval,
-        dry_run_evidence_acknowledged=payload.dry_run_evidence_acknowledged,
-        permission_evidence_acknowledged=payload.permission_evidence_acknowledged,
-        final_operator_confirmation=payload.final_operator_confirmation,
-        real_api_call_requested=payload.real_api_call_requested,
-        actor_context=payload.actor_context,
-    )
-    return success_response(data=result, message="shipping shipment writeback completed")
 
 
 @router.post("/logistics-mappings/write-gate")

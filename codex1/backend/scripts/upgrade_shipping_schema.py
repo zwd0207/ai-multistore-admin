@@ -18,6 +18,7 @@ SHIPPING_TABLES = {
     "shipping_tracking_import_batches",
     "shipping_tracking_import_rows",
     "warehouse_shipping_batches",
+    "warehouse_shipping_approval_grants",
     "warehouse_shipping_batch_orders",
 }
 
@@ -142,9 +143,14 @@ SHIPPING_TABLE_COLUMNS = {
         "created_at",
     },
     "warehouse_shipping_batches": {
-        "id", "batch_no", "store_id", "platform", "status", "export_batch_id", "tracking_import_batch_id",
+        "id", "batch_no", "store_id", "platform", "status", "version", "export_batch_id", "tracking_import_batch_id",
         "created_by_actor_hash", "warehouse_sent_at", "warehouse_returned_at", "operator_confirmed_at",
         "completed_at", "created_at", "updated_at",
+    },
+    "warehouse_shipping_approval_grants": {
+        "id", "batch_id", "user_id", "grant_scope", "token_hash", "batch_version", "candidate_hash",
+        "expires_at", "used_at", "attempt_status", "attempt_token_hash", "attempt_started_at",
+        "attempt_finished_at", "attempt_error_code", "attempt_response_hash", "attempt_scope", "created_at",
     },
     "warehouse_shipping_batch_orders": {
         "id", "batch_id", "local_order_id", "store_id", "platform", "order_reference", "product_order_reference",
@@ -248,7 +254,11 @@ SHIPPING_NOT_NULL_COLUMNS = {
         "created_at",
     },
     "warehouse_shipping_batches": {
-        "batch_no", "store_id", "platform", "status", "created_at", "updated_at",
+        "batch_no", "store_id", "platform", "status", "version", "created_at", "updated_at",
+    },
+    "warehouse_shipping_approval_grants": {
+        "batch_id", "user_id", "grant_scope", "token_hash", "batch_version", "candidate_hash", "expires_at",
+        "attempt_status", "created_at",
     },
     "warehouse_shipping_batch_orders": {
         "batch_id", "local_order_id", "store_id", "platform", "order_reference", "product_name", "quantity",
@@ -376,6 +386,21 @@ SHIPPING_INDEXES = {
         "warehouse_shipping_batches",
         ["store_id", "platform", "status"],
         False,
+    ),
+    "ix_warehouse_shipping_grants_batch_scope": (
+        "warehouse_shipping_approval_grants",
+        ["batch_id", "grant_scope"],
+        False,
+    ),
+    "ix_warehouse_shipping_grants_token_hash": (
+        "warehouse_shipping_approval_grants",
+        ["token_hash"],
+        True,
+    ),
+    "uq_warehouse_shipping_grant_pilot_attempt_scope": (
+        "warehouse_shipping_approval_grants",
+        ["attempt_scope"],
+        True,
     ),
     "ix_warehouse_shipping_batch_orders_active_order": (
         "warehouse_shipping_batch_orders",
@@ -636,7 +661,39 @@ def create_shipping_schema(connection: sqlite3.Connection) -> list[str]:
         )
     """)
 
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS warehouse_shipping_approval_grants (
+            id INTEGER PRIMARY KEY,
+            batch_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            grant_scope VARCHAR(40) NOT NULL,
+            token_hash VARCHAR(128) NOT NULL,
+            batch_version INTEGER NOT NULL,
+            candidate_hash VARCHAR(128) NOT NULL,
+            expires_at DATETIME NOT NULL,
+            used_at DATETIME,
+            attempt_status VARCHAR(20) NOT NULL DEFAULT 'not_started',
+            attempt_token_hash VARCHAR(128),
+            attempt_started_at DATETIME,
+            attempt_finished_at DATETIME,
+            attempt_error_code VARCHAR(80),
+            attempt_response_hash VARCHAR(128),
+            attempt_scope VARCHAR(160),
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES warehouse_shipping_batches(id),
+            FOREIGN KEY(user_id) REFERENCES erp_users(id),
+            CHECK (attempt_status IN ('not_started', 'pending', 'success', 'failed', 'unknown', 'reconciled'))
+        )
+    """)
+
     for index_name, (table_name, columns, unique) in SHIPPING_INDEXES.items():
+        if index_name == "uq_warehouse_shipping_grant_pilot_attempt_scope":
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_shipping_grant_pilot_attempt_scope "
+                "ON warehouse_shipping_approval_grants (attempt_scope) "
+                "WHERE attempt_scope IS NOT NULL AND attempt_status != 'not_started'"
+            )
+            continue
         unique_sql = "UNIQUE " if unique else ""
         connection.execute(
             f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} "
@@ -695,6 +752,44 @@ def verify_shipping_schema(connection: sqlite3.Connection) -> None:
             )
 
 
+def upgrade_existing_shipping_columns(connection: sqlite3.Connection) -> None:
+    """Add columns before ORM metadata attempts to create dependent indexes."""
+
+    tables = get_existing_tables(connection)
+    if "warehouse_shipping_batches" in tables:
+        batch_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batches)").fetchall()
+        }
+        if "version" not in batch_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batches ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+    if "warehouse_shipping_batch_orders" in tables:
+        batch_order_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batch_orders)").fetchall()
+        }
+        if "pre_batch_order_status" not in batch_order_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN pre_batch_order_status VARCHAR(30)")
+        if "shipped_at" not in batch_order_columns:
+            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN shipped_at VARCHAR(80)")
+    if "warehouse_shipping_approval_grants" in tables:
+        approval_grant_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_approval_grants)").fetchall()
+        }
+        approval_column_upgrades = {
+            "attempt_status": "VARCHAR(20) NOT NULL DEFAULT 'not_started'",
+            "attempt_token_hash": "VARCHAR(128)",
+            "attempt_started_at": "DATETIME",
+            "attempt_finished_at": "DATETIME",
+            "attempt_error_code": "VARCHAR(80)",
+            "attempt_response_hash": "VARCHAR(128)",
+            "attempt_scope": "VARCHAR(160)",
+        }
+        for column_name, column_sql in approval_column_upgrades.items():
+            if column_name not in approval_grant_columns:
+                connection.execute(
+                    f"ALTER TABLE warehouse_shipping_approval_grants ADD COLUMN {column_name} {column_sql}"
+                )
+
+
 def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
     import app.models  # noqa: F401
 
@@ -705,6 +800,15 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
         return {"tables": [], "indexes": []}
 
     database_path = resolve_sqlite_path(settings.database_url)
+    # Existing databases need the new approval-grant columns before SQLAlchemy
+    # can create the partial one-attempt index declared on the model.
+    pre_upgrade_connection = sqlite3.connect(database_path)
+    try:
+        pre_upgrade_connection.execute("PRAGMA foreign_keys=ON")
+        upgrade_existing_shipping_columns(pre_upgrade_connection)
+        pre_upgrade_connection.commit()
+    finally:
+        pre_upgrade_connection.close()
     if run_create_all:
         Base.metadata.create_all(bind=engine)
 
@@ -712,14 +816,7 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         created_tables = create_shipping_schema(connection)
-        batch_columns = {row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batches)").fetchall()}
-        if "version" not in batch_columns:
-            connection.execute("ALTER TABLE warehouse_shipping_batches ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
-        batch_order_columns = {row[1] for row in connection.execute("PRAGMA table_info(warehouse_shipping_batch_orders)").fetchall()}
-        if "pre_batch_order_status" not in batch_order_columns:
-            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN pre_batch_order_status VARCHAR(30)")
-        if "shipped_at" not in batch_order_columns:
-            connection.execute("ALTER TABLE warehouse_shipping_batch_orders ADD COLUMN shipped_at VARCHAR(80)")
+        upgrade_existing_shipping_columns(connection)
         connection.commit()
         verify_shipping_schema(connection)
         return {

@@ -1547,6 +1547,7 @@ def verify_stage_scripts() -> None:
         "verify_t15_automatic_read_sync.py",
         "verify_t16_automatic_read_recovery.py",
         "verify_t17_naver_logistics.py",
+        "verify_t18_naver_shipping_pilot.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",
@@ -19999,6 +20000,7 @@ def verify_git_tracking() -> None:
         " M backend/requirements.txt",
         " M backend/scripts/verify_all.py",
         "M  backend/scripts/verify_all.py",
+        " M backend/scripts/verify_local_mfa_code_display.py",
         "?? backend/scripts/verify_local_mfa_code_display.py",
         "?? backend/scripts/create_local_backup.py",
         "?? backend/scripts/list_local_backups.py",
@@ -20010,6 +20012,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_t15_automatic_read_sync.py",
         " M backend/scripts/verify_t16_automatic_read_recovery.py",
         "?? backend/scripts/verify_t17_naver_logistics.py",
+        "?? backend/scripts/verify_t18_naver_shipping_pilot.py",
+        " M backend/scripts/verify_warehouse_shipping_reprocess.py",
         "?? backend/scripts/verify_t16_automatic_read_recovery.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_operation_audit_logs_schema.py",
@@ -20229,6 +20233,7 @@ def main() -> None:
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t15_automatic_read_sync.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t16_automatic_read_recovery.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t17_naver_logistics.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t18_naver_shipping_pilot.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

@@ -17,6 +17,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.api_credential import ApiCredential
@@ -1672,6 +1673,33 @@ def _safe_hash_identifier(value: Any) -> str:
     return f"id-hash-{digest}"
 
 
+def _remove_full_tracking_metadata(value: Any) -> Any:
+    """Retain hashes and workflow labels while removing full tracking values."""
+
+    full_tracking_keys = {
+        "trackingnumber",
+        "shippingtrackingnumber",
+        "invoiceno",
+        "invoicenumber",
+        "waybillno",
+        "waybillnumber",
+        "deliverytrackingnumber",
+    }
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, nested in value.items():
+            normalized = _normalize_sensitive_key(str(key))
+            if normalized in full_tracking_keys:
+                continue
+            sanitized[str(key)] = _remove_full_tracking_metadata(nested)
+        return sanitized
+    if isinstance(value, list):
+        return [_remove_full_tracking_metadata(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_remove_full_tracking_metadata(item) for item in value)
+    return value
+
+
 def _parse_tracking_datetime(value: Any) -> datetime | None:
     text = _clean_text(value, max_length=80)
     if not text:
@@ -2633,7 +2661,12 @@ def _normalize_naver_delivery_company_code(value: Any) -> str | None:
     return None
 
 
-def _ensure_naver_shipping_credential(db: Session, store_id: int) -> ApiCredential:
+def _ensure_naver_shipping_credential(
+    db: Session,
+    store_id: int,
+    *,
+    expected_credential_id: int | None = None,
+) -> ApiCredential:
     store = ensure_store_exists(db, store_id)
     if str(store.platform or "").strip().lower() != "naver":
         raise ApiError(
@@ -2642,15 +2675,14 @@ def _ensure_naver_shipping_credential(db: Session, store_id: int) -> ApiCredenti
             status_code=400,
             detail={"store_id": store_id, "store_platform": store.platform},
         )
-    credential = db.scalars(
-        select(ApiCredential)
-        .where(
-            ApiCredential.store_id == store_id,
-            ApiCredential.platform == "naver",
-            ApiCredential.status == "active",
-        )
-        .order_by(ApiCredential.id.desc())
-    ).first()
+    conditions = [
+        ApiCredential.store_id == store_id,
+        ApiCredential.platform == "naver",
+        ApiCredential.status == "active",
+    ]
+    if expected_credential_id is not None:
+        conditions.append(ApiCredential.id == expected_credential_id)
+    credential = db.scalars(select(ApiCredential).where(*conditions).order_by(ApiCredential.id.desc())).first()
     if credential is None or not credential.client_id or not credential.encrypted_secret_key:
         raise ApiError(
             message="Active Naver credential is required for shipment writeback",
@@ -2834,7 +2866,9 @@ def _post_naver_shipment_dispatch(
         product_order_id = _clean_text(item.get("productOrderId") or item.get("productOrderNo"), max_length=120)
         safe_fail_infos.append({
             "product_order_id_hash": _safe_hash_identifier(product_order_id),
-            "reason": _clean_text(item.get("message") or item.get("reason") or item.get("code"), max_length=160),
+            # Naver may echo a submitted tracking number in a free-form error
+            # message. Keep only a stable local category in outward responses.
+            "reason": "platform_rejected",
         })
     return {
         "success": True,
@@ -2907,7 +2941,7 @@ def _audit_row_for_naver_shipment_writeback(
         "raw_response_saved": False,
         "secrets_saved": False,
         "privacy_fields_redacted": True,
-        "notes": "Approved Naver shipment dispatch writeback. Platform payload details, tokens, signatures, and secrets were not persisted.",
+        "notes": "Approved Naver shipment dispatch writeback. Platform request contents and credentials were not persisted.",
     }
 
 
@@ -2932,6 +2966,9 @@ def execute_naver_shipment_writeback(
     final_operator_confirmation: bool = False,
     real_api_call_requested: bool = False,
     actor_context: dict[str, Any] | None = None,
+    t18_pilot_execution: bool = False,
+    commit_local_changes: bool = True,
+    expected_credential_id: int | None = None,
 ) -> dict[str, Any]:
     ensure_store_exists(db, store_id)
     normalized_platform = _normalize_platform(platform)
@@ -2948,6 +2985,10 @@ def execute_naver_shipment_writeback(
         "raw_response_saved": False,
         "secrets_saved": False,
         "dispatchProductOrders": True,
+        "token_request_count": 0,
+        "http_request_count": 0,
+        "token_call_count": 0,
+        "http_call_count": 0,
     }
     if normalized_platform != "naver":
         result.update({"status": "blocked", "skip_reason": "naver_only_writeback"})
@@ -2970,6 +3011,30 @@ def execute_naver_shipment_writeback(
         if flag is not True:
             result.update({"status": "blocked", "skip_reason": skip_reason})
             return result
+
+    settings = get_settings()
+    if not t18_pilot_execution:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "t18_shipping_pilot_execution_required",
+            "shipment_writeback_open": False,
+        })
+        return result
+    disabled_gates = [
+        name for name, enabled in (
+            ("real_api_write_disabled", settings.real_api_write_enabled),
+            ("shipping_platform_write_disabled", settings.shipping_platform_write_enabled),
+            ("pxg_naver_shipping_pilot_disabled", settings.pxg_naver_shipping_pilot_enabled),
+        ) if not enabled
+    ]
+    if disabled_gates:
+        result.update({
+            "status": "blocked",
+            "skip_reason": disabled_gates[0],
+            "disabled_write_gates": disabled_gates,
+            "shipment_writeback_open": False,
+        })
+        return result
 
     forbidden_fields = _sensitive_fields({
         "tracking_rows": tracking_rows or [],
@@ -3023,19 +3088,37 @@ def execute_naver_shipment_writeback(
             "skipped_candidates": skipped_candidates,
         })
         return result
+    if len(candidates) != 1 or skipped_candidates:
+        result.update({
+            "status": "blocked",
+            "skip_reason": "t18_single_exact_dispatch_candidate_required",
+            "dispatch_candidate_count": len(candidates),
+            "skipped_candidate_count": len(skipped_candidates),
+        })
+        return result
 
-    credential = _ensure_naver_shipping_credential(db, store_id)
+    credential = _ensure_naver_shipping_credential(
+        db,
+        store_id,
+        expected_credential_id=expected_credential_id,
+    )
     context = _build_naver_shipping_token_context(credential)
     try:
+        result["token_request_count"] = 1
+        result["token_call_count"] = 1
         access_token, token_status = api_credential_readiness_service._request_naver_token_from_context(context)
+        # The write call starts here. A timeout after this point is ambiguous and
+        # must be reconciled by the warehouse workflow instead of retried.
+        result["platform_write_attempted"] = True
+        result["real_api_called"] = True
+        result["shipment_writeback_called"] = True
+        result["http_request_count"] = 1
+        result["http_call_count"] = 1
         dispatch_result = _post_naver_shipment_dispatch(
             api_base=context["api_base"],
             headers={"Authorization": f"Bearer {access_token}"},
             candidates=candidates,
         )
-        result["platform_write_attempted"] = True
-        result["real_api_called"] = True
-        result["shipment_writeback_called"] = True
         result["token_http_status"] = token_status
         result["http_status"] = dispatch_result.get("http_status")
         if not dispatch_result.get("success"):
@@ -3086,7 +3169,7 @@ def execute_naver_shipment_writeback(
             previous_status = _clean_text(order.order_status, max_length=30).upper()
             order.order_status = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS
             order.last_synced_at = now
-            safe_metadata = dict(order.raw_data or {})
+            safe_metadata = _remove_full_tracking_metadata(dict(order.raw_data or {}))
             safe_metadata.update({
                 "naver_shipment_writeback": True,
                 "naver_shipment_writeback_phase": "Shipping-10A",
@@ -3095,10 +3178,8 @@ def execute_naver_shipment_writeback(
                 "shipping_status_current_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
                 "shipping_tracking_hash": candidate["tracking_number_hash"],
                 "shipping_carrier_code": candidate["delivery_company_code"],
-                "shipping_tracking_number": candidate["tracking_number"],
                 "delivery_company": candidate["carrier_label"],
                 "delivery_company_code": candidate["delivery_company_code"],
-                "tracking_number": candidate["tracking_number"],
                 "raw_response_saved": False,
                 "secrets_saved": False,
                 "privacy_fields_redacted": True,
@@ -3140,7 +3221,6 @@ def execute_naver_shipment_writeback(
                     safe_metadata={
                         "shipping_tracking_hash": candidate["tracking_number_hash"],
                         "shipping_carrier_code": candidate["delivery_company_code"],
-                        "shipping_tracking_number": candidate["tracking_number"],
                         "shipping_carrier_label": candidate["carrier_label"],
                         "platform_write": True,
                         "raw_response_saved": False,
@@ -3173,7 +3253,10 @@ def execute_naver_shipment_writeback(
                 "operation_audit_rows_written": False,
             })
             return result
-        db.commit()
+        if commit_local_changes:
+            db.commit()
+        else:
+            db.flush()
         result.update({
             "status": "success" if failed_count == 0 else "partial_success",
             "skip_reason": None,
@@ -3220,7 +3303,7 @@ def execute_naver_shipment_writeback(
             "status": "failed",
             "skip_reason": getattr(exc, "error_code", None) or "shipment_writeback_failed",
             "error_code": getattr(exc, "error_code", None) or "shipment_writeback_failed",
-            "business_message": _clean_text(getattr(exc, "message", None) or str(exc), max_length=200),
+            "business_message": "Naver shipment dispatch did not receive a verifiable result.",
             "platform_write": False,
             "raw_response_saved": False,
             "secrets_saved": False,

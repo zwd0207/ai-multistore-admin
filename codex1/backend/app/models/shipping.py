@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -311,6 +311,15 @@ class WarehouseShippingApprovalGrant(Base):
     __table_args__ = (
         Index("ix_warehouse_shipping_grants_batch_scope", "batch_id", "grant_scope"),
         Index("ix_warehouse_shipping_grants_token_hash", "token_hash", unique=True),
+        # A pilot store may have one durable write attempt at a time. The
+        # partial unique index makes that invariant survive concurrent workers.
+        Index(
+            "uq_warehouse_shipping_grant_pilot_attempt_scope",
+            "attempt_scope",
+            unique=True,
+            sqlite_where=text("attempt_scope IS NOT NULL AND attempt_status != 'not_started'"),
+            postgresql_where=text("attempt_scope IS NOT NULL AND attempt_status != 'not_started'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -322,6 +331,13 @@ class WarehouseShippingApprovalGrant(Base):
     candidate_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_started", server_default="not_started")
+    attempt_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    attempt_response_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    attempt_scope: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

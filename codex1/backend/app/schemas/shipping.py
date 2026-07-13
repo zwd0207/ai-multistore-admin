@@ -205,6 +205,7 @@ class WarehouseShippingRemoveRowRequest(BaseModel):
 
 
 class WarehouseShippingWritebackRequest(BaseModel):
+    action: str = Field(default="execute", pattern="^(execute|reconcile)$")
     manual_approval: bool = False
     final_operator_confirmation: bool = False
     real_api_call_requested: bool = False

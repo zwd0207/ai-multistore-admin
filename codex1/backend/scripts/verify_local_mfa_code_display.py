@@ -1,9 +1,11 @@
 """Focused, isolated verification for the local MFA code display endpoint."""
 
+import gc
 import os
 import re
 import sys
 import tempfile
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -242,7 +244,15 @@ def main() -> None:
 
     engine.dispose()
     if TEMP_DB.exists():
-        TEMP_DB.unlink()
+        for _ in range(20):
+            try:
+                TEMP_DB.unlink()
+                break
+            except PermissionError:
+                gc.collect()
+                time.sleep(0.05)
+        else:
+            raise PermissionError(f"temporary verification database is still locked: {TEMP_DB}")
     print("verify_local_mfa_code_display: ok")
 
 
