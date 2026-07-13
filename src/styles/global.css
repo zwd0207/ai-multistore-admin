@@ -58,9 +58,11 @@ h1, h2, p { margin-top: 0; }
 .page-header p, .card-title p { color: var(--muted); margin-bottom: 0; font-size: 14px; }
 .page-actions { display: flex; gap: 10px; }
 .search-panel { display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #edf0f5; padding: 12px; border-radius: 9px; margin-bottom: 18px; }
-.search-input { width: min(330px, 32vw); display: flex; align-items: center; gap: 8px; background: white; border: 1px solid #dce1ea; border-radius: 7px; padding: 0 11px; }
+.search-input { width: min(330px, 32vw); min-width: 180px; flex: 1 1 260px; display: flex; align-items: center; gap: 8px; background: white; border: 1px solid #dce1ea; border-radius: 7px; padding: 0 11px; }
 .search-input input { width: 100%; border: 0; outline: 0; padding: 9px 0; background: transparent; }
 .search-panel select, .form-field select, .form-field input, .form-field textarea { border: 1px solid #dce1ea; background: white; border-radius: 7px; padding: 9px 11px; outline: none; color: #344054; }
+.search-panel select { min-width: 120px; max-width: 280px; }
+.search-panel > .button { flex: 0 0 auto; min-width: 64px; white-space: nowrap; }
 .search-panel select:focus, .form-field select:focus, .form-field input:focus, .form-field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px #4f46e515; }
 .form-field textarea { min-height: 110px; resize: vertical; }
 .table-wrap { width: 100%; overflow-x: auto; }
@@ -322,6 +324,11 @@ a.product-cell-id:hover { text-decoration: underline; }
 @media (max-width: 1400px) { .summary-grid { grid-template-columns: repeat(3, 1fr); } .panel-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .template-list, .detail-grid, .form-grid, .summary-grid, .info-grid, .binding-item, .settings-grid, .mini-grid, .readiness-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
+  .page-header { display: grid; align-items: start; gap: 14px; }
+  .page-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 8px; }
+  .page-actions > * { min-width: 0; width: 100%; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 10px; white-space: nowrap; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .summary-card { min-width: 0; border-radius: 8px; padding: 14px; }
   .product-cell { min-width: 210px; max-width: 280px; }
   .product-cell-detail { min-width: 0; max-width: 100%; }
   .product-cell-detail .product-cell-name, .product-cell-detail .product-cell-option { white-space: normal; overflow-wrap: anywhere; }

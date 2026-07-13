@@ -17,7 +17,7 @@
 .manual-sync-status.warning { color: #a46705; background: #fff6dc; }
 .manual-sync-status.danger { color: #c83d45; background: #fff0f0; }
 .manual-sync-status.neutral { color: #637083; background: #f0f2f5; }
-.topbar-actions { color: #4a5568; }.topbar-actions > span:last-child { display: flex; flex-direction: column; }.topbar-actions small { color: #8b95a7; font-size: 11px; }
+.topbar-actions { color: #4a5568; }.topbar-actions > .avatar + span { display: flex; flex-direction: column; }.topbar-actions small { color: #8b95a7; font-size: 11px; }
 .avatar { width: 34px; height: 34px; display: grid; place-items: center; color: white; border-radius: 50%; background: #5966d9; font-size: 13px; }.notification { width: 22px; height: 22px; display: grid; place-items: center; color: white; background: #e45858; border-radius: 50%; font-size: 11px; margin-right: 8px; }
 .main-content { padding: 24px 26px 40px; max-width: 1600px; margin: 0 auto; }
 .mobile-nav { display: none; }
@@ -29,15 +29,17 @@
   .topbar > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .topbar > div:first-child > strong, .topbar .environment-chip, .manual-sync-status, .notification { display: none; }
   .store-selector { min-width: 0; width: 100%; }
+  .store-selector > span { display: none; }
   .store-selector select { min-width: 0; width: 100%; }
   .manual-sync-button { padding-inline: 10px; }
   .topbar-actions { justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; }
   .topbar-actions { flex-wrap: wrap; min-width: 0; }
-  .topbar-actions > span:last-child { display: flex; min-width: 0; flex: 1 1 auto; }
-  .topbar-actions > span:last-child strong { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions > .avatar + span { display: flex; min-width: 0; flex: 1 1 auto; }
+  .topbar-actions > .avatar + span strong { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions > .avatar + span small { display: none; }
   .topbar-actions > .button { flex: 0 0 auto; }
   .main-content { min-width: 0; padding: 16px 12px 28px; overflow-x: hidden; }
-  .summary-grid { grid-template-columns: 1fr; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tab-row { max-width: 100%; overflow-x: auto; white-space: nowrap; }
   .content-card { min-width: 0; overflow-x: auto; }
   .data-table { min-width: 760px; }
