@@ -7,6 +7,14 @@ const PARAMETER_ALIASES = {
   endDate: 'end_date',
   includeAdvanced: 'include_advanced',
   includeRows: 'include_rows',
+  startAt: 'start_at',
+  endAt: 'end_at',
+  orderId: 'order_id',
+  productOrderId: 'product_order_id',
+  productId: 'product_id',
+  productName: 'product_name',
+  buyerName: 'buyer_name',
+  buyerPhone: 'buyer_phone',
 };
 
 function normalizeParams(params = {}) {
@@ -53,6 +61,11 @@ export const backendApi = {
   logout: () => sendData('post', '/auth/logout'),
   healthCheck: () => getData('/health'),
   getStores: (params) => getData('/stores', params),
+  createStoreOnboarding: (payload) => sendData('post', '/store-onboardings', payload),
+  getStoreOnboarding: (onboardingId) => getData(`/store-onboardings/${onboardingId}`),
+  updateStoreOnboarding: (onboardingId, payload) => sendData('patch', `/store-onboardings/${onboardingId}`, payload),
+  resumeStoreOnboarding: (onboardingId) => sendData('post', `/store-onboardings/${onboardingId}/resume`),
+  historicalOrderBackfill: (onboardingId, payload) => sendData('post', `/store-onboardings/${onboardingId}/historical-backfill`, payload),
   createStore: (payload) => sendData('post', '/stores', payload),
   updateStore: (storeId, payload) => sendData('put', `/stores/${storeId}`, payload),
   getDashboardSummary: (params) => getData('/dashboard/summary', params),

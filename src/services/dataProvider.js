@@ -4450,6 +4450,31 @@ const sourceMethods = {
     if (!isBackendSource) return mockApi.getStores(params);
     return queryBackendRows(await getBackendStores(), params);
   },
+  createStoreOnboarding: async (payload) => {
+    if (!isBackendSource) return { id: null, status: 'partially_synced', progressSummary: {} };
+    return adapters.storeOnboarding(await backendApi.createStoreOnboarding(payload));
+  },
+  getStoreOnboarding: async (onboardingId) => {
+    if (!isBackendSource) return null;
+    return adapters.storeOnboarding(await backendApi.getStoreOnboarding(onboardingId));
+  },
+  updateStoreOnboarding: async (onboardingId, payload) => {
+    if (!isBackendSource) return null;
+    return adapters.storeOnboarding(await backendApi.updateStoreOnboarding(onboardingId, payload));
+  },
+  resumeStoreOnboarding: async (onboardingId) => {
+    if (!isBackendSource) return null;
+    return adapters.storeOnboarding(await backendApi.resumeStoreOnboarding(onboardingId));
+  },
+  historicalOrderBackfill: async (onboardingId, payload) => {
+    if (!isBackendSource) return { platformWrite: false, localOnly: true };
+    const result = await backendApi.historicalOrderBackfill(onboardingId, payload);
+    return {
+      ...result,
+      onboarding: result.onboarding ? adapters.storeOnboarding(result.onboarding) : null,
+      backfill: result.backfill || {},
+    };
+  },
   createStore: async (payload) => {
     if (!isBackendSource) return mockApi.createStore(payload);
     const result = adapters.store(await backendApi.createStore(adapters.toBackendStorePayload(payload)));
@@ -4472,11 +4497,28 @@ const sourceMethods = {
   getOrders: async (params) => {
     if (!isBackendSource) return mockApi.getOrders(params);
     const { store, stores } = await resolveBackendStore(params);
-    const result = await backendApi.getOrders({ storeId: store.id, platform: params?.platform });
+    const result = await backendApi.getOrders({
+      storeId: store.id,
+      platform: params?.platform,
+      view: params?.view || 'current',
+      page: params?.page || 1,
+      pageSize: params?.pageSize || 20,
+      startAt: params?.startAt,
+      endAt: params?.endAt,
+      orderId: params?.orderId,
+      productOrderId: params?.productOrderId,
+      productId: params?.productId,
+      productName: params?.productName,
+      status: params?.status,
+      buyerName: params?.buyerName,
+      buyerPhone: params?.buyerPhone,
+    });
     const adapted = adapters.list(result, adapters.order);
     const rows = withStoreName(adapted.data, stores);
     return {
-      ...queryBackendRows(rows, params),
+      ...adapted,
+      data: rows,
+      items: rows,
       includeTestOrders: adapted.includeTestOrders,
       testOrdersExcluded: adapted.testOrdersExcluded,
     };

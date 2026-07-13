@@ -3,7 +3,7 @@ const configuredApiBaseUrl = (import.meta.env?.VITE_API_BASE_URL || DEFAULT_API_
 const shouldUseLocalDevProxy = import.meta.env?.DEV
   && /^https?:\/\/(?:127\.0\.0\.1|localhost):8012\/api\/v1$/i.test(configuredApiBaseUrl);
 const API_BASE_URL = import.meta.env?.PROD || shouldUseLocalDevProxy ? '/api/v1' : configuredApiBaseUrl;
-const SENSITIVE_KEY_PATTERN = /(?:access[_-]?key|secret[_-]?key|password|token|credential|proxy[_-]?password|remote[_-]?desktop[_-]?password)/i;
+const SENSITIVE_KEY_PATTERN = /(?:client[_-]?secret|access[_-]?key|secret[_-]?key|password|token|credential|proxy[_-]?password|remote[_-]?desktop[_-]?password)/i;
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 let csrfToken = null;

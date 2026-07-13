@@ -428,6 +428,22 @@ export function adaptOrder(item = {}) {
   };
 }
 
+export function adaptStoreOnboarding(item = {}) {
+  const progress = item.progress_summary || item.progressSummary || {};
+  const validation = item.validation_summary || item.validationSummary || {};
+  return {
+    ...item,
+    id: item.id,
+    storeId: item.store_id ?? item.storeId ?? null,
+    status: item.status || 'validating',
+    requestedStoreName: item.requested_store_name || item.requestedStoreName || '',
+    validationSummary: validation,
+    progressSummary: progress,
+    lastErrorCode: item.last_error_code || item.lastErrorCode || '',
+    nextRetryAt: item.next_retry_at || item.nextRetryAt || null,
+  };
+}
+
 export function adaptOrderLogisticsTrace(data = {}) {
   const events = Array.isArray(data.events) ? data.events : [];
   return {
@@ -1809,6 +1825,7 @@ export const adapters = {
   store: adaptStore,
   product: adaptProduct,
   order: adaptOrder,
+  storeOnboarding: adaptStoreOnboarding,
   orderLogisticsTrace: adaptOrderLogisticsTrace,
   customerInquiry: adaptCustomerInquiry,
   syncLog: adaptSyncLog,
