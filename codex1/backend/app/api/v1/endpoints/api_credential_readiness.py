@@ -34,5 +34,4 @@ def run_readonly_smoke_test(
         credential_id=payload.credential_id,
         capability_scope=payload.capability_scope,
         persist_channel_no=payload.persist_channel_no,
-        persist_capability_results=payload.persist_capability_results,
     ))

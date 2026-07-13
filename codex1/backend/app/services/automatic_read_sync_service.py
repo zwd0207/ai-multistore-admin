@@ -307,19 +307,42 @@ def _recovery_eligible_error(code: str | None) -> bool:
 
 def _attention_fields(*, resource: str, status: str, enabled: bool, stale: bool, last_error_code: str | None, store_id: int) -> dict[str, Any]:
     if resource == "logistics":
-        return {"attention_state": "none", "operator_message": "not_supported", "admin_action": None, "recovery_eligible": False, "action_path": None}
+        return {"attention_state": "none", "operator_message": "暂未接入自动读取", "admin_action": None, "recovery_eligible": False, "action_path": None}
     if status == "blocked":
         eligible = _recovery_eligible_error(last_error_code)
         return {
             "attention_state": "admin_action",
-            "operator_message": "administrator_recovery_required" if eligible else "manual_review_required",
-            "admin_action": "recover_automatic_read" if eligible else "manual_review",
+            "operator_message": "自动读取已暂停，请管理员检查店铺连接。" if eligible else "自动读取已暂停，需要管理员处理。",
+            "admin_action": "verify_and_recover",
             "recovery_eligible": eligible,
-            "action_path": f"/api/v1/stores/{store_id}/automatic-read/recover" if eligible else None,
+            "action_path": f"/stores?storeId={store_id}&focus=connection",
         }
     if status == "retry_wait" or (enabled and stale):
-        return {"attention_state": "automatic_retry", "operator_message": "automatic_retry_scheduled", "admin_action": None, "recovery_eligible": False, "action_path": None}
-    return {"attention_state": "none", "operator_message": "automatic_read_on_schedule", "admin_action": None, "recovery_eligible": False, "action_path": None}
+        return {"attention_state": "automatic_retry", "operator_message": "数据更新暂时延迟，系统会自动重试，无需操作。", "admin_action": None, "recovery_eligible": False, "action_path": None}
+    return {"attention_state": "none", "operator_message": "", "admin_action": None, "recovery_eligible": False, "action_path": None}
+
+
+def _write_recovery_audit(
+    db: Session, *, store_id: int, actor_id: str, now: datetime, settings: Settings,
+    status: str, reason_code: str, restored_count: int = 0,
+) -> bool:
+    audit = write_operation_audit_log_local(
+        db,
+        {
+            "created_at": now, "updated_at": now, "store_id": store_id, "platform": NAVER,
+            "environment": settings.app_env, "actor_type": "human", "actor_id": actor_id,
+            "action": "automatic_read_recovery", "operation_phase": "T16",
+            "correlation_id": f"t16_recovery_{store_id}_{int(now.timestamp())}", "status": status,
+            "reason_code": reason_code, "target_type": "sync_gate", "target_id": store_id,
+            "changed_field_names": ["automatic_read_enabled", "last_error_code", "next_run_at", "retry_count", "status"] if restored_count else [],
+            "counts_summary": {"restored_checkpoint_count": restored_count},
+            "safety_flags": {"platform_write": False, "raw_response_saved": False, "smoke_persisted": False},
+            "sensitive_scan_passed": True, "raw_response_saved": False, "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        write_enabled=True, manual_approval=True, local_write_scope=LOCAL_WRITER_SCOPE,
+    )
+    return bool(audit.get("audit_rows_written"))
 
 
 def recover_automatic_read(db: Session, *, store_id: int, actor_id: str, now: datetime | None = None) -> dict[str, Any]:
@@ -344,6 +367,7 @@ def recover_automatic_read(db: Session, *, store_id: int, actor_id: str, now: da
         raise ValueError("automatic_read_live_lease")
     eligible = [row for row in rows if row.status == "blocked" and _recovery_eligible_error(row.last_error_code)]
     if not eligible:
+        _write_recovery_audit(db, store_id=store_id, actor_id=actor_id, now=current, settings=settings, status="blocked", reason_code="no_eligible_checkpoint")
         raise ValueError("automatic_read_no_eligible_checkpoint")
     smoke = api_credential_readiness_service.run_api_credential_smoke_test(
         db=db, platform=NAVER, mode="readonly", store_id=store_id, capability_scope="seller_channels",
@@ -351,6 +375,7 @@ def recover_automatic_read(db: Session, *, store_id: int, actor_id: str, now: da
     )
     smoke_result = (smoke.get("results") or [{}])[0]
     if smoke_result.get("error_code") or smoke_result.get("seller_or_account_test") != "success":
+        _write_recovery_audit(db, store_id=store_id, actor_id=actor_id, now=current, settings=settings, status="failed", reason_code="verification_failed")
         raise ValueError("automatic_read_recovery_verification_failed")
     restored_resources = []
     for checkpoint in eligible:
@@ -362,28 +387,16 @@ def recover_automatic_read(db: Session, *, store_id: int, actor_id: str, now: da
         checkpoint.lease_token = None
         checkpoint.lease_expires_at = None
         restored_resources.append(_resource_for_checkpoint(checkpoint))
-    audit = write_operation_audit_log_local(
-        db,
-        {
-            "created_at": current, "updated_at": current, "store_id": store_id, "platform": NAVER,
-            "environment": settings.app_env, "actor_type": "human", "actor_id": actor_id,
-            "action": "automatic_read_recovery", "operation_phase": "T16",
-            "correlation_id": f"t16_recovery_{store_id}_{int(current.timestamp())}", "status": "success",
-            "reason_code": "credential_verification_passed", "target_type": "sync_gate", "target_id": store_id,
-            "changed_field_names": ["automatic_read_enabled", "last_error_code", "next_run_at", "retry_count", "status"],
-            "counts_summary": {"restored_checkpoint_count": len(restored_resources)},
-            "safety_flags": {"platform_write": False, "raw_response_saved": False, "smoke_persisted": False},
-            "sensitive_scan_passed": True, "raw_response_saved": False, "secrets_saved": False,
-            "privacy_fields_redacted": True,
-        },
-        write_enabled=True, manual_approval=True, local_write_scope=LOCAL_WRITER_SCOPE,
-    )
-    if not audit.get("audit_rows_written"):
+    if not _write_recovery_audit(
+        db, store_id=store_id, actor_id=actor_id, now=current, settings=settings,
+        status="success", reason_code="credential_verification_passed", restored_count=len(restored_resources),
+    ):
         db.rollback()
         raise RuntimeError("automatic_read_recovery_audit_failed")
-    return {"status": "automatic_read_recovery_restored", "store_id": store_id,
+    return {"status": "recovered", "store_id": store_id,
             "restored_resources": sorted(restored_resources), "restored_checkpoint_count": len(restored_resources),
-            "platform_write": False, "sync_started": False, "smoke_persisted": False}
+            "verification_status": "passed", "automatic_read_status": automatic_read_status(db, store_id=store_id, now=current),
+            "safety_flags": {"platform_write": False, "sync_started": False, "smoke_persisted": False}}
 
 
 def run_automatic_checkpoint(

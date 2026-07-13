@@ -924,12 +924,18 @@ def _automatic_read_status(db: Session, store_id: int) -> dict[str, Any]:
 
 
 def _automatic_read_attention_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
-    resources = [item for row in rows for item in row.get("automatic_read_status", {}).values()]
+    attention = [
+        (row["store_id"], item)
+        for row in rows
+        for item in row.get("automatic_read_status", {}).values()
+        if item.get("attention_state") in {"automatic_retry", "admin_action"}
+    ]
     return {
-        "none_count": sum(1 for item in resources if item.get("attention_state") == "none"),
-        "automatic_retry_count": sum(1 for item in resources if item.get("attention_state") == "automatic_retry"),
-        "admin_action_count": sum(1 for item in resources if item.get("attention_state") == "admin_action"),
-        "recovery_eligible_count": sum(1 for item in resources if item.get("recovery_eligible") is True),
+        "affected_store_count": len({store_id for store_id, _item in attention}),
+        "affected_resource_count": len(attention),
+        "retrying_count": sum(1 for _store_id, item in attention if item.get("status") == "retry_wait"),
+        "stale_count": sum(1 for _store_id, item in attention if item.get("status") == "stale"),
+        "admin_required_count": sum(1 for _store_id, item in attention if item.get("attention_state") == "admin_action"),
     }
 
 
@@ -1052,6 +1058,7 @@ def get_store_overview(
         "data_policy": "无法确认真实平台数据时显示 ?，避免把未知误判为 0。",
         "store_count": len(rows),
         "stores": rows,
+        "automatic_read_attention_summary": _automatic_read_attention_summary(rows),
         "operator_workbench": _aggregate_store_overview_workbenches(store_workbenches),
         "summary": {
             "store_count": len(rows),
@@ -1064,7 +1071,6 @@ def get_store_overview(
             "pending_shipment_count": sum(_metric_known_value(row, "pending_shipments") for row in rows),
             "abnormal_order_count": sum(_metric_known_value(row, "abnormal_orders") for row in rows),
             "inventory_alert_count": sum(_metric_known_value(row, "inventory_alerts") for row in rows),
-            "automatic_read_attention_summary": _automatic_read_attention_summary(rows),
         },
     }
 

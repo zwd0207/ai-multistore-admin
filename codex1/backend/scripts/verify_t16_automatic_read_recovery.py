@@ -146,6 +146,13 @@ def successful_smoke(**kwargs):
     return {"results": [{"seller_or_account_test": "success", "error_code": None}]}
 
 
+def failed_smoke(**kwargs):
+    assert kwargs["capability_scope"] == "seller_channels"
+    assert kwargs["persist_channel_no"] is False
+    assert kwargs["persist_capability_results"] is False
+    return {"results": [{"seller_or_account_test": "failed", "error_code": "permission_forbidden"}]}
+
+
 def main():
     store_id, role_id, credential_id = seed()
     with SessionLocal() as db:
@@ -162,11 +169,30 @@ def main():
         fields = {"attention_state", "operator_message", "admin_action", "recovery_eligible", "action_path"}
         assert fields.issubset(status["orders"])
         assert status["orders"]["attention_state"] == "admin_action" and status["orders"]["recovery_eligible"] is True
-        assert status["products"]["admin_action"] == "manual_review" and status["products"]["recovery_eligible"] is False
-        assert status["logistics"]["attention_state"] == "none" and status["logistics"]["operator_message"] == "not_supported"
+        assert status["orders"]["admin_action"] == "verify_and_recover"
+        assert status["orders"]["action_path"] == f"/stores?storeId={store_id}&focus=connection"
+        assert status["orders"]["operator_message"] == "自动读取已暂停，请管理员检查店铺连接。"
+        assert status["products"]["admin_action"] == "verify_and_recover" and status["products"]["recovery_eligible"] is False
+        assert status["products"]["operator_message"] == "自动读取已暂停，需要管理员处理。"
+        assert status["logistics"]["attention_state"] == "none" and status["logistics"]["operator_message"] == "暂未接入自动读取"
         overview = stats_service.get_store_overview(db, operator_user_id=1)
-        summary = overview["summary"]["automatic_read_attention_summary"]
-        assert summary["admin_action_count"] == 3 and summary["recovery_eligible_count"] == 2, summary
+        summary = overview["automatic_read_attention_summary"]
+        assert set(summary) == {"affected_store_count", "affected_resource_count", "retrying_count", "stale_count", "admin_required_count"}
+        assert summary == {"affected_store_count": 1, "affected_resource_count": 3, "retrying_count": 0, "stale_count": 0, "admin_required_count": 3}, summary
+        checkpoint_snapshot = [(row.id, row.status, row.automatic_read_enabled, row.last_error_code, row.retry_count) for row in db.query(SyncCheckpoint).order_by(SyncCheckpoint.id)]
+        audit_before_failed_verification = db.query(OperationAuditLog).count()
+        with patch.object(automatic_read_sync_service.api_credential_readiness_service, "run_api_credential_smoke_test", side_effect=failed_smoke):
+            try:
+                automatic_read_sync_service.recover_automatic_read(db, store_id=store_id, actor_id="t16-operator")
+                raise AssertionError("failed verification must not recover checkpoints")
+            except ValueError as exc:
+                assert str(exc) == "automatic_read_recovery_verification_failed"
+        assert [(row.id, row.status, row.automatic_read_enabled, row.last_error_code, row.retry_count) for row in db.query(SyncCheckpoint).order_by(SyncCheckpoint.id)] == checkpoint_snapshot
+        assert db.query(ApiCapabilityTestResult).count() == capability_before
+        assert db.get(ApiCredential, credential_id).extra_config == credential_before
+        failed_audit = db.query(OperationAuditLog).order_by(OperationAuditLog.id.desc()).first()
+        assert db.query(OperationAuditLog).count() == audit_before_failed_verification + 1
+        assert failed_audit.status == "failed" and failed_audit.reason_code == "verification_failed"
 
     with TestClient(app, base_url=ORIGIN) as client:
         csrf = authenticate(client)
@@ -197,7 +223,12 @@ def main():
         with patch.object(automatic_read_sync_service.api_credential_readiness_service, "run_api_credential_smoke_test", side_effect=successful_smoke) as mocked_smoke:
             recovered = client.post(f"/api/v1/stores/{store_id}/automatic-read/recover", headers=headers, json={"confirmation": True})
         assert recovered.status_code == 200, recovered.text
-        assert recovered.json()["data"]["restored_resources"] == ["customer_inquiries", "orders"]
+        recovery_data = recovered.json()["data"]
+        assert recovery_data["status"] == "recovered" and recovery_data["verification_status"] == "passed"
+        assert recovery_data["restored_resources"] == ["customer_inquiries", "orders"]
+        assert recovery_data["automatic_read_status"]["orders"]["status"] == "stale"
+        assert recovery_data["automatic_read_status"]["orders"]["attention_state"] == "automatic_retry"
+        assert recovery_data["safety_flags"] == {"platform_write": False, "sync_started": False, "smoke_persisted": False}
         assert mocked_smoke.call_count == 1
 
     with SessionLocal() as db:
@@ -209,7 +240,7 @@ def main():
             assert checkpoint.next_run_at is not None and checkpoint.retry_count == 0 and checkpoint.last_error_code is None
         assert products.status == "blocked" and products.cursor_value == "preserve-cursor" and products.last_error_code == "invalid_cursor"
         assert db.query(SyncLog).count() == sync_log_count
-        audit = db.query(OperationAuditLog).one()
+        audit = db.query(OperationAuditLog).order_by(OperationAuditLog.id.desc()).first()
         assert db.query(OperationAuditLog).count() == audit_count + 1
         audit_text = str({"action": audit.action, "counts": audit.counts_summary, "flags": audit.safety_flags}).lower()
         for marker in ("secret", "cursor", "buyer", "phone"):

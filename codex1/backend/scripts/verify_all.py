@@ -20005,6 +20005,7 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_stage_1e.py",
         " M backend/scripts/verify_production_sessions.py",
         " M backend/scripts/verify_t15_automatic_read_sync.py",
+        " M backend/scripts/verify_t16_automatic_read_recovery.py",
         "?? backend/scripts/verify_t16_automatic_read_recovery.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_operation_audit_logs_schema.py",

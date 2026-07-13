@@ -8,7 +8,6 @@ class ApiCredentialSmokeTestRequest(BaseModel):
     credential_id: int | None = Field(default=None, ge=1)
     capability_scope: str | None = Field(default=None)
     persist_channel_no: bool = Field(default=False)
-    persist_capability_results: bool = Field(default=True)
 
     @field_validator("platform")
     @classmethod
