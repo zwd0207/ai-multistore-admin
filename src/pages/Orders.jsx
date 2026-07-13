@@ -17,16 +17,29 @@ import { buildApiAssetUrl } from '../services/http';
 import { classifyCoreDataSource } from '../utils/coreErpContract';
 
 const PAGE_SIZE = 20;
+const HISTORY_MAX_RANGE_DAYS = 31;
+const HISTORY_AUTO_IMPORT_DAYS = 30;
 
 function dateDaysAgo(days) {
-  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function dateDistanceInDays(startAt, endAt) {
+  const start = Date.parse(`${startAt}T00:00:00Z`);
+  const end = Date.parse(`${endAt}T00:00:00Z`);
+  return Number.isFinite(start) && Number.isFinite(end) ? (end - start) / 86400000 : NaN;
 }
 
 function initialHistoryFilters(storeId = '') {
   return {
     storeId,
-    startAt: dateDaysAgo(31),
-    endAt: dateDaysAgo(1),
+    startAt: dateDaysAgo(61),
+    endAt: dateDaysAgo(31),
     orderId: '',
     productOrderId: '',
     productId: '',
@@ -455,8 +468,8 @@ export default function Orders() {
       setHistoryError('请选择有效的历史订单开始和结束日期。');
       return;
     }
-    if ((end.getTime() - start.getTime()) / 86400000 > 31) {
-      setHistoryError('单次历史订单查询和回填最多支持 31 天。');
+    if (dateDistanceInDays(historyDraft.startAt, historyDraft.endAt) > HISTORY_MAX_RANGE_DAYS) {
+      setHistoryError(`单次历史订单查询和回填最多支持 ${HISTORY_MAX_RANGE_DAYS} 天。`);
       return;
     }
     setHistoryError('');
@@ -473,8 +486,22 @@ export default function Orders() {
 
   const runHistoricalBackfill = async () => {
     const storeId = historyQuery.storeId || selectedStoreId;
+    const backfillLatestDate = dateDaysAgo(HISTORY_AUTO_IMPORT_DAYS + 1);
+    const dateDistance = dateDistanceInDays(historyQuery.startAt, historyQuery.endAt);
     if (!historyOnboarding || String(historyOnboarding.storeId) !== String(storeId)) {
       setHistoryBackfillNotice(historyOnboardingReason || '当前店铺无法确认安全的历史回填任务。');
+      return;
+    }
+    if (!historyQuery.startAt || !historyQuery.endAt || Number.isNaN(dateDistance) || dateDistance < 0) {
+      setHistoryBackfillNotice('请选择有效的历史订单开始和结束日期。');
+      return;
+    }
+    if (dateDistance > HISTORY_MAX_RANGE_DAYS) {
+      setHistoryBackfillNotice(`单次历史订单回填最多支持 ${HISTORY_MAX_RANGE_DAYS} 天。`);
+      return;
+    }
+    if (historyQuery.endAt > backfillLatestDate) {
+      setHistoryBackfillNotice(`回填结束日期不得晚于 ${backfillLatestDate}；最近 ${HISTORY_AUTO_IMPORT_DAYS} 天由系统自动维护。`);
       return;
     }
     setHistoryBackfilling(true);
@@ -622,7 +649,7 @@ export default function Orders() {
             <div className="card-title">
               <div>
                 <h2>历史订单筛选</h2>
-                <p>日期范围为必填项，单次最多 31 天；筛选和分页均由服务端执行。</p>
+                <p>日期范围为必填项，单次最多 31 天；已保存历史可查询，最近 30 天由系统自动维护。</p>
               </div>
             </div>
             <div className="order-filters">
@@ -633,10 +660,10 @@ export default function Orders() {
                 </select>
               </FormField>
               <FormField label="开始日期" required>
-                <input type="date" value={historyDraft.startAt} onChange={(event) => setHistoryDraft({ ...historyDraft, startAt: event.target.value })} />
+                <input type="date" value={historyDraft.startAt} max={dateDaysAgo(0)} onChange={(event) => setHistoryDraft({ ...historyDraft, startAt: event.target.value })} />
               </FormField>
               <FormField label="结束日期" required>
-                <input type="date" value={historyDraft.endAt} onChange={(event) => setHistoryDraft({ ...historyDraft, endAt: event.target.value })} />
+                <input type="date" value={historyDraft.endAt} max={dateDaysAgo(0)} onChange={(event) => setHistoryDraft({ ...historyDraft, endAt: event.target.value })} />
               </FormField>
               <FormField label="订单号">
                 <input value={historyDraft.orderId} onChange={(event) => setHistoryDraft({ ...historyDraft, orderId: event.target.value })} />
@@ -669,7 +696,7 @@ export default function Orders() {
             <div className="card-title">
               <div>
                 <h2>历史订单本地回填</h2>
-                <p>{historyOnboardingReason || '已确认当前店铺的 Naver 添加任务，可按当前日期范围执行本地回填。'}</p>
+                <p>{historyOnboardingReason || `已确认当前店铺的 Naver 添加任务，可回填 ${dateDaysAgo(HISTORY_AUTO_IMPORT_DAYS + 1)} 及更早日期；最近 ${HISTORY_AUTO_IMPORT_DAYS} 天由系统自动维护。`}</p>
               </div>
               <button
                 className="button ghost"

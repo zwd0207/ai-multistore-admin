@@ -65,6 +65,14 @@ assert.ok(
   'Historical rows must expose the detail action only',
 );
 assert.match(orders, /不提供平台更新、发货、复制收件信息、内部备注或智能写作操作/);
+assert.match(orders, /HISTORY_MAX_RANGE_DAYS = 31/);
+assert.match(orders, /HISTORY_AUTO_IMPORT_DAYS = 30/);
+assert.match(orders, /new Date\(now\.getFullYear\(\), now\.getMonth\(\), now\.getDate\(\) - days\)/);
+assert.match(orders, /dateDistanceInDays/);
+assert.match(orders, /max=\{dateDaysAgo\(0\)\}/);
+assert.match(orders, /backfillLatestDate = dateDaysAgo\(HISTORY_AUTO_IMPORT_DAYS \+ 1\)/);
+assert.match(orders, /historyQuery\.endAt > backfillLatestDate/);
+assert.match(orders, /最近 \$\{HISTORY_AUTO_IMPORT_DAYS\} 天由系统自动维护/);
 assert.match(orders, /单次最多 31 天/);
 assert.match(orders, /historicalOrderBackfill\(historyOnboarding\.id/);
 
