@@ -5,6 +5,8 @@ import EmptyState from '../components/common/EmptyState';
 import PageHeader from '../components/common/PageHeader';
 import SummaryCard from '../components/common/SummaryCard';
 import StatusBadge from '../components/common/StatusBadge';
+import StoreSyncStatusPanel from '../components/common/StoreSyncStatusPanel';
+import { useAuthContext } from '../context/AuthContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { metricDisplayValue } from '../services/adapters';
@@ -73,6 +75,7 @@ const activityColumns = [
 ];
 
 export default function Dashboard() {
+  const { canAccessStore } = useAuthContext();
   const { selectedStoreId, setSelectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [view, setView] = useState('all');
   const [state, setState] = useState({ loading: true, error: '', overview: null, orders: [], activities: [] });
@@ -158,6 +161,10 @@ export default function Dashboard() {
         <div className="card-title"><div><h2>按店铺查看</h2><p>选择店铺后查看该店铺的聚合任务和数据状态。</p></div></div>
         <div className="dashboard-store-table"><DataTable columns={storeColumns} rows={overviewRows} renderActions={(row) => <><button type="button" onClick={() => setSelectedStoreId(row.storeId)}>设为当前</button><Link to="/orders" onClick={() => setSelectedStoreId(row.storeId)}>订单</Link><Link to="/shipping" onClick={() => setSelectedStoreId(row.storeId)}>发货</Link></>} /></div>
       </section>
+      <StoreSyncStatusPanel
+        rows={overviewRows}
+        canViewFailureReason={(storeId) => canAccessStore(storeId, 'store_membership.assign')}
+      />
       <section className="content-card">
         <div className="card-title"><div><h2>核心快捷入口</h2><p>常用任务集中在这里。</p></div></div>
         <div className="business-capability-grid compact"><Link className="business-capability-card info" to="/orders">处理订单</Link><Link className="business-capability-card info" to="/shipping">仓库发货</Link><Link className="business-capability-card info" to="/customer-service">客户咨询</Link><Link className="business-capability-card info" to="/inventory">库存预警</Link></div>
