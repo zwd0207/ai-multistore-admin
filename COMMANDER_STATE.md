@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T12-R1 actual local multi-store rehearsal accepted; local MFA display accepted
+Status: T13 Naver one-click onboarding and historical orders in progress
 
 ## Mission
 
@@ -16,7 +16,7 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `11e0a3e` (T12-R1 actual local multi-store rehearsal).
+- Last accepted integration: `8e48607` (protected order product display and responsive operator shell).
 - Last accepted backend integration: `66074a8`
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
@@ -27,6 +27,9 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Real Naver/Coupang writes remain forbidden during the trial.
 - Persistent local trial database and restricted operator account are provisioned without deployment credentials.
 - Current local frontend: `http://127.0.0.1:5181/`.
+- T13 is active. Its product target is one Naver store submission with automatic credential/IP/permission validation, automatic 30-day local read import, and no repeated operator test step.
+- T13 historical orders extend the existing Orders page and orders table. Queried history is locally indexed for after-sales and follow-up, excluded from today's workbench, and cannot invoke platform writes, customer sends, inventory writes, or AI actions.
+- Products and orders are mandatory onboarding datasets. Customer inquiries and logistics may report partially available while their approved Naver read adapters remain incomplete; they must never report false success or block use of successfully imported products and orders.
 - Credential handoff exists only in ignored local storage with a current-user Windows ACL.
 
 ## Active Trial Boundary
