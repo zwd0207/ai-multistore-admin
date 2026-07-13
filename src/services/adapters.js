@@ -312,9 +312,12 @@ export function adaptOrder(item = {}) {
     : '';
   const naverDeliveryStatus = item.delivery_status || rawData.delivery_status;
   const naverClaimStatus = item.claim_status || rawData.claim_status;
-  const naverDeliveryLabel = isNaver
-    ? naverBusinessStatusLabel(naverDeliveryStatus, item.delivery_status_label_zh, rawData.delivery_status_label_zh, naverDeliveryStatus)
-    : item.delivery_status_label_zh || rawData.delivery_status_label_zh;
+  // Delivery labels are authoritative backend values. Do not translate or infer
+  // platform delivery states in the browser.
+  const naverDeliveryLabel = item.delivery_status_label_zh
+    || rawData.delivery_status_label_zh
+    || naverDeliveryStatus
+    || '';
   const naverClaimLabel = isNaver
     ? naverBusinessStatusLabel(naverClaimStatus, item.claim_status_label_zh, rawData.claim_status_label_zh, naverClaimStatus)
     : item.claim_status_label_zh || rawData.claim_status_label_zh;
@@ -356,10 +359,15 @@ export function adaptOrder(item = {}) {
     || '';
   const trackingNumber = item.tracking_number
     || item.trackingNumber
-    || rawData.tracking_number
-    || rawData.trackingNumber
-    || rawData.shipping_tracking_number
     || '';
+  const logisticsUpdatedAt = item.logistics_updated_at
+    || item.logisticsUpdatedAt
+    || rawData.logistics_updated_at
+    || rawData.logisticsUpdatedAt
+    || item.updated_at
+    || rawData.updated_at
+    || '';
+  const logisticsStale = Boolean(item.logistics_stale ?? item.is_stale ?? rawData.logistics_stale ?? rawData.is_stale ?? false);
   const statusLabel = isNaver
     ? (naverStatusLabel || getNaverOrderStatusPresentation(item.order_status).label)
     : adaptStatus(item.order_status, {
@@ -402,8 +410,8 @@ export function adaptOrder(item = {}) {
     delivery_company_code: deliveryCompanyCode,
     trackingNumber,
     tracking_number: trackingNumber,
-    logisticsTraceStatus: item.logistics_trace_status || item.logisticsTraceStatus || (trackingNumber ? 'local_tracking_trace' : 'tracking_number_missing'),
-    logisticsTraceAvailable: Boolean(trackingNumber),
+    logisticsTraceStatus: item.logistics_trace_status || item.logisticsTraceStatus || rawData.logistics_trace_status || '',
+    logisticsTraceAvailable: Boolean(item.logistics_trace_status || item.logisticsTraceStatus || rawData.logistics_trace_status || trackingNumber),
     quantity: item.quantity,
     amount: numberValue(item.order_amount),
     currency: item.currency,
@@ -412,6 +420,9 @@ export function adaptOrder(item = {}) {
     paymentStatus: item.payment_status || rawData.payment_status,
     deliveryStatus: statusRawValue(naverDeliveryStatus),
     deliveryStatusLabelZh: naverDeliveryLabel,
+    logisticsUpdatedAt,
+    logisticsStale,
+    isStale: logisticsStale,
     claimStatus: statusRawValue(naverClaimStatus),
     claimStatusLabelZh: naverClaimLabel,
     statusEvents,
@@ -457,8 +468,11 @@ export function adaptOrderLogisticsTrace(data = {}) {
     deliveryCompany: data.delivery_company || data.deliveryCompany || '',
     deliveryCompanyCode: data.delivery_company_code || data.deliveryCompanyCode || '',
     trackingNumber: data.tracking_number || data.trackingNumber || '',
-    trackingSource: data.tracking_source || data.trackingSource || 'local_tracking_trace',
+    trackingSource: data.tracking_source || data.trackingSource || '',
     realtimeTrackingOpen: Boolean(data.realtime_tracking_open ?? data.realtimeTrackingOpen),
+    logisticsUpdatedAt: data.logistics_updated_at || data.logisticsUpdatedAt || data.updated_at || data.updatedAt || '',
+    logisticsStale: Boolean(data.logistics_stale ?? data.is_stale ?? false),
+    isStale: Boolean(data.is_stale ?? data.logistics_stale ?? false),
     message: data.message || '',
     events: events.map((item, index) => ({
       id: item.id || `${data.order_id || data.orderId || 'trace'}-${index}`,
@@ -593,10 +607,26 @@ export function adaptCustomerInquiry(item = {}) {
       batchNo: relatedOrder.warehouse_batch_no || relatedOrder.batch_no || '',
       batchStatus: relatedOrder.warehouse_batch_status || relatedOrder.batch_status || '',
       warehouseStatus: relatedOrder.warehouse_row_status || '',
-      carrier: stableLogistics.carrier || relatedOrder.carrier || '',
-      trackingNumber: stableLogistics.tracking_number_masked || relatedOrder.tracking_number_masked || relatedOrder.tracking_number || '',
-      trackingStatus: stableLogistics.shipment_status || relatedOrder.tracking_status || '',
+      carrier: stableLogistics.carrier || '',
+      trackingNumber: stableLogistics.tracking_number_masked || relatedOrder.tracking_number_masked || '',
+      trackingStatus: stableLogistics.shipment_status || '',
+      deliveryStatus: stableLogistics.shipment_status || '',
+      deliveryStatusLabelZh: stableLogistics.shipment_status || '',
       shippedAt: stableLogistics.shipped_at || '',
+      logisticsUpdatedAt: stableLogistics.updated_at || stableLogistics.source_updated_at || '',
+      sourceUpdatedAt: stableLogistics.source_updated_at || '',
+      logisticsStale: Boolean(stableLogistics.logistics_stale ?? stableLogistics.is_stale ?? false),
+      isStale: Boolean(stableLogistics.is_stale ?? stableLogistics.logistics_stale ?? false),
+    },
+    logisticsContext: {
+      carrier: stableLogistics.carrier || '',
+      trackingNumberMasked: stableLogistics.tracking_number_masked || '',
+      shipmentStatus: stableLogistics.shipment_status || '',
+      shippedAt: stableLogistics.shipped_at || '',
+      updatedAt: stableLogistics.updated_at || '',
+      sourceUpdatedAt: stableLogistics.source_updated_at || '',
+      isStale: Boolean(stableLogistics.is_stale ?? stableLogistics.logistics_stale ?? false),
+      logisticsStale: Boolean(stableLogistics.logistics_stale ?? stableLogistics.is_stale ?? false),
     },
     answerContent: rawData.answer_content || '',
     platformReplySubmitted: Boolean(rawData.platform_reply_submitted),

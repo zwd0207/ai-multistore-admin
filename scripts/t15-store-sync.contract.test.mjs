@@ -24,8 +24,8 @@ assert.match(adapters, /automaticReadStatus: adaptAutomaticReadStatus\(item\.aut
 assert.match(panel, /row\.automaticReadStatus/);
 assert.doesNotMatch(panel, /row\.resources/);
 assert.doesNotMatch(panel, /lastErrorCode|lease|租约|taskId|内部任务/);
-assert.match(panel, /safeFailureReason === 'not_supported'/);
-assert.match(panel, /暂未接入自动读取/);
+assert.doesNotMatch(panel, /safeFailureReason === 'not_supported'/);
+assert.doesNotMatch(panel, /暂未接入自动读取/);
 assert.match(panel, /attentionState !== 'none'/);
 assert.match(styles, /store-sync-resource-grid/);
 

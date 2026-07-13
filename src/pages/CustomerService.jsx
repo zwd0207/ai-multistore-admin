@@ -67,6 +67,10 @@ function normalizeMessage(row = {}) {
     replyEnabled: row.replyEnabled !== false,
     replyDisabledReason: row.replyDisabledReason || '',
     hasRelatedOrder: row.hasRelatedOrder === true,
+    logisticsContext: row.logisticsContext || row.logistics_context || {},
+    logisticsValidity: row.relatedOrder?.logisticsStale || row.relatedOrder?.isStale
+      ? '已过期'
+      : (row.relatedOrder?.logisticsUpdatedAt ? '有效' : '尚未发货或平台暂无物流信息'),
   };
 }
 
@@ -329,8 +333,11 @@ export default function CustomerService() {
                 ['订单状态', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.orderStatus || '待确认') : '当前读取窗口暂无关联订单'],
                 ['发货批次', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.batchNo || '尚未进入批次') : '当前读取窗口暂无关联订单'],
                 ['仓库进度', activeMessage.hasRelatedOrder ? (activeMessage.relatedOrder?.warehouseStatus || activeMessage.relatedOrder?.batchStatus || '待处理') : '当前读取窗口暂无关联订单'],
-                ['快递公司', activeMessage.relatedOrder?.carrier || '尚未录入'],
-                ['物流单号', activeMessage.relatedOrder?.trackingNumber || '尚未录入'],
+                ['快递公司', activeMessage.relatedOrder?.carrier || '尚未发货或平台暂无物流信息'],
+                ['物流单号', activeMessage.relatedOrder?.trackingNumber || '尚未发货或平台暂无物流信息'],
+                ['物流状态', activeMessage.relatedOrder?.deliveryStatusLabelZh || activeMessage.relatedOrder?.deliveryStatus || '尚未发货或平台暂无物流信息'],
+                ['物流更新时间', activeMessage.relatedOrder?.logisticsUpdatedAt || '-'],
+                ['物流有效期', activeMessage.logisticsValidity],
                 ['状态', <StatusBadge value={activeMessage.statusLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
                 ['记录状态', activeMessage.sourceInfo.label],

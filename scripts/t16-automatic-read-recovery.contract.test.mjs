@@ -99,7 +99,7 @@ assert.doesNotMatch(panel, /runManualStoreSync|runManualAllStoresSync/);
 assert.match(panel, /actionPath \|\| connectionActionPath/);
 assert.match(panel, /operatorMessage/);
 assert.doesNotMatch(panel, /row\.automaticReadAttentionSummary/);
-assert.match(panel, /safeFailureReason === 'not_supported'/);
+assert.doesNotMatch(panel, /safeFailureReason === 'not_supported'/);
 assert.match(panel, /const attentionRows =/);
 assert.match(panel, /attentionRows\.map/);
 assert.match(panel, /store-sync-attention-stores/);

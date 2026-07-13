@@ -18,13 +18,12 @@ function connectionActionPath(storeId) {
 }
 
 function ResourceStatus({ resource, showOperatorMessage }) {
-  const unavailable = resource?.safeFailureReason === 'not_supported';
-  const label = unavailable ? (resource.safeFailureLabel || '暂未接入自动读取') : storeSyncStatusLabel(resource?.status);
+  const label = storeSyncStatusLabel(resource?.status);
   return (
     <article className="store-sync-resource">
       <div className="store-sync-resource-heading">
         <strong>{label}</strong>
-        <StatusBadge value={unavailable ? '暂未接入' : label} />
+        <StatusBadge value={label} />
       </div>
       <dl>
         <div><dt>最后成功</dt><dd>{formatStoreSyncTime(resource?.lastSuccessAt)}</dd></div>

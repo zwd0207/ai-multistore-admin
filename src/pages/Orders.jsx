@@ -69,7 +69,7 @@ function normalizedOrder(row = {}) {
   const statusText = textOf(row.status, row.order_status, row.rawStatus, row.raw_status, row.delivery_status_label_zh, row.claim_status_label_zh);
   const product = row.product || row.productName || row.product_name || row.name || '-';
   const option = row.option || row.optionName || row.option_name || row.spec || '-';
-  const shippingStatus = row.deliveryStatusLabelZh || row.delivery_status_label_zh || row.shippingStatus || row.delivery_status || '-';
+  const shippingStatus = row.deliveryStatusLabelZh || row.delivery_status_label_zh || row.shippingStatus || row.delivery_status || '';
   const deliveryCompany = row.deliveryCompany || row.delivery_company || row.logisticsCompany || row.courier || '';
   const trackingNumber = row.trackingNumber || row.tracking_number || row.trackingNo || row.invoiceNo || '';
   return {
@@ -89,9 +89,14 @@ function normalizedOrder(row = {}) {
     deliveryCompany,
     deliveryCompanyCode: row.deliveryCompanyCode || row.delivery_company_code || '',
     trackingNumber,
-    logisticsTraceStatus: row.logisticsTraceStatus || row.logistics_trace_status || (trackingNumber ? 'local_tracking_trace' : 'tracking_number_missing'),
+    logisticsTraceStatus: row.logisticsTraceStatus || row.logistics_trace_status || '',
     logisticsCompany: deliveryCompany || '-',
     trackingNo: trackingNumber || '-',
+    logisticsUpdatedAt: row.logisticsUpdatedAt || row.logistics_updated_at || row.updatedAt || row.updated_at || '',
+    logisticsStale: Boolean(row.logisticsStale ?? row.logistics_stale ?? row.isStale ?? row.is_stale ?? false),
+    logisticsValidity: row.logisticsStale ?? row.logistics_stale ?? row.isStale ?? row.is_stale
+      ? '已过期'
+      : (row.logisticsUpdatedAt || row.logistics_updated_at || row.updatedAt || row.updated_at ? '有效' : '尚未发货或平台暂无物流信息'),
     createdAt: row.createdAt || row.ordered_at || row.orderDate || row.paid_at || '',
     receiverName: row.receiverName || row.receiver_name || row.customer || row.buyer_name || '',
     receiverPhone: row.receiverPhone || row.receiver_phone || row.phone || row.buyer_phone || '',
@@ -192,6 +197,8 @@ const columns = [
   { key: 'shippingStatus', title: '发货状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'logisticsCompany', title: '快递公司' },
   { key: 'trackingNo', title: '运单号' },
+  { key: 'logisticsUpdatedAt', title: '物流更新时间' },
+  { key: 'logisticsValidity', title: '物流有效期' },
 ];
 
 export default function Orders() {
@@ -523,7 +530,7 @@ export default function Orders() {
 
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
   const renderTrackingDetail = (order) => {
-    if (!hasDisplayValue(order?.trackingNo)) return <span>-</span>;
+    if (!hasDisplayValue(order?.trackingNo)) return <span>尚未发货或平台暂无物流信息</span>;
     return (
       <span className="inline-action-group">
         <span>{order.trackingNo}</span>
@@ -752,9 +759,11 @@ export default function Orders() {
                 ['数量', activeOrder.quantity],
                 ['订单金额', `${Number(activeOrder.amount || 0).toLocaleString()} ${activeOrder.currency || 'KRW'}`],
                 ['订单状态', <StatusBadge value={activeOrder.statusText} />],
-                ['发货状态', <StatusBadge value={activeOrder.shippingStatus} />],
+                ['发货状态', activeOrder.shippingStatus ? <StatusBadge value={activeOrder.shippingStatus} /> : '尚未发货或平台暂无物流信息'],
                 ['快递公司', activeOrder.logisticsCompany],
                 ['运单号', renderTrackingDetail(activeOrder)],
+                ['物流更新时间', activeOrder.logisticsUpdatedAt || '-'],
+                ['物流有效期', activeOrder.logisticsValidity],
                 ['记录状态', activeOrder.sourceInfo.label],
                 ['内部备注', notes[activeOrder.orderNo] || '暂无'],
               ].filter((_, index) => viewMode === 'current' || index < 9).map(([label, value]) => (
@@ -815,6 +824,8 @@ export default function Orders() {
               {[
                 ['快递公司', traceModal.trace.deliveryCompany || traceModal.order?.logisticsCompany || '-'],
                 ['运单号', traceModal.trace.trackingNumber || traceModal.order?.trackingNo || '-'],
+                ['物流更新时间', traceModal.trace.logisticsUpdatedAt || traceModal.order?.logisticsUpdatedAt || '-'],
+                ['物流有效期', traceModal.trace.logisticsStale ? '已过期' : (traceModal.trace.logisticsUpdatedAt ? '有效' : '尚未发货或平台暂无物流信息')],
                 ['记录状态', traceModal.trace.trackingSource === 'shipping_tracking_import_rows' ? '仓库回传的物流信息' : '订单物流信息'],
                 ['实时轨迹', traceModal.trace.realtimeTrackingOpen ? '可查询' : '暂未提供实时轨迹'],
               ].map(([label, value]) => (
