@@ -923,6 +923,16 @@ def _automatic_read_status(db: Session, store_id: int) -> dict[str, Any]:
     return automatic_read_status(db, store_id=store_id)
 
 
+def _automatic_read_attention_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
+    resources = [item for row in rows for item in row.get("automatic_read_status", {}).values()]
+    return {
+        "none_count": sum(1 for item in resources if item.get("attention_state") == "none"),
+        "automatic_retry_count": sum(1 for item in resources if item.get("attention_state") == "automatic_retry"),
+        "admin_action_count": sum(1 for item in resources if item.get("attention_state") == "admin_action"),
+        "recovery_eligible_count": sum(1 for item in resources if item.get("recovery_eligible") is True),
+    }
+
+
 def _store_overview_row(db: Session, store: Store) -> dict[str, Any]:
     try:
         platform = normalize_platform(store.platform)
@@ -1054,6 +1064,7 @@ def get_store_overview(
             "pending_shipment_count": sum(_metric_known_value(row, "pending_shipments") for row in rows),
             "abnormal_order_count": sum(_metric_known_value(row, "abnormal_orders") for row in rows),
             "inventory_alert_count": sum(_metric_known_value(row, "inventory_alerts") for row in rows),
+            "automatic_read_attention_summary": _automatic_read_attention_summary(rows),
         },
     }
 

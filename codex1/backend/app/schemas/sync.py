@@ -146,3 +146,13 @@ class ManualAllStoresSyncRequest(BaseModel):
     include_customer_inquiries: bool = True
     include_inactive: bool = False
     replace_policy: str = "delete_absent_when_full_snapshot"
+
+
+class AutomaticReadRecoveryRequest(BaseModel):
+    confirmation: bool = Field(...)
+
+    @model_validator(mode="after")
+    def require_confirmation(self) -> "AutomaticReadRecoveryRequest":
+        if self.confirmation is not True:
+            raise ValueError("confirmation must be true")
+        return self

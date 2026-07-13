@@ -9,6 +9,9 @@ from app.database import get_db
 from app.models.store import Store
 from app.models.auth import ErpRole, ErpStoreMembership
 from app.schemas.store import StoreCreate, StoreRead, StoreUpdate
+from app.schemas.sync import AutomaticReadRecoveryRequest
+from app.services import automatic_read_sync_service
+from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_operator_recent_auth, require_store_permission
 
 
 router = APIRouter(prefix="/stores", tags=["stores"])
@@ -90,6 +93,24 @@ def list_stores(
 def get_store(store_id: int, db: Session = Depends(get_db)) -> dict:
     store = get_store_or_404(db, store_id)
     return success_response(data=serialize_store(store))
+
+
+@router.post("/{store_id}/automatic-read/recover")
+def recover_store_automatic_read(
+    store_id: int,
+    payload: AutomaticReadRecoveryRequest,
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    del payload
+    require_operator_recent_auth(identity)
+    require_store_permission(db, identity=identity, store_id=store_id, permission_key="credentials.manage")
+    require_store_permission(db, identity=identity, store_id=store_id, permission_key="platform.sync")
+    try:
+        result = automatic_read_sync_service.recover_automatic_read(db, store_id=store_id, actor_id=identity.user_key_hash)
+    except ValueError as exc:
+        raise ApiError("automatic read recovery is not available", str(exc), status.HTTP_409_CONFLICT) from exc
+    return success_response(data=result, message="automatic read recovery restored")
 
 
 @router.put("/{store_id}")

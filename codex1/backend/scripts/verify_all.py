@@ -58,6 +58,7 @@ EXPECTED_API_PATHS = {
     "/api/v1/credentials",
     "/api/v1/api-credentials/readiness",
     "/api/v1/api-credentials/smoke-test",
+    "/api/v1/stores/{store_id}/automatic-read/recover",
     "/api/v1/credentials/{credential_id}",
     "/api/v1/platform-logins",
     "/api/v1/platform-logins/{login_id}",
@@ -1544,6 +1545,7 @@ def verify_stage_scripts() -> None:
         "verify_t13_onboarding.py",
         "verify_t14_naver_readonly_inquiries.py",
         "verify_t15_automatic_read_sync.py",
+        "verify_t16_automatic_read_recovery.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",
@@ -19930,6 +19932,7 @@ def verify_git_tracking() -> None:
         " M backend/app/api/v1/endpoints/shipping.py",
         "A  backend/app/api/v1/endpoints/shipping.py",
         " M backend/app/api/v1/endpoints/stats.py",
+        " M backend/app/api/v1/endpoints/stores.py",
         " M backend/app/api/v1/endpoints/sync.py",
         " M backend/app/config.py",
         " M backend/app/database.py",
@@ -19962,6 +19965,7 @@ def verify_git_tracking() -> None:
         "A  backend/app/schemas/shipping.py",
         " M backend/app/schemas/sync.py",
         " M backend/app/services/stats_service.py",
+        " M backend/app/services/automatic_read_sync_service.py",
         " M backend/app/services/api_capability_service.py",
         " M backend/app/services/api_credential_readiness_service.py",
         " M backend/app/services/backup_service.py",
@@ -20000,6 +20004,8 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_stage_1d.py",
         " M backend/scripts/verify_stage_1e.py",
         " M backend/scripts/verify_production_sessions.py",
+        " M backend/scripts/verify_t15_automatic_read_sync.py",
+        "?? backend/scripts/verify_t16_automatic_read_recovery.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
         " M backend/scripts/upgrade_operation_audit_logs_schema.py",
         "A  backend/scripts/upgrade_operation_audit_logs_schema.py",
@@ -20215,6 +20221,8 @@ def main() -> None:
         verify_auth_schema_local_migration_script()
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t13_onboarding.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t14_naver_readonly_inquiries.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t15_automatic_read_sync.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t16_automatic_read_recovery.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

@@ -18,7 +18,8 @@ from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from app.services.encryption import decrypt_value
-from app.services import naver_readonly_inquiry_service, order_service, product_service, store_onboarding_service
+from app.services import api_credential_readiness_service, naver_readonly_inquiry_service, order_service, product_service, store_onboarding_service
+from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 
 
 NAVER = "naver"
@@ -36,6 +37,9 @@ LEGACY_APPROVED_READONLY_SYNC_TYPES = (
     "naver_customer_inquiry_real_sync",
     "naver_readonly_inquiry_refresh",
 )
+RECOVERABLE_RESOURCES = ("orders", "customer_inquiries", "products")
+MANUAL_REVIEW_ERROR_MARKERS = ("cursor", "page", "cleanup", "retention", "conflict", "invalid", "unknown")
+RECOVERABLE_ERROR_MARKERS = ("credential", "auth", "ip_not_allowed", "permission", "forbidden")
 
 
 def _utc(value: datetime) -> datetime:
@@ -292,6 +296,96 @@ def _safe_failure_reason(code: str | None) -> str | None:
     return "manual_review_required"
 
 
+def _recovery_eligible_error(code: str | None) -> bool:
+    if not code:
+        return False
+    normalized = code.lower()
+    if any(marker in normalized for marker in MANUAL_REVIEW_ERROR_MARKERS):
+        return False
+    return any(marker in normalized for marker in RECOVERABLE_ERROR_MARKERS)
+
+
+def _attention_fields(*, resource: str, status: str, enabled: bool, stale: bool, last_error_code: str | None, store_id: int) -> dict[str, Any]:
+    if resource == "logistics":
+        return {"attention_state": "none", "operator_message": "not_supported", "admin_action": None, "recovery_eligible": False, "action_path": None}
+    if status == "blocked":
+        eligible = _recovery_eligible_error(last_error_code)
+        return {
+            "attention_state": "admin_action",
+            "operator_message": "administrator_recovery_required" if eligible else "manual_review_required",
+            "admin_action": "recover_automatic_read" if eligible else "manual_review",
+            "recovery_eligible": eligible,
+            "action_path": f"/api/v1/stores/{store_id}/automatic-read/recover" if eligible else None,
+        }
+    if status == "retry_wait" or (enabled and stale):
+        return {"attention_state": "automatic_retry", "operator_message": "automatic_retry_scheduled", "admin_action": None, "recovery_eligible": False, "action_path": None}
+    return {"attention_state": "none", "operator_message": "automatic_read_on_schedule", "admin_action": None, "recovery_eligible": False, "action_path": None}
+
+
+def recover_automatic_read(db: Session, *, store_id: int, actor_id: str, now: datetime | None = None) -> dict[str, Any]:
+    """Verify one store-bound readonly capability, then reopen eligible blocked checkpoints."""
+    current = _utc(now or get_utc_now())
+    settings = get_settings()
+    store = db.get(Store, store_id)
+    if store is None:
+        raise ValueError("automatic_read_store_not_found")
+    if store.status != "active":
+        raise ValueError("automatic_read_store_inactive")
+    if store.platform.lower() != NAVER:
+        raise ValueError("automatic_read_platform_not_supported")
+    if not settings.automatic_read_sync_enabled:
+        raise ValueError("automatic_read_runtime_disabled")
+    rows = db.scalars(select(SyncCheckpoint).where(
+        SyncCheckpoint.store_id == store_id,
+        SyncCheckpoint.platform == NAVER,
+        SyncCheckpoint.sync_type.in_([RESOURCE_CONFIG[resource]["sync_type"] for resource in RECOVERABLE_RESOURCES]),
+    )).all()
+    if any(row.lease_token and row.lease_expires_at and _utc(row.lease_expires_at) > current for row in rows):
+        raise ValueError("automatic_read_live_lease")
+    eligible = [row for row in rows if row.status == "blocked" and _recovery_eligible_error(row.last_error_code)]
+    if not eligible:
+        raise ValueError("automatic_read_no_eligible_checkpoint")
+    smoke = api_credential_readiness_service.run_api_credential_smoke_test(
+        db=db, platform=NAVER, mode="readonly", store_id=store_id, capability_scope="seller_channels",
+        persist_channel_no=False, persist_capability_results=False,
+    )
+    smoke_result = (smoke.get("results") or [{}])[0]
+    if smoke_result.get("error_code") or smoke_result.get("seller_or_account_test") != "success":
+        raise ValueError("automatic_read_recovery_verification_failed")
+    restored_resources = []
+    for checkpoint in eligible:
+        checkpoint.status = "idle"
+        checkpoint.automatic_read_enabled = True
+        checkpoint.next_run_at = current
+        checkpoint.retry_count = 0
+        checkpoint.last_error_code = None
+        checkpoint.lease_token = None
+        checkpoint.lease_expires_at = None
+        restored_resources.append(_resource_for_checkpoint(checkpoint))
+    audit = write_operation_audit_log_local(
+        db,
+        {
+            "created_at": current, "updated_at": current, "store_id": store_id, "platform": NAVER,
+            "environment": settings.app_env, "actor_type": "human", "actor_id": actor_id,
+            "action": "automatic_read_recovery", "operation_phase": "T16",
+            "correlation_id": f"t16_recovery_{store_id}_{int(current.timestamp())}", "status": "success",
+            "reason_code": "credential_verification_passed", "target_type": "sync_gate", "target_id": store_id,
+            "changed_field_names": ["automatic_read_enabled", "last_error_code", "next_run_at", "retry_count", "status"],
+            "counts_summary": {"restored_checkpoint_count": len(restored_resources)},
+            "safety_flags": {"platform_write": False, "raw_response_saved": False, "smoke_persisted": False},
+            "sensitive_scan_passed": True, "raw_response_saved": False, "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        write_enabled=True, manual_approval=True, local_write_scope=LOCAL_WRITER_SCOPE,
+    )
+    if not audit.get("audit_rows_written"):
+        db.rollback()
+        raise RuntimeError("automatic_read_recovery_audit_failed")
+    return {"status": "automatic_read_recovery_restored", "store_id": store_id,
+            "restored_resources": sorted(restored_resources), "restored_checkpoint_count": len(restored_resources),
+            "platform_write": False, "sync_started": False, "smoke_persisted": False}
+
+
 def run_automatic_checkpoint(
     db: Session, *, checkpoint_id: int, now: datetime | None = None,
     reader: store_onboarding_service.NaverReadAdapter | None = None,
@@ -352,19 +446,20 @@ def automatic_read_status(db: Session, *, store_id: int, now: datetime | None = 
     for resource, config in RESOURCE_CONFIG.items():
         row = by_type.get(config["sync_type"])
         if resource == "logistics":
-            result[resource] = _status_item("blocked", False, None, None, None, 0, "not_supported", None, current)
+            result[resource] = _status_item(resource, store_id, "blocked", False, None, None, None, 0, "not_supported", None, current)
         elif row is None:
-            result[resource] = _status_item("disabled", False, None, None, None, 0, None, None, current)
+            result[resource] = _status_item(resource, store_id, "disabled", False, None, None, None, 0, None, None, current)
         else:
-            result[resource] = _status_item(row.status, row.automatic_read_enabled, row.last_synced_at, row.next_run_at, row.fresh_until, row.retry_count, row.last_error_code, row.last_attempt_at, current)
+            result[resource] = _status_item(resource, store_id, row.status, row.automatic_read_enabled, row.last_synced_at, row.next_run_at, row.fresh_until, row.retry_count, row.last_error_code, row.last_attempt_at, current)
     return result
 
 
-def _status_item(status: str, enabled: bool, last_success_at: datetime | None, next_run_at: datetime | None, data_fresh_until: datetime | None, retry_count: int, last_error_code: str | None, last_attempt_at: datetime | None, now: datetime) -> dict[str, Any]:
+def _status_item(resource: str, store_id: int, status: str, enabled: bool, last_success_at: datetime | None, next_run_at: datetime | None, data_fresh_until: datetime | None, retry_count: int, last_error_code: str | None, last_attempt_at: datetime | None, now: datetime) -> dict[str, Any]:
     stale = bool(data_fresh_until and _utc(data_fresh_until) < now)
     due = bool(next_run_at and _utc(next_run_at) <= now)
     display_status = "blocked" if status == "blocked" else ("stale" if stale else ("due" if due and status not in {"running", "retry_wait"} else status))
     return {"status": display_status, "automatic_read_enabled": enabled, "last_success_at": last_success_at,
             "next_run_at": next_run_at, "data_fresh_until": data_fresh_until, "retry_count": retry_count,
             "last_error_code": last_error_code, "safe_failure_reason": _safe_failure_reason(last_error_code),
-            "is_stale": stale, "last_attempt_at": last_attempt_at}
+            "is_stale": stale, "last_attempt_at": last_attempt_at,
+            **_attention_fields(resource=resource, status=status, enabled=enabled, stale=stale, last_error_code=last_error_code, store_id=store_id)}

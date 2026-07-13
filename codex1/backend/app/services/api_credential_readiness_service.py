@@ -980,6 +980,7 @@ def run_api_credential_smoke_test(
     credential_id: int | None = None,
     capability_scope: str | None = None,
     persist_channel_no: bool = False,
+    persist_capability_results: bool = True,
 ) -> dict:
     settings = get_settings()
     if platform == "naver" and store_id is not None:
@@ -1003,6 +1004,7 @@ def run_api_credential_smoke_test(
             and result.get("store_id") is not None
             and result.get("credential_id") is not None
             and result.get("error_code") != "real_api_test_disabled"
+            and persist_capability_results
         ):
             result["capability_result_ids"] = _persist_real_readonly_capability_results(db, capability_results)
         return {
