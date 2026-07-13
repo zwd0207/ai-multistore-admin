@@ -826,7 +826,11 @@ export default function Orders() {
                 ['运单号', traceModal.trace.trackingNumber || traceModal.order?.trackingNo || '-'],
                 ['物流更新时间', traceModal.trace.logisticsUpdatedAt || traceModal.order?.logisticsUpdatedAt || '-'],
                 ['物流有效期', traceModal.trace.logisticsStale ? '已过期' : (traceModal.trace.logisticsUpdatedAt ? '有效' : '尚未发货或平台暂无物流信息')],
-                ['记录状态', traceModal.trace.trackingSource === 'shipping_tracking_import_rows' ? '仓库回传的物流信息' : '订单物流信息'],
+                ['记录状态', traceModal.trace.trackingSource === 'pxg_naver_readonly_logistics'
+                  ? 'Naver 配送快照'
+                  : traceModal.trace.trackingSource === 'shipping_tracking_import_rows'
+                    ? '仓库回传的物流信息'
+                    : '订单物流信息'],
                 ['实时轨迹', traceModal.trace.realtimeTrackingOpen ? '可查询' : '暂未提供实时轨迹'],
               ].map(([label, value]) => (
                 <div className="detail-item" key={label}>

@@ -66,6 +66,7 @@ assert.deepEqual(inquiry.relatedOrder, {
 for (const marker of ['deliveryStatusLabelZh', 'logisticsUpdatedAt', 'logisticsValidity', '尚未发货或平台暂无物流信息', 'getOrderLogisticsTrace']) {
   assert.match(orders, new RegExp(marker), `orders must expose ${marker}`);
 }
+assert.match(orders, /Naver 配送快照/);
 for (const marker of ['logistics_context', '物流状态', '物流更新时间', '物流有效期', '尚未发货或平台暂无物流信息']) {
   assert.match(customerService, new RegExp(marker), `customer service must expose ${marker}`);
 }
