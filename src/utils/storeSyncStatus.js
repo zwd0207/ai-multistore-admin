@@ -14,5 +14,10 @@ export function storeSyncStatusLabel(status) {
 }
 
 export function formatStoreSyncTime(value) {
-  return value || '暂无记录';
+  if (!value) return '暂无记录';
+  const normalized = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) && !/(?:z|[+-]\d{2}:?\d{2})$/i.test(value)
+    ? `${value}Z`
+    : value;
+  return formatKstDateTimeWithLabel(normalized);
 }
+import { formatKstDateTimeWithLabel } from './time.js';

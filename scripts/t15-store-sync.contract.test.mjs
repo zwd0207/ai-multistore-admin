@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { STORE_SYNC_STATUS_LABELS } from '../src/utils/storeSyncStatus.js';
+import { formatStoreSyncTime, STORE_SYNC_STATUS_LABELS } from '../src/utils/storeSyncStatus.js';
 import { adaptAutomaticReadStatus } from '../src/utils/automaticReadStatus.js';
 
 const panel = fs.readFileSync('src/components/common/StoreSyncStatusPanel.jsx', 'utf8');
@@ -18,6 +18,7 @@ assert.equal(backendSample.orders.nextRunAt, '2026-07-13T09:00:00+09:00');
 assert.equal(backendSample.orders.lastAttemptAt, '2026-07-13T08:00:00+09:00');
 assert.equal(backendSample.products.safeFailureLabel, '平台或网络暂时异常');
 assert.equal(backendSample.logistics.safeFailureLabel, '暂未接入自动读取');
+assert.equal(formatStoreSyncTime('2026-07-13T05:20:12.000000'), '2026-07-13 14:20 KST');
 assert.deepEqual(Object.keys(STORE_SYNC_STATUS_LABELS), ['idle', 'due', 'running', 'retry_wait', 'blocked', 'success', 'stale', 'disabled']);
 assert.match(adapters, /automaticReadStatus: adaptAutomaticReadStatus\(item\.automatic_read_status\)/);
 assert.match(panel, /row\.automaticReadStatus/);
