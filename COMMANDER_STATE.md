@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: project commander
-Status: T17 Naver logistics readonly loop accepted
+Status: T18 guarded Naver shipment writeback implementation accepted; real dispatch not authorized
 
 ## Mission
 
@@ -16,8 +16,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 
 - Integration worktree: `codex2`
 - Integration branch: `integration/operator-v1-preview`
-- Last accepted integration: `8199f2e` (T17 operator logistics visibility and explicit Naver snapshot labeling).
-- Last accepted backend integration: `f60a754` (stale/no-logistics failure closure and unconditional customer-reply write gates).
+- Last accepted integration: `fd8e565` (T18 identity and carrier hardening after final security review).
+- Last accepted backend integration: `fd8e565` (session-backed T18 actions, development-auth closure, and canonical carrier persistence).
 - Luna runtime correction `fb88c396` and mobile correction `01a8e52` passed Commander Gate B.
 - Luna operator authentication and responsive UX are integrated.
 - Terra production sessions and write authorization boundary commit `02aacdd` are integrated.
@@ -38,6 +38,10 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - Ordinary orders, customer inquiries, the workbench, and logistics traces expose only masked tracking numbers. Expired snapshots are evaluated at serialization time, marked stale, and do not return tracking values. A newer explicit no-logistics snapshot clears the previous encrypted/hash/masked tracking values and fails closed.
 - The legacy T13 product-order-hash identifier is accepted only after an exact same-store, same-platform, unique product-order match. New T13 records use the correct platform-order hash.
 - Customer platform replies now require both global real-write and customer-write settings inside the service before inquiry lookup, credential access, token retrieval, or network work. The approved trial keeps both switches off.
+- T18 is implementation-accepted. It reuses the existing warehouse batch, approval grant, T17 readonly preflight, session permissions, and audit flow. The only real shipment endpoint is `POST /api/v1/shipping/warehouse-batches/{batch_id}/writeback`.
+- The pilot remains limited to the exact PXG/Naver store, one active product-order row, one bound credential, one candidate hash, and at most one dispatch attempt. Approval and execution require a session-backed identity, MFA, recent authentication, CSRF, same-store permission, two authoritative readonly preflights, and an atomically claimed one-use attempt.
+- Ambiguous post results remain `unknown` and cannot be resent. They permit readonly reconciliation only. Unapproved or tracking-like carrier values are rejected before preflight; ordinary orders and events retain only canonical carrier code/label and tracking hashes.
+- Sol's initial T18 review found development-identity and carrier-field blockers. Commander commit `fd8e565` closed both, and Sol's narrow re-review passed with no blocker. No real Naver write was executed or authorized.
 
 ## Active Trial Boundary
 
@@ -106,15 +110,16 @@ AI automation is deferred until the manual operator workflow is stable and measu
 - `1c9fcc7` through `9975db6`: T16 extends the existing store overview, T15 checkpoints/scheduler, connection editor, and workbench status panel. It adds safe exception summaries, store-scoped verify-and-recover, connection deep links, administrator/ordinary-operator response separation, and 68-second recovery polling without a new table, scheduler, log, page, or platform write path. T13-T16, production sessions, frontend contracts/build/encoding, full `verify_all.py`, desktop browser QA, 390px browser QA, and Sol final review passed.
 - `8937d2d`: frontend business routes, the administrative layout, and the large data provider load on demand. The entry bundle fell from 901 KB to 253 KB, the data-provider chunk is 351 KB, all 37 JavaScript chunks pass enforced budgets, and the production build no longer emits the 500 KB warning. Browser QA passed login, workbench, orders, shipping, customer service, and 390px containment; invalid 200-row list requests were corrected to the backend limit of 100.
 - `35b6f54` through `f60a754` and `fccb90b` through `8199f2e`: T17 reuses Naver order-detail reads, existing logistics records/events, T15 checkpoints/logs, order trace, inquiry context, and existing frontend pages. A bounded real PXG read checked 6 saved product-order candidates, produced 5 valid encrypted logistics snapshots and one honest no-logistics result, and ended with the logistics checkpoint at `success` and `platform_write=false`. T13-T17, production sessions, all frontend contracts, build, encoding, session security, bundle budget, final `verify_all.py`, desktop QA, 390px QA, and Sol final review passed.
+- `077ad0b` through `44ad315` and `fd8e565`: T18 adds a single guarded warehouse-batch Naver shipment writeback path without a new table, scheduler, batch system, or public legacy execute route. Commander independently passed T18, warehouse, reprocess, production sessions, full `verify_all.py`, frontend contracts/build/encoding/session/bundle gates, and desktop/390px browser QA. Sol's final narrow review passed development-identity closure, canonical carrier handling, privacy, idempotency, and duplication checks. All real-write flags remain off and no dispatch was sent.
 
 ## Worktree Registry
 
 | Role | Worktree | Branch | Current use |
 |---|---|---|---|
 | Commander | `codex2` | `integration/operator-v1-preview` | integration, verification, memory |
-| Sol | review-only | final gate | T17 final review passed; closed |
-| Terra | `codex2-terra` | `task/t17-terra` | T17 backend integrated and verified; paused |
-| Luna | `codex2-luna` | `task/t17-luna` | T17 frontend integrated and verified; paused |
+| Sol | review-only | final gate | T18 final re-review passed; closed |
+| Terra | `codex2-terra` | `task/t18-terra-fix` | T18 backend integrated and verified; paused |
+| Luna | `codex2-luna` | `task/t18-luna-fix` | T18 frontend integrated and verified; paused |
 
 ## Next Action
 
@@ -140,7 +145,8 @@ AI automation is deferred until the manual operator workflow is stable and measu
 20. Logistics automatic read is supported for approved Naver stores. Missing checkpoints and stores without approved credentials remain disabled; failures continue through T15 retry and T16 attention handling.
 21. The next phase should improve operator handling of the refreshed order, inquiry, product, and warehouse data without creating a second scheduler, task table, order table, inquiry service, or platform-write path.
 22. The next product decision is a separately approved single-store manual write trial: either shipment writeback or customer reply, not both at once. Until that decision, all real platform writes remain closed.
-23. Keep `npm run bundle:verify` in every frontend acceptance run. Current baseline: 253,249-byte entry, 37 JavaScript chunks, all within budget.
+23. Keep `npm run bundle:verify` in every frontend acceptance run. Current baseline: 252,851-byte entry, 37 JavaScript chunks, all within budget.
+24. T18 implementation is accepted, but real Naver shipment dispatch is not authorized. Keep `REAL_API_WRITE_ENABLED=false`, `SHIPPING_PLATFORM_WRITE_ENABLED=false`, `PXG_NAVER_SHIPPING_PILOT_ENABLED=false`, `PLATFORM_ORDER_WRITE_ENABLED=false`, and `ALLOW_DEV_AUTH=false` for any future pilot runtime until the owner explicitly approves one exact product-order candidate.
 
 ## Compact Reporting Contract
 
