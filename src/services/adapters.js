@@ -556,6 +556,8 @@ export function adaptCustomerInquiry(item = {}) {
   const replyEnabled = item.reply_enabled ?? item.replyEnabled ?? (source !== 'naver_readonly');
   const readonlyId = item.readonly_id ?? item.readonlyId
     ?? (String(item.inquiry_id || '').startsWith('pxg_naver_readonly:') ? String(item.inquiry_id).split(':')[1] : null);
+  const safeSummary = item.summary || item.title || item.inquiry_type || item.category || 'customer inquiry';
+  const isReadonly = readonlyId !== null && readonlyId !== undefined && String(readonlyId) !== '';
   return {
     id: item.inquiry_id || item.id,
     readonlyId,
@@ -569,8 +571,9 @@ export function adaptCustomerInquiry(item = {}) {
     customer: item.customer_name,
     customerName: item.customer_name,
     title: item.title || item.summary,
-    content: '',
-    summary: item.summary || item.title || item.content,
+    content: isReadonly ? '' : safeSummary,
+    summary: safeSummary,
+    detailLoaded: !isReadonly,
     rawStatus: item.status,
     status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
     priority: item.priority || '일반',

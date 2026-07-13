@@ -11,6 +11,7 @@ assert.match(backendApi, /`\/customer-inquiries\/\$\{encodeURIComponent\(readonl
 assert.match(backendApi, /store_id: storeId/);
 assert.match(dataProvider, /refreshNaverCustomerInquiries/);
 assert.match(customerPage, /getCustomerInquiryDetail/);
+assert.match(customerPage, /!activeMessage\.readonlyId/);
 assert.match(customerPage, /正在加载客服消息详情/);
 assert.match(customerPage, /客服消息详情暂不可用/);
 assert.doesNotMatch(customerPage, /syncNaverCustomerInquiries\(/);
@@ -21,9 +22,15 @@ const summary = adaptCustomerInquiry({
   content: 'must not appear in list summary',
   reply_enabled: false,
 });
-assert.equal(summary.content, '');
+assert.equal(summary.content, 'delivery inquiry');
 assert.equal(summary.replyEnabled, false);
-assert.equal(adaptCustomerInquiry({ inquiry_id: 'pxg_naver_readonly:17' }).readonlyId, '17');
+const readonly = adaptCustomerInquiry({ inquiry_id: 'pxg_naver_readonly:17', source: 'pxg_naver_readonly_local_v1', summary: 'safe summary' });
+assert.equal(readonly.readonlyId, '17');
+assert.equal(readonly.detailLoaded, false);
+const generic = adaptCustomerInquiry({ inquiry_id: 'generic:1', source: 'generic', summary: 'safe generic summary', content: 'raw content must not appear' });
+assert.equal(generic.readonlyId, null);
+assert.equal(generic.content, 'safe generic summary');
+assert.equal(generic.detailLoaded, true);
 
 const detail = adaptCustomerInquiryDetail({
   readonly_id: 'readonly-1',

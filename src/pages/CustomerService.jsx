@@ -185,7 +185,7 @@ export default function CustomerService() {
   };
 
   useEffect(() => {
-    if (!activeMessage || activeMessage.detailLoaded || !isBackendSource || !selectedStoreId) return undefined;
+    if (!activeMessage || !activeMessage.readonlyId || activeMessage.detailLoaded || !isBackendSource || !selectedStoreId) return undefined;
     let cancelled = false;
     setDetailLoading(true);
     setDetailError('');
