@@ -21,7 +21,7 @@ from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from app.schemas.store_onboarding import HistoricalBackfillCreate, StoreOnboardingCreate, StoreOnboardingCredentialUpdate, StoreOnboardingRead
-from app.services import api_credential_readiness_service, order_service, product_service, sync_service
+from app.services import api_credential_readiness_service, order_service, product_service, pxg_naver_readonly_persistence_service, sync_service
 from app.services.encryption import decrypt_value, encrypt_value
 
 
@@ -744,7 +744,14 @@ def _sync_dataset(
                 raise NaverReadFailure("invalid_read_adapter_page")
             remote_items += len(page.items)
             items = _canonical_products(page.items, scope) if dataset == "products" else _canonical_orders(page.items, scope)
-            outcome = product_service.upsert_products(db, onboarding.store_id, NAVER_PLATFORM, items) if dataset == "products" else order_service.upsert_orders(db, onboarding.store_id, NAVER_PLATFORM, items)
+            outcome = product_service.upsert_products(db, onboarding.store_id, NAVER_PLATFORM, items) if dataset == "products" else order_service.upsert_orders(db, onboarding.store_id, NAVER_PLATFORM, items, commit=False)
+            if dataset == "orders" and any(_has_logistics_snapshot(item) for item in page.items if isinstance(item, dict)):
+                pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+                    db,
+                    store_id=onboarding.store_id,
+                    details=page.items,
+                    scope="historical" if scope == "historical" else "onboarding",
+                )
             created += outcome["created"]
             updated += outcome["updated"]
             pages += 1
@@ -943,6 +950,13 @@ def _parse_business_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     return _as_aware_utc(parsed)
+
+
+def _has_logistics_snapshot(item: dict) -> bool:
+    if any(item.get(field) for field in ("delivery_company", "tracking_number", "shipped_at")):
+        return True
+    status = item.get("delivery_status")
+    return isinstance(status, dict) and not status.get("derived_from_order_status") and bool(status.get("raw"))
 
 
 def _set_failure(db: Session, onboarding: StoreOnboarding, code: str, *, retryable: bool, now: datetime, progress: dict | None = None) -> None:

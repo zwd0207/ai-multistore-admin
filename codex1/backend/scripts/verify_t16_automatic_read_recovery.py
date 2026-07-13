@@ -195,7 +195,7 @@ def main():
         assert status["products"]["admin_action"] == "manual_review" and status["products"]["recovery_eligible"] is False
         assert status["products"]["operator_message"] == "自动读取已暂停，需要管理员处理。"
         assert status["products"]["action_path"] == f"/stores?storeId={store_id}&focus=connection"
-        assert status["logistics"]["attention_state"] == "none" and status["logistics"]["operator_message"] == "暂未接入自动读取"
+        assert status["logistics"]["status"] == "disabled" and status["logistics"]["automatic_read_enabled"] is False
         for code in ("product_api_not_allowed",):
             assert automatic_read_sync_service._recovery_eligible_error(code) is True
         for code in ("invalid_cursor", "unknown_forbidden", "unknown_internal", "unexpected_auth_failure", "permission_backend_error"):

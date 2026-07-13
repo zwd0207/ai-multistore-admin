@@ -20,7 +20,9 @@ from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.order import Order
+from app.models.order_status_event import OrderStatusEvent
 from app.models.product import Product
+from app.models.store import Store
 from app.models.pxg_naver_readonly import (
     PxgNaverOrderRecipientSecureRecord,
     PxgNaverReadonlyCleanupStatus,
@@ -50,6 +52,16 @@ RECIPIENT_MAX_RETENTION_DAYS = 30
 TRACKING_RETENTION_DAYS = 30
 METADATA_RETENTION_DAYS = 90
 TERMINAL_ORDER_STATUSES = {"DELIVERED", "DELIVERY_COMPLETED", "CANCELLED", "CANCELED", "RETURNED"}
+NAVER_DELIVERY_TERMINAL_STATUSES = frozenset({
+    "DELIVERED", "DELIVERY_COMPLETION", "DELIVERY_COMPLETED", "DELIVERY_COMPLETE",
+    "COMPLETED_DELIVERY", "SHIPPING_COMPLETED",
+})
+NAVER_LOGISTICS_STOP_STATUSES = frozenset({
+    "CANCELLED", "CANCELED", "RETURNED", "RETURN_COMPLETED", "RETURN_COMPLETE",
+    "EXCHANGE_COMPLETED", "EXCHANGE_COMPLETE", "PURCHASE_CONFIRMED", "PURCHASE_DECIDED",
+})
+T17_DELIVERY_TERMINAL_STATUSES = set(NAVER_DELIVERY_TERMINAL_STATUSES)
+T17_LOGISTICS_SYNC_TYPE = "naver_automatic_logistics"
 RECIPIENT_FIELDS = (
     "receiver_name",
     "receiver_phone",
@@ -83,6 +95,51 @@ def _masked_tracking_number(value: str) -> str:
     if len(text) <= 4:
         return "*" * len(text)
     return f"{'*' * max(4, len(text) - 4)}{text[-4:]}"
+
+
+def _snapshot_status(value: object) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("raw") or value.get("status")
+    return _snapshot_text(value, max_length=60)
+
+
+def _snapshot_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return _utc(value)
+    if not value:
+        return None
+    try:
+        return _utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _terminal_delivery_status(value: object) -> bool:
+    status = (_snapshot_status(value) or "").upper().replace("-", "_").replace(" ", "_")
+    return status in T17_DELIVERY_TERMINAL_STATUSES
+
+
+def _terminal_order_snapshot(snapshot: dict[str, object]) -> bool:
+    values = (_snapshot_status(snapshot.get("order_status")), _snapshot_status(snapshot.get("claim_status")))
+    normalized = " ".join(value.upper().replace("-", "_") for value in values if value)
+    return (
+        "CANCEL" in normalized
+        or ("RETURN" in normalized and "COMPLETE" in normalized)
+        or ("EXCHANGE" in normalized and "COMPLETE" in normalized)
+        or "PURCHASE_CONFIRM" in normalized
+    )
+
+
+def _t17_logistics_fields(snapshot: dict[str, object]) -> dict[str, object]:
+    tracking_number = _snapshot_text(snapshot.get("tracking_number"))
+    carrier = _snapshot_text(snapshot.get("delivery_company") or snapshot.get("carrier"))
+    delivery_status = _snapshot_status(snapshot.get("delivery_status"))
+    shipped_at = _snapshot_datetime(snapshot.get("shipped_at"))
+    return {
+        "tracking_number": tracking_number, "carrier": carrier,
+        "shipment_status": delivery_status or "observed", "shipped_at": shipped_at,
+        "has_logistics_field": bool(tracking_number or carrier or delivery_status or shipped_at),
+    }
 
 
 def _empty_recipient_contract() -> dict[str, str]:
@@ -660,6 +717,175 @@ def _logistics_outcome(
         settings=settings,
     )
     return outcome
+
+
+def _snapshot_text(value: object, *, max_length: int = 120) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("raw") or value.get("status")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:max_length] or None
+
+
+def _snapshot_time(value: object, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return _utc(value)
+    if value:
+        try:
+            return _utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+        except ValueError:
+            pass
+    return _utc(fallback)
+
+
+def _snapshot_is_terminal(detail: dict) -> bool:
+    return any(
+        value and value.upper() in NAVER_LOGISTICS_STOP_STATUSES
+        for value in (
+            _snapshot_text(detail.get("order_status")),
+            _snapshot_text(detail.get("claim_status")),
+            _snapshot_text(detail.get("delivery_status")),
+        )
+    )
+
+
+def _write_t17_logistics_event(db: Session, *, order: Order, detail: dict, observed_at: datetime) -> None:
+    delivery_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
+    shipment_status = delivery_status or _snapshot_text(detail.get("order_status"), max_length=60) or "observed"
+    dedupe_key = "|".join(("t17_naver_logistics", str(order.id), shipment_status, _utc(observed_at).isoformat()))
+    if db.scalar(select(OrderStatusEvent.id).where(
+        OrderStatusEvent.store_id == order.store_id,
+        OrderStatusEvent.platform == "naver",
+        OrderStatusEvent.dedupe_key == dedupe_key,
+    )) is not None:
+        return
+    db.add(OrderStatusEvent(
+        store_id=order.store_id, order_id=order.id, platform="naver",
+        external_order_id_hash=_hash(order.external_order_id) if order.external_order_id else None,
+        external_product_order_id_hash=_hash(order.external_product_order_id or str(order.id)),
+        event_type="logistics_snapshot", status_raw=_snapshot_text(detail.get("order_status"), max_length=60),
+        status_label_zh=None, payment_status_raw=None, payment_status_label_zh=None,
+        delivery_status_raw=delivery_status, delivery_status_label_zh=None,
+        claim_status_raw=_snapshot_text(detail.get("claim_status"), max_length=60), claim_status_label_zh=None,
+        observed_at=_utc(observed_at), source_phase="T17", source_type="naver_order_detail_readonly",
+        mapping_version="t17_naver_logistics_snapshot_v1", dedupe_key=dedupe_key,
+        raw_response_saved=False, privacy_fields_redacted=True, address_saved=False,
+        safe_metadata={"raw_response_saved": False, "privacy_fields_redacted": True},
+    ))
+
+
+def persist_naver_order_detail_logistics_page(
+    db: Session, *, store_id: int, details: list[dict], now: datetime | None = None, scope: str = "automatic",
+) -> dict[str, int]:
+    """Persist one read-only order-detail page without retaining raw responses."""
+    current = _utc(now or get_utc_now())
+    settings = get_settings()
+    store = db.get(Store, store_id)
+    if store is None or store.status != "active" or store.platform != "naver":
+        raise ApiError("Naver logistics store is unavailable", "naver_logistics_store_unavailable", 403)
+    assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings, now=current)
+    saved = not_available = skipped = 0
+    for detail in details:
+        if not isinstance(detail, dict):
+            skipped += 1
+            continue
+        product_order_id = _snapshot_text(detail.get("external_product_order_id"))
+        external_order_id = _snapshot_text(detail.get("external_order_id_full") or detail.get("external_order_id"))
+        if not product_order_id or _snapshot_is_terminal(detail):
+            skipped += 1
+            continue
+        statement = select(Order).where(
+            Order.store_id == store_id, Order.platform == "naver",
+            Order.external_product_order_id == product_order_id,
+            Order.source_type.notin_(("mock_sync", "local_frontend_mock")),
+        )
+        if scope == "historical":
+            statement = statement.where(Order.source_type == "naver_historical_backfill")
+        else:
+            statement = statement.where(
+                Order.source_type != "naver_historical_backfill",
+                Order.ordered_at >= current - timedelta(days=30),
+            )
+        matches = db.scalars(statement).all()
+        if len(matches) != 1:
+            skipped += 1
+            continue
+        order = matches[0]
+        if external_order_id and order.external_order_id != external_order_id:
+            skipped += 1
+            continue
+        carrier = _snapshot_text(detail.get("delivery_company"))
+        tracking_number = _snapshot_text(detail.get("tracking_number"))
+        shipment_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
+        shipped_at = _snapshot_time(detail.get("shipped_at"), current) if detail.get("shipped_at") else None
+        if not any((carrier, tracking_number, shipment_status, shipped_at)):
+            not_available += 1
+            continue
+        source_value = detail.get("last_changed_at") or detail.get("source_updated_at") or detail.get("shipped_at")
+        if not source_value:
+            skipped += 1
+            continue
+        source_updated_at = _snapshot_time(source_value, current)
+        source_key_hash = _hash(f"logistics:{order.id}")
+        fingerprint = _fingerprint({
+            "carrier": carrier, "tracking_number_hash": _hash(tracking_number) if tracking_number else None,
+            "shipment_status": shipment_status, "shipped_at": shipped_at.isoformat() if shipped_at else None,
+        })
+        state = _state_for(db, store_id=store_id, resource_type="logistics", source_key_hash=source_key_hash)
+        decision = _state_decision(state, source_updated_at=source_updated_at, content_fingerprint=fingerprint)
+        if decision == "older_source":
+            skipped += 1
+            continue
+        if decision == "same_version_conflict":
+            raise RuntimeError("logistics_same_version_conflict")
+        record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.order_id == order.id))
+        if decision == "unchanged":
+            if state is not None:
+                _refresh_existing_state(state, observed_at=current, settings=settings)
+            if record is not None:
+                record.is_stale = False
+                record.source_observed_at = current
+                record.expires_at = _resource_expiry(settings, "logistics", current)
+            saved += 1
+            continue
+        incoming_terminal = bool(shipment_status and shipment_status.upper() in NAVER_DELIVERY_TERMINAL_STATUSES)
+        if record is not None and record.shipment_status.upper() in NAVER_DELIVERY_TERMINAL_STATUSES and not incoming_terminal:
+            skipped += 1
+            continue
+        previous_status = record.shipment_status if record is not None else None
+        if record is None:
+            record = PxgNaverReadonlyLogisticsRecord(
+                order_id=order.id, store_id=store_id, platform="naver", carrier=carrier,
+                encrypted_tracking_number=encrypt_value(tracking_number) if tracking_number else "",
+                tracking_number_hash=_hash(tracking_number) if tracking_number else "",
+                tracking_number_masked=_masked_tracking_number(tracking_number) if tracking_number else "",
+                shipment_status=shipment_status or "observed", shipped_at=shipped_at,
+                source_updated_at=source_updated_at, source_observed_at=current,
+                expires_at=_resource_expiry(settings, "logistics", current), is_stale=False,
+            )
+            db.add(record)
+        else:
+            record.carrier = carrier
+            record.encrypted_tracking_number = encrypt_value(tracking_number) if tracking_number else ""
+            record.tracking_number_hash = _hash(tracking_number) if tracking_number else ""
+            record.tracking_number_masked = _masked_tracking_number(tracking_number) if tracking_number else ""
+            record.shipment_status = shipment_status or "observed"
+            record.shipped_at = shipped_at
+            record.source_updated_at = source_updated_at
+            record.source_observed_at = current
+            record.expires_at = _resource_expiry(settings, "logistics", current)
+            record.is_stale = False
+        db.flush()
+        _refresh_state(
+            db, state=state, store_id=store_id, resource_type="logistics", source_key_hash=source_key_hash,
+            local_record_id=record.id, source_updated_at=source_updated_at, content_fingerprint=fingerprint,
+            observed_at=current, settings=settings,
+        )
+        if previous_status != record.shipment_status:
+            _write_t17_logistics_event(db, order=order, detail=detail, observed_at=source_updated_at)
+        saved += 1
+    return {"saved": saved, "not_available": not_available, "skipped": skipped}
 
 
 def _inquiry_outcome(

@@ -77,10 +77,10 @@ def main():
         assert run_automatic_checkpoint(db, checkpoint_id=legacy_product_cp.id, now=NOW, reader=Reader()) == "success"
         fictional_status = automatic_read_status(db, store_id=rejected_store.id, now=NOW)
         assert fictional_status["orders"]["status"] == "disabled" and fictional_status["orders"]["automatic_read_enabled"] is False
-        assert checkpoint(db, stores[0].id, "logistics").status == "blocked"
+        assert checkpoint(db, stores[0].id, "logistics").status == "idle"
         contract_fields = {"status", "automatic_read_enabled", "last_success_at", "next_run_at", "data_fresh_until", "retry_count", "last_error_code", "safe_failure_reason", "is_stale", "last_attempt_at", "attention_state", "operator_message", "admin_action", "recovery_eligible", "action_path"}
         status = automatic_read_status(db, store_id=stores[0].id, now=NOW)
-        assert set(status["logistics"]) == contract_fields and status["logistics"]["last_error_code"] == "not_supported"
+        assert set(status["logistics"]) == contract_fields and status["logistics"]["automatic_read_enabled"] is True
         assert Settings().automatic_read_sync_enabled is False
         assert RESOURCE_CONFIG["orders"]["lease"] == timedelta(minutes=15) and RESOURCE_CONFIG["products"]["lease"] == timedelta(minutes=30)
         assert abs(_stagger(stores[0].id, "orders", RESOURCE_CONFIG["orders"]["interval"]).total_seconds()) <= 60

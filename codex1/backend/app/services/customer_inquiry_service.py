@@ -68,6 +68,8 @@ def _order_context(db: Session, order: Order | None) -> tuple[dict, dict]:
             "tracking_number_masked": readonly_logistics.tracking_number_masked,
             "shipment_status": readonly_logistics.shipment_status,
             "shipped_at": readonly_logistics.shipped_at,
+            "updated_at": readonly_logistics.updated_at,
+            "is_stale": readonly_logistics.is_stale,
         }
     if batch_row is None or batch_row.batch.tracking_import_batch_id is None:
         return order_context, {}
@@ -82,6 +84,8 @@ def _order_context(db: Session, order: Order | None) -> tuple[dict, dict]:
         "tracking_number_masked": _mask_tracking_number(tracking_row.tracking_number),
         "shipment_status": tracking_row.row_status,
         "shipped_at": tracking_row.shipped_at,
+        "updated_at": tracking_row.updated_at,
+        "is_stale": False,
     }
 
 

@@ -10,6 +10,7 @@ from app.core.timezone import get_utc_now
 from app.models.order import Order
 from app.models.product import Product
 from app.models.order_status_event import OrderStatusEvent
+from app.models.pxg_naver_readonly import PxgNaverReadonlyLogisticsRecord
 from app.models.shipping import ShippingTrackingImportRow
 from app.schemas.order import OrderRead
 from app.services.store_service import ensure_store_exists
@@ -110,6 +111,17 @@ def _first_text(*values: object, max_length: int = 160) -> str | None:
     return None
 
 
+def _mask_tracking_number(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = str(value).strip()
+    if len(normalized) <= 4:
+        return "*" * len(normalized)
+    if len(normalized) <= 8:
+        return f"{normalized[:2]}{'*' * (len(normalized) - 4)}{normalized[-2:]}"
+    return f"{normalized[:4]}{'*' * (len(normalized) - 8)}{normalized[-4:]}"
+
+
 def _display_delivery_company(value: object) -> str | None:
     text = _clean_text(value, max_length=120)
     if not text:
@@ -171,8 +183,18 @@ def _tracking_row_for_order(
     return None
 
 
-def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow | None = None) -> dict[str, str | None]:
+def _order_delivery_fields(
+    order: Order,
+    tracking_row: ShippingTrackingImportRow | None = None,
+    *,
+    db: Session | None = None,
+) -> dict[str, str | None]:
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
+    readonly_logistics = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+        PxgNaverReadonlyLogisticsRecord.order_id == order.id,
+        PxgNaverReadonlyLogisticsRecord.store_id == order.store_id,
+        PxgNaverReadonlyLogisticsRecord.platform == order.platform,
+    )) if db is not None else None
     delivery_company = _first_text(
         _find_nested_text(raw_data, (
             "delivery_company",
@@ -185,6 +207,7 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
             "courier",
             "courierCompany",
         )),
+        readonly_logistics.carrier if readonly_logistics else None,
         tracking_row.carrier if tracking_row else None,
         _find_nested_text(raw_data, ("delivery_company_code", "deliveryCompanyCode", "shipping_carrier_code")),
         max_length=120,
@@ -205,6 +228,7 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
             "waybillNumber",
             "shipping_tracking_number",
         ), max_length=120),
+        readonly_logistics.tracking_number_masked if readonly_logistics else None,
         tracking_row.tracking_number if tracking_row else None,
         max_length=120,
     )
@@ -212,7 +236,7 @@ def _order_delivery_fields(order: Order, tracking_row: ShippingTrackingImportRow
     return {
         "delivery_company": _display_delivery_company(delivery_company),
         "delivery_company_code": delivery_company_code,
-        "tracking_number": tracking_number,
+        "tracking_number": _mask_tracking_number(tracking_number),
         "logistics_trace_status": trace_status,
     }
 
@@ -314,7 +338,7 @@ def serialize_order(order: Order, tracking_row: ShippingTrackingImportRow | None
         ("receiver_address", "receiverAddress", "recipientAddress", "baseAddress", "roadNameAddress"),
         max_length=300,
     )
-    payload.update(_order_delivery_fields(order, tracking_row))
+    payload.update(_order_delivery_fields(order, tracking_row, db=db))
     if db is not None:
         payload.update(product_display_contract(db, order))
     return payload
@@ -327,7 +351,7 @@ def serialize_order_summary(order: Order, tracking_row: ShippingTrackingImportRo
     return payload
 
 
-def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) -> dict:
+def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict], *, commit: bool = True) -> dict:
     ensure_store_exists(db, store_id)
     created = 0
     updated = 0
@@ -359,7 +383,8 @@ def upsert_orders(db: Session, store_id: int, platform: str, items: list[dict]) 
             setattr(order, field, value)
         updated += 1
 
-    db.commit()
+    if commit:
+        db.commit()
     return {"created": created, "updated": updated, "total": len(items)}
 
 
@@ -539,7 +564,7 @@ def get_order_logistics_timeline(db: Session, *, store_id: int, order_id: int) -
     ).all()
     tracking_lookup = _build_tracking_lookup(tracking_rows)
     tracking_row = _tracking_row_for_order(order, tracking_lookup)
-    delivery_fields = _order_delivery_fields(order, tracking_row)
+    delivery_fields = _order_delivery_fields(order, tracking_row, db=db)
     raw_data = order.raw_data if isinstance(order.raw_data, dict) else {}
 
     events: list[dict[str, Any]] = []
@@ -566,7 +591,7 @@ def get_order_logistics_timeline(db: Session, *, store_id: int, order_id: int) -
             events,
             time=tracking_row.created_at,
             label="物流单号已导入本地",
-            description=f"{tracking_row.carrier} / {tracking_row.tracking_number}",
+            description=f"{tracking_row.carrier} / {_mask_tracking_number(tracking_row.tracking_number) or ''}",
             source="shipping_tracking_import_rows",
         )
 

@@ -27,7 +27,7 @@ RESOURCE_CONFIG = {
     "orders": {"sync_type": "naver_automatic_orders", "interval": timedelta(minutes=10), "freshness": timedelta(minutes=25), "lease": timedelta(minutes=15)},
     "customer_inquiries": {"sync_type": "naver_automatic_inquiries", "interval": timedelta(minutes=10), "freshness": timedelta(minutes=25), "lease": timedelta(minutes=15)},
     "products": {"sync_type": "naver_automatic_products", "interval": timedelta(hours=2), "freshness": timedelta(hours=4), "lease": timedelta(minutes=30)},
-    "logistics": {"sync_type": "naver_automatic_logistics", "interval": None, "freshness": timedelta(minutes=75), "lease": None},
+    "logistics": {"sync_type": "naver_automatic_logistics", "interval": timedelta(minutes=30), "freshness": timedelta(minutes=75), "lease": timedelta(minutes=20)},
 }
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
@@ -37,7 +37,7 @@ LEGACY_APPROVED_READONLY_SYNC_TYPES = (
     "naver_customer_inquiry_real_sync",
     "naver_readonly_inquiry_refresh",
 )
-RECOVERABLE_RESOURCES = ("orders", "customer_inquiries", "products")
+RECOVERABLE_RESOURCES = ("orders", "customer_inquiries", "products", "logistics")
 RECOVERABLE_ERROR_CODES = frozenset({
     "credential_unavailable",
     "credential_not_ready",
@@ -76,10 +76,9 @@ def _checkpoint(db: Session, *, store_id: int, resource: str, now: datetime) -> 
             store_id=store_id,
             platform=NAVER,
             sync_type=config["sync_type"],
-            automatic_read_enabled=resource != "logistics",
-            status="blocked" if resource == "logistics" else "idle",
-            next_run_at=None if resource == "logistics" else now + _stagger(store_id, resource, interval),
-            notes="not_supported" if resource == "logistics" else None,
+            automatic_read_enabled=True,
+            status="idle",
+            next_run_at=now + _stagger(store_id, resource, interval),
         )
         db.add(checkpoint)
         db.flush()
@@ -227,7 +226,7 @@ def _sync_t13_resource(
         if not isinstance(page, store_onboarding_service.NaverReadPage):
             raise store_onboarding_service.NaverReadFailure("invalid_read_adapter_page")
         items = store_onboarding_service._canonical_orders(page.items, "automatic_incremental") if resource == "orders" else store_onboarding_service._canonical_products(page.items, "automatic_incremental")
-        outcome = order_service.upsert_orders(db, checkpoint.store_id, NAVER, items) if resource == "orders" else product_service.upsert_products(db, checkpoint.store_id, NAVER, items)
+        outcome = order_service.upsert_orders(db, checkpoint.store_id, NAVER, items, commit=False) if resource == "orders" else product_service.upsert_products(db, checkpoint.store_id, NAVER, items)
         # The writer commits before this cursor transition is persisted.
         created += outcome["created"]
         updated += outcome["updated"]
@@ -238,6 +237,46 @@ def _sync_t13_resource(
         if not cursor:
             break
     return {"created": created, "updated": updated, "pages": pages}
+
+
+def _sync_t17_logistics(
+    db: Session, *, checkpoint: SyncCheckpoint,
+    reader: store_onboarding_service.NaverReadAdapter, now: datetime,
+) -> dict[str, int]:
+    """Read existing order-detail snapshots and persist only local logistics data."""
+    from app.services import pxg_naver_readonly_persistence_service
+
+    context = _context(db, checkpoint.store_id)
+    if checkpoint.cursor_value:
+        start_at = _utc(checkpoint.window_start_at or now - timedelta(days=30))
+        end_at = _utc(checkpoint.window_end_at or now)
+    else:
+        start_at = _utc(now - timedelta(days=30))
+        end_at = now
+        checkpoint.window_start_at, checkpoint.window_end_at = start_at, end_at
+        db.commit()
+    cursor = checkpoint.cursor_value
+    pages = saved = not_available = skipped = 0
+    while True:
+        if pages >= MAX_PAGES_PER_RUN:
+            raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
+        page = reader.read_orders(context, start_at=start_at, end_at=end_at, cursor=cursor)
+        if not isinstance(page, store_onboarding_service.NaverReadPage):
+            raise store_onboarding_service.NaverReadFailure("invalid_read_adapter_page")
+        outcome = pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db, store_id=checkpoint.store_id, details=page.items, now=now, scope="automatic",
+        )
+        saved += outcome["saved"]
+        not_available += outcome["not_available"]
+        skipped += outcome["skipped"]
+        pages += 1
+        cursor = page.next_cursor
+        checkpoint.cursor_value = cursor
+        # Snapshot writes and this cursor transition commit as one page transaction.
+        db.commit()
+        if not cursor:
+            break
+    return {"created": saved, "updated": 0, "pages": pages, "not_available": not_available, "skipped": skipped}
 
 
 def _finish_success(db: Session, *, checkpoint: SyncCheckpoint, token: str, now: datetime, result: dict[str, int]) -> bool:
@@ -313,8 +352,6 @@ def _recovery_eligible_error(code: str | None) -> bool:
 
 
 def _attention_fields(*, resource: str, status: str, enabled: bool, stale: bool, last_error_code: str | None, store_id: int) -> dict[str, Any]:
-    if resource == "logistics":
-        return {"attention_state": "none", "operator_message": "暂未接入自动读取", "admin_action": None, "recovery_eligible": False, "action_path": None}
     if status == "blocked":
         eligible = _recovery_eligible_error(last_error_code)
         return {
@@ -424,6 +461,10 @@ def run_automatic_checkpoint(
                 db, store_id=checkpoint.store_id, actor_id="automatic-read", settings=get_settings(),
             )
             summary = {"created": int(result.get("created_count", 0)), "updated": int(result.get("updated_count", 0)), "pages": int(result.get("pages_read", 0))}
+        elif resource == "logistics":
+            summary = _sync_t17_logistics(
+                db, checkpoint=checkpoint, reader=reader or store_onboarding_service.get_naver_read_adapter(), now=current,
+            )
         else:
             summary = _sync_t13_resource(db, checkpoint=checkpoint, resource=resource, reader=reader or store_onboarding_service.get_naver_read_adapter(), now=current)
         return "success" if _finish_success(db, checkpoint=checkpoint, token=token, now=current, result=summary) else "not_due"
@@ -465,9 +506,7 @@ def automatic_read_status(db: Session, *, store_id: int, now: datetime | None = 
     current = _utc(now or get_utc_now())
     for resource, config in RESOURCE_CONFIG.items():
         row = by_type.get(config["sync_type"])
-        if resource == "logistics":
-            result[resource] = _status_item(resource, store_id, "blocked", False, None, None, None, 0, "not_supported", None, current)
-        elif row is None:
+        if row is None:
             result[resource] = _status_item(resource, store_id, "disabled", False, None, None, None, 0, None, None, current)
         else:
             result[resource] = _status_item(resource, store_id, row.status, row.automatic_read_enabled, row.last_synced_at, row.next_run_at, row.fresh_until, row.retry_count, row.last_error_code, row.last_attempt_at, current)
