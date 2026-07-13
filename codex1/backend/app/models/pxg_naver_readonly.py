@@ -121,7 +121,7 @@ class PxgNaverReadonlyLogisticsRecord(Base):
 
 
 class PxgNaverReadonlyCustomerInquiry(Base):
-    """Safe customer-inquiry metadata without customer content or source payloads."""
+    """Naver readonly inquiry storage (legacy PXG table name retained for compatibility)."""
 
     __tablename__ = "pxg_naver_readonly_customer_inquiries"
     __table_args__ = (
@@ -147,6 +147,10 @@ class PxgNaverReadonlyCustomerInquiry(Base):
     customer_display_masked: Mapped[str | None] = mapped_column(String(120), nullable=True)
     subject_category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     content_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    encrypted_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_length: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

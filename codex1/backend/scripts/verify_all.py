@@ -20211,6 +20211,7 @@ def main() -> None:
         verify_auth_schema_mock_migration_gate()
         verify_auth_schema_local_migration_script()
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t13_onboarding.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t14_naver_readonly_inquiries.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

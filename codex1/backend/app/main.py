@@ -31,16 +31,23 @@ async def run_pxg_naver_cleanup_scheduler(
 
     while True:
         if runtime_settings.pxg_naver_local_read_retention_cleanup_enabled:
-            try:
-                runner = cleanup_runner
-                if runner is None:
-                    from app.services.pxg_naver_readonly_sync_safety_service import run_pxg_naver_daily_cleanup
+            runner = cleanup_runner
+            if runner is None:
+                from app.services.pxg_naver_readonly_sync_safety_service import run_pxg_naver_daily_cleanup
 
-                    runner = run_pxg_naver_daily_cleanup
+                runner = run_pxg_naver_daily_cleanup
+            try:
                 with session_factory() as db:
                     runner(db, settings=runtime_settings)
             except Exception:
                 # The cleanup service records a fail-closed state when the trial store exists.
+                pass
+            try:
+                with session_factory() as db:
+                    from app.services.naver_readonly_inquiry_service import run_naver_inquiry_cleanup_scheduler
+                    run_naver_inquiry_cleanup_scheduler(db, settings=runtime_settings)
+            except Exception:
+                # Per-store inquiry failures are persisted by the dedicated cleanup service.
                 pass
         await sleep_fn(interval_seconds)
 
@@ -189,6 +196,8 @@ def _requires_write_protection(request: Request) -> bool:
 
 
 def _write_permission_for_path(path: str) -> str:
+    if path == "/api/v1/customer-inquiries/naver/refresh":
+        return "platform.sync"
     if path.startswith("/api/v1/store-onboardings"):
         return "store_membership.assign"
     if path.startswith("/api/v1/shipping/"):

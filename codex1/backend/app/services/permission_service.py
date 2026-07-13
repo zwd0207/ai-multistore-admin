@@ -39,6 +39,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "shipping.batch.manage",
             "shipping.writeback.approve",
             "recipient_pii.audit.read",
+            "customer.inquiries.content.read",
         },
         "sensitive_approval_actions": {
             "products.batch_sync_write",
@@ -61,6 +62,7 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "orders.preview",
             "audit.read",
             "backup.read",
+            "customer.inquiries.content.read",
         },
         "sensitive_approval_actions": set(),
     },

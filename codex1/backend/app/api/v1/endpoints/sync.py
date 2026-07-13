@@ -21,6 +21,7 @@ from app.schemas.sync import (
 )
 from app.services import sync_service
 from app.services.operator_trial_service import assert_legacy_naver_customer_inquiry_sync_closed
+from app.services.operator_access_service import OperatorIdentity, get_operator_identity
 
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -30,6 +31,7 @@ router = APIRouter(prefix="/sync", tags=["sync"])
 def manual_batch_sync(
     payload: ManualBatchSyncRequest,
     db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
     result = sync_service.manual_batch_sync(
         db,
@@ -39,6 +41,7 @@ def manual_batch_sync(
         include_orders=payload.include_orders,
         include_customer_inquiries=payload.include_customer_inquiries,
         replace_policy=payload.replace_policy,
+        actor_id=identity.user_key_hash,
     )
     return success_response(data=result, message="manual batch sync completed")
 
@@ -47,6 +50,7 @@ def manual_batch_sync(
 def manual_batch_sync_all_stores(
     payload: ManualAllStoresSyncRequest,
     db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
     result = sync_service.manual_batch_sync_all_stores(
         db,
@@ -56,6 +60,7 @@ def manual_batch_sync_all_stores(
         include_customer_inquiries=payload.include_customer_inquiries,
         include_inactive=payload.include_inactive,
         replace_policy=payload.replace_policy,
+        actor_id=identity.user_key_hash,
     )
     return success_response(data=result, message="manual batch sync for all stores completed")
 

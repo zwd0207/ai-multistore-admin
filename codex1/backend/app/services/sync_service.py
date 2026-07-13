@@ -2498,9 +2498,10 @@ def _manual_sync_coupang_orders(db: Session, store_id: int) -> dict:
     )
 
 
-def _manual_sync_customer_inquiries(db: Session, store_id: int, platform: str) -> dict:
+def _manual_sync_customer_inquiries(db: Session, store_id: int, platform: str, *, actor_id: str | None = None) -> dict:
     if platform == "naver":
-        result = sync_naver_customer_inquiries(db, store_id=store_id, page=1, size=50)
+        from app.services.naver_readonly_inquiry_service import refresh_naver_readonly_inquiries
+        result = refresh_naver_readonly_inquiries(db, store_id=store_id, actor_id=actor_id)
         status = result.get("status") or "skipped"
         return _manual_batch_item(
             platform="naver",
@@ -2532,6 +2533,7 @@ def manual_batch_sync(
     include_orders: bool = True,
     include_customer_inquiries: bool = True,
     replace_policy: str = "delete_absent_when_full_snapshot",
+    actor_id: str | None = None,
 ) -> dict:
     store = ensure_store_exists(db, store_id)
     store_platform = normalize_platform(store.platform)
@@ -2604,7 +2606,7 @@ def manual_batch_sync(
 
         if include_customer_inquiries:
             try:
-                items.append(_manual_sync_customer_inquiries(db, store_id, platform))
+                items.append(_manual_sync_customer_inquiries(db, store_id, platform, actor_id=actor_id))
             except Exception as exc:
                 db.rollback()
                 items.append(_manual_batch_item_from_error(platform, "customer_inquiries", exc))
@@ -2654,6 +2656,7 @@ def manual_batch_sync_all_stores(
     include_customer_inquiries: bool = True,
     include_inactive: bool = False,
     replace_policy: str = "delete_absent_when_full_snapshot",
+    actor_id: str | None = None,
 ) -> dict:
     requested_platforms: list[str] = []
     for platform in platforms or []:
@@ -2697,6 +2700,7 @@ def manual_batch_sync_all_stores(
                 include_orders=include_orders,
                 include_customer_inquiries=include_customer_inquiries,
                 replace_policy=replace_policy,
+                actor_id=actor_id,
             )
             store_results.append({
                 **result,

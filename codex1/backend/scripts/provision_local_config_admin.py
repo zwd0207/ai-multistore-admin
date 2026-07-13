@@ -22,6 +22,7 @@ PERMISSION_KEYS = {
     "recipient_pii.export",
     "shipping.batch.manage",
     "platform.sync",
+    "customer.inquiries.content.read",
     "platform.readonly.persist",
     "store.manage",
     "credentials.manage",

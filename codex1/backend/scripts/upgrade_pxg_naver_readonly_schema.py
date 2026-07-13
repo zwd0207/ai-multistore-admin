@@ -31,7 +31,7 @@ TABLE_COLUMNS = {
     "pxg_naver_readonly_customer_inquiries": {
         "id", "store_id", "platform", "external_inquiry_id_hash", "related_order_id", "inquiry_type",
         "status", "customer_display_masked", "subject_category", "content_available", "received_at",
-        "answered_at", "source_updated_at", "source_observed_at", "expires_at", "is_stale",
+        "encrypted_content", "encrypted_title", "content_hash", "content_length", "answered_at", "source_updated_at", "source_observed_at", "expires_at", "is_stale",
         "created_at", "updated_at",
     },
     "pxg_naver_readonly_cleanup_statuses": {
@@ -162,6 +162,10 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             customer_display_masked VARCHAR(120),
             subject_category VARCHAR(120),
             content_available BOOLEAN NOT NULL DEFAULT 0,
+            encrypted_content TEXT,
+            encrypted_title TEXT,
+            content_hash VARCHAR(64),
+            content_length INTEGER NOT NULL DEFAULT 0,
             received_at DATETIME,
             answered_at DATETIME,
             source_updated_at DATETIME NOT NULL,
@@ -239,6 +243,15 @@ def _upgrade_existing_sync_backup_columns(connection: sqlite3.Connection) -> Non
     recipient_columns = {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_order_recipient_secure_records)").fetchall()}
     if "terminal_confirmed_at" not in recipient_columns:
         connection.execute("ALTER TABLE pxg_naver_order_recipient_secure_records ADD COLUMN terminal_confirmed_at DATETIME")
+    inquiry_columns = {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)").fetchall()}
+    for name, definition in (
+        ("encrypted_content", "TEXT"),
+        ("encrypted_title", "TEXT"),
+        ("content_hash", "VARCHAR(64)"),
+        ("content_length", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if name not in inquiry_columns:
+            connection.execute(f"ALTER TABLE pxg_naver_readonly_customer_inquiries ADD COLUMN {name} {definition}")
 
 
 def _verify_schema(connection: sqlite3.Connection) -> None:
