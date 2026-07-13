@@ -92,7 +92,11 @@
 .store-sync-healthy-line { margin: 0; color: #176a3a; font-size: 13px; font-weight: 700; }
 .store-sync-full-status { margin-top: 10px; }
 .store-sync-full-status summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+.store-sync-attention-stores { display: grid; gap: 14px; }
+.store-sync-attention-store { padding-top: 14px; border-top: 1px solid #edf0f4; }
+.store-sync-attention-store:first-child { padding-top: 0; border-top: 0; }
 .store-sync-attention-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.store-sync-feedback-list { display: grid; gap: 4px; margin-top: 10px; }
 .store-sync-admin-action { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .store-sync-operator-message { margin: 10px 0 0; color: #8a5b10; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .store-sync-empty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }

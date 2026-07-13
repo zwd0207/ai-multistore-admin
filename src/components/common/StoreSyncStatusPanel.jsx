@@ -51,6 +51,32 @@ function waitForPoll() {
   return new Promise((resolve) => setTimeout(resolve, RECOVERY_POLL_DELAY_MS));
 }
 
+function AllStoreStatus({ rows, adminStoreIds }) {
+  return (
+    <div className="store-sync-list">
+      {rows.map((row) => (
+        <article className="store-sync-store" key={row.storeId}>
+          <div className="store-sync-store-heading">
+            <strong>{row.storeName}</strong>
+            <span>{row.platform || '-'}</span>
+          </div>
+          <div className="store-sync-resource-grid">
+            {RESOURCE_ROWS.map(([key, label]) => (
+              <div key={key} className="store-sync-resource-column">
+                <h3>{label}</h3>
+                <ResourceStatus
+                  resource={row.automaticReadStatus?.[key]}
+                  showOperatorMessage={adminStoreIds.has(String(row.storeId))}
+                />
+              </div>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {}, canManageRecovery = () => false }) {
   const [visibleRows, setVisibleRows] = useState(rows);
   const [recoveringStoreId, setRecoveringStoreId] = useState('');
@@ -62,6 +88,9 @@ export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {},
     () => new Set(visibleRows.filter((row) => canManageRecovery(row.storeId)).map((row) => String(row.storeId))),
     [visibleRows, canManageRecovery],
   );
+  const attentionRows = visibleRows
+    .map((row) => ({ row, attention: attentionResources(row) }))
+    .filter(({ attention }) => attention.length);
 
   const pollStoreOverview = async (storeId) => {
     for (let attempt = 0; attempt < MAX_RECOVERY_POLLS; attempt += 1) {
@@ -116,80 +145,63 @@ export default function StoreSyncStatusPanel({ rows = [], attentionSummary = {},
       {!visibleRows.length ? (
         <p className="store-sync-empty">暂无店铺同步状态。</p>
       ) : (
-        <div className="store-sync-list">
-          {visibleRows.map((row) => {
-            const attention = attentionResources(row);
+        <>
+          {!attentionRows.length ? <p className="store-sync-healthy-line">自动读取正常</p> : (
+            <div className="store-sync-attention-stores">
+              {attentionRows.map(({ row, attention }) => {
             const isAdmin = adminStoreIds.has(String(row.storeId));
             const actionResource = attention
               .map(([key]) => row.automaticReadStatus?.[key])
               .find((resource) => resource?.adminAction && resource.adminAction !== 'none');
             const actionPath = actionResource?.actionPath || connectionActionPath(row.storeId);
             return (
-              <article className="store-sync-store" key={row.storeId}>
+              <article className="store-sync-attention-store" key={row.storeId}>
                 <div className="store-sync-store-heading">
                   <strong>{row.storeName}</strong>
                   <span>{row.platform || '-'}</span>
                 </div>
-                {!attention.length ? (
-                  <>
-                    <p className="store-sync-healthy-line">自动读取状态正常</p>
-                    <details className="store-sync-full-status">
-                      <summary>查看完整状态</summary>
-                      <div className="store-sync-resource-grid">
-                        {RESOURCE_ROWS.map(([key, label]) => (
-                          <div key={key} className="store-sync-resource-column">
-                            <h3>{label}</h3>
-                            <ResourceStatus resource={row.automaticReadStatus?.[key]} showOperatorMessage={isAdmin} />
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  </>
-                ) : (
-                  <>
-                    <div className="store-sync-attention-list">
-                      {attention.map(([key, label]) => (
-                        <div key={key} className="store-sync-resource-column attention">
-                          <h3>{label}</h3>
-                          <ResourceStatus resource={row.automaticReadStatus?.[key]} showOperatorMessage />
-                        </div>
-                      ))}
+                <div className="store-sync-attention-list">
+                  {attention.map(([key, label]) => (
+                    <div key={key} className="store-sync-resource-column attention">
+                      <h3>{label}</h3>
+                      <ResourceStatus resource={row.automaticReadStatus?.[key]} showOperatorMessage />
                     </div>
-                    {isAdmin && actionResource?.adminAction === 'verify_and_recover' && actionResource.recoveryEligible ? (
-                      <div className="store-sync-admin-action">
-                        <button
-                          className="button primary compact"
-                          type="button"
-                          onClick={() => recover(row)}
-                          disabled={recoveringStoreId === String(row.storeId)}
-                        >
-                          {recoveringStoreId === String(row.storeId) ? '正在安排恢复...' : '验证并恢复读取'}
-                        </button>
-                      </div>
-                    ) : null}
-                    {isAdmin && actionResource?.adminAction === 'manual_review' ? (
-                      <div className="store-sync-admin-action">
-                        <Link className="button ghost compact" to={actionPath}>检查连接资料</Link>
-                      </div>
-                    ) : null}
-                    <details className="store-sync-full-status">
-                      <summary>查看完整状态（含正常资源）</summary>
-                      <div className="store-sync-resource-grid">
-                        {RESOURCE_ROWS.map(([key, label]) => (
-                          <div key={key} className="store-sync-resource-column">
-                            <h3>{label}</h3>
-                            <ResourceStatus resource={row.automaticReadStatus?.[key]} showOperatorMessage={isAdmin} />
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  </>
-                )}
-                {feedback[row.storeId] ? <p className="inline-action-feedback">{feedback[row.storeId]}</p> : null}
+                  ))}
+                </div>
+                {isAdmin && actionResource?.adminAction === 'verify_and_recover' && actionResource.recoveryEligible ? (
+                  <div className="store-sync-admin-action">
+                    <button
+                      className="button primary compact"
+                      type="button"
+                      onClick={() => recover(row)}
+                      disabled={recoveringStoreId === String(row.storeId)}
+                    >
+                      {recoveringStoreId === String(row.storeId) ? '正在安排恢复...' : '验证并恢复读取'}
+                    </button>
+                  </div>
+                ) : null}
+                {isAdmin && actionResource?.adminAction === 'manual_review' ? (
+                  <div className="store-sync-admin-action">
+                    <Link className="button ghost compact" to={actionPath}>检查连接资料</Link>
+                  </div>
+                ) : null}
               </article>
             );
-          })}
-        </div>
+              })}
+            </div>
+          )}
+          {Object.entries(feedback).filter(([, message]) => message).length ? (
+            <div className="store-sync-feedback-list" aria-live="polite">
+              {Object.entries(feedback).filter(([, message]) => message).map(([storeId, message]) => (
+                <p key={storeId} className="inline-action-feedback">{message}</p>
+              ))}
+            </div>
+          ) : null}
+          <details className="store-sync-full-status">
+            <summary>查看全部店铺状态</summary>
+            <AllStoreStatus rows={visibleRows} adminStoreIds={adminStoreIds} />
+          </details>
+        </>
       )}
     </section>
   );
