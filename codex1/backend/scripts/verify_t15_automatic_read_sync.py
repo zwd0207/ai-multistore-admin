@@ -24,7 +24,8 @@ from app.models.product import Product
 from app.models.store import Store
 from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
-from app.services.automatic_read_sync_service import RESOURCE_CONFIG, _stagger, automatic_read_status, ensure_onboarded_store_schedules, run_automatic_checkpoint
+from app.models.sync_log import SyncLog
+from app.services.automatic_read_sync_service import RESOURCE_CONFIG, _eligible_store_ids, _stagger, automatic_read_status, ensure_onboarded_store_schedules, run_automatic_checkpoint
 from app.services.encryption import encrypt_value
 from app.services.store_onboarding_service import NaverReadFailure, NaverReadPage
 
@@ -57,7 +58,25 @@ def main():
             db.add(credential); db.flush()
             db.add(StoreOnboarding(idempotency_key=f"t15-{store.id}", requested_store_name=store.name, creator_user_id=user.id, store_id=store.id, credential_id=credential.id, status="partially_synced"))
         db.commit()
-        assert ensure_onboarded_store_schedules(db, now=NOW) == 2
+        legacy_store = Store(name="T15 Legacy PXG", platform="naver", status="active")
+        rejected_store = Store(name="T15 Fictional", platform="naver", status="active")
+        db.add_all((legacy_store, rejected_store)); db.flush()
+        db.add(ApiCredential(store_id=legacy_store.id, platform="naver", credential_name="T15 legacy", client_id="legacy-client", encrypted_secret_key=encrypt_value("legacy-secret-never-in-log"), auth_status="configured", status="active", extra_config={"channel_no": "1"}))
+        db.add(SyncLog(store_id=legacy_store.id, platform="naver", sync_type="manual_batch_sync", status="success", message="approved legacy readonly sync", raw_summary={"status": "success", "platform_write": False}))
+        db.commit()
+        assert db.query(StoreOnboarding).filter_by(store_id=legacy_store.id).count() == 0
+        assert _eligible_store_ids(db) == [stores[0].id, stores[1].id, legacy_store.id]
+        assert db.query(SyncCheckpoint).filter_by(store_id=legacy_store.id).count() == 0
+        assert ensure_onboarded_store_schedules(db, now=NOW) == 3
+        assert db.query(StoreOnboarding).filter_by(store_id=legacy_store.id).count() == 0
+        assert db.query(SyncCheckpoint).filter_by(store_id=legacy_store.id).count() == 4
+        assert db.query(SyncCheckpoint).filter_by(store_id=rejected_store.id).count() == 0
+        legacy_product_cp = checkpoint(db, legacy_store.id, "products")
+        legacy_product_cp.next_run_at = NOW
+        db.commit()
+        assert run_automatic_checkpoint(db, checkpoint_id=legacy_product_cp.id, now=NOW, reader=Reader()) == "success"
+        fictional_status = automatic_read_status(db, store_id=rejected_store.id, now=NOW)
+        assert fictional_status["orders"]["status"] == "disabled" and fictional_status["orders"]["automatic_read_enabled"] is False
         assert checkpoint(db, stores[0].id, "logistics").status == "blocked"
         contract_fields = {"status", "automatic_read_enabled", "last_success_at", "next_run_at", "data_fresh_until", "retry_count", "last_error_code", "safe_failure_reason", "is_stale", "last_attempt_at"}
         status = automatic_read_status(db, store_id=stores[0].id, now=NOW)

@@ -30,6 +30,12 @@ RESOURCE_CONFIG = {
 }
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
+LEGACY_APPROVED_READONLY_SYNC_TYPES = (
+    "manual_batch_sync",
+    "naver_real_order_sync",
+    "naver_customer_inquiry_real_sync",
+    "naver_readonly_inquiry_refresh",
+)
 
 
 def _utc(value: datetime) -> datetime:
@@ -67,12 +73,44 @@ def _checkpoint(db: Session, *, store_id: int, resource: str, now: datetime) -> 
 
 
 def _eligible_store_ids(db: Session) -> list[int]:
-    return db.scalars(select(StoreOnboarding.store_id).join(Store, Store.id == StoreOnboarding.store_id).where(
+    onboarded_store_ids = db.scalars(select(StoreOnboarding.store_id).join(Store, Store.id == StoreOnboarding.store_id).where(
         StoreOnboarding.status.in_(("partially_synced", "active_incremental")),
         Store.status == "active",
         Store.platform == NAVER,
         StoreOnboarding.store_id.is_not(None),
     )).all()
+    legacy_store_ids = db.scalars(_legacy_compatible_store_ids_query()).all()
+    return sorted(set(onboarded_store_ids).union(legacy_store_ids))
+
+
+def _legacy_compatible_store_ids_query():
+    return select(Store.id).join(ApiCredential, and_(
+        ApiCredential.store_id == Store.id,
+        ApiCredential.platform == NAVER,
+        ApiCredential.status == "active",
+        ApiCredential.auth_status.in_(("configured", "test_passed")),
+    )).where(
+        Store.status == "active",
+        Store.platform == NAVER,
+        ~select(StoreOnboarding.id).where(StoreOnboarding.store_id == Store.id).exists(),
+        select(SyncLog.id).where(
+            SyncLog.store_id == Store.id,
+            SyncLog.platform == NAVER,
+            SyncLog.sync_type.in_(LEGACY_APPROVED_READONLY_SYNC_TYPES),
+            SyncLog.status == "success",
+            SyncLog.raw_summary["status"].as_string() == "success",
+            SyncLog.raw_summary["platform_write"].as_boolean().is_(False),
+        ).exists(),
+    )
+
+
+def _legacy_configured_credential_is_approved(db: Session, credential: ApiCredential) -> bool:
+    if credential.auth_status != "configured":
+        return False
+    return db.scalar(_legacy_compatible_store_ids_query().where(
+        Store.id == credential.store_id,
+        ApiCredential.id == credential.id,
+    )) is not None
 
 
 def ensure_automatic_read_schedule(db: Session, *, store_id: int, now: datetime | None = None) -> None:
@@ -120,6 +158,13 @@ def _context(db: Session, store_id: int) -> store_onboarding_service.NaverReadCo
         ApiCredential.store_id == store_id, ApiCredential.platform == NAVER,
         ApiCredential.status == "active", ApiCredential.auth_status == "test_passed",
     ).order_by(ApiCredential.id.desc()))
+    if credential is None:
+        configured_credential = db.scalar(select(ApiCredential).where(
+            ApiCredential.store_id == store_id, ApiCredential.platform == NAVER,
+            ApiCredential.status == "active", ApiCredential.auth_status == "configured",
+        ).order_by(ApiCredential.id.desc()))
+        if configured_credential is not None and _legacy_configured_credential_is_approved(db, configured_credential):
+            credential = configured_credential
     if credential is None or not credential.client_id:
         raise store_onboarding_service.NaverReadFailure("credential_unavailable")
     secret = decrypt_value(credential.encrypted_secret_key)
@@ -309,7 +354,7 @@ def automatic_read_status(db: Session, *, store_id: int, now: datetime | None = 
         if resource == "logistics":
             result[resource] = _status_item("blocked", False, None, None, None, 0, "not_supported", None, current)
         elif row is None:
-            result[resource] = _status_item("pending", False, None, None, None, 0, None, None, current)
+            result[resource] = _status_item("disabled", False, None, None, None, 0, None, None, current)
         else:
             result[resource] = _status_item(row.status, row.automatic_read_enabled, row.last_synced_at, row.next_run_at, row.fresh_until, row.retry_count, row.last_error_code, row.last_attempt_at, current)
     return result
