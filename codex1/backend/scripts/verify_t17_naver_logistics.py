@@ -36,7 +36,7 @@ from app.services.encryption import encrypt_value
 from app.services.store_onboarding_service import NaverReadPage, _canonical_orders
 
 
-NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 TRACKING = "T17-TRACKING-99887766"
 
 

@@ -455,7 +455,11 @@ def _validate_shipping_export_rows(export_rows: list[dict[str, Any]]) -> tuple[l
     return normalized_rows, {}
 
 
-def _validate_tracking_import_rows(tracking_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+def _validate_tracking_import_rows(
+    tracking_rows: list[dict[str, Any]],
+    *,
+    platform: str | None = None,
+) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
     if not tracking_rows:
         return None, {"skip_reason": "tracking_import_rows_required"}
     if len(tracking_rows) > 200:
@@ -490,6 +494,11 @@ def _validate_tracking_import_rows(tracking_rows: list[dict[str, Any]]) -> tuple
             return None, {"skip_reason": "tracking_order_reference_required", "invalid_row_index": index}
         if not carrier:
             return None, {"skip_reason": "tracking_carrier_required", "invalid_row_index": index}
+        if platform == "naver":
+            carrier_code = _normalize_naver_delivery_company_code(carrier)
+            if not carrier_code:
+                return None, {"skip_reason": "unsupported_delivery_company", "invalid_row_index": index}
+            carrier = _safe_naver_delivery_company_label(carrier_code)
         if not tracking_number:
             return None, {"skip_reason": "tracking_number_required", "invalid_row_index": index}
 
@@ -895,7 +904,7 @@ def evaluate_tracking_number_import_mock_gate(
         result["skip_reason"] = "tracking_parser_contract_required"
         return result
 
-    normalized_rows, error = _validate_tracking_import_rows(tracking_rows)
+    normalized_rows, error = _validate_tracking_import_rows(tracking_rows, platform=normalized_platform)
     if error and error.get("skip_reason"):
         result.update(error)
         return result
@@ -1581,7 +1590,7 @@ def evaluate_tracking_order_match_readonly(
         })
         return result
 
-    normalized_rows, error = _validate_tracking_import_rows(source_rows)
+    normalized_rows, error = _validate_tracking_import_rows(source_rows, platform=normalized_platform)
     if error and error.get("skip_reason"):
         result.update(error)
         return result
@@ -1817,6 +1826,7 @@ def evaluate_tracking_order_status_local_update_gate(
     target_order_status: str = SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
     actor_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    normalized_platform = _normalize_platform(platform)
     result = {
         **_base_result(phase="Shipping-8B"),
         "manual_approval": bool(manual_approval),
@@ -1845,6 +1855,9 @@ def evaluate_tracking_order_status_local_update_gate(
         "platform_writes_enabled": False,
     }
 
+    if normalized_platform is None:
+        result["skip_reason"] = "platform_not_supported"
+        return result
     if target_order_status != SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS:
         result["skip_reason"] = "target_order_status_not_supported"
         return result
@@ -1864,7 +1877,7 @@ def evaluate_tracking_order_status_local_update_gate(
     match_result = evaluate_tracking_order_match_readonly(
         db,
         store_id=store_id,
-        platform=platform,
+        platform=normalized_platform,
         import_batch_id=import_batch_id,
         tracking_rows=tracking_rows,
         matching_contract_acknowledged=matching_contract_acknowledged,
@@ -1905,12 +1918,25 @@ def evaluate_tracking_order_status_local_update_gate(
                 "block_reason": "order_status_not_updatable",
             })
             continue
+        carrier_code = (
+            _normalize_naver_delivery_company_code(row.get("carrier"))
+            if normalized_platform == "naver"
+            else None
+        )
+        if normalized_platform == "naver" and not carrier_code:
+            blocked_orders.append({
+                "local_order_id": local_order_id,
+                "current_order_status": current_status,
+                "block_reason": "unsupported_delivery_company",
+            })
+            continue
         update_candidates.append({
             "local_order_id": local_order_id,
             "order_reference_hash": _safe_hash_identifier(row.get("order_reference")),
             "product_order_reference_hash": _safe_hash_identifier(row.get("product_order_reference") or row.get("order_reference")),
             "tracking_number_hash": _safe_hash_identifier(row.get("tracking_number")),
-            "carrier": _clean_text(row.get("carrier"), max_length=80),
+            "carrier_code": carrier_code,
+            "carrier_label": _safe_naver_delivery_company_label(carrier_code) if carrier_code else None,
             "shipped_at": row.get("shipped_at"),
             "current_order_status": current_status,
             "next_order_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
@@ -1922,7 +1948,11 @@ def evaluate_tracking_order_status_local_update_gate(
     result["update_candidate_count"] = len(update_candidates)
     result["update_candidates"] = update_candidates
     if blocked_orders:
-        result["skip_reason"] = "order_status_not_updatable"
+        result["skip_reason"] = (
+            "unsupported_delivery_company"
+            if all(item.get("block_reason") == "unsupported_delivery_company" for item in blocked_orders)
+            else "order_status_not_updatable"
+        )
         return result
     if not update_candidates:
         result.update({
@@ -2056,7 +2086,8 @@ def write_tracking_order_status_local_update(
                 "shipping_status_previous_status": previous_status,
                 "shipping_status_current_status": SHIPPING_ORDER_STATUS_LOCAL_UPDATE_TARGET_STATUS,
                 "shipping_tracking_hash": candidate["tracking_number_hash"],
-                "shipping_carrier_label": candidate["carrier"],
+                "shipping_carrier_code": candidate.get("carrier_code"),
+                "shipping_carrier_label": candidate.get("carrier_label"),
                 "raw_response_saved": False,
                 "privacy_fields_redacted": True,
                 "address_saved": False,
@@ -2105,7 +2136,8 @@ def write_tracking_order_status_local_update(
                     address_saved=False,
                     safe_metadata={
                         "shipping_tracking_hash": candidate["tracking_number_hash"],
-                        "shipping_carrier_label": candidate["carrier"],
+                        "shipping_carrier_code": candidate.get("carrier_code"),
+                        "shipping_carrier_label": candidate.get("carrier_label"),
                         "source_phase": "Shipping-8C",
                         "raw_response_saved": False,
                         "privacy_fields_redacted": True,
@@ -2633,6 +2665,8 @@ def evaluate_shipment_writeback_execution_mock_gate(
 NAVER_DELIVERY_COMPANY_CODES = {
     "CJ": "CJGLS",
     "CJGLS": "CJGLS",
+    "CJLOGISTICS": "CJGLS",
+    "CJ物流": "CJGLS",
     "CJ대한통운": "CJGLS",
     "대한통운": "CJGLS",
     "HANJIN": "HANJIN",
@@ -2649,6 +2683,14 @@ NAVER_DELIVERY_COMPANY_CODES = {
     "로젠택배": "KGB",
 }
 
+NAVER_DELIVERY_COMPANY_LABELS = {
+    "CJGLS": "CJ",
+    "HANJIN": "HANJIN",
+    "EPOST": "EPOST",
+    "HYUNDAI": "HYUNDAI",
+    "KGB": "KGB",
+}
+
 
 def _normalize_naver_delivery_company_code(value: Any) -> str | None:
     text = _clean_text(value, max_length=120)
@@ -2659,9 +2701,11 @@ def _normalize_naver_delivery_company_code(value: Any) -> str | None:
         return NAVER_DELIVERY_COMPANY_CODES[compact]
     if text in NAVER_DELIVERY_COMPANY_CODES:
         return NAVER_DELIVERY_COMPANY_CODES[text]
-    if re.fullmatch(r"[A-Z0-9_]{2,30}", compact):
-        return compact
     return None
+
+
+def _safe_naver_delivery_company_label(code: str | None) -> str | None:
+    return NAVER_DELIVERY_COMPANY_LABELS.get(str(code or "").strip().upper())
 
 
 def _ensure_naver_shipping_credential(
@@ -2742,7 +2786,7 @@ def _build_naver_dispatch_candidates(
             platform=platform,
             import_batch_id=import_batch_id,
         )
-    normalized_rows, error = _validate_tracking_import_rows(source_rows)
+    normalized_rows, error = _validate_tracking_import_rows(source_rows, platform="naver")
     if error and error.get("skip_reason"):
         return [], [{"row_index": error.get("invalid_row_index"), "skip_reason": error["skip_reason"]}]
     orders = db.scalars(
@@ -2807,7 +2851,7 @@ def _build_naver_dispatch_candidates(
             "delivery_company_code": delivery_company_code,
             "tracking_number": tracking_number,
             "dispatch_date": _naver_dispatch_datetime(row.get("shipped_at")),
-            "carrier_label": _clean_text(row["carrier"], max_length=80),
+            "carrier_label": _safe_naver_delivery_company_label(delivery_company_code),
             "tracking_number_hash": _safe_hash_identifier(tracking_number),
             "product_order_id_hash": _safe_hash_identifier(product_order_id),
             "order_reference_hash": _safe_hash_identifier(order.external_order_id),
@@ -2968,6 +3012,8 @@ def _t18_write_gate_skip_reason(settings: Any) -> str | None:
         return "shipping_platform_write_disabled"
     if not settings.pxg_naver_shipping_pilot_enabled:
         return "pxg_naver_shipping_pilot_disabled"
+    if bool(getattr(settings, "allow_dev_auth", False)):
+        return "development_auth_must_remain_disabled"
     if bool(getattr(settings, "platform_order_write_enabled", False)):
         return "platform_order_write_must_remain_disabled"
     return None

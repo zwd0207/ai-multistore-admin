@@ -29,6 +29,9 @@ os.environ.update({
 })
 
 import app.models  # noqa: E402,F401
+from app import main as main_module  # noqa: E402
+from app.api.v1.endpoints import shipping as shipping_endpoint  # noqa: E402
+from app.core.exceptions import ApiError  # noqa: E402
 from app.database import Base, SessionLocal, engine, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.auth import ErpUser  # noqa: E402
@@ -43,8 +46,10 @@ from app.models.shipping import (  # noqa: E402
     WarehouseShippingBatchOrder,
 )
 from app.models.store import Store  # noqa: E402
+from app.schemas.shipping import WarehouseShippingApprovalRequest, WarehouseShippingWritebackRequest  # noqa: E402
 from app.services import shipping_service, warehouse_shipping_service  # noqa: E402
 from app.services import operator_trial_service  # noqa: E402
+from app.services.operator_access_service import OperatorIdentity  # noqa: E402
 from app.services.operator_trial_service import TRIAL_STORE_NAME  # noqa: E402
 
 
@@ -72,6 +77,7 @@ def settings(*, enabled: bool) -> SimpleNamespace:
         shipping_platform_write_enabled=enabled,
         pxg_naver_shipping_pilot_enabled=enabled,
         platform_order_write_enabled=False,
+        allow_dev_auth=False,
     )
 
 
@@ -388,6 +394,108 @@ def test_platform_order_write_flag_remains_closed() -> None:
     assert calls["credential"] == 0, calls
 
 
+def test_development_identity_and_write_configuration_are_rejected() -> None:
+    reset_database()
+    _store_id, user_id, _order_id, batch_id = fixture()
+    identity = OperatorIdentity(
+        user_id=user_id,
+        user_key_hash="t18-development-identity",
+        is_development_identity=True,
+    )
+    with SessionLocal() as db:
+        calls = (
+            lambda: shipping_endpoint.execute_warehouse_shipping_writeback(
+                batch_id,
+                WarehouseShippingWritebackRequest(
+                    action="execute",
+                    manual_approval=True,
+                    final_operator_confirmation=True,
+                    real_api_call_requested=True,
+                    approval_token="development-token-value",
+                ),
+                db,
+                identity,
+            ),
+            lambda: shipping_endpoint.issue_warehouse_shipping_approval(
+                batch_id,
+                "writeback",
+                WarehouseShippingApprovalRequest(confirmation=True),
+                db,
+                identity,
+            ),
+        )
+        for call in calls:
+            try:
+                call()
+            except ApiError as exc:
+                assert exc.error_code == "session_backed_identity_required", exc
+            else:
+                raise AssertionError("T18 HTTP actions must reject development identities")
+
+    dangerous = settings(enabled=True)
+    dangerous.allow_dev_auth = True
+    assert warehouse_shipping_service._t18_gate_skip_reason(dangerous) == "development_auth_must_remain_disabled"
+    assert shipping_service._t18_write_gate_skip_reason(dangerous) == "development_auth_must_remain_disabled"
+    dangerous_config = SimpleNamespace(
+        app_env="development",
+        operator_trial_enabled=False,
+        allow_dev_auth=True,
+        real_api_write_enabled=True,
+        shipping_platform_write_enabled=True,
+        pxg_naver_shipping_pilot_enabled=True,
+    )
+    with patch.object(main_module, "settings", dangerous_config):
+        try:
+            main_module._validate_production_configuration()
+        except RuntimeError as exc:
+            assert "development authentication" in str(exc), exc
+        else:
+            raise AssertionError("application startup must reject development auth with real write gates")
+
+
+def test_carrier_values_are_allowlisted_and_canonical() -> None:
+    assert shipping_service._normalize_naver_delivery_company_code("CJ") == "CJGLS"
+    assert shipping_service._normalize_naver_delivery_company_code("CJ Logistics") == "CJGLS"
+    assert shipping_service._normalize_naver_delivery_company_code("cj物流") == "CJGLS"
+    assert shipping_service._safe_naver_delivery_company_label("CJGLS") == "CJ"
+    for unsafe_value in ("123456789012", "UNAPPROVED", "UPS_FAKE", TRACKING_NUMBER):
+        assert shipping_service._normalize_naver_delivery_company_code(unsafe_value) is None, unsafe_value
+        rows, error = shipping_service._validate_tracking_import_rows(
+            [{
+                "product_order_reference": "t18-product-order-001",
+                "carrier": unsafe_value,
+                "tracking_number": TRACKING_NUMBER,
+            }],
+            platform="naver",
+        )
+        assert rows is None and error["skip_reason"] == "unsupported_delivery_company", (unsafe_value, rows, error)
+
+    rows, error = shipping_service._validate_tracking_import_rows(
+        [{
+            "product_order_reference": "t18-product-order-001",
+            "carrier": "cj物流",
+            "tracking_number": TRACKING_NUMBER,
+        }],
+        platform="naver",
+    )
+    assert not error.get("skip_reason") and rows[0]["carrier"] == "CJ", (rows, error)
+
+    reset_database()
+    _store_id, user_id, _order_id, batch_id = fixture()
+    with SessionLocal() as db, patch.object(warehouse_shipping_service, "get_settings", lambda: settings(enabled=True)):
+        batch = db.get(WarehouseShippingBatch, batch_id)
+        batch.rows[0].carrier = "123456789012"
+        db.query(ShippingTrackingImportRow).one().carrier = "123456789012"
+        db.commit()
+        with patch.object(
+            warehouse_shipping_service,
+            "_t18_platform_preflight",
+            side_effect=AssertionError("invalid carrier must be rejected before platform preflight"),
+        ):
+            blocked = approve(db, batch_id=batch_id, user_id=user_id)
+        assert blocked["status"] == "blocked" and blocked["skip_reason"] == "unsupported_delivery_company", blocked
+
+
 def test_exact_approval_execution_and_privacy() -> None:
     reset_database()
     _store_id, user_id, order_id, batch_id = fixture()
@@ -436,8 +544,12 @@ def test_exact_approval_execution_and_privacy() -> None:
         assert grant.attempt_token_hash and grant.attempt_token_hash != grant.token_hash
         order = db.get(Order, order_id)
         assert TRACKING_NUMBER not in str(order.raw_data), order.raw_data
+        assert order.raw_data["shipping_carrier_code"] == "CJGLS", order.raw_data
+        assert order.raw_data["delivery_company"] == "CJ", order.raw_data
         event = db.query(OrderStatusEvent).filter(OrderStatusEvent.order_id == order_id).one()
         assert TRACKING_NUMBER not in str(event.safe_metadata), event.safe_metadata
+        assert event.safe_metadata["shipping_carrier_code"] == "CJGLS", event.safe_metadata
+        assert event.safe_metadata["shipping_carrier_label"] == "CJ", event.safe_metadata
         audit_rows = db.query(OperationAuditLog).filter(OperationAuditLog.store_id == order.store_id).all()
         assert audit_rows and all(TRACKING_NUMBER not in str(row) for row in audit_rows), audit_rows
         assert any((row.safety_flags or {}).get("real_api_called") is True for row in audit_rows), audit_rows
@@ -1148,6 +1260,8 @@ def main() -> None:
     test_bottom_level_gate_blocks_token_and_http()
     test_all_eight_gate_combinations_and_proof_requirement()
     test_platform_order_write_flag_remains_closed()
+    test_development_identity_and_write_configuration_are_rejected()
+    test_carrier_values_are_allowlisted_and_canonical()
     test_exact_approval_execution_and_privacy()
     test_platform_state_change_invalidates_approval()
     test_capability_contract_and_platform_logistics_guards()

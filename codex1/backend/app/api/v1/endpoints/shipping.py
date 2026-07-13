@@ -28,7 +28,13 @@ from app.schemas.shipping import (
 )
 from app.services import shipping_service
 from app.services import warehouse_shipping_service
-from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_operator_recent_auth, require_store_permission
+from app.services.operator_access_service import (
+    OperatorIdentity,
+    get_operator_identity,
+    require_operator_recent_auth,
+    require_session_backed_identity,
+    require_store_permission,
+)
 
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
@@ -156,6 +162,7 @@ def remove_warehouse_shipping_batch_row(
 def execute_warehouse_shipping_writeback(
     batch_id: int, payload: WarehouseShippingWritebackRequest, db: Session = Depends(get_db), identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
+    require_session_backed_identity(identity)
     batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
     if batch is None:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})
@@ -182,6 +189,8 @@ def issue_warehouse_shipping_approval(
 ) -> dict:
     if grant_scope not in {"manifest", "writeback"} or not payload.confirmation:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_approval_confirmation_required"})
+    if grant_scope == "writeback":
+        require_session_backed_identity(identity)
     batch = db.get(__import__("app.models.shipping", fromlist=["WarehouseShippingBatch"]).WarehouseShippingBatch, batch_id)
     if batch is None:
         return success_response(data={"status": "blocked", "skip_reason": "shipping_batch_not_found"})

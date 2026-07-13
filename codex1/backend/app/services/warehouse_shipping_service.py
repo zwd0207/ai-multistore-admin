@@ -212,6 +212,8 @@ def _t18_gate_skip_reason(settings: Any) -> str | None:
         return "shipping_platform_write_disabled"
     if not settings.pxg_naver_shipping_pilot_enabled:
         return "pxg_naver_shipping_pilot_disabled"
+    if bool(getattr(settings, "allow_dev_auth", False)):
+        return "development_auth_must_remain_disabled"
     if bool(getattr(settings, "platform_order_write_enabled", False)):
         return "platform_order_write_must_remain_disabled"
     return None
@@ -306,11 +308,16 @@ def _t18_candidates(
     candidate = candidates[0]
     if not str(candidate.get("product_order_reference") or "").strip():
         return None, "product_order_reference_required"
-    if not shipping_service._normalize_naver_delivery_company_code(candidate.get("carrier")):
+    carrier_code = shipping_service._normalize_naver_delivery_company_code(candidate.get("carrier"))
+    if not carrier_code:
         return None, "unsupported_delivery_company"
+    candidate = {
+        **candidate,
+        "carrier": shipping_service._safe_naver_delivery_company_label(carrier_code),
+    }
     if not str(candidate.get("tracking_number") or "").strip():
         return None, "tracking_number_missing"
-    return candidates, None
+    return [candidate], None
 
 
 def _t18_status(value: Any) -> str:
@@ -2202,6 +2209,7 @@ def remove_warehouse_batch_row(
         "shipping_status_previous_status",
         "shipping_status_current_status",
         "shipping_tracking_hash",
+        "shipping_carrier_code",
         "shipping_carrier_label",
         "shipping_tracking_import_batch_id",
     ):

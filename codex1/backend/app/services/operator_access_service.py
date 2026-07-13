@@ -47,6 +47,15 @@ def get_operator_identity(
     )
 
 
+def require_session_backed_identity(identity: OperatorIdentity) -> None:
+    if identity.is_development_identity:
+        raise ApiError(
+            "verified login session is required for this operation",
+            "session_backed_identity_required",
+            403,
+        )
+
+
 def require_operator_recent_auth(identity: OperatorIdentity) -> None:
     if identity.is_development_identity:
         return

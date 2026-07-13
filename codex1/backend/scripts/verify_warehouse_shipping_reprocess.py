@@ -166,6 +166,15 @@ def main():
         )
         assert confirmed["status"] == "ready_to_writeback", confirmed
         assert db.get(Order, order.id).order_status == "DISPATCHED"
+        order_metadata = db.get(Order, order.id).raw_data or {}
+        assert order_metadata["shipping_carrier_code"] == "CJGLS", order_metadata
+        assert order_metadata["shipping_carrier_label"] == "CJ", order_metadata
+        status_event = db.scalars(select(OrderStatusEvent).where(
+            OrderStatusEvent.order_id == order.id,
+            OrderStatusEvent.source_type == shipping_service.SHIPPING_ORDER_STATUS_LOCAL_UPDATE_SOURCE_TYPE,
+        )).one()
+        assert status_event.safe_metadata["shipping_carrier_code"] == "CJGLS", status_event.safe_metadata
+        assert status_event.safe_metadata["shipping_carrier_label"] == "CJ", status_event.safe_metadata
         displayed_before_release = order_service.list_orders(
             db, store_id=store.id, platform="naver", include_test_orders=True,
         )[0]
@@ -211,6 +220,7 @@ def main():
             "shipping_status_previous_status",
             "shipping_status_current_status",
             "shipping_tracking_hash",
+            "shipping_carrier_code",
             "shipping_carrier_label",
             "shipping_tracking_import_batch_id",
         } & set(release_raw_data), release_raw_data

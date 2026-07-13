@@ -82,6 +82,12 @@ async def run_store_onboarding_scheduler(
 
 
 def _validate_production_configuration() -> None:
+    if settings.allow_dev_auth and any((
+        settings.real_api_write_enabled,
+        settings.shipping_platform_write_enabled,
+        settings.pxg_naver_shipping_pilot_enabled,
+    )):
+        raise RuntimeError("development authentication cannot coexist with real platform write gates")
     if settings.operator_trial_enabled:
         from app.services.operator_trial_service import assert_trial_runtime_closed
 
