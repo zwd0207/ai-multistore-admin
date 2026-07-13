@@ -38,8 +38,19 @@ LEGACY_APPROVED_READONLY_SYNC_TYPES = (
     "naver_readonly_inquiry_refresh",
 )
 RECOVERABLE_RESOURCES = ("orders", "customer_inquiries", "products")
-MANUAL_REVIEW_ERROR_MARKERS = ("cursor", "page", "cleanup", "retention", "conflict", "invalid", "unknown")
-RECOVERABLE_ERROR_MARKERS = ("credential", "auth", "ip_not_allowed", "permission", "forbidden")
+RECOVERABLE_ERROR_CODES = frozenset({
+    "credential_unavailable",
+    "credential_not_ready",
+    "credential_invalid",
+    "credential_decrypt_failed",
+    "auth_failed",
+    "token_auth_failed",
+    "permission_forbidden",
+    "product_api_not_allowed",
+    "order_api_not_allowed",
+    "ip_not_allowed",
+    "unknown_forbidden",
+})
 
 
 def _utc(value: datetime) -> datetime:
@@ -299,10 +310,7 @@ def _safe_failure_reason(code: str | None) -> str | None:
 def _recovery_eligible_error(code: str | None) -> bool:
     if not code:
         return False
-    normalized = code.lower()
-    if any(marker in normalized for marker in MANUAL_REVIEW_ERROR_MARKERS):
-        return False
-    return any(marker in normalized for marker in RECOVERABLE_ERROR_MARKERS)
+    return code.strip().lower() in RECOVERABLE_ERROR_CODES
 
 
 def _attention_fields(*, resource: str, status: str, enabled: bool, stale: bool, last_error_code: str | None, store_id: int) -> dict[str, Any]:
@@ -313,7 +321,7 @@ def _attention_fields(*, resource: str, status: str, enabled: bool, stale: bool,
         return {
             "attention_state": "admin_action",
             "operator_message": "自动读取已暂停，请管理员检查店铺连接。" if eligible else "自动读取已暂停，需要管理员处理。",
-            "admin_action": "verify_and_recover",
+            "admin_action": "verify_and_recover" if eligible else "manual_review",
             "recovery_eligible": eligible,
             "action_path": f"/stores?storeId={store_id}&focus=connection",
         }

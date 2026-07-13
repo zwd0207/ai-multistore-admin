@@ -172,9 +172,14 @@ def main():
         assert status["orders"]["admin_action"] == "verify_and_recover"
         assert status["orders"]["action_path"] == f"/stores?storeId={store_id}&focus=connection"
         assert status["orders"]["operator_message"] == "自动读取已暂停，请管理员检查店铺连接。"
-        assert status["products"]["admin_action"] == "verify_and_recover" and status["products"]["recovery_eligible"] is False
+        assert status["products"]["admin_action"] == "manual_review" and status["products"]["recovery_eligible"] is False
         assert status["products"]["operator_message"] == "自动读取已暂停，需要管理员处理。"
+        assert status["products"]["action_path"] == f"/stores?storeId={store_id}&focus=connection"
         assert status["logistics"]["attention_state"] == "none" and status["logistics"]["operator_message"] == "暂未接入自动读取"
+        for code in ("product_api_not_allowed", "unknown_forbidden"):
+            assert automatic_read_sync_service._recovery_eligible_error(code) is True
+        for code in ("invalid_cursor", "unknown_internal"):
+            assert automatic_read_sync_service._recovery_eligible_error(code) is False
         overview = stats_service.get_store_overview(db, operator_user_id=1)
         summary = overview["automatic_read_attention_summary"]
         assert set(summary) == {"affected_store_count", "affected_resource_count", "retrying_count", "stale_count", "admin_required_count"}
