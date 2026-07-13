@@ -91,6 +91,7 @@ class NaverReadAdapter(Protocol):
     def validate(self, *, client_id: str, client_secret: str, channel_no: str | None) -> NaverValidation: ...
     def read_products(self, context: NaverReadContext, *, start_at: datetime, end_at: datetime, cursor: str | None) -> NaverReadPage: ...
     def read_orders(self, context: NaverReadContext, *, start_at: datetime, end_at: datetime, cursor: str | None) -> NaverReadPage: ...
+    def read_logistics(self, context: NaverReadContext, *, product_order_ids: list[str]) -> list[dict]: ...
 
 
 class DefaultNaverReadAdapter:
@@ -209,6 +210,20 @@ class DefaultNaverReadAdapter:
             next_slice = slice_index + 1
             next_cursor = _encode_cursor("orders", {"slice": next_slice, "after": None}) if start_kst + timedelta(days=next_slice) < end_kst else None
         return NaverReadPage(items=details, next_cursor=next_cursor)
+
+    def read_logistics(self, context: NaverReadContext, *, product_order_ids: list[str]) -> list[dict]:
+        """Read delivery snapshots only from the existing order-detail endpoint."""
+        safe_ids = [str(item).strip() for item in product_order_ids if str(item or "").strip()]
+        if not safe_ids or len(safe_ids) > ORDER_DETAIL_BATCH_SIZE:
+            raise NaverReadFailure("invalid_logistics_detail_batch")
+        detail_result = self._order_detail(
+            api_base=context.api_base,
+            headers=self._headers(context),
+            product_order_ids=safe_ids,
+        )
+        _raise_for_read_result(detail_result, scope="order")
+        records = sync_service._extract_naver_order_detail_records(detail_result.get("payload"), safe_ids)
+        return [sync_service._build_naver_order_internal_detail(item, store_id=context.store_id) for item in records]
 
     def _headers(self, context: NaverReadContext) -> dict[str, str]:
         token = self._tokens.get(context.credential_id)

@@ -739,6 +739,17 @@ def _snapshot_time(value: object, fallback: datetime) -> datetime:
     return _utc(fallback)
 
 
+def _strict_snapshot_time(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return _utc(value)
+    if not value:
+        return None
+    try:
+        return _utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
 def _snapshot_is_terminal(detail: dict) -> bool:
     return any(
         value and value.upper() in NAVER_LOGISTICS_STOP_STATUSES
@@ -792,7 +803,9 @@ def persist_naver_order_detail_logistics_page(
             continue
         product_order_id = _snapshot_text(detail.get("external_product_order_id"))
         external_order_id = _snapshot_text(detail.get("external_order_id_full") or detail.get("external_order_id"))
-        if not product_order_id or _snapshot_is_terminal(detail):
+        if not product_order_id:
+            raise ApiError("Naver logistics product-order ID is required", "naver_logistics_product_order_id_missing", 409)
+        if _snapshot_is_terminal(detail):
             skipped += 1
             continue
         statement = select(Order).where(
@@ -809,12 +822,10 @@ def persist_naver_order_detail_logistics_page(
             )
         matches = db.scalars(statement).all()
         if len(matches) != 1:
-            skipped += 1
-            continue
+            raise ApiError("Naver logistics order association is not unique", "naver_logistics_order_association_invalid", 409)
         order = matches[0]
         if external_order_id and order.external_order_id != external_order_id:
-            skipped += 1
-            continue
+            raise ApiError("Naver logistics order association does not match", "naver_logistics_external_order_id_mismatch", 409)
         carrier = _snapshot_text(detail.get("delivery_company"))
         tracking_number = _snapshot_text(detail.get("tracking_number"))
         shipment_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
@@ -822,11 +833,11 @@ def persist_naver_order_detail_logistics_page(
         if not any((carrier, tracking_number, shipment_status, shipped_at)):
             not_available += 1
             continue
-        source_value = detail.get("last_changed_at") or detail.get("source_updated_at") or detail.get("shipped_at")
-        if not source_value:
-            skipped += 1
-            continue
-        source_updated_at = _snapshot_time(source_value, current)
+        source_updated_at = _strict_snapshot_time(
+            detail.get("last_changed_at") or detail.get("source_updated_at") or detail.get("shipped_at")
+        )
+        if source_updated_at is None:
+            raise ApiError("Naver logistics source timestamp is invalid", "naver_logistics_source_time_invalid", 409)
         source_key_hash = _hash(f"logistics:{order.id}")
         fingerprint = _fingerprint({
             "carrier": carrier, "tracking_number_hash": _hash(tracking_number) if tracking_number else None,
@@ -838,7 +849,7 @@ def persist_naver_order_detail_logistics_page(
             skipped += 1
             continue
         if decision == "same_version_conflict":
-            raise RuntimeError("logistics_same_version_conflict")
+            raise ApiError("Naver logistics source version conflicts", "naver_logistics_same_version_conflict", 409)
         record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.order_id == order.id))
         if decision == "unchanged":
             if state is not None:

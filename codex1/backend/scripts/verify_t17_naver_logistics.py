@@ -53,10 +53,18 @@ def detail(product_order_id, order_id, *, changed=NOW, delivery="DELIVERING", tr
 
 
 class Reader:
-    def __init__(self, page): self.page = page
+    def __init__(self, page):
+        self.page = page
+        self.feed_calls = 0
+        self.detail_calls = []
     def validate(self, **_kwargs): raise AssertionError("not used")
     def read_products(self, *_args, **_kwargs): raise AssertionError("not used")
-    def read_orders(self, *_args, **_kwargs): return NaverReadPage(self.page)
+    def read_orders(self, *_args, **_kwargs):
+        self.feed_calls += 1
+        raise AssertionError("T17 logistics must not call the order feed")
+    def read_logistics(self, _context, *, product_order_ids):
+        self.detail_calls.append(list(product_order_ids))
+        return self.page
 
 
 def seed_order(db, store, product_order_id, order_id, *, ordered_at=NOW - timedelta(days=1), source_type="naver_onboarding_sync"):
@@ -90,6 +98,29 @@ def main():
         seed_order(db, other, "po-primary", "o-other")
         db.commit()
 
+        # Exact legacy placeholder upgrade is idempotent; unrelated blocks stay blocked.
+        legacy_checkpoint = SyncCheckpoint(
+            store_id=store.id, platform="naver", sync_type="naver_automatic_logistics",
+            automatic_read_enabled=False, status="blocked", notes="not_supported", next_run_at=None,
+        )
+        unrelated_checkpoint = SyncCheckpoint(
+            store_id=other.id, platform="naver", sync_type="naver_automatic_logistics",
+            automatic_read_enabled=False, status="blocked", notes="manual_review", next_run_at=None,
+        )
+        db.add_all((legacy_checkpoint, unrelated_checkpoint)); db.commit()
+        automatic_read_sync_service.ensure_automatic_read_schedule(db, store_id=store.id, now=NOW)
+        db.refresh(legacy_checkpoint); db.refresh(unrelated_checkpoint)
+        assert legacy_checkpoint.status == "idle" and legacy_checkpoint.automatic_read_enabled is True
+        legacy_next_run = legacy_checkpoint.next_run_at
+        assert legacy_next_run is not None
+        if legacy_next_run.tzinfo is None:
+            legacy_next_run = legacy_next_run.replace(tzinfo=timezone.utc)
+        assert legacy_checkpoint.notes is None and legacy_next_run == NOW
+        automatic_read_sync_service.ensure_automatic_read_schedule(db, store_id=store.id, now=NOW)
+        db.refresh(legacy_checkpoint); db.refresh(unrelated_checkpoint)
+        assert legacy_checkpoint.status == "idle" and legacy_checkpoint.notes is None
+        assert unrelated_checkpoint.status == "blocked" and unrelated_checkpoint.automatic_read_enabled is False
+
         # Permission/isolation and fictional stores fail closed before any record write.
         try:
             pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=fictional.id, details=[detail("po-primary", "o-primary")], now=NOW)
@@ -120,9 +151,19 @@ def main():
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[unavailable], now=NOW)["not_available"] == 1
 
         # Exact association, multi-product orders, candidate filters, terminal exclusion, and historical side-save.
-        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "wrong-order")], now=NOW)["skipped"] == 1
-        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-old", "o-old")], now=NOW)["skipped"] == 1
-        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-test", "o-test")], now=NOW)["skipped"] == 1
+        try:
+            pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "wrong-order")], now=NOW)
+            raise AssertionError("external order mismatch must block")
+        except ApiError as exc:
+            assert exc.error_code == "naver_logistics_external_order_id_mismatch"
+            db.rollback()
+        for excluded_detail in (detail("po-old", "o-old"), detail("po-test", "o-test")):
+            try:
+                pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[excluded_detail], now=NOW)
+                raise AssertionError("non-candidate association must block")
+            except ApiError as exc:
+                assert exc.error_code == "naver_logistics_order_association_invalid"
+                db.rollback()
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "o-primary", delivery="CANCELLED")], now=NOW)["skipped"] == 1
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-history", "o-history")], now=NOW, scope="historical")["saved"] == 1
         db.commit()
@@ -133,8 +174,8 @@ def main():
         try:
             pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "o-primary", tracking="CONFLICT")], now=NOW)
             raise AssertionError("same-version conflict must block")
-        except RuntimeError as exc:
-            assert str(exc) == "logistics_same_version_conflict"
+        except ApiError as exc:
+            assert exc.error_code == "naver_logistics_same_version_conflict"
             db.rollback()
         delivered = detail("po-primary", "o-primary", changed=NOW + timedelta(minutes=1), delivery="DELIVERED")
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[delivered], now=NOW)["saved"] == 1
@@ -156,6 +197,7 @@ def main():
             assert exc.error_code == "readonly_retention_cleanup_failed"
         cleanup.status = "healthy"; cleanup.last_success_at = NOW; db.commit()
 
+        # The scheduler reads only local candidates and the detail endpoint.
         automatic_read_sync_service.ensure_automatic_read_schedule(db, store_id=store.id, now=NOW)
         checkpoint = db.scalar(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store.id, SyncCheckpoint.sync_type == "naver_automatic_logistics"))
         assert checkpoint and checkpoint.automatic_read_enabled and checkpoint.status == "idle"
@@ -164,11 +206,36 @@ def main():
         assert automatic_read_sync_service.RESOURCE_CONFIG["logistics"]["freshness"] == timedelta(minutes=75)
         assert "logistics" in automatic_read_sync_service.RECOVERABLE_RESOURCES
         checkpoint.next_run_at = NOW; db.commit()
-        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=Reader([detail("po-primary", "o-primary", changed=NOW + timedelta(minutes=3), delivery="DELIVERED")])) == "success"
+        reader = Reader([detail("po-second", "o-shared", changed=NOW + timedelta(minutes=3), delivery="DELIVERING", tracking="T17-SECOND")])
+        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=reader) == "success"
+        assert reader.feed_calls == 0 and reader.detail_calls == [["po-second"]]
         fresh_until = db.scalar(select(SyncCheckpoint.fresh_until).where(SyncCheckpoint.id == checkpoint.id))
         assert fresh_until is not None and fresh_until.replace(tzinfo=timezone.utc) >= NOW + timedelta(minutes=75)
         assert db.query(OrderStatusEvent).filter_by(order_id=primary.id).count() >= 2
         assert db.query(PxgNaverReadonlyLogisticsRecord).count() >= 2
+
+        # Stable non-retryable detail failures roll the page back without advancing its local cursor.
+        for bad_detail, code in (
+            (detail("po-second", "wrong-order", changed=NOW + timedelta(minutes=4)), "naver_logistics_external_order_id_mismatch"),
+            ({**detail("po-second", "o-shared", changed=NOW + timedelta(minutes=4)), "last_changed_at": "not-a-time"}, "naver_logistics_source_time_invalid"),
+            (detail("po-second", "o-shared", changed=NOW + timedelta(minutes=3), tracking="same-version-conflict"), "naver_logistics_same_version_conflict"),
+        ):
+            checkpoint.status = "idle"; checkpoint.automatic_read_enabled = True; checkpoint.next_run_at = NOW
+            checkpoint.cursor_value = None; checkpoint.lease_token = None; checkpoint.lease_expires_at = None
+            db.commit()
+            assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=Reader([bad_detail])) == "failed"
+            db.refresh(checkpoint)
+            assert checkpoint.cursor_value is None and checkpoint.last_error_code == code and checkpoint.status == "blocked"
+
+        duplicate = seed_order(db, store, "po-duplicate", "o-duplicate")
+        duplicate_second = seed_order(db, store, "po-duplicate", "o-duplicate-second")
+        db.commit()
+        try:
+            pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-duplicate", "o-duplicate")], now=NOW)
+            raise AssertionError("ambiguous product-order association must block")
+        except ApiError as exc:
+            assert exc.error_code == "naver_logistics_order_association_invalid"
+            db.rollback()
     print("verify_t17_naver_logistics: ok")
 
 

@@ -11,14 +11,17 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.api_credential import ApiCredential
 from app.models.store import Store
 from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
+from app.models.order import Order
+from app.models.pxg_naver_readonly import PxgNaverReadonlyLogisticsRecord
 from app.services.encryption import decrypt_value
-from app.services import api_credential_readiness_service, naver_readonly_inquiry_service, order_service, product_service, store_onboarding_service
+from app.services import api_credential_readiness_service, naver_readonly_inquiry_service, order_service, product_service, pxg_naver_readonly_persistence_service, store_onboarding_service
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 
 
@@ -82,6 +85,17 @@ def _checkpoint(db: Session, *, store_id: int, resource: str, now: datetime) -> 
         )
         db.add(checkpoint)
         db.flush()
+    elif resource == "logistics" and (
+        checkpoint.status == "blocked"
+        and checkpoint.automatic_read_enabled is False
+        and checkpoint.notes == "not_supported"
+    ):
+        # Only the exact R1 placeholder is upgraded. Other operator-blocked
+        # checkpoints remain fail-closed and require the normal recovery path.
+        checkpoint.status = "idle"
+        checkpoint.automatic_read_enabled = True
+        checkpoint.notes = None
+        checkpoint.next_run_at = now if checkpoint.next_run_at is None else checkpoint.next_run_at
     return checkpoint
 
 
@@ -247,36 +261,88 @@ def _sync_t17_logistics(
     from app.services import pxg_naver_readonly_persistence_service
 
     context = _context(db, checkpoint.store_id)
-    if checkpoint.cursor_value:
-        start_at = _utc(checkpoint.window_start_at or now - timedelta(days=30))
-        end_at = _utc(checkpoint.window_end_at or now)
-    else:
-        start_at = _utc(now - timedelta(days=30))
-        end_at = now
-        checkpoint.window_start_at, checkpoint.window_end_at = start_at, end_at
-        db.commit()
-    cursor = checkpoint.cursor_value
+    cursor = _decode_logistics_cursor(checkpoint.cursor_value)
+    candidates = _t17_logistics_candidates(db, store_id=checkpoint.store_id, now=now)
+    offset = cursor["offset"]
+    if offset >= len(candidates):
+        checkpoint.cursor_value = None
+        return {"created": 0, "updated": 0, "pages": 0, "not_available": 0, "skipped": 0}
+    checkpoint.window_start_at, checkpoint.window_end_at = _utc(now - timedelta(days=30)), now
     pages = saved = not_available = skipped = 0
     while True:
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
-        page = reader.read_orders(context, start_at=start_at, end_at=end_at, cursor=cursor)
-        if not isinstance(page, store_onboarding_service.NaverReadPage):
-            raise store_onboarding_service.NaverReadFailure("invalid_read_adapter_page")
+        batch = candidates[offset:offset + store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
+        product_order_ids = [str(order.external_product_order_id) for order in batch]
+        details = reader.read_logistics(context, product_order_ids=product_order_ids)
+        if not isinstance(details, list):
+            raise store_onboarding_service.NaverReadFailure("invalid_logistics_detail_page")
+        received_ids = {str(item.get("external_product_order_id") or "").strip() for item in details if isinstance(item, dict)}
+        if received_ids != set(product_order_ids):
+            raise ApiError("Naver logistics detail response is incomplete", "naver_logistics_detail_response_incomplete", 409)
         outcome = pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
-            db, store_id=checkpoint.store_id, details=page.items, now=now, scope="automatic",
+            db, store_id=checkpoint.store_id, details=details, now=now, scope="automatic",
         )
         saved += outcome["saved"]
         not_available += outcome["not_available"]
         skipped += outcome["skipped"]
         pages += 1
-        cursor = page.next_cursor
-        checkpoint.cursor_value = cursor
+        offset += len(batch)
+        checkpoint.cursor_value = _encode_logistics_cursor(offset) if offset < len(candidates) else None
         # Snapshot writes and this cursor transition commit as one page transaction.
         db.commit()
-        if not cursor:
+        if checkpoint.cursor_value is None:
             break
     return {"created": saved, "updated": 0, "pages": pages, "not_available": not_available, "skipped": skipped}
+
+
+def _encode_logistics_cursor(offset: int) -> str:
+    return f"logistics-local:{offset}"
+
+
+def _decode_logistics_cursor(value: str | None) -> dict[str, int]:
+    if not value:
+        return {"offset": 0}
+    prefix, separator, offset = value.partition(":")
+    if prefix != "logistics-local" or not separator or not offset.isdigit():
+        raise store_onboarding_service.NaverReadFailure("logistics_checkpoint_cursor_invalid")
+    return {"offset": int(offset)}
+
+
+def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime) -> list[Order]:
+    cutoff = _utc(now) - timedelta(days=30)
+    rows = db.scalars(select(Order).where(
+        Order.store_id == store_id,
+        Order.platform == NAVER,
+        Order.ordered_at >= cutoff,
+        Order.source_type.notin_(order_service.TEST_ORDER_SOURCE_TYPES),
+        Order.source_type != order_service.HISTORICAL_BACKFILL_SOURCE_TYPE,
+        Order.external_product_order_id.is_not(None),
+        Order.external_product_order_id != "",
+    ).order_by(Order.ordered_at.asc(), Order.id.asc())).all()
+    by_product_order_id: dict[str, list[Order]] = {}
+    for row in rows:
+        key = str(row.external_product_order_id or "").strip()
+        if key:
+            by_product_order_id.setdefault(key, []).append(row)
+    candidates: list[Order] = []
+    stop_statuses = pxg_naver_readonly_persistence_service.NAVER_LOGISTICS_STOP_STATUSES
+    terminal_statuses = pxg_naver_readonly_persistence_service.NAVER_DELIVERY_TERMINAL_STATUSES
+    for product_rows in by_product_order_id.values():
+        if len(product_rows) != 1:
+            continue
+        order = product_rows[0]
+        if str(order.order_status or "").upper() in stop_statuses:
+            continue
+        record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == order.id,
+            PxgNaverReadonlyLogisticsRecord.store_id == store_id,
+            PxgNaverReadonlyLogisticsRecord.platform == NAVER,
+        ))
+        if record is not None and str(record.shipment_status or "").upper() in terminal_statuses:
+            continue
+        candidates.append(order)
+    return candidates
 
 
 def _finish_success(db: Session, *, checkpoint: SyncCheckpoint, token: str, now: datetime, result: dict[str, int]) -> bool:
