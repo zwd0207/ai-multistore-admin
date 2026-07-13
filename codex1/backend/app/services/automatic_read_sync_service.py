@@ -262,17 +262,18 @@ def _sync_t17_logistics(
 
     context = _context(db, checkpoint.store_id)
     cursor = _decode_logistics_cursor(checkpoint.cursor_value)
-    candidates = _t17_logistics_candidates(db, store_id=checkpoint.store_id, now=now)
-    offset = cursor["offset"]
-    if offset >= len(candidates):
-        checkpoint.cursor_value = None
-        return {"created": 0, "updated": 0, "pages": 0, "not_available": 0, "skipped": 0}
+    last_order_id = cursor["last_order_id"]
     checkpoint.window_start_at, checkpoint.window_end_at = _utc(now - timedelta(days=30)), now
     pages = saved = not_available = skipped = 0
     while True:
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
-        batch = candidates[offset:offset + store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
+        batch = _t17_logistics_candidates(
+            db, store_id=checkpoint.store_id, now=now, after_order_id=last_order_id,
+        )[:store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
+        if not batch:
+            checkpoint.cursor_value = None
+            break
         product_order_ids = [str(order.external_product_order_id) for order in batch]
         details = reader.read_logistics(context, product_order_ids=product_order_ids)
         if not isinstance(details, list):
@@ -287,29 +288,27 @@ def _sync_t17_logistics(
         not_available += outcome["not_available"]
         skipped += outcome["skipped"]
         pages += 1
-        offset += len(batch)
-        checkpoint.cursor_value = _encode_logistics_cursor(offset) if offset < len(candidates) else None
+        last_order_id = batch[-1].id
+        checkpoint.cursor_value = _encode_logistics_cursor(last_order_id)
         # Snapshot writes and this cursor transition commit as one page transaction.
         db.commit()
-        if checkpoint.cursor_value is None:
-            break
     return {"created": saved, "updated": 0, "pages": pages, "not_available": not_available, "skipped": skipped}
 
 
-def _encode_logistics_cursor(offset: int) -> str:
-    return f"logistics-local:{offset}"
+def _encode_logistics_cursor(last_order_id: int) -> str:
+    return f"logistics-local-id:{last_order_id}"
 
 
 def _decode_logistics_cursor(value: str | None) -> dict[str, int]:
     if not value:
-        return {"offset": 0}
-    prefix, separator, offset = value.partition(":")
-    if prefix != "logistics-local" or not separator or not offset.isdigit():
+        return {"last_order_id": 0}
+    prefix, separator, order_id = value.partition(":")
+    if prefix != "logistics-local-id" or not separator or not order_id.isdigit():
         raise store_onboarding_service.NaverReadFailure("logistics_checkpoint_cursor_invalid")
-    return {"offset": int(offset)}
+    return {"last_order_id": int(order_id)}
 
 
-def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime) -> list[Order]:
+def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime, after_order_id: int = 0) -> list[Order]:
     cutoff = _utc(now) - timedelta(days=30)
     rows = db.scalars(select(Order).where(
         Order.store_id == store_id,
@@ -330,7 +329,7 @@ def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime) -> l
     terminal_statuses = pxg_naver_readonly_persistence_service.NAVER_DELIVERY_TERMINAL_STATUSES
     for product_rows in by_product_order_id.values():
         if len(product_rows) != 1:
-            continue
+            raise ApiError("Naver logistics product-order ID is duplicated", "naver_logistics_duplicate_product_order_id", 409)
         order = product_rows[0]
         if str(order.order_status or "").upper() in stop_statuses:
             continue
@@ -341,7 +340,8 @@ def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime) -> l
         ))
         if record is not None and str(record.shipment_status or "").upper() in terminal_statuses:
             continue
-        candidates.append(order)
+        if order.id > after_order_id:
+            candidates.append(order)
     return candidates
 
 

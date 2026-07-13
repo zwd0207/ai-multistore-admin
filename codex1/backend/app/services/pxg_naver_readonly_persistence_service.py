@@ -802,7 +802,8 @@ def persist_naver_order_detail_logistics_page(
             skipped += 1
             continue
         product_order_id = _snapshot_text(detail.get("external_product_order_id"))
-        external_order_id = _snapshot_text(detail.get("external_order_id_full") or detail.get("external_order_id"))
+        external_order_id_full = _snapshot_text(detail.get("external_order_id_full") or detail.get("external_order_id"))
+        external_order_id_hash = _snapshot_text(detail.get("external_order_id_hash"))
         if not product_order_id:
             raise ApiError("Naver logistics product-order ID is required", "naver_logistics_product_order_id_missing", 409)
         if _snapshot_is_terminal(detail):
@@ -824,7 +825,12 @@ def persist_naver_order_detail_logistics_page(
         if len(matches) != 1:
             raise ApiError("Naver logistics order association is not unique", "naver_logistics_order_association_invalid", 409)
         order = matches[0]
-        if external_order_id and order.external_order_id != external_order_id:
+        expected_order_id = (
+            external_order_id_full
+            if order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE
+            else external_order_id_hash or external_order_id_full
+        )
+        if expected_order_id and order.external_order_id != expected_order_id:
             raise ApiError("Naver logistics order association does not match", "naver_logistics_external_order_id_mismatch", 409)
         carrier = _snapshot_text(detail.get("delivery_company"))
         tracking_number = _snapshot_text(detail.get("tracking_number"))

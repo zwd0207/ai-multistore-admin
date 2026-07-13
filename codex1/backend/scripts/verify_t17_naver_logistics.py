@@ -40,10 +40,11 @@ NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 TRACKING = "T17-TRACKING-99887766"
 
 
-def detail(product_order_id, order_id, *, changed=NOW, delivery="DELIVERING", tracking=TRACKING, carrier="CJ"):
+def detail(product_order_id, order_id, *, changed=NOW, delivery="DELIVERING", tracking=TRACKING, carrier="CJ", order_hash=None):
     return {
         "external_product_order_id": product_order_id,
         "external_order_id_full": order_id,
+        "external_order_id_hash": order_hash,
         "last_changed_at": changed.isoformat(),
         "delivery_status": {"raw": delivery, "derived_from_order_status": False} if delivery else None,
         "tracking_number": tracking,
@@ -65,6 +66,22 @@ class Reader:
     def read_logistics(self, _context, *, product_order_ids):
         self.detail_calls.append(list(product_order_ids))
         return self.page
+
+
+class BatchReader:
+    def __init__(self, order_ids, *, fail_on_second=False):
+        self.order_ids = order_ids
+        self.fail_on_second = fail_on_second
+        self.detail_calls = []
+    def validate(self, **_kwargs): raise AssertionError("not used")
+    def read_products(self, *_args, **_kwargs): raise AssertionError("not used")
+    def read_orders(self, *_args, **_kwargs): raise AssertionError("T17 logistics must not call the order feed")
+    def read_logistics(self, _context, *, product_order_ids):
+        self.detail_calls.append(list(product_order_ids))
+        if self.fail_on_second and len(self.detail_calls) == 2:
+            from app.services.store_onboarding_service import NaverReadFailure
+            raise NaverReadFailure("network_timeout", retryable=True)
+        return [detail(product_order_id, self.order_ids[product_order_id], delivery="DELIVERED") for product_order_id in product_order_ids]
 
 
 def seed_order(db, store, product_order_id, order_id, *, ordered_at=NOW - timedelta(days=1), source_type="naver_onboarding_sync"):
@@ -166,6 +183,23 @@ def main():
                 db.rollback()
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "o-primary", delivery="CANCELLED")], now=NOW)["skipped"] == 1
         assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-history", "o-history")], now=NOW, scope="historical")["saved"] == 1
+        hash_order = seed_order(db, store, "po-hash", "id-hash-t13")
+        hash_history = seed_order(db, store, "po-hash-history", "id-hash-history", ordered_at=NOW - timedelta(days=61), source_type="naver_historical_backfill")
+        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db, store_id=store.id, details=[detail("po-hash", "full-order-id-must-not-persist", order_hash="id-hash-t13")], now=NOW,
+        )["saved"] == 1
+        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db, store_id=store.id, details=[detail("po-hash-history", "full-history-id-must-not-persist", order_hash="id-hash-history")], now=NOW, scope="historical",
+        )["saved"] == 1
+        db.commit()
+        try:
+            pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+                db, store_id=store.id, details=[detail("po-hash", "full-order-id-must-not-persist", order_hash="wrong-hash")], now=NOW,
+            )
+            raise AssertionError("T13 canonical hash mismatch must block")
+        except ApiError as exc:
+            assert exc.error_code == "naver_logistics_external_order_id_mismatch"
+            db.rollback()
         db.commit()
 
         # Idempotence, stale source protection, same-version conflict, and terminal non-regression.
@@ -198,6 +232,12 @@ def main():
         cleanup.status = "healthy"; cleanup.last_success_at = NOW; db.commit()
 
         # The scheduler reads only local candidates and the detail endpoint.
+        for logistics in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.store_id == store.id,
+            PxgNaverReadonlyLogisticsRecord.order_id != second.id,
+        )).all():
+            logistics.shipment_status = "DELIVERED"
+        db.commit()
         automatic_read_sync_service.ensure_automatic_read_schedule(db, store_id=store.id, now=NOW)
         checkpoint = db.scalar(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store.id, SyncCheckpoint.sync_type == "naver_automatic_logistics"))
         assert checkpoint and checkpoint.automatic_read_enabled and checkpoint.status == "idle"
@@ -213,6 +253,46 @@ def main():
         assert fresh_until is not None and fresh_until.replace(tzinfo=timezone.utc) >= NOW + timedelta(minutes=75)
         assert db.query(OrderStatusEvent).filter_by(order_id=primary.id).count() >= 2
         assert db.query(PxgNaverReadonlyLogisticsRecord).count() >= 2
+
+        # The durable cursor is the last local Order.id, not a changing candidate-array offset.
+        for logistics in db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.store_id == store.id,
+        )).all():
+            logistics.shipment_status = "DELIVERED"
+        db.commit()
+        paged_orders = {f"po-page-{index}": f"o-page-{index}" for index in range(21)}
+        for product_order_id, order_id in paged_orders.items():
+            seed_order(db, store, product_order_id, order_id)
+        checkpoint.status = "idle"; checkpoint.automatic_read_enabled = True; checkpoint.next_run_at = NOW
+        checkpoint.cursor_value = None; checkpoint.lease_token = None; checkpoint.lease_expires_at = None
+        db.commit()
+        interrupted_reader = BatchReader(paged_orders, fail_on_second=True)
+        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=interrupted_reader) == "failed"
+        db.refresh(checkpoint)
+        first_page_last_id = db.scalar(select(Order.id).where(Order.store_id == store.id, Order.external_product_order_id == "po-page-19"))
+        assert checkpoint.cursor_value == f"logistics-local-id:{first_page_last_id}"
+        resumed_reader = BatchReader(paged_orders)
+        checkpoint.next_run_at = NOW; checkpoint.status = "retry_wait"; checkpoint.automatic_read_enabled = True
+        db.commit()
+        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=resumed_reader) == "success"
+        assert resumed_reader.detail_calls == [["po-page-20"]]
+
+        duplicate_checkpoint = checkpoint
+        scheduler_dup_a = seed_order(db, store, "po-scheduler-duplicate", "o-scheduler-duplicate-a")
+        scheduler_dup_b = seed_order(db, store, "po-scheduler-duplicate", "o-scheduler-duplicate-b")
+        duplicate_checkpoint.status = "idle"; duplicate_checkpoint.automatic_read_enabled = True; duplicate_checkpoint.next_run_at = NOW
+        duplicate_checkpoint.cursor_value = None; db.commit()
+        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=duplicate_checkpoint.id, now=NOW, reader=BatchReader({})) == "failed"
+        db.refresh(duplicate_checkpoint)
+        assert duplicate_checkpoint.cursor_value is None and duplicate_checkpoint.last_error_code == "naver_logistics_duplicate_product_order_id"
+        scheduler_dup_a.source_type = "mock_sync"
+        scheduler_dup_b.source_type = "mock_sync"
+        second_record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == second.id,
+        ))
+        assert second_record is not None
+        second_record.shipment_status = "DELIVERING"
+        db.commit()
 
         # Stable non-retryable detail failures roll the page back without advancing its local cursor.
         for bad_detail, code in (
