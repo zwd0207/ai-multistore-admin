@@ -472,6 +472,56 @@ def run_onboarding_worker(
             db.commit()
 
 
+def run_due_onboarding_workers(
+    *,
+    session_factory: Callable[[], Session] = SessionLocal,
+    worker: Callable[..., dict | None] = run_onboarding_worker,
+    now: datetime | None = None,
+    limit: int = 10,
+) -> dict[str, int]:
+    """Resume durable work after restart and retry transient failures when due."""
+    current = now or get_utc_now()
+    stale_before = current - WORKER_CLAIM_TTL
+    with session_factory() as db:
+        ids = db.scalars(
+            select(StoreOnboarding.id)
+            .where(
+                or_(
+                    StoreOnboarding.status.in_(("validating", "provisioning", "backfilling")),
+                    (StoreOnboarding.status == "retry_wait") & (StoreOnboarding.next_retry_at <= current),
+                ),
+                or_(
+                    StoreOnboarding.worker_claim_token.is_(None),
+                    StoreOnboarding.worker_claimed_at < stale_before,
+                ),
+            )
+            .order_by(StoreOnboarding.updated_at.asc(), StoreOnboarding.id.asc())
+            .limit(max(1, min(int(limit), 100)))
+        ).all()
+    completed = 0
+    for onboarding_id in ids:
+        if worker(onboarding_id, session_factory=session_factory) is not None:
+            completed += 1
+    return {"scheduled": len(ids), "completed": completed}
+
+
+def list_store_onboardings(db: Session, *, store_id: int, user_id: int) -> list[dict]:
+    rows = db.scalars(
+        select(StoreOnboarding)
+        .join(
+            ErpStoreMembership,
+            ErpStoreMembership.store_id == StoreOnboarding.store_id,
+        )
+        .where(
+            StoreOnboarding.store_id == store_id,
+            ErpStoreMembership.user_id == user_id,
+            ErpStoreMembership.membership_status == "active",
+        )
+        .order_by(StoreOnboarding.updated_at.desc(), StoreOnboarding.id.desc())
+    ).all()
+    return [serialize_onboarding(item) for item in rows]
+
+
 def update_onboarding_credentials(
     db: Session,
     *,

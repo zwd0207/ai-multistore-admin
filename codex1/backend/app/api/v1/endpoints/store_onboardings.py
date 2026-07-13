@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.responses import success_response
@@ -9,6 +9,20 @@ from app.services.operator_access_service import OperatorIdentity, get_operator_
 
 
 router = APIRouter(prefix="/store-onboardings", tags=["store-onboardings"])
+
+
+@router.get("")
+def list_store_onboardings(
+    store_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    items = store_onboarding_service.list_store_onboardings(
+        db,
+        store_id=store_id,
+        user_id=identity.user_id,
+    )
+    return success_response(data={"items": items, "total": len(items)})
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

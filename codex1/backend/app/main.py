@@ -45,6 +45,27 @@ async def run_pxg_naver_cleanup_scheduler(
         await sleep_fn(interval_seconds)
 
 
+async def run_store_onboarding_scheduler(
+    *,
+    runner: Callable[..., Any] | None = None,
+    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    interval_seconds: float = 60,
+) -> None:
+    """Resume incomplete onboarding work at startup and retry it when due."""
+    while True:
+        try:
+            resolved_runner = runner
+            if resolved_runner is None:
+                from app.services.store_onboarding_service import run_due_onboarding_workers
+
+                resolved_runner = run_due_onboarding_workers
+            await asyncio.to_thread(resolved_runner)
+        except Exception:
+            # The durable onboarding row keeps its last safe state for the next pass.
+            pass
+        await sleep_fn(interval_seconds)
+
+
 def _validate_production_configuration() -> None:
     if settings.operator_trial_enabled:
         from app.services.operator_trial_service import assert_trial_runtime_closed
@@ -73,11 +94,16 @@ def _validate_production_configuration() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     init_db()
-    task = asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings))
+    tasks = [
+        asyncio.create_task(run_pxg_naver_cleanup_scheduler(runtime_settings=settings)),
+        asyncio.create_task(run_store_onboarding_scheduler()),
+    ]
     yield
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def create_app() -> FastAPI:

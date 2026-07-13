@@ -202,6 +202,15 @@ def main() -> None:
         db.commit()
         member_poll = client.get(f"/api/v1/store-onboardings/{submitted['id']}", headers={"X-ERP-User-Key": outsider.user_key_hash})
         assert member_poll.status_code == 200
+        store_runs = store_onboarding_service.list_store_onboardings(db, store_id=store_id, user_id=outsider.id)
+        assert [item["id"] for item in store_runs] == [submitted["id"]]
+        list_response = client.get(
+            "/api/v1/store-onboardings",
+            params={"store_id": store_id},
+            headers={"X-ERP-User-Key": outsider.user_key_hash},
+        )
+        assert list_response.status_code == 200
+        assert list_response.json()["data"]["items"][0]["store_id"] == store_id
 
         credential = db.get(ApiCredential, credential_id)
         assert credential.client_id == "client-id-for-test"
@@ -267,6 +276,33 @@ def main() -> None:
         assert reads.platform_write_count == 0
         assert completed["progress_summary"]["customer_inquiries"]["adapter_called"] is False
         assert completed["progress_summary"]["logistics"]["adapter_called"] is False
+
+        due = StoreOnboarding(
+            idempotency_key="t13-restart-recovery",
+            requested_store_name="Restart recovery store",
+            creator_user_id=creator.id,
+            encrypted_client_id="encrypted-test-client",
+            encrypted_client_secret="encrypted-test-secret",
+            status="retry_wait",
+            next_retry_at=NOW - timedelta(seconds=1),
+            progress_summary={"products": {"status": "pending"}, "orders": {"status": "pending"}},
+        )
+        db.add(due)
+        db.commit()
+        scheduled_ids = []
+
+        def fake_worker(onboarding_id, *, session_factory):
+            assert session_factory is SessionLocal
+            scheduled_ids.append(onboarding_id)
+            return {"status": "scheduled"}
+
+        recovery = store_onboarding_service.run_due_onboarding_workers(
+            session_factory=SessionLocal,
+            worker=fake_worker,
+            now=NOW,
+        )
+        assert recovery == {"scheduled": 1, "completed": 1}
+        assert scheduled_ids == [due.id]
     print("t13-r1 onboarding: ok")
 
 
