@@ -93,7 +93,8 @@ export function AuthProvider({ children }) {
   const canAccessStore = useCallback((storeId, permissionKey) => {
     const store = session.stores.find((item) => String(item.store_id) === String(storeId));
     if (!store) return false;
-    return !permissionKey || store.permissions?.includes('*') || store.permissions?.includes(permissionKey);
+    const requiredPermissions = Array.isArray(permissionKey) ? permissionKey : [permissionKey];
+    return !permissionKey || store.permissions?.includes('*') || requiredPermissions.some((key) => store.permissions?.includes(key));
   }, [session.stores]);
 
   const value = useMemo(() => ({

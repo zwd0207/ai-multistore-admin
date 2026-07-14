@@ -26,12 +26,16 @@ if ($LASTEXITCODE -ne 0) { throw "Local PXG trial provisioning failed." }
 Import-LocalEnv $runtimeEnv
 $ziniaoCli = Join-Path $env:APPDATA "npm\node_modules\@ziniao-open\cli\bin\ziniao-cli.exe"
 $env:ZINIAO_BROWSER_OPEN_ENABLED = if (Test-Path -LiteralPath $ziniaoCli) { "true" } else { "false" }
+$env:ZINIAO_DIRECTORY_SYNC_ENABLED = if (Test-Path -LiteralPath $ziniaoCli) { "true" } else { "false" }
+$env:ZINIAO_DIRECTORY_SYNC_INTERVAL_SECONDS = "300"
 $env:ZINIAO_CLI_EXECUTABLE = $ziniaoCli
 $env:ZINIAO_CLI_PROFILE = "ziniao-sso-pilot"
 & $python (Join-Path $backend "scripts\provision_local_config_admin.py")
 if ($LASTEXITCODE -ne 0) { throw "Local PXG configuration administrator provisioning failed." }
 & $python (Join-Path $backend "scripts\upgrade_pxg_naver_readonly_schema.py")
 if ($LASTEXITCODE -ne 0) { throw "Local PXG readonly schema upgrade failed; backend startup is blocked." }
+& $python (Join-Path $backend "scripts\upgrade_ziniao_directory_schema.py")
+if ($LASTEXITCODE -ne 0) { throw "Ziniao directory schema upgrade failed; backend startup is blocked." }
 
 $processFile = Join-Path $trialDir "processes.json"
 if (Test-Path -LiteralPath $processFile) {

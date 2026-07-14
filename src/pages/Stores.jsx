@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
 import OpenStoreBackendButton from '../components/common/OpenStoreBackendButton';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
+import { useAuthContext } from '../context/AuthContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import mockApi from '../services/mockApi';
@@ -59,6 +60,8 @@ function apiConnectionStatus(credential) {
 
 async function withApiConnectionStatus(store) {
   if (!isBackendSource) return { ...store, apiConnectionStatus: '演示数据' };
+  if (store.archived) return { ...store, apiConnectionStatus: '已归档' };
+  if (store.openOnly) return { ...store, apiConnectionStatus: '仅打开后台' };
   const credential = await findStoreCredential(store);
   return {
     ...store,
@@ -150,7 +153,9 @@ const api = {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.max(Number(params.pageSize) || 5, 1);
     const result = await baseApi.list({ ...params, page: 1, pageSize: 100 });
-    let rows = filterVisibleBusinessStores(result.data || result.items || []);
+    let rows = params.includeArchived
+      ? (result.data || result.items || []).map(normalizeStoreDisplay)
+      : filterVisibleBusinessStores(result.data || result.items || []);
     const keyword = String(params.keyword || '').trim().toLowerCase();
     const platform = String(params.platform || '').trim().toLowerCase();
     const status = String(params.status || '').trim();
@@ -177,8 +182,8 @@ const api = {
   },
 };
 
-const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
-const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用'];
+const platformOptions = ['Naver', 'Coupang', 'Custom', 'Gmarket'];
+const statusOptions = ['正常运营', '审核中', '申诉中', '暂停使用', '已归档'];
 const apiStatusOptions = [
   { value: 'active', label: '启用' },
   { value: 'inactive', label: '停用' },
@@ -191,6 +196,8 @@ const isNaverForm = (form) => normalizeCredentialPlatform(form.platform) === 'na
 const isCoupangForm = (form) => normalizeCredentialPlatform(form.platform) === 'coupang';
 
 function displaySyncedProductCount(_value, row = {}) {
+  if (row.openOnly) return '不接入业务数据';
+  if (row.archived) return '历史数据保留';
   const formalCount = row.platformProductCount
     ?? row.syncedProductCount
     ?? row.formalProductCount
@@ -201,9 +208,32 @@ function displaySyncedProductCount(_value, row = {}) {
   return `${count.toLocaleString()} 条`;
 }
 
+function directoryStatusLabel(value, row = {}) {
+  if (row.archived || value === 'removed') return '已从紫鸟移除';
+  if (value === 'active') return row.openOnly ? '已同步，仅打开' : '同步正常';
+  return '本地店铺';
+}
+
+function storeNetworkLabel(row = {}) {
+  const network = row.network || {};
+  const location = [network.country, network.region, network.city].filter(Boolean).join(' / ');
+  const statuses = {
+    success: location || '归属已确认',
+    failed: '归属查询失败',
+    pending: '归属查询中',
+    no_ip: '暂无 IP',
+    dynamic: '动态网络，打开时分配 IP',
+    not_applicable: '私网或保留地址',
+    not_configured: '待同步',
+  };
+  return [network.ipAddress || '暂无 IP', statuses[network.status] || '待同步'].join(' · ');
+}
+
 const columns = [
   { key: 'name', title: '店铺名称', render: (value) => <strong>{value}</strong> },
   { key: 'platform', title: '平台' },
+  { key: 'ziniaoDirectoryStatus', title: '紫鸟目录', render: (value, row) => <StatusBadge value={directoryStatusLabel(value, row)} /> },
+  { key: 'network', title: 'IP / 归属', render: (_value, row) => storeNetworkLabel(row) },
   { key: 'manager', title: '负责人' },
   { key: 'region', title: '地区' },
   { key: 'products', title: '同步商品数', render: displaySyncedProductCount },
@@ -279,7 +309,7 @@ const fields = [
     label: '紫鸟店铺名称',
     placeholder: '必须与紫鸟店铺列表中的名称完全一致',
     showWhen: (form) => form.browserProvider === 'ziniao',
-    help: '只保存精确店铺名称，不保存紫鸟店铺 ID、IP、Token 或 API Key。',
+    help: '紫鸟目录店铺由系统自动维护绑定；此字段仅用于未接入目录的人工店铺。',
   },
 ];
 
@@ -404,6 +434,7 @@ function OnboardingProgress({ onboarding }) {
 
 export default function Stores() {
   const { selectedStoreId, setSelectedStoreId, refreshStores } = useStoreContext();
+  const { stores: authorizedStores } = useAuthContext();
   const [searchParams] = useSearchParams();
   const queryStoreId = searchParams.get('storeId') || '';
   const queryFocus = searchParams.get('focus') || '';
@@ -416,11 +447,21 @@ export default function Stores() {
   const [onboardingSubmitting, setOnboardingSubmitting] = useState(false);
   const [editingBlocked, setEditingBlocked] = useState(false);
   const [pollVersion, setPollVersion] = useState(0);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const idempotencyKeyRef = useRef(generateIdempotencyKey());
+  const canViewArchived = authorizedStores.some((store) => (
+    store.permissions?.includes('*')
+    || store.permissions?.includes('store_membership.assign')
+    || store.permissions?.includes('store.manage')
+  ));
 
   useEffect(() => {
     if (queryStoreId) setSelectedStoreId(queryStoreId);
   }, [queryStoreId, setSelectedStoreId]);
+
+  useEffect(() => {
+    if (!canViewArchived) setIncludeArchived(false);
+  }, [canViewArchived]);
 
   useEffect(() => {
     if (!isBackendSource || !onboardingId) return undefined;
@@ -545,7 +586,8 @@ export default function Stores() {
       api={api}
       columns={columns}
       initialQuery={{ pageSize: 100 }}
-      initialQueryKey={`${queryStoreId}:${queryFocus}`}
+      initialQueryKey={`${queryStoreId}:${queryFocus}:${includeArchived}`}
+      extraParams={{ includeArchived }}
       openRecordId={queryFocus === 'connection' ? queryStoreId : ''}
       openRecordKey={queryFocus}
       fields={fields}
@@ -579,8 +621,26 @@ export default function Stores() {
       buildSavePayload={buildStorePayload}
       afterSave={saveStoreCredential}
       modalWidth="min(820px, 94vw)"
-      extraActions={<button className="button ghost" type="button" onClick={openOnboardingWizard}>添加 Naver 店铺</button>}
-      renderExtraActions={(store) => <OpenStoreBackendButton store={store} compact />}
+      extraActions={(
+        <>
+          {canViewArchived ? (
+            <button className="button ghost" type="button" onClick={() => setIncludeArchived((value) => !value)}>
+              {includeArchived ? '隐藏归档店铺' : '查看归档店铺'}
+            </button>
+          ) : null}
+          <button className="button ghost" type="button" onClick={openOnboardingWizard}>添加 Naver 店铺</button>
+        </>
+      )}
+      renderExtraActions={(store) => (
+        <>
+          <OpenStoreBackendButton store={store} compact />
+          {store.archived ? (
+            <Link className="button ghost compact" to={`/orders?view=historical&storeId=${encodeURIComponent(store.id)}`}>
+              查询历史订单
+            </Link>
+          ) : null}
+        </>
+      )}
       onSaved={(store) => refreshStores({ preferredStoreId: normalizeStoreDisplay(store)?.id || selectedStoreId })}
       />
       <Modal

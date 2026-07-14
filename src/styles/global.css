@@ -47,6 +47,10 @@ h1, h2, p { margin-top: 0; }
 }
 .store-selector { display: inline-flex; align-items: center; gap: 8px; color: #4a5568; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px; font-size: 12px; }
 .store-selector select { min-width: 180px; max-width: 280px; border: 0; outline: 0; background: transparent; color: #253044; font-size: 12px; }
+.store-selector-block { display: grid; gap: 3px; min-width: 0; }
+.store-network-summary { display: block; max-width: 380px; overflow: hidden; color: #647184; font-size: 11px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.store-network-summary.status-failed { color: #b54708; }
+.store-network-summary.status-success { color: #167354; }
 .store-selector.is-muted { color: #718096; background: #f8fafc; }
 .store-selector.is-error { color: #c83d45; background: #fff5f5; border-color: #ffd5d8; }
 .content-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 2px 7px rgba(31, 41, 55, .025); padding: 20px; }

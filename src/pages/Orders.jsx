@@ -205,6 +205,8 @@ export default function Orders() {
   const [searchParams] = useSearchParams();
   const deepLinkOrderId = searchParams.get('orderId');
   const deepLinkStatus = searchParams.get('status') || '';
+  const deepLinkView = searchParams.get('view') || '';
+  const deepLinkStoreId = searchParams.get('storeId') || '';
   const {
     stores,
     selectedStoreId,
@@ -234,9 +236,9 @@ export default function Orders() {
   const [traceModal, setTraceModal] = useState({ open: false, order: null, trace: null });
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState('');
-  const [viewMode, setViewMode] = useState('current');
-  const [historyDraft, setHistoryDraft] = useState(() => initialHistoryFilters());
-  const [historyQuery, setHistoryQuery] = useState(() => initialHistoryFilters());
+  const [viewMode, setViewMode] = useState(deepLinkView === 'historical' ? 'historical' : 'current');
+  const [historyDraft, setHistoryDraft] = useState(() => initialHistoryFilters(deepLinkStoreId));
+  const [historyQuery, setHistoryQuery] = useState(() => initialHistoryFilters(deepLinkStoreId));
   const [historyRows, setHistoryRows] = useState([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyPage, setHistoryPage] = useState(1);
@@ -246,6 +248,16 @@ export default function Orders() {
   const [historyBackfilling, setHistoryBackfilling] = useState(false);
   const [historyOnboarding, setHistoryOnboarding] = useState(null);
   const [historyOnboardingReason, setHistoryOnboardingReason] = useState('后端暂未提供按店铺查询连接任务的接口，当前店铺无法确认回填任务。');
+
+  useEffect(() => {
+    if (deepLinkView !== 'historical') return;
+    setViewMode('historical');
+    if (deepLinkStoreId) {
+      setHistoryDraft((current) => ({ ...current, storeId: deepLinkStoreId }));
+      setHistoryQuery((current) => ({ ...current, storeId: deepLinkStoreId }));
+      setHistoryPage(1);
+    }
+  }, [deepLinkStoreId, deepLinkView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -663,6 +675,9 @@ export default function Orders() {
               <FormField label="店铺">
                 <select value={historyDraft.storeId} onChange={(event) => setHistoryDraft({ ...historyDraft, storeId: event.target.value })}>
                   <option value="">当前选中店铺</option>
+                  {deepLinkStoreId && !stores.some((store) => String(store.id) === String(deepLinkStoreId)) ? (
+                    <option value={deepLinkStoreId}>归档店铺 #{deepLinkStoreId}</option>
+                  ) : null}
                   {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
                 </select>
               </FormField>

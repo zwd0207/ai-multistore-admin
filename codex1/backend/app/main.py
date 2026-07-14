@@ -78,6 +78,17 @@ async def run_store_onboarding_scheduler(
                 await asyncio.to_thread(run_due_automatic_read_syncs, session_factory=SessionLocal)
             except Exception:
                 pass
+        if runtime_settings.ziniao_directory_sync_enabled:
+            try:
+                from app.services.ziniao_directory_sync_service import run_due_ziniao_directory_sync
+
+                await asyncio.to_thread(
+                    run_due_ziniao_directory_sync,
+                    session_factory=SessionLocal,
+                    settings=runtime_settings,
+                )
+            except Exception:
+                pass
         await sleep_fn(max(30, min(60, runtime_settings.automatic_read_sync_interval_seconds, interval_seconds)))
 
 

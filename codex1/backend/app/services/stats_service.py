@@ -843,6 +843,17 @@ def _build_operator_workbench(
     }
 
 
+def _empty_operator_workbench(reason_code: str) -> dict[str, Any]:
+    return {
+        "summary": {key: 0 for key in _WORKBENCH_SECTIONS},
+        "sections": {key: [] for key in _WORKBENCH_SECTIONS},
+        "sources": {
+            source: {"status": "not_open", "reason_code": reason_code}
+            for source in ("orders", "shipping", "customer_inquiries")
+        },
+    }
+
+
 def _store_order_metrics(db: Session, store_id: int, platform: str, data_status: dict[str, Any]) -> dict[str, Any]:
     if data_status["data_status"] != "confirmed":
         reason = _overview_unconfirmed_reason(data_status)
@@ -1063,6 +1074,8 @@ def get_store_overview(
             ErpStoreMembership.membership_status == "active",
             ErpRole.status == "active",
             Store.status == "active",
+            Store.ziniao_directory_status != "removed",
+            Store.ziniao_operational_mode != "open_only",
             ErpPermission.status == "active",
             ErpPermission.permission_key.in_(("dashboard.read", "*")),
         )
@@ -1338,13 +1351,18 @@ def get_dashboard_summary(
     }
     if store_id is not None:
         store = ensure_store_exists(db, store_id)
-        workbench_platform = platform or normalize_platform(store.platform)
-        result["operator_workbench"] = _build_operator_workbench(
-            db,
-            store_id=store_id,
-            platform=workbench_platform,
-            include_test_orders=include_test_orders,
-        )
+        if store.ziniao_directory_status == "removed":
+            result["operator_workbench"] = _empty_operator_workbench("ziniao_directory_removed")
+        elif store.ziniao_operational_mode == "open_only":
+            result["operator_workbench"] = _empty_operator_workbench("ziniao_open_only")
+        else:
+            workbench_platform = platform or normalize_platform(store.platform)
+            result["operator_workbench"] = _build_operator_workbench(
+                db,
+                store_id=store_id,
+                platform=workbench_platform,
+                include_test_orders=include_test_orders,
+            )
     return result
 
 

@@ -39,18 +39,20 @@ function pickSelectedStoreId(nextStores, preferredStoreId) {
 }
 
 export function StoreProvider({ children }) {
-  const { isAuthenticated, status: authStatus } = useAuthContext();
+  const { isAuthenticated, refreshSession, status: authStatus } = useAuthContext();
   const [stores, setStores] = useState([]);
   const [selectedStoreId, setSelectedStoreIdState] = useState(readStoredStoreId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const refreshStores = useCallback(async ({ preferredStoreId } = {}) => {
-    setLoading(true);
-    setError('');
+  const refreshStores = useCallback(async ({ preferredStoreId, silent = false, forceRefresh = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
 
     try {
-      const response = await getStores({ page: 1, pageSize: 100 });
+      const response = await getStores({ page: 1, pageSize: 100, forceRefresh });
       const nextStores = filterVisibleBusinessStores(response.data || response.items || []);
       setStores(nextStores);
 
@@ -59,12 +61,14 @@ export function StoreProvider({ children }) {
       writeStoredStoreId(nextSelectedId);
       return nextStores;
     } catch (requestError) {
-      setStores([]);
-      setSelectedStoreIdState('');
-      setError(requestError.message || '店铺列表加载失败');
+      if (!silent) {
+        setStores([]);
+        setSelectedStoreIdState('');
+        setError(requestError.message || '店铺列表加载失败');
+      }
       throw requestError;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -102,6 +106,16 @@ export function StoreProvider({ children }) {
 
     return () => { cancelled = true; };
   }, [authStatus, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isBackendSource || !isAuthenticated) return undefined;
+    const timer = window.setInterval(() => {
+      refreshSession()
+        .then(() => refreshStores({ silent: true, forceRefresh: true }))
+        .catch(() => {});
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated, refreshSession, refreshStores]);
 
   const setSelectedStoreId = useCallback((storeId) => {
     const nextStoreId = storeId ? String(storeId) : '';

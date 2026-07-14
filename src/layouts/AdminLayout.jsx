@@ -29,9 +29,9 @@ const menuGroups = [
   {
     label: '管理员',
     items: [
-      ['□', '店铺与平台连接', '/stores', 'store_membership.assign'],
-      ['@', '邮箱与平台通知', '/emails', 'store_membership.assign'],
-      ['⚙', '管理员设置', '/settings', 'store_membership.assign'],
+      ['□', '店铺与平台连接', '/stores', ['store_membership.assign', 'store.manage']],
+      ['@', '邮箱与平台通知', '/emails', ['store_membership.assign', 'store.manage']],
+      ['⚙', '管理员设置', '/settings', ['store_membership.assign', 'store.manage']],
     ],
   },
 ];

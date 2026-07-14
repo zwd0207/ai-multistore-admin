@@ -14,6 +14,8 @@ const ERROR_MESSAGES = {
   ZINIAO_STORE_NOT_FOUND: '紫鸟中未找到该店铺',
   ZINIAO_STORE_MATCH_NOT_UNIQUE: '紫鸟店铺匹配不唯一',
   ZINIAO_STORE_PLATFORM_MISMATCH: '紫鸟店铺平台与系统不一致',
+  ZINIAO_STORE_REMOVED: '该店铺已从紫鸟目录移除',
+  ZINIAO_STORE_BINDING_INVALID: '紫鸟店铺绑定无法读取',
   ZINIAO_STORE_OPEN_IN_PROGRESS: '店铺后台正在打开，请稍候',
   ZINIAO_STORE_OPEN_FAILED: '紫鸟店铺打开失败',
 };
@@ -37,8 +39,11 @@ export default function OpenStoreBackendButton({ store, compact = false }) {
   const configured = capability.configured ?? store.browserProfileConfigured;
   const runtimeEnabled = capability.runtimeEnabled !== false;
   const supported = capability.supported !== false;
-  const disabledReason = !supported
-    ? '首版仅支持 Naver 店铺'
+  const directoryStatus = capability.directoryStatus || store.ziniaoDirectoryStatus;
+  const disabledReason = directoryStatus === 'removed'
+    ? '该店铺已从紫鸟目录移除'
+    : !supported
+      ? '该平台尚未完成紫鸟目录绑定'
     : !configured
       ? '请管理员先在店铺连接中绑定紫鸟店铺名称'
       : !runtimeEnabled

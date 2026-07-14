@@ -4197,6 +4197,15 @@ const sourceMethods = {
   getDashboardSalesTrend: mockApi.getDashboardSalesTrend,
   getStores: async (params) => {
     if (!isBackendSource) return mockApi.getStores(params);
+    if (params?.forceRefresh) resetBackendStoresCache();
+    if (params?.includeArchived || params?.include_archived) {
+      const result = await backendApi.getStores({
+        page: 1,
+        pageSize: 100,
+        includeArchived: true,
+      });
+      return queryBackendRows(adapters.list(result, adapters.store).data, params);
+    }
     return queryBackendRows(await getBackendStores(), params);
   },
   createStoreOnboarding: async (payload) => {

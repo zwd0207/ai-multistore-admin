@@ -9,24 +9,151 @@ from app.core.responses import success_response
 from app.database import get_db
 from app.models.store import Store
 from app.models.auth import ErpRole, ErpStoreMembership
+from app.models.device_environment import DeviceEnvironment
 from app.schemas.store import StoreCreate, StoreRead, StoreUpdate
 from app.schemas.sync import AutomaticReadRecoveryRequest
 from app.services import automatic_read_sync_service, platform_login_service, store_service
-from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_operator_recent_auth, require_store_permission
+from app.services.encryption import decrypt_value
+from app.services.operator_access_service import (
+    OperatorIdentity,
+    get_operator_identity,
+    require_any_store_permission,
+    require_operator_recent_auth,
+    require_store_permission,
+)
 
 
 router = APIRouter(prefix="/stores", tags=["stores"])
 
 
-def serialize_store(store: Store) -> dict:
+def _user_has_store_permission(
+    db: Session,
+    *,
+    user_id: int | None,
+    store_id: int,
+    permission_key: str,
+) -> bool:
+    if user_id is None:
+        return False
+    try:
+        require_store_permission(
+            db,
+            identity=OperatorIdentity(user_id=user_id, user_key_hash="store-serializer"),
+            store_id=store_id,
+            permission_key=permission_key,
+        )
+    except ApiError:
+        return False
+    return True
+
+
+def _user_has_any_store_permission(
+    db: Session,
+    *,
+    user_id: int | None,
+    permission_key: str | tuple[str, ...],
+) -> bool:
+    if user_id is None:
+        return False
+    permission_keys = (permission_key,) if isinstance(permission_key, str) else permission_key
+    identity = OperatorIdentity(user_id=user_id, user_key_hash="store-serializer")
+    return any(
+        _can_require_any_store_permission(db, identity=identity, permission_key=key)
+        for key in permission_keys
+    )
+
+
+def _can_require_any_store_permission(
+    db: Session,
+    *,
+    identity: OperatorIdentity,
+    permission_key: str,
+) -> bool:
+    try:
+        require_any_store_permission(db, identity=identity, permission_key=permission_key)
+    except ApiError:
+        return False
+    return True
+
+
+def _serialize_network(
+    db: Session,
+    *,
+    store: Store,
+    user_id: int | None,
+) -> dict:
+    environment = db.scalar(select(DeviceEnvironment).where(
+        DeviceEnvironment.store_id == store.id,
+        DeviceEnvironment.source_provider == "ziniao",
+    ).order_by(DeviceEnvironment.id.asc()))
+    if environment is None:
+        return {
+            "ip_address": None,
+            "country": None,
+            "region": None,
+            "city": None,
+            "status": "not_configured",
+            "updated_at": None,
+        }
+    ip_address = environment.masked_ip_address
+    if _user_has_store_permission(
+        db,
+        user_id=user_id,
+        store_id=store.id,
+        permission_key="platform.browser.open",
+    ) and environment.encrypted_ip_address:
+        try:
+            ip_address = decrypt_value(environment.encrypted_ip_address)
+        except ApiError:
+            ip_address = environment.masked_ip_address
+    return {
+        "ip_address": ip_address,
+        "country": environment.network_country,
+        "region": environment.network_region,
+        "city": environment.network_city,
+        "status": environment.network_status,
+        "updated_at": environment.updated_at.isoformat() if environment.updated_at else None,
+    }
+
+
+def serialize_store(store: Store, *, db: Session | None = None, user_id: int | None = None) -> dict:
     data = StoreRead.model_validate(store).model_dump(mode="json")
-    configured = bool(store.browser_provider == "ziniao" and store.browser_profile_name)
+    directory_status = str(store.ziniao_directory_status or "unmanaged")
+    has_directory_id = bool(store.ziniao_external_id_encrypted and store.ziniao_external_id_hash)
+    configured = bool(
+        store.browser_provider == "ziniao"
+        and store.browser_profile_name
+        and (has_directory_id or str(store.platform or "").lower() == "naver")
+    )
     data["browser_open_capability"] = {
         "provider": store.browser_provider,
         "configured": configured,
         "runtime_enabled": bool(get_settings().ziniao_browser_open_enabled),
-        "supported": str(store.platform or "").lower() == "naver",
+        "supported": directory_status != "removed" and (
+            has_directory_id or str(store.platform or "").lower() == "naver"
+        ),
+        "directory_status": directory_status,
     }
+    data.update({
+        "ziniao_directory_status": directory_status,
+        "source_platform": store.ziniao_source_platform,
+        "source_site": store.ziniao_source_site,
+        "last_seen_at": store.ziniao_last_seen_at.isoformat() if store.ziniao_last_seen_at else None,
+        "directory_checked_at": (
+            store.ziniao_directory_checked_at.isoformat()
+            if store.ziniao_directory_checked_at else None
+        ),
+        "ziniao_auto_managed": bool(store.ziniao_auto_managed),
+        "operational_mode": str(store.ziniao_operational_mode or "business"),
+        "network": _serialize_network(db, store=store, user_id=user_id) if db is not None else {
+            "ip_address": None,
+            "country": None,
+            "region": None,
+            "city": None,
+            "status": "not_configured",
+            "updated_at": None,
+        },
+    })
     return data
 
 
@@ -63,7 +190,7 @@ def create_store(payload: StoreCreate, db: Session = Depends(get_db)) -> dict:
         ) from exc
 
     db.refresh(store)
-    return success_response(data=serialize_store(store), message="created")
+    return success_response(data=serialize_store(store, db=db), message="created")
 
 
 @router.get("")
@@ -71,11 +198,24 @@ def list_stores(
     request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    include_archived: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
     offset = (page - 1) * page_size
     query = select(Store)
     user_id = getattr(request.state, "authenticated_user_id", None)
+    if include_archived and not _user_has_any_store_permission(
+        db,
+        user_id=user_id,
+        permission_key=("store_membership.assign", "store.manage"),
+    ):
+        raise ApiError(
+            "archived stores require administrator permission",
+            "store_membership_assign_forbidden",
+            status.HTTP_403_FORBIDDEN,
+        )
+    if not include_archived:
+        query = query.where(Store.ziniao_directory_status != "removed")
     if user_id is not None:
         query = query.join(ErpStoreMembership, ErpStoreMembership.store_id == Store.id).join(
             ErpRole, ErpRole.id == ErpStoreMembership.role_id,
@@ -95,7 +235,7 @@ def list_stores(
 
     return success_response(
         data={
-            "items": [serialize_store(store) for store in stores],
+            "items": [serialize_store(store, db=db, user_id=user_id) for store in stores],
             "page": page,
             "page_size": page_size,
             "total": total,
@@ -104,9 +244,13 @@ def list_stores(
 
 
 @router.get("/{store_id}")
-def get_store(store_id: int, db: Session = Depends(get_db)) -> dict:
+def get_store(store_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
     store = get_store_or_404(db, store_id)
-    return success_response(data=serialize_store(store))
+    return success_response(data=serialize_store(
+        store,
+        db=db,
+        user_id=getattr(request.state, "authenticated_user_id", None),
+    ))
 
 
 @router.post("/{store_id}/automatic-read/recover")
@@ -147,7 +291,7 @@ def update_store(store_id: int, payload: StoreUpdate, db: Session = Depends(get_
     store = get_store_or_404(db, store_id)
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
-        return success_response(data=serialize_store(store), message="no changes")
+        return success_response(data=serialize_store(store, db=db), message="no changes")
 
     provider, profile_name = store_service.normalize_browser_binding(
         updates.get("browser_provider", store.browser_provider),
@@ -156,6 +300,8 @@ def update_store(store_id: int, payload: StoreUpdate, db: Session = Depends(get_
     if "browser_provider" in updates or "browser_profile_name" in updates:
         updates["browser_provider"] = provider
         updates["browser_profile_name"] = profile_name
+    if "name" in updates and updates["name"] != store.name and store.ziniao_auto_managed:
+        store.ziniao_name_managed = False
 
     for field, value in updates.items():
         setattr(store, field, value)
@@ -172,13 +318,19 @@ def update_store(store_id: int, payload: StoreUpdate, db: Session = Depends(get_
         ) from exc
 
     db.refresh(store)
-    return success_response(data=serialize_store(store), message="updated")
+    return success_response(data=serialize_store(store, db=db), message="updated")
 
 
 @router.delete("/{store_id}")
 def delete_store(store_id: int, db: Session = Depends(get_db)) -> dict:
     store = get_store_or_404(db, store_id)
-    deleted = serialize_store(store)
+    if store.ziniao_auto_managed:
+        raise ApiError(
+            "Ziniao directory stores are archived instead of deleted",
+            "ZINIAO_DIRECTORY_STORE_DELETE_FORBIDDEN",
+            status.HTTP_409_CONFLICT,
+        )
+    deleted = serialize_store(store, db=db)
     db.delete(store)
     db.commit()
     return success_response(data=deleted, message="deleted")

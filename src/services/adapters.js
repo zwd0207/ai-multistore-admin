@@ -249,6 +249,9 @@ function normalizeAuthStatusForBackend(value) {
 
 export function adaptStore(item = {}) {
   const browserOpenCapability = item.browser_open_capability || item.browserOpenCapability || {};
+  const network = item.network || {};
+  const directoryStatus = item.ziniao_directory_status || item.ziniaoDirectoryStatus || 'unmanaged';
+  const operationalMode = item.operational_mode || item.operationalMode || 'business';
   return {
     id: item.id,
     name: item.name,
@@ -259,7 +262,9 @@ export function adaptStore(item = {}) {
     manager: emptyText(item.owner_name, '未配置'),
     products: numberValue(item.product_count),
     rawStatus: item.status,
-    status: adaptStatus(item.status, { active: '정상 운영', inactive: '使用中止' }),
+    status: directoryStatus === 'removed'
+      ? '已归档'
+      : adaptStatus(item.status, { active: '정상 운영', inactive: '使用中止' }),
     remark: item.remark,
     browserProvider: item.browser_provider || item.browserProvider || '',
     browserProfileName: item.browser_profile_name || item.browserProfileName || '',
@@ -272,6 +277,24 @@ export function adaptStore(item = {}) {
       configured: Boolean(browserOpenCapability.configured ?? (item.browser_provider && item.browser_profile_name)),
       runtimeEnabled: Boolean(browserOpenCapability.runtime_enabled ?? browserOpenCapability.runtimeEnabled),
       supported: Boolean(browserOpenCapability.supported ?? String(item.platform || '').toLowerCase() === 'naver'),
+      directoryStatus: browserOpenCapability.directory_status || browserOpenCapability.directoryStatus || directoryStatus,
+    },
+    ziniaoDirectoryStatus: directoryStatus,
+    sourcePlatform: item.source_platform || item.sourcePlatform || '',
+    sourceSite: item.source_site || item.sourceSite || '',
+    lastSeenAt: item.last_seen_at || item.lastSeenAt || '',
+    directoryCheckedAt: item.directory_checked_at || item.directoryCheckedAt || '',
+    ziniaoAutoManaged: Boolean(item.ziniao_auto_managed ?? item.ziniaoAutoManaged),
+    operationalMode,
+    openOnly: operationalMode === 'open_only',
+    archived: directoryStatus === 'removed',
+    network: {
+      ipAddress: network.ip_address || network.ipAddress || '',
+      country: network.country || '',
+      region: network.region || '',
+      city: network.city || '',
+      status: network.status || 'not_configured',
+      updatedAt: network.updated_at || network.updatedAt || '',
     },
     createdAt: item.created_at,
     updatedAt: emptyText(item.updated_at),

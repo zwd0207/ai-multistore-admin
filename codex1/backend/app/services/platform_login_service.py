@@ -18,7 +18,7 @@ from app.models.device_environment import DeviceEnvironment
 from app.models.email_account import EmailAccount
 from app.models.platform_login_credential import PlatformLoginCredential
 from app.schemas.platform_login import PlatformLoginCreate, PlatformLoginUpdate
-from app.services.encryption import encrypt_value
+from app.services.encryption import decrypt_value, encrypt_value
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.store_service import ensure_store_exists, normalize_browser_binding, normalize_platform
 
@@ -250,14 +250,18 @@ def _resolve_ziniao_store(
     executable: Path,
     *,
     profile_name: str,
+    external_id: str | None = None,
+    expected_platform: str = "naver",
+    expected_source_platform: str | None = None,
     settings: Settings,
     command_runner: CommandRunner,
 ) -> None:
+    selector = ["--id", external_id] if external_id else ["--name", profile_name]
     result = _run_cli(
         executable,
         [
             "store", "resolve",
-            "--name", profile_name,
+            *selector,
             "--expected-name", profile_name,
             "--format", "json",
         ],
@@ -280,6 +284,10 @@ def _resolve_ziniao_store(
         if isinstance(item, dict)
         and item.get("matched") is not False
         and str(item.get("name") or item.get("storeName") or "") == profile_name
+        and (
+            not external_id
+            or str(item.get("storeId") or item.get("id") or "") == external_id
+        )
     ]
     unique_matches = {
         (
@@ -293,7 +301,26 @@ def _resolve_ziniao_store(
     if len(unique_matches) != 1:
         raise ApiError("紫鸟店铺匹配不唯一", "ZINIAO_STORE_MATCH_NOT_UNIQUE", 409)
     _store_id, platform_name = next(iter(unique_matches))
-    if not _store_id or "naver" not in platform_name.lower():
+    normalized_platform = str(expected_platform or "").strip().lower()
+    source_platform = str(expected_source_platform or "").strip().lower()
+    platform_text = platform_name.lower()
+    resolved_platform_matches = (
+        normalized_platform == "naver" and "naver" in platform_text
+        or normalized_platform == "coupang" and "coupang" in platform_text
+        or normalized_platform == "custom" and bool(source_platform) and platform_text == source_platform
+    )
+    directory_source_matches = (
+        normalized_platform == "naver" and "naver" in source_platform
+        or normalized_platform == "coupang" and "coupang" in source_platform
+        or normalized_platform == "custom" and bool(source_platform)
+    )
+    # Current ZClaw resolve responses identify the exact store but may omit
+    # platformName. In that case the encrypted directory binding is the trusted
+    # platform source; legacy name-only bindings still require a platform value.
+    platform_matches = resolved_platform_matches or (
+        bool(external_id) and not platform_text and directory_source_matches
+    )
+    if not _store_id or not platform_matches:
         raise ApiError("紫鸟店铺平台与系统不一致", "ZINIAO_STORE_PLATFORM_MISMATCH", 409)
 
 
@@ -360,11 +387,20 @@ def open_store_backend(
     store = ensure_store_exists(db, store_id)
     if store.status != "active":
         raise ApiError("当前店铺已停用", "ZINIAO_STORE_INACTIVE", 409)
-    if normalize_platform(store.platform) != "naver":
-        raise ApiError("首版仅支持 Naver 店铺", "ZINIAO_PLATFORM_NOT_SUPPORTED", 409)
+    if str(store.ziniao_directory_status or "unmanaged") == "removed":
+        raise ApiError("该店铺已从紫鸟目录移除", "ZINIAO_STORE_REMOVED", 409)
     provider, profile_name = normalize_browser_binding(store.browser_provider, store.browser_profile_name)
     if provider != "ziniao" or not profile_name:
         raise ApiError("请先绑定紫鸟店铺", "ZINIAO_STORE_NOT_BOUND", 409)
+    external_id = None
+    if store.ziniao_external_id_encrypted:
+        try:
+            external_id = str(decrypt_value(store.ziniao_external_id_encrypted) or "").strip() or None
+        except ApiError as exc:
+            raise ApiError("紫鸟店铺绑定无法读取", "ZINIAO_STORE_BINDING_INVALID", 409) from exc
+    store_platform = str(store.platform or "").strip().lower()
+    if not external_id and store_platform != "naver":
+        raise ApiError("该平台尚未完成紫鸟目录绑定", "ZINIAO_PLATFORM_NOT_SUPPORTED", 409)
 
     lock = _store_open_lock(store.id)
     if not lock.acquire(blocking=False):
@@ -377,13 +413,16 @@ def open_store_backend(
         _resolve_ziniao_store(
             executable,
             profile_name=profile_name,
+            external_id=external_id,
+            expected_platform=store_platform,
+            expected_source_platform=store.ziniao_source_platform,
             settings=runtime_settings,
             command_runner=command_runner,
         )
         planned_audit_written = _write_browser_open_audit(
             db,
             store_id=store.id,
-            platform="naver",
+            platform=store_platform,
             actor_id=actor_id,
             correlation_id=correlation_id,
             status="planned",
@@ -394,7 +433,11 @@ def open_store_backend(
             raise ApiError("店铺打开审计不可用", "ZINIAO_OPEN_AUDIT_UNAVAILABLE", 503)
         result = _run_cli(
             executable,
-            ["store", "open", "--name", profile_name, "--expected-name", profile_name],
+            [
+                "store", "open",
+                *( ["--id", external_id] if external_id else ["--name", profile_name] ),
+                "--expected-name", profile_name,
+            ],
             settings=runtime_settings,
             command_runner=command_runner,
         )
@@ -404,7 +447,7 @@ def open_store_backend(
             success_audit_written = _write_browser_open_audit(
                 db,
                 store_id=store.id,
-                platform="naver",
+                platform=store_platform,
                 actor_id=actor_id,
                 correlation_id=correlation_id,
                 status="success",
@@ -429,7 +472,7 @@ def open_store_backend(
                 _write_browser_open_audit(
                     db,
                     store_id=store.id,
-                    platform="naver",
+                    platform=store_platform,
                     actor_id=actor_id,
                     correlation_id=correlation_id,
                     status="failed",

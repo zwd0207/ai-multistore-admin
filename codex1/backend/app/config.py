@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     ziniao_cli_executable: str | None = None
     ziniao_cli_profile: str = "ziniao-sso-pilot"
     ziniao_cli_timeout_seconds: int = 30
+    ziniao_directory_sync_enabled: bool = False
+    ziniao_directory_sync_interval_seconds: int = 300
+    ziniao_directory_geoip_timeout_seconds: int = 8
     session_token_pepper: str | None = None
     session_cookie_name: str = "__Host-erp_session"
     session_cookie_secure: bool = True

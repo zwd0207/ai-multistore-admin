@@ -195,6 +195,9 @@ class ErpStoreMembership(Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("erp_roles.id"), nullable=False)
     scope_type: Mapped[str] = mapped_column(String(30), nullable=False, default="assigned", server_default="assigned")
     membership_status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", server_default="active")
+    assignment_source: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="manual", server_default="manual", index=True,
+    )
     assigned_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("erp_users.id"), nullable=True)
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

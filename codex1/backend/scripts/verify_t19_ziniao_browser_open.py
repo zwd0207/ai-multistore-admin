@@ -32,6 +32,7 @@ os.environ.update({
     "CORS_ALLOWED_ORIGINS": '["https://t19.test"]',
     "OPERATOR_TRIAL_ENABLED": "false",
     "REAL_API_WRITE_ENABLED": "false",
+    "LIFECYCLE_SCHEDULERS_ENABLED": "false",
     "ZINIAO_BROWSER_OPEN_ENABLED": "true",
     "ZINIAO_CLI_EXECUTABLE": str(CLI_PATH),
     "ZINIAO_CLI_PROFILE": "ziniao-sso-pilot",
@@ -39,6 +40,7 @@ os.environ.update({
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.orm import close_all_sessions
 
 from app.config import Settings
 from app.core.exceptions import ApiError
@@ -377,9 +379,15 @@ if __name__ == "__main__":
     try:
         main()
     finally:
+        close_all_sessions()
         engine.dispose()
         for path in (DB_PATH, LEGACY_DB_PATH, CLI_PATH):
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except PermissionError:
+                # Windows can retain a short-lived sqlite test handle after
+                # TestClient shutdown; cleanup must not override passed gates.
+                pass
         try:
             CLI_PATH.parent.rmdir()
         except OSError:

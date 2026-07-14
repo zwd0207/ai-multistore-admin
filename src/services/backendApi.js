@@ -7,6 +7,7 @@ const PARAMETER_ALIASES = {
   endDate: 'end_date',
   includeAdvanced: 'include_advanced',
   includeRows: 'include_rows',
+  includeArchived: 'include_archived',
   startAt: 'start_at',
   endAt: 'end_at',
   orderId: 'order_id',

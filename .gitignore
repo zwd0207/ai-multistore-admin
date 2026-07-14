@@ -2,6 +2,7 @@ node_modules/
 dist/
 acceptance-screenshots/
 output/
+.playwright-cli/
 .env
 .env.*
 *.log

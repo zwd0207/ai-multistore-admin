@@ -31,6 +31,7 @@ const REGION_LABELS = {
 };
 
 export function isVisibleBusinessStore(store = {}) {
+  if (String(store.ziniaoDirectoryStatus || store.ziniao_directory_status || '') === 'removed') return false;
   const name = String(store.name || store.storeName || '').trim();
   const manager = String(store.manager || store.ownerName || store.owner_name || store.managerName || '').trim();
   const visibleText = `${name} ${manager}`.trim();

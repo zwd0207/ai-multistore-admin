@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timezone import get_utc_now
@@ -13,6 +13,9 @@ def utc_now() -> datetime:
 
 class Store(Base):
     __tablename__ = "stores"
+    __table_args__ = (
+        Index("uq_stores_ziniao_external_hash", "ziniao_external_id_hash", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
@@ -24,6 +27,23 @@ class Store(Base):
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     browser_provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
     browser_profile_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ziniao_external_id_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ziniao_external_id_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ziniao_source_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ziniao_source_platform: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ziniao_source_site: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ziniao_auto_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    ziniao_name_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    ziniao_directory_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="unmanaged", server_default="unmanaged", index=True,
+    )
+    ziniao_operational_mode: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="business", server_default="business", index=True,
+    )
+    ziniao_last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ziniao_directory_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ziniao_missing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    ziniao_missing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

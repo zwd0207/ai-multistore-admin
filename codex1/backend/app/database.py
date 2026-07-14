@@ -48,6 +48,7 @@ def init_db() -> None:
         from scripts.upgrade_shipping_schema import upgrade as upgrade_shipping_schema
         from scripts.upgrade_store_browser_schema import upgrade as upgrade_store_browser_schema
         from scripts.upgrade_store_onboarding_schema import upgrade as upgrade_store_onboarding_schema
+        from scripts.upgrade_ziniao_directory_schema import upgrade as upgrade_ziniao_directory_schema
 
         upgrade_sync_schema(run_create_all=False)
         upgrade_order_status_events_schema(run_create_all=False)
@@ -57,3 +58,4 @@ def init_db() -> None:
         upgrade_pxg_naver_readonly_schema(run_create_all=False)
         upgrade_store_browser_schema()
         upgrade_store_onboarding_schema()
+        upgrade_ziniao_directory_schema()
