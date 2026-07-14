@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import FormField from '../components/common/FormField';
 import Modal from '../components/common/Modal';
+import OpenStoreBackendButton from '../components/common/OpenStoreBackendButton';
 import ResourcePage from '../components/common/ResourcePage';
 import StatusBadge from '../components/common/StatusBadge';
 import { useStoreContext } from '../context/StoreContext';
@@ -65,7 +66,10 @@ async function withApiConnectionStatus(store) {
   };
 }
 
-const STORE_PAYLOAD_KEYS = ['name', 'platform', 'manager', 'region', 'language', 'status', 'remark'];
+const STORE_PAYLOAD_KEYS = [
+  'name', 'platform', 'manager', 'region', 'language', 'status', 'remark',
+  'browserProvider', 'browserProfileName',
+];
 
 function buildStorePayload({ form }) {
   return STORE_PAYLOAD_KEYS.reduce((payload, key) => ({ ...payload, [key]: form[key] }), {});
@@ -257,6 +261,25 @@ const fields = [
     label: '接口备注',
     placeholder: '例如：主账号接口资料，仅用于商品/订单读取',
     showWhen: (form) => isNaverForm(form) || isCoupangForm(form),
+  },
+  {
+    key: 'browser-section',
+    type: 'section',
+    label: '紫鸟浏览器绑定',
+    description: '绑定后，运营人员可从系统打开该店铺既有的紫鸟浏览器、登录会话和 IP 设备环境。',
+  },
+  {
+    key: 'browserProvider',
+    label: '浏览器服务',
+    type: 'select',
+    options: [{ value: 'ziniao', label: '紫鸟浏览器' }],
+  },
+  {
+    key: 'browserProfileName',
+    label: '紫鸟店铺名称',
+    placeholder: '必须与紫鸟店铺列表中的名称完全一致',
+    showWhen: (form) => form.browserProvider === 'ziniao',
+    help: '只保存精确店铺名称，不保存紫鸟店铺 ID、IP、Token 或 API Key。',
   },
 ];
 
@@ -546,6 +569,8 @@ export default function Stores() {
         apiRemark: '',
         apiSecretExistingStatus: '未保存',
         coupangAccessKeyExistingStatus: '未保存',
+        browserProvider: '',
+        browserProfileName: '',
       }}
       canCreate
       canEdit
@@ -555,6 +580,7 @@ export default function Stores() {
       afterSave={saveStoreCredential}
       modalWidth="min(820px, 94vw)"
       extraActions={<button className="button ghost" type="button" onClick={openOnboardingWizard}>添加 Naver 店铺</button>}
+      renderExtraActions={(store) => <OpenStoreBackendButton store={store} compact />}
       onSaved={(store) => refreshStores({ preferredStoreId: normalizeStoreDisplay(store)?.id || selectedStoreId })}
       />
       <Modal

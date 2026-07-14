@@ -4,6 +4,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
@@ -39,6 +40,15 @@ from app.services import api_credential_readiness_service, credential_service, o
 
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+
+
+def _run_worker(onboarding_id: int, reads: "InjectedNaverReads") -> dict | None:
+    with patch.object(store_onboarding_service, "get_utc_now", return_value=NOW):
+        return store_onboarding_service.run_onboarding_worker(
+            onboarding_id,
+            reader=reads.adapter(),
+            session_factory=SessionLocal,
+        )
 
 
 class InjectedNaverReads:
@@ -164,7 +174,7 @@ def main() -> None:
         assert creator_poll.status_code == 200
         assert outsider_poll.status_code == 403
 
-        blocked = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        blocked = _run_worker(submitted["id"], reads)
         db.expire_all()
         assert blocked["status"] == "blocked" and blocked["last_error_code"] == "auth_failed"
         corrected = store_onboarding_service.update_onboarding_credentials(
@@ -175,7 +185,7 @@ def main() -> None:
         assert corrected["id"] == submitted["id"] and corrected["configuration_version"] == 2
         assert "invalid-secret" not in str(corrected) and "secret-for-test" not in str(corrected)
 
-        interrupted = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        interrupted = _run_worker(submitted["id"], reads)
         db.expire_all()
         assert interrupted["status"] == "retry_wait", interrupted
         assert interrupted["progress_summary"]["products"]["status"] == "success"
@@ -187,7 +197,7 @@ def main() -> None:
         assert checkpoint and '"slice":10' in checkpoint.cursor_value
 
         store_onboarding_service.request_onboarding_resume(db, onboarding_id=submitted["id"])
-        completed = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        completed = _run_worker(submitted["id"], reads)
         db.expire_all()
         assert completed["status"] == "partially_synced", completed
         assert completed["store_id"] == store_id and completed["credential_id"] == credential_id
@@ -261,7 +271,7 @@ def main() -> None:
         )
         assert corrected_after_store["configuration_version"] == 3
         assert "secret-for-test" not in str(corrected_after_store) and "secret-after-provision" not in str(corrected_after_store)
-        revalidated = store_onboarding_service.run_onboarding_worker(submitted["id"], reader=reads.adapter(), session_factory=SessionLocal)
+        revalidated = _run_worker(submitted["id"], reads)
         db.expire_all()
         assert revalidated["status"] == "partially_synced"
         assert revalidated["store_id"] == store_id and revalidated["credential_id"] == credential_id

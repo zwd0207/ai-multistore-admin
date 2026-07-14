@@ -248,6 +248,7 @@ function normalizeAuthStatusForBackend(value) {
 }
 
 export function adaptStore(item = {}) {
+  const browserOpenCapability = item.browser_open_capability || item.browserOpenCapability || {};
   return {
     id: item.id,
     name: item.name,
@@ -260,6 +261,18 @@ export function adaptStore(item = {}) {
     rawStatus: item.status,
     status: adaptStatus(item.status, { active: '정상 운영', inactive: '使用中止' }),
     remark: item.remark,
+    browserProvider: item.browser_provider || item.browserProvider || '',
+    browserProfileName: item.browser_profile_name || item.browserProfileName || '',
+    browserProfileConfigured: Boolean(
+      browserOpenCapability.configured
+      ?? (item.browser_provider && item.browser_profile_name),
+    ),
+    browserOpenCapability: {
+      provider: browserOpenCapability.provider || item.browser_provider || '',
+      configured: Boolean(browserOpenCapability.configured ?? (item.browser_provider && item.browser_profile_name)),
+      runtimeEnabled: Boolean(browserOpenCapability.runtime_enabled ?? browserOpenCapability.runtimeEnabled),
+      supported: Boolean(browserOpenCapability.supported ?? String(item.platform || '').toLowerCase() === 'naver'),
+    },
     createdAt: item.created_at,
     updatedAt: emptyText(item.updated_at),
   };
@@ -274,6 +287,8 @@ export function toBackendStorePayload(item = {}) {
     status: normalizeStoreStatusForBackend(item.status || item.rawStatus),
     owner_name: item.manager || item.ownerName || item.owner_name || null,
     remark: item.remark || null,
+    browser_provider: item.browserProvider ? String(item.browserProvider).trim().toLowerCase() : null,
+    browser_profile_name: item.browserProfileName ? String(item.browserProfileName).trim() : null,
   });
 }
 

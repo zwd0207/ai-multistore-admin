@@ -22,6 +22,7 @@ PERMISSION_KEYS = {
     "recipient_pii.export",
     "shipping.batch.manage",
     "platform.sync",
+    "platform.browser.open",
     "customer.inquiries.content.read",
     "platform.readonly.persist",
     "store.manage",
@@ -99,7 +100,7 @@ def main() -> None:
                     permission_key=key,
                     permission_group="local_configuration",
                     permission_label_zh=key,
-                    sensitive_action=key in {"store.manage", "credentials.manage"},
+                    sensitive_action=key in {"store.manage", "credentials.manage", "platform.browser.open"},
                     status="active",
                 )
                 db.add(permission)
@@ -123,7 +124,7 @@ def main() -> None:
             db.add(ErpRolePermission(
                 role_id=role.id,
                 permission_id=permission.id,
-                can_approve_sensitive=permission.permission_key in {"store.manage", "credentials.manage"},
+                can_approve_sensitive=permission.permission_key in {"store.manage", "credentials.manage", "platform.browser.open"},
             ))
 
         login_hash = hash_login_identifier(values["login_identifier"])

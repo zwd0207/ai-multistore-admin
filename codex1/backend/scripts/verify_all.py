@@ -1548,6 +1548,7 @@ def verify_stage_scripts() -> None:
         "verify_t16_automatic_read_recovery.py",
         "verify_t17_naver_logistics.py",
         "verify_t18_naver_shipping_pilot.py",
+        "verify_t19_ziniao_browser_open.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",
@@ -19966,6 +19967,7 @@ def verify_git_tracking() -> None:
         " M backend/app/schemas/pxg_naver_readonly.py",
         "A  backend/app/schemas/shipping.py",
         " M backend/app/schemas/sync.py",
+        " M backend/app/schemas/store.py",
         " M backend/app/services/stats_service.py",
         " M backend/app/services/automatic_read_sync_service.py",
         " M backend/app/services/api_capability_service.py",
@@ -19976,7 +19978,9 @@ def verify_git_tracking() -> None:
         " M backend/app/services/operation_audit_service.py",
         " M backend/app/services/operator_access_service.py",
         " M backend/app/services/operator_trial_service.py",
+        " M backend/app/services/platform_login_service.py",
         " M backend/app/services/permission_service.py",
+        " M backend/app/services/store_service.py",
         " M backend/app/services/invitation_audit_linkage_service.py",
         "A  backend/app/services/operation_audit_service.py",
         "A  backend/app/services/permission_service.py",
@@ -20017,6 +20021,7 @@ def verify_git_tracking() -> None:
         " M backend/scripts/verify_t17_naver_logistics.py",
         "?? backend/scripts/verify_t18_naver_shipping_pilot.py",
         " M backend/scripts/verify_t18_naver_shipping_pilot.py",
+        " M backend/scripts/verify_t13_onboarding.py",
         " M backend/scripts/verify_warehouse_shipping_reprocess.py",
         "?? backend/scripts/verify_t16_automatic_read_recovery.py",
         " M backend/scripts/upgrade_order_status_events_schema.py",
@@ -20079,10 +20084,24 @@ def verify_git_tracking() -> None:
         "?? backend/scripts/upgrade_shipping_schema.py",
         "?? backend/scripts/upgrade_sync_schema.py",
         "?? backend/scripts/upgrade_pxg_naver_readonly_schema.py",
+        "?? backend/scripts/upgrade_store_browser_schema.py",
         "?? backend/scripts/verify_pxg_naver_readonly_persistence.py",
         "?? backend/scripts/verify_multi_store_workbench.py",
+        "?? backend/scripts/verify_t19_ziniao_browser_open.py",
         "?? backend/scripts/verify_all.py",
+        " M backend/scripts/provision_local_config_admin.py",
+        " M ../COMMANDER_STATE.md",
+        " M ../package.json",
         " M ../scripts/start-local-pxg-naver-trial.ps1",
+        "?? ../scripts/ziniao-store-open.contract.test.mjs",
+        " M ../src/layouts/AdminLayout.jsx",
+        " M ../src/pages/Stores.jsx",
+        " M ../src/services/adapters.js",
+        " M ../src/services/backendApi.js",
+        " M ../src/services/dataProvider.js",
+        " M ../src/styles/layout.css",
+        "?? ../src/components/common/OpenStoreBackendButton.jsx",
+        "?? ../docs/",
         " M \"../\\346\\237\\245\\347\\234\\213PXG\\350\\257\\225\\350\\277\\220\\350\\220\\245\\351\\252\\214\\350\\257\\201\\347\\240\\201.cmd\"",
         " M \"../\\346\\237\\245\\347\\234\\213\\347\\234\\237\\345\\256\\236\\345\\217\\252\\350\\257\\273\\351\\205\\215\\347\\275\\256\\350\\264\\246\\345\\217\\267.cmd\"",
     )
@@ -20238,6 +20257,7 @@ def main() -> None:
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t16_automatic_read_recovery.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t17_naver_logistics.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t18_naver_shipping_pilot.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t19_ziniao_browser_open.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()

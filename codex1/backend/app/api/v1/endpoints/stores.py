@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.responses import success_response
 from app.database import get_db
@@ -10,7 +11,7 @@ from app.models.store import Store
 from app.models.auth import ErpRole, ErpStoreMembership
 from app.schemas.store import StoreCreate, StoreRead, StoreUpdate
 from app.schemas.sync import AutomaticReadRecoveryRequest
-from app.services import automatic_read_sync_service
+from app.services import automatic_read_sync_service, platform_login_service, store_service
 from app.services.operator_access_service import OperatorIdentity, get_operator_identity, require_operator_recent_auth, require_store_permission
 
 
@@ -18,7 +19,15 @@ router = APIRouter(prefix="/stores", tags=["stores"])
 
 
 def serialize_store(store: Store) -> dict:
-    return StoreRead.model_validate(store).model_dump(mode="json")
+    data = StoreRead.model_validate(store).model_dump(mode="json")
+    configured = bool(store.browser_provider == "ziniao" and store.browser_profile_name)
+    data["browser_open_capability"] = {
+        "provider": store.browser_provider,
+        "configured": configured,
+        "runtime_enabled": bool(get_settings().ziniao_browser_open_enabled),
+        "supported": str(store.platform or "").lower() == "naver",
+    }
+    return data
 
 
 def get_store_or_404(db: Session, store_id: int) -> Store:
@@ -35,7 +44,12 @@ def get_store_or_404(db: Session, store_id: int) -> Store:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_store(payload: StoreCreate, db: Session = Depends(get_db)) -> dict:
-    store = Store(**payload.model_dump())
+    values = payload.model_dump()
+    provider, profile_name = store_service.normalize_browser_binding(
+        values.get("browser_provider"), values.get("browser_profile_name"),
+    )
+    values.update(browser_provider=provider, browser_profile_name=profile_name)
+    store = Store(**values)
     db.add(store)
     try:
         db.commit()
@@ -113,12 +127,35 @@ def recover_store_automatic_read(
     return success_response(data=result, message="automatic read recovery restored")
 
 
+@router.post("/{store_id}/open-backend")
+def open_store_backend(
+    store_id: int,
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    require_store_permission(db, identity=identity, store_id=store_id, permission_key="platform.browser.open")
+    result = platform_login_service.open_store_backend(
+        db,
+        store_id=store_id,
+        actor_id=identity.user_key_hash,
+    )
+    return success_response(data=result, message="ziniao store browser opened")
+
+
 @router.put("/{store_id}")
 def update_store(store_id: int, payload: StoreUpdate, db: Session = Depends(get_db)) -> dict:
     store = get_store_or_404(db, store_id)
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         return success_response(data=serialize_store(store), message="no changes")
+
+    provider, profile_name = store_service.normalize_browser_binding(
+        updates.get("browser_provider", store.browser_provider),
+        updates.get("browser_profile_name", store.browser_profile_name),
+    )
+    if "browser_provider" in updates or "browser_profile_name" in updates:
+        updates["browser_provider"] = provider
+        updates["browser_profile_name"] = profile_name
 
     for field, value in updates.items():
         setattr(store, field, value)

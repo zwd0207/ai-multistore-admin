@@ -46,6 +46,7 @@ def init_db() -> None:
         from scripts.upgrade_auth_schema import upgrade as upgrade_auth_schema
         from scripts.upgrade_pxg_naver_readonly_schema import upgrade as upgrade_pxg_naver_readonly_schema
         from scripts.upgrade_shipping_schema import upgrade as upgrade_shipping_schema
+        from scripts.upgrade_store_browser_schema import upgrade as upgrade_store_browser_schema
         from scripts.upgrade_store_onboarding_schema import upgrade as upgrade_store_onboarding_schema
 
         upgrade_sync_schema(run_create_all=False)
@@ -54,4 +55,5 @@ def init_db() -> None:
         upgrade_auth_schema(run_create_all=False)
         upgrade_shipping_schema(run_create_all=False)
         upgrade_pxg_naver_readonly_schema(run_create_all=False)
+        upgrade_store_browser_schema()
         upgrade_store_onboarding_schema()

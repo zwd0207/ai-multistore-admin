@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     pxg_naver_shipping_pilot_enabled: bool = False
     allow_dev_auth: bool = False
     local_mfa_code_display_enabled: bool = False
+    ziniao_browser_open_enabled: bool = False
+    ziniao_cli_executable: str | None = None
+    ziniao_cli_profile: str = "ziniao-sso-pilot"
+    ziniao_cli_timeout_seconds: int = 30
     session_token_pepper: str | None = None
     session_cookie_name: str = "__Host-erp_session"
     session_cookie_secure: bool = True

@@ -226,6 +226,8 @@ def _write_permission_for_path(path: str) -> str:
         return "platform.readonly.persist"
     if path.startswith("/api/v1/stores/") and path.endswith("/automatic-read/recover"):
         return "credentials.manage"
+    if path.startswith("/api/v1/stores/") and path.endswith("/open-backend"):
+        return "platform.browser.open"
     if path.startswith("/api/v1/stores"):
         return "store.manage"
     if path.startswith(("/api/v1/credentials", "/api/v1/platform-logins", "/api/v1/api-credentials")):

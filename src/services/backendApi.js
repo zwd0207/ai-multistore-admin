@@ -69,6 +69,7 @@ export const backendApi = {
   historicalOrderBackfill: (onboardingId, payload) => sendData('post', `/store-onboardings/${onboardingId}/historical-backfill`, payload),
   createStore: (payload) => sendData('post', '/stores', payload),
   updateStore: (storeId, payload) => sendData('put', `/stores/${storeId}`, payload),
+  openStoreBackend: (storeId) => sendData('post', `/stores/${encodeURIComponent(storeId)}/open-backend`, {}),
   getDashboardSummary: (params) => getData('/dashboard/summary', params),
   getStoreOverview: (params) => getData('/dashboard/store-overview', params),
   recoverAutomaticRead: (storeId) => sendData(

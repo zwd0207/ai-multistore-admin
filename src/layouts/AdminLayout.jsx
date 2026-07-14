@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
+import OpenStoreBackendButton from '../components/common/OpenStoreBackendButton';
 import StoreSelector from '../components/common/StoreSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 import { useAuthContext } from '../context/AuthContext';
@@ -37,7 +38,7 @@ const menuGroups = [
 
 export default function AdminLayout() {
   const { user, canAccessStore, logout } = useAuthContext();
-  const { selectedStoreId } = useStoreContext();
+  const { selectedStore, selectedStoreId } = useStoreContext();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -85,6 +86,7 @@ export default function AdminLayout() {
             <strong>多店铺运营中心</strong>
             <span className="environment-chip">韩国时间 {BUSINESS_TIME_LABEL}</span>
             <StoreSelector />
+            <OpenStoreBackendButton store={selectedStore} compact />
             <ManualStoreSyncButton />
           </div>
           <div className="topbar-actions">

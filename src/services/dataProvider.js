@@ -4243,6 +4243,10 @@ const sourceMethods = {
     resetBackendStoresCache();
     return result;
   },
+  openStoreBackend: async (storeId) => {
+    if (!isBackendSource) throw new Error('演示数据不能打开真实店铺后台');
+    return backendApi.openStoreBackend(storeId);
+  },
   getProducts: async (params) => {
     if (!isBackendSource) return mockApi.getProducts(params);
     const { store, stores } = await resolveBackendStore(params);

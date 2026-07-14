@@ -1,13 +1,32 @@
+from collections.abc import Callable
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import threading
+from typing import Any
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
+from app.core.timezone import get_utc_now
 from app.models.device_environment import DeviceEnvironment
 from app.models.email_account import EmailAccount
 from app.models.platform_login_credential import PlatformLoginCredential
 from app.schemas.platform_login import PlatformLoginCreate, PlatformLoginUpdate
 from app.services.encryption import encrypt_value
-from app.services.store_service import ensure_store_exists, normalize_platform
+from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
+from app.services.store_service import ensure_store_exists, normalize_browser_binding, normalize_platform
+
+
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+_PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+_OPEN_LOCKS_GUARD = threading.Lock()
+_OPEN_LOCKS: dict[int, threading.Lock] = {}
 
 
 def _serialize(item: PlatformLoginCredential) -> dict:
@@ -162,3 +181,263 @@ def update_platform_login(db: Session, login_id: int, payload: PlatformLoginUpda
     db.commit()
     db.refresh(item)
     return _serialize(item)
+
+
+def _store_open_lock(store_id: int) -> threading.Lock:
+    with _OPEN_LOCKS_GUARD:
+        return _OPEN_LOCKS.setdefault(store_id, threading.Lock())
+
+
+def _cli_executable(settings: Settings) -> Path:
+    raw_path = str(settings.ziniao_cli_executable or "").strip()
+    if not raw_path:
+        raise ApiError("紫鸟本机连接尚未配置", "ZINIAO_CLI_NOT_CONFIGURED", 409)
+    path = Path(raw_path).expanduser().resolve()
+    if not path.is_file() or (os.name == "nt" and path.name.lower() != "ziniao-cli.exe"):
+        raise ApiError("紫鸟本机连接不可用", "ZINIAO_CLI_NOT_AVAILABLE", 409)
+    return path
+
+
+def _run_cli(
+    executable: Path,
+    arguments: list[str],
+    *,
+    settings: Settings,
+    command_runner: CommandRunner,
+) -> subprocess.CompletedProcess[str]:
+    timeout = max(5, min(int(settings.ziniao_cli_timeout_seconds), 60))
+    kwargs: dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": timeout,
+        "check": False,
+        "shell": False,
+        "env": {**os.environ, "ZINIAO_CLI_NO_UPDATE_CHECK": "1"},
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        return command_runner([str(executable), *arguments], **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        raise ApiError("紫鸟响应超时，请稍后重试", "ZINIAO_CLI_TIMEOUT", 504) from exc
+    except OSError as exc:
+        raise ApiError("紫鸟本机连接不可用", "ZINIAO_CLI_NOT_AVAILABLE", 409) from exc
+
+
+def _require_cli_profile(
+    executable: Path,
+    *,
+    settings: Settings,
+    command_runner: CommandRunner,
+) -> None:
+    expected = str(settings.ziniao_cli_profile or "").strip()
+    if not _PROFILE_PATTERN.fullmatch(expected):
+        raise ApiError("紫鸟 CLI 配置名称无效", "ZINIAO_PROFILE_INVALID", 409)
+    result = _run_cli(executable, ["config", "list"], settings=settings, command_runner=command_runner)
+    if result.returncode != 0:
+        raise ApiError("紫鸟 CLI 认证不可用", "ZINIAO_PROFILE_UNAVAILABLE", 409)
+    active = next(
+        (line.strip()[2:].strip() for line in result.stdout.splitlines() if line.strip().startswith("* ")),
+        "",
+    )
+    if active != expected:
+        raise ApiError("紫鸟本机授权配置未启用", "ZINIAO_PROFILE_NOT_ACTIVE", 409)
+
+
+def _resolve_ziniao_store(
+    executable: Path,
+    *,
+    profile_name: str,
+    settings: Settings,
+    command_runner: CommandRunner,
+) -> None:
+    result = _run_cli(
+        executable,
+        [
+            "store", "resolve",
+            "--name", profile_name,
+            "--expected-name", profile_name,
+            "--format", "json",
+        ],
+        settings=settings,
+        command_runner=command_runner,
+    )
+    if result.returncode != 0:
+        raise ApiError("未找到已绑定的紫鸟店铺", "ZINIAO_STORE_NOT_FOUND", 409)
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ApiError("紫鸟店铺校验失败", "ZINIAO_STORE_RESOLVE_INVALID", 502) from exc
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise ApiError("紫鸟店铺校验失败", "ZINIAO_STORE_RESOLVE_INVALID", 502)
+    data = payload.get("data")
+    candidates = [data] if isinstance(data, dict) else data if isinstance(data, list) else []
+    matches = [
+        item
+        for item in candidates
+        if isinstance(item, dict)
+        and item.get("matched") is not False
+        and str(item.get("name") or item.get("storeName") or "") == profile_name
+    ]
+    unique_matches = {
+        (
+            str(item.get("storeId") or item.get("id") or ""),
+            str(item.get("platformName") or item.get("platform") or ""),
+        )
+        for item in matches
+    }
+    if not unique_matches:
+        raise ApiError("未找到已绑定的紫鸟店铺", "ZINIAO_STORE_NOT_FOUND", 409)
+    if len(unique_matches) != 1:
+        raise ApiError("紫鸟店铺匹配不唯一", "ZINIAO_STORE_MATCH_NOT_UNIQUE", 409)
+    _store_id, platform_name = next(iter(unique_matches))
+    if not _store_id or "naver" not in platform_name.lower():
+        raise ApiError("紫鸟店铺平台与系统不一致", "ZINIAO_STORE_PLATFORM_MISMATCH", 409)
+
+
+def _write_browser_open_audit(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str,
+    actor_id: str,
+    correlation_id: str,
+    status: str,
+    reason_code: str,
+    settings: Settings,
+) -> bool:
+    now = get_utc_now()
+    result = write_operation_audit_log_local(
+        db,
+        {
+            "created_at": now,
+            "updated_at": now,
+            "store_id": store_id,
+            "platform": platform,
+            "environment": settings.app_env,
+            "actor_type": "human",
+            "actor_id": actor_id,
+            "action": "ziniao_browser_open",
+            "operation_phase": "local_browser_handoff",
+            "correlation_id": correlation_id,
+            "status": status,
+            "reason_code": reason_code,
+            "target_type": "store",
+            "target_id": store_id,
+            "changed_field_names": [],
+            "counts_summary": {"browser_windows_requested": 1 if status == "success" else 0},
+            "safety_flags": {
+                "platform_write": False,
+                "arbitrary_url_allowed": False,
+                "raw_response_saved": False,
+                "secrets_saved": False,
+            },
+            "sensitive_scan_passed": True,
+            "raw_response_saved": False,
+            "secrets_saved": False,
+            "privacy_fields_redacted": True,
+        },
+        write_enabled=True,
+        manual_approval=True,
+        local_write_scope=LOCAL_WRITER_SCOPE,
+    )
+    return bool(result.get("audit_rows_written"))
+
+
+def open_store_backend(
+    db: Session,
+    *,
+    store_id: int,
+    actor_id: str,
+    settings: Settings | None = None,
+    command_runner: CommandRunner = subprocess.run,
+) -> dict[str, Any]:
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.ziniao_browser_open_enabled:
+        raise ApiError("紫鸟店铺入口尚未启用", "ZINIAO_BROWSER_OPEN_DISABLED", 409)
+    store = ensure_store_exists(db, store_id)
+    if store.status != "active":
+        raise ApiError("当前店铺已停用", "ZINIAO_STORE_INACTIVE", 409)
+    if normalize_platform(store.platform) != "naver":
+        raise ApiError("首版仅支持 Naver 店铺", "ZINIAO_PLATFORM_NOT_SUPPORTED", 409)
+    provider, profile_name = normalize_browser_binding(store.browser_provider, store.browser_profile_name)
+    if provider != "ziniao" or not profile_name:
+        raise ApiError("请先绑定紫鸟店铺", "ZINIAO_STORE_NOT_BOUND", 409)
+
+    lock = _store_open_lock(store.id)
+    if not lock.acquire(blocking=False):
+        raise ApiError("店铺后台正在打开，请稍候", "ZINIAO_STORE_OPEN_IN_PROGRESS", 409)
+    correlation_id = f"ziniao_open_{store.id}_{uuid.uuid4().hex[:12]}"
+    planned_audit_written = False
+    try:
+        executable = _cli_executable(runtime_settings)
+        _require_cli_profile(executable, settings=runtime_settings, command_runner=command_runner)
+        _resolve_ziniao_store(
+            executable,
+            profile_name=profile_name,
+            settings=runtime_settings,
+            command_runner=command_runner,
+        )
+        planned_audit_written = _write_browser_open_audit(
+            db,
+            store_id=store.id,
+            platform="naver",
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+            status="planned",
+            reason_code="ziniao_browser_open_requested",
+            settings=runtime_settings,
+        )
+        if not planned_audit_written:
+            raise ApiError("店铺打开审计不可用", "ZINIAO_OPEN_AUDIT_UNAVAILABLE", 503)
+        result = _run_cli(
+            executable,
+            ["store", "open", "--name", profile_name, "--expected-name", profile_name],
+            settings=runtime_settings,
+            command_runner=command_runner,
+        )
+        if result.returncode != 0:
+            raise ApiError("紫鸟店铺打开失败", "ZINIAO_STORE_OPEN_FAILED", 502)
+        try:
+            success_audit_written = _write_browser_open_audit(
+                db,
+                store_id=store.id,
+                platform="naver",
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                status="success",
+                reason_code="ziniao_browser_opened",
+                settings=runtime_settings,
+            )
+        except Exception:
+            db.rollback()
+            success_audit_written = False
+        return {
+            "status": "opened",
+            "store_id": store.id,
+            "provider": "ziniao",
+            "manual_browser_session_opened": True,
+            "automated_platform_write_enabled": False,
+            "arbitrary_url_allowed": False,
+            "audit_recorded": success_audit_written,
+        }
+    except ApiError as exc:
+        if planned_audit_written:
+            try:
+                _write_browser_open_audit(
+                    db,
+                    store_id=store.id,
+                    platform="naver",
+                    actor_id=actor_id,
+                    correlation_id=correlation_id,
+                    status="failed",
+                    reason_code=str(exc.error_code or "ziniao_browser_open_failed").lower(),
+                    settings=runtime_settings,
+                )
+            except Exception:
+                db.rollback()
+        raise
+    finally:
+        lock.release()

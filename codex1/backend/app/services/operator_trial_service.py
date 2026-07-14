@@ -37,6 +37,7 @@ TRIAL_PERMISSION_KEYS = {
     "shipping.batch.manage",
     "shipping.writeback.approve",
     "platform.sync",
+    "platform.browser.open",
     "customer.inquiries.content.read",
 }
 FORBIDDEN_TRIAL_PERMISSION_KEYS = {"*", "system.configure", "customer.inquiries.reply"}

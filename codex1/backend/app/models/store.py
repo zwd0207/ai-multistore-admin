@@ -22,6 +22,8 @@ class Store(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", index=True)
     owner_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    browser_provider: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    browser_profile_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
