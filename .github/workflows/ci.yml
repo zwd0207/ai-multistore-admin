@@ -40,8 +40,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Setup Python for cross-runtime contracts
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: codex1/backend/requirements.txt
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          pip install -r codex1/backend/requirements.txt
       - name: Verify encoding and session boundaries
         run: |
           npm run encoding:scan
