@@ -48,7 +48,7 @@ class StoreBase(BaseModel):
 
 
 class StoreCreate(StoreBase):
-    pass
+    tenant_id: int | None = Field(default=None, ge=1)
 
 
 class StoreUpdate(BaseModel):
@@ -97,6 +97,7 @@ class StoreUpdate(BaseModel):
 
 class StoreRead(StoreBase):
     id: int
+    tenant_id: int | None
     created_at: datetime
     updated_at: datetime
 

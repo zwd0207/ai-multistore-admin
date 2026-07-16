@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timezone import get_utc_now
@@ -14,11 +14,13 @@ def utc_now() -> datetime:
 class Store(Base):
     __tablename__ = "stores"
     __table_args__ = (
-        Index("uq_stores_ziniao_external_hash", "ziniao_external_id_hash", unique=True),
+        Index("uq_stores_tenant_name", "tenant_id", "name", unique=True),
+        Index("uq_stores_tenant_ziniao_external_hash", "tenant_id", "ziniao_external_id_hash", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     platform: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     country: Mapped[str] = mapped_column(String(10), nullable=False, default="KR")
     language: Mapped[str] = mapped_column(String(20), nullable=False, default="ko-KR")
@@ -51,6 +53,8 @@ class Store(Base):
         onupdate=utc_now,
         nullable=False,
     )
+
+    tenant = relationship("Tenant", back_populates="stores")
 
     api_credentials = relationship(
         "ApiCredential",

@@ -342,15 +342,28 @@ def submit_onboarding(
     *,
     payload: StoreOnboardingCreate,
     creator_user_id: int,
+    tenant_id: int | None = None,
     now: datetime | None = None,
 ) -> dict:
-    existing = db.scalar(select(StoreOnboarding).where(StoreOnboarding.idempotency_key == payload.idempotency_key))
+    from app.models.auth import ErpUser
+
+    creator = db.get(ErpUser, creator_user_id)
+    if creator is None:
+        raise ApiError("onboarding creator is unavailable", "onboarding_creator_missing", 403)
+    target_tenant_id = creator.tenant_id if tenant_id is None else tenant_id
+    existing_query = select(StoreOnboarding).where(StoreOnboarding.idempotency_key == payload.idempotency_key)
+    if target_tenant_id is not None:
+        existing_query = existing_query.where(StoreOnboarding.tenant_id == target_tenant_id)
+    else:
+        existing_query = existing_query.where(StoreOnboarding.creator_user_id == creator_user_id)
+    existing = db.scalar(existing_query)
     if existing is not None:
         if existing.creator_user_id != creator_user_id:
             raise ApiError("idempotency key is owned by another operator", "onboarding_idempotency_conflict", 409)
         return serialize_onboarding(existing)
     frozen_end = now or get_utc_now()
     onboarding = StoreOnboarding(
+        tenant_id=target_tenant_id,
         idempotency_key=payload.idempotency_key,
         requested_store_name=payload.store_name,
         creator_user_id=creator_user_id,
@@ -831,7 +844,7 @@ def _provision_validated_store(db: Session, *, onboarding: StoreOnboarding, clie
         _set_failure(db, onboarding, "creator_role_unavailable", retryable=False, now=now)
         return False
     onboarding.status = "provisioning"
-    store = Store(name=onboarding.requested_store_name, platform=NAVER_PLATFORM)
+    store = Store(tenant_id=onboarding.tenant_id, name=onboarding.requested_store_name, platform=NAVER_PLATFORM)
     credential = ApiCredential(
         store=store,
         platform=NAVER_PLATFORM,

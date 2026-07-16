@@ -7,4 +7,4 @@ class LoginRequest(BaseModel):
 
 
 class MfaVerifyRequest(BaseModel):
-    code: str = Field(pattern=r"^\d{6}$")
+    code: str = Field(min_length=6, max_length=14, pattern=r"^(?:\d{6}|[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4})$")

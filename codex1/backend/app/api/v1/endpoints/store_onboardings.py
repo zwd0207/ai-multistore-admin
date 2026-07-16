@@ -57,7 +57,12 @@ def create_store_onboarding(
     identity: OperatorIdentity = Depends(get_operator_identity),
 ) -> dict:
     require_any_store_permission(db, identity=identity, permission_key="store_membership.assign")
-    onboarding = store_onboarding_service.submit_onboarding(db, payload=payload, creator_user_id=identity.user_id)
+    onboarding = store_onboarding_service.submit_onboarding(
+        db,
+        payload=payload,
+        creator_user_id=identity.user_id,
+        tenant_id=identity.selected_tenant_id if identity.platform_role == "platform_admin" else identity.tenant_id,
+    )
     if onboarding["status"] in {"validating", "provisioning", "backfilling"}:
         background_tasks.add_task(store_onboarding_service.run_onboarding_worker, onboarding["id"])
     return success_response(data=onboarding, message="onboarding submitted")

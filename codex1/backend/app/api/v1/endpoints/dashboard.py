@@ -24,15 +24,24 @@ def get_dashboard_summary(
     include_test_orders: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
-    if store_id is not None and get_settings().app_env != "development":
+    if get_settings().app_env != "development":
         user = db.get(ErpUser, getattr(request.state, "authenticated_user_id", None))
-        if user is not None:
-            require_store_permission(
-                db,
-                identity=OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash),
-                store_id=store_id,
-                permission_key="dashboard.read",
-            )
+        if user is None:
+            raise ApiError("login session is required", "session_required", 401)
+        if store_id is None:
+            raise ApiError("current store is required", "store_scope_required", 422)
+        require_store_permission(
+            db,
+            identity=OperatorIdentity(
+                user_id=user.id,
+                user_key_hash=user.user_key_hash,
+                tenant_id=user.tenant_id,
+                platform_role=user.platform_role,
+                selected_tenant_id=getattr(request.state, "selected_tenant_id", None),
+            ),
+            store_id=store_id,
+            permission_key="dashboard.read",
+        )
     result = stats_service.get_dashboard_summary(
         db,
         store_id=store_id,
@@ -54,11 +63,19 @@ def get_store_overview(
     user = db.get(ErpUser, principal.user_id)
     if user is None:
         raise ApiError("login session is required", "session_required", 401)
-    identity = OperatorIdentity(user_id=user.id, user_key_hash=user.user_key_hash)
+    identity = OperatorIdentity(
+        user_id=user.id,
+        user_key_hash=user.user_key_hash,
+        tenant_id=user.tenant_id,
+        platform_role=user.platform_role,
+        selected_tenant_id=principal.selected_tenant_id,
+    )
     require_any_store_permission(db, identity=identity, permission_key="dashboard.read")
     result = stats_service.get_store_overview(
         db,
         include_inactive=include_inactive,
         operator_user_id=user.id,
+        tenant_id=principal.selected_tenant_id if user.platform_role == "platform_admin" else user.tenant_id,
+        platform_admin=user.platform_role == "platform_admin",
     )
     return success_response(data=result)

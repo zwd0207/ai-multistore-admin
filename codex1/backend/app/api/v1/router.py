@@ -27,6 +27,7 @@ from app.api.v1.endpoints import (
     store_onboardings,
     sync,
     sync_logs,
+    tenants,
 )
 
 
@@ -57,3 +58,4 @@ api_router.include_router(customer_inquiries.router)
 api_router.include_router(sync.router)
 api_router.include_router(sync_logs.router)
 api_router.include_router(operation_audit_logs.router)
+api_router.include_router(tenants.router)

@@ -16,13 +16,23 @@ class ErpUser(Base):
             "auth_provider IN ('local_pending', 'password', 'sso', 'api_operator')",
             name="ck_erp_users_auth_provider",
         ),
+        CheckConstraint(
+            "platform_role IN ('tenant_owner', 'platform_admin')",
+            name="ck_erp_users_platform_role",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     user_key_hash: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     login_identifier_hash: Mapped[str | None] = mapped_column(String(120), nullable=True)
     login_identifier_masked: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    email_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    platform_role: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="tenant_owner", server_default="tenant_owner",
+    )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="invited", server_default="invited")
     auth_provider: Mapped[str] = mapped_column(
         String(40),
@@ -38,6 +48,8 @@ class ErpUser(Base):
         onupdate=utc_now,
         nullable=False,
     )
+
+    tenant = relationship("Tenant", back_populates="users")
 
     store_memberships = relationship(
         "ErpStoreMembership",
@@ -87,6 +99,7 @@ class ErpSession(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), nullable=False)
+    selected_tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     environment: Mapped[str] = mapped_column(String(30), nullable=False)
     authn_level: Mapped[str] = mapped_column(String(30), nullable=False)
     session_version: Mapped[int] = mapped_column(Integer, nullable=False)

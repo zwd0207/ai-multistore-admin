@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     session_absolute_hours: int = 12
     session_mfa_pending_minutes: int = 5
     session_recent_auth_minutes: int = 15
+    public_app_url: str = "https://aiglxt.xyz"
+    auth_invitation_hours: int = 24
+    password_reset_minutes: int = 30
+    email_delivery_enabled: bool = False
     coupang_vendor_id: str | None = None
     coupang_access_key: str | None = None
     coupang_secret_key: str | None = None

@@ -214,10 +214,15 @@ def _requires_write_protection(request: Request) -> bool:
         settings.app_env != "development"
         and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
         and request.url.path.startswith("/api/v1/")
+        and not request.url.path.startswith(("/api/v1/auth/invitations", "/api/v1/admin/tenants"))
         and request.url.path not in {
             "/api/v1/auth/login",
             "/api/v1/auth/mfa/verify",
             "/api/v1/auth/logout",
+            "/api/v1/auth/invitations/accept",
+            "/api/v1/auth/mfa/enroll/complete",
+            "/api/v1/auth/password-reset/request",
+            "/api/v1/auth/password-reset/complete",
         }
     )
 
@@ -312,7 +317,12 @@ async def _enforce_write_protection(request: Request) -> None:
         body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
     except (UnicodeDecodeError, ValueError):
         body = {}
-    from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_permission
+    from app.services.operator_access_service import (
+        OperatorIdentity,
+        audit_platform_admin_tenant_access,
+        require_any_store_permission,
+        require_store_permission,
+    )
     from app.services.session_service import require_csrf, require_session
 
     db = SessionLocal()
@@ -324,6 +334,9 @@ async def _enforce_write_protection(request: Request) -> None:
             user_key_hash=principal.user_key_hash,
             session_id=principal.session_id,
             last_reauthenticated_at=principal.last_reauthenticated_at,
+            tenant_id=principal.tenant_id,
+            platform_role=principal.platform_role,
+            selected_tenant_id=principal.selected_tenant_id,
         )
         permission_key = _write_permission_for_path(request.url.path)
         store_id = _request_store_id(request, body, db)
@@ -353,6 +366,12 @@ async def _enforce_write_protection(request: Request) -> None:
             require_any_store_permission(db, identity=identity, permission_key=permission_key)
         else:
             require_store_permission(db, identity=identity, store_id=store_id, permission_key=permission_key)
+        audit_platform_admin_tenant_access(
+            db,
+            identity=identity,
+            operation="write_authorized",
+            store_id=store_id,
+        )
         from app.services.operator_trial_service import DISABLED_TRIAL_WRITE_PATHS
         if request.url.path in DISABLED_TRIAL_WRITE_PATHS:
             raise ApiError("legacy real platform write is disabled", "legacy_platform_write_disabled", 403)
@@ -380,7 +399,13 @@ def _requires_read_protection(request: Request) -> bool:
 
 
 def _enforce_read_protection(request: Request) -> None:
-    from app.services.operator_access_service import OperatorIdentity, require_any_store_permission, require_store_membership
+    from app.services.operator_access_service import (
+        OperatorIdentity,
+        audit_platform_admin_tenant_access,
+        require_any_store_permission,
+        require_selected_tenant,
+        require_store_membership,
+    )
     from app.services.session_service import require_session
 
     db = SessionLocal()
@@ -391,8 +416,16 @@ def _enforce_read_protection(request: Request) -> None:
             user_key_hash=principal.user_key_hash,
             session_id=principal.session_id,
             last_reauthenticated_at=principal.last_reauthenticated_at,
+            tenant_id=principal.tenant_id,
+            platform_role=principal.platform_role,
+            selected_tenant_id=principal.selected_tenant_id,
         )
         request.state.authenticated_user_id = principal.user_id
+        request.state.authenticated_tenant_id = principal.tenant_id
+        request.state.authenticated_platform_role = principal.platform_role
+        request.state.selected_tenant_id = principal.selected_tenant_id
+        if request.url.path.startswith("/api/v1/admin/tenants"):
+            return
         if request.url.path.startswith("/api/v1/store-onboardings/"):
             parts = [part for part in request.url.path.split("/") if part]
             try:
@@ -410,7 +443,16 @@ def _enforce_read_protection(request: Request) -> None:
         store_id = _request_store_id(request, {}, db)
         if store_id is not None:
             require_store_membership(db, identity=identity, store_id=store_id)
-        elif request.url.path not in {"/api/v1/stores", "/api/v1/dashboard/store-overview"}:
+        elif request.url.path in {"/api/v1/stores", "/api/v1/dashboard/store-overview"}:
+            if identity.platform_role == "platform_admin":
+                require_selected_tenant(db, identity)
+        else:
             require_any_store_permission(db, identity=identity, permission_key="system.configure")
+        audit_platform_admin_tenant_access(
+            db,
+            identity=identity,
+            operation="read_authorized",
+            store_id=store_id,
+        )
     finally:
         db.close()

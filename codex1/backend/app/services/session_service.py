@@ -22,6 +22,7 @@ from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpSession, ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.store import Store
+from app.models.tenant import ErpMfaRecoveryCode, Tenant
 from app.services.encryption import decrypt_value
 
 
@@ -42,6 +43,9 @@ class AuthenticatedPrincipal:
     display_name: str
     authn_level: str
     last_reauthenticated_at: datetime | None
+    tenant_id: int | None = None
+    platform_role: str = "tenant_owner"
+    selected_tenant_id: int | None = None
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -89,13 +93,18 @@ def verify_totp(secret: str, code: str) -> bool:
     return any(hmac.compare_digest(generate_totp(secret, timestamp=now + offset * 30), code) for offset in (-1, 0, 1))
 
 
-def _has_active_membership(db: Session, user_id: int) -> bool:
+def _has_active_login_scope(db: Session, user: ErpUser) -> bool:
+    if user.platform_role == "platform_admin":
+        return True
+    if user.tenant_id is not None:
+        tenant = db.get(Tenant, user.tenant_id)
+        return tenant is not None and tenant.status == "active"
     return db.scalar(
         select(ErpStoreMembership.id)
         .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
         .join(Store, Store.id == ErpStoreMembership.store_id)
         .where(
-            ErpStoreMembership.user_id == user_id,
+            ErpStoreMembership.user_id == user.id,
             ErpStoreMembership.membership_status == "active",
             ErpRole.status == "active",
             Store.status == "active",
@@ -121,6 +130,7 @@ def _create_session(db: Session, *, user: ErpUser, security: ErpUserSecurity, au
         id=uuid.uuid4().hex,
         session_token_hash=_peppered_hash(token),
         user_id=user.id,
+        selected_tenant_id=user.tenant_id,
         environment=settings.app_env,
         authn_level=authn_level,
         session_version=security.session_version,
@@ -151,7 +161,7 @@ def begin_login(db: Session, *, login_identifier: str, password: str) -> tuple[d
         and verify_password(security.password_hash, password)
         and security.mfa_enabled_at
         and security.mfa_secret_encrypted
-        and _has_active_membership(db, user.id)
+        and _has_active_login_scope(db, user)
     )
     if not valid:
         if security and not blocked:
@@ -270,8 +280,19 @@ def complete_mfa(db: Session, *, pending_token: str | None, code: str) -> tuple[
     if user is None or security is None or user.status != "active" or not security.mfa_secret_encrypted:
         raise ApiError("MFA verification failed", "mfa_required", 403)
     secret = decrypt_value(security.mfa_secret_encrypted)
-    if not secret or not verify_totp(secret, code.strip()):
+    normalized_code = code.strip().upper()
+    recovery = None
+    if not normalized_code.isdigit():
+        recovery_hash = _peppered_hash(normalized_code.replace("-", ""))
+        recovery = db.scalar(select(ErpMfaRecoveryCode).where(
+            ErpMfaRecoveryCode.user_id == user.id,
+            ErpMfaRecoveryCode.code_hash == recovery_hash,
+            ErpMfaRecoveryCode.used_at.is_(None),
+        ))
+    if not secret or (recovery is None and not verify_totp(secret, normalized_code)):
         raise ApiError("MFA verification failed", "mfa_invalid", 403)
+    if recovery is not None:
+        recovery.used_at = now
     pending.revoked_at = now
     pending.revoke_reason = "mfa_completed"
     verified, token, csrf_token = _create_session(db, user=user, security=security, authn_level="mfa_verified")
@@ -290,7 +311,12 @@ def complete_mfa(db: Session, *, pending_token: str | None, code: str) -> tuple[
     db.commit()
     return {
         "status": "authenticated",
-        "user": {"id": user.id, "display_name": user.display_name},
+        "user": {
+            "id": user.id,
+            "display_name": user.display_name,
+            "tenant_id": user.tenant_id,
+            "platform_role": user.platform_role,
+        },
         "csrf_token": csrf_token,
         "absolute_expires_at": verified.absolute_expires_at,
     }, token, csrf_token or ""
@@ -331,6 +357,16 @@ def require_session(request: Request, db: Session, *, require_mfa: bool = True) 
             _as_utc(session.absolute_expires_at),
         )
         db.commit()
+    selected_tenant_id = user.tenant_id
+    if user.platform_role == "platform_admin":
+        selected_tenant = db.get(Tenant, session.selected_tenant_id) if session.selected_tenant_id else None
+        if selected_tenant is not None and selected_tenant.status == "active":
+            selected_tenant_id = selected_tenant.id
+        else:
+            selected_tenant_id = None
+            if session.selected_tenant_id is not None:
+                session.selected_tenant_id = None
+                db.commit()
     return AuthenticatedPrincipal(
         session_id=session.id,
         user_id=user.id,
@@ -338,6 +374,9 @@ def require_session(request: Request, db: Session, *, require_mfa: bool = True) 
         display_name=user.display_name,
         authn_level=session.authn_level,
         last_reauthenticated_at=session.last_reauthenticated_at,
+        tenant_id=user.tenant_id,
+        platform_role=user.platform_role,
+        selected_tenant_id=selected_tenant_id,
     )
 
 
@@ -381,34 +420,74 @@ def rotate_csrf_token(db: Session, principal: AuthenticatedPrincipal) -> str:
 
 
 def session_summary(db: Session, principal: AuthenticatedPrincipal) -> dict:
-    rows = db.execute(
-        select(ErpStoreMembership, ErpRole)
-        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
-        .join(Store, Store.id == ErpStoreMembership.store_id)
-        .where(
-            ErpStoreMembership.user_id == principal.user_id,
-            ErpStoreMembership.membership_status == "active",
-            ErpRole.status == "active",
-            Store.status == "active",
-        )
-    ).all()
-    stores = []
-    for membership, role in rows:
-        permissions = db.scalars(
-            select(ErpPermission.permission_key)
-            .join(ErpRolePermission, ErpRolePermission.permission_id == ErpPermission.id)
+    if principal.platform_role == "platform_admin":
+        if principal.selected_tenant_id is None:
+            stores = []
+        else:
+            stores = [
+                {
+                    "store_id": store.id,
+                    "tenant_id": store.tenant_id,
+                    "role": "platform_admin",
+                    "permissions": ["*"],
+                }
+                for store in db.scalars(select(Store).where(
+                    Store.tenant_id == principal.selected_tenant_id,
+                    Store.status == "active",
+                ).order_by(Store.id.asc())).all()
+            ]
+    else:
+        rows = db.execute(
+            select(ErpStoreMembership, ErpRole)
+            .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+            .join(Store, Store.id == ErpStoreMembership.store_id)
             .where(
-                ErpRolePermission.role_id == role.id,
-                ErpPermission.status == "active",
+                ErpStoreMembership.user_id == principal.user_id,
+                ErpStoreMembership.membership_status == "active",
+                ErpRole.status == "active",
+                Store.status == "active",
+                Store.tenant_id == principal.tenant_id,
             )
         ).all()
-        stores.append({
-            "store_id": membership.store_id,
-            "role": role.role_key,
-            "permissions": sorted(set(permissions)),
-        })
+        stores = []
+        for membership, role in rows:
+            permissions = db.scalars(
+                select(ErpPermission.permission_key)
+                .join(ErpRolePermission, ErpRolePermission.permission_id == ErpPermission.id)
+                .where(
+                    ErpRolePermission.role_id == role.id,
+                    ErpPermission.status == "active",
+                )
+            ).all()
+            stores.append({
+                "store_id": membership.store_id,
+                "tenant_id": principal.tenant_id,
+                "role": role.role_key,
+                "permissions": sorted(set(permissions)),
+            })
+    active_tenant_id = principal.selected_tenant_id if principal.platform_role == "platform_admin" else principal.tenant_id
+    tenant = db.get(Tenant, active_tenant_id) if active_tenant_id is not None else None
     return {
-        "user": {"id": principal.user_id, "display_name": principal.display_name},
+        "user": {
+            "id": principal.user_id,
+            "display_name": principal.display_name,
+            "tenant_id": principal.tenant_id,
+            "platform_role": principal.platform_role,
+        },
+        "tenant": {
+            "id": tenant.id,
+            "name": tenant.name,
+            "status": tenant.status,
+        } if tenant is not None else None,
+        "administration": {
+            "is_platform_admin": principal.platform_role == "platform_admin",
+            "selected_tenant_id": active_tenant_id,
+            "cross_tenant_mode": bool(
+                principal.platform_role == "platform_admin"
+                and active_tenant_id is not None
+                and active_tenant_id != principal.tenant_id
+            ),
+        },
         "authn_level": principal.authn_level,
         "stores": stores,
     }

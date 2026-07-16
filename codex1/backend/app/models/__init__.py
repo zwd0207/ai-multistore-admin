@@ -39,6 +39,7 @@ from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.store import Store
 from app.models.store_onboarding import StoreOnboarding
 from app.models.sync_log import SyncLog
+from app.models.tenant import ErpMfaRecoveryCode, PasswordResetToken, Tenant, TenantInvitation
 
 __all__ = [
     "ApiCredential",
@@ -84,4 +85,8 @@ __all__ = [
     "Store",
     "StoreOnboarding",
     "SyncLog",
+    "Tenant",
+    "TenantInvitation",
+    "PasswordResetToken",
+    "ErpMfaRecoveryCode",
 ]

@@ -1060,34 +1060,47 @@ def get_store_overview(
     db: Session,
     include_inactive: bool = False,
     operator_user_id: int | None = None,
+    tenant_id: int | None = None,
+    platform_admin: bool = False,
 ) -> dict[str, Any]:
     if operator_user_id is None:
         raise ApiError("dashboard store scope is required", "dashboard_read_forbidden", 403)
-    stores = db.scalars(
-        select(Store)
-        .join(ErpStoreMembership, ErpStoreMembership.store_id == Store.id)
-        .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
-        .join(ErpRolePermission, ErpRolePermission.role_id == ErpRole.id)
-        .join(ErpPermission, ErpPermission.id == ErpRolePermission.permission_id)
-        .where(
-            ErpStoreMembership.user_id == operator_user_id,
-            ErpStoreMembership.membership_status == "active",
-            ErpRole.status == "active",
+    if platform_admin:
+        if tenant_id is None:
+            raise ApiError("select a tenant before accessing dashboard data", "tenant_selection_required", 409)
+        statement = select(Store).where(
+            Store.tenant_id == tenant_id,
             Store.status == "active",
             Store.ziniao_directory_status != "removed",
             Store.ziniao_operational_mode != "open_only",
-            ErpPermission.status == "active",
-            ErpPermission.permission_key.in_(("dashboard.read", "*")),
         )
-        .distinct()
-        .order_by(Store.id.asc())
-    ).all()
+    else:
+        statement = (
+            select(Store)
+            .join(ErpStoreMembership, ErpStoreMembership.store_id == Store.id)
+            .join(ErpRole, ErpRole.id == ErpStoreMembership.role_id)
+            .join(ErpRolePermission, ErpRolePermission.role_id == ErpRole.id)
+            .join(ErpPermission, ErpPermission.id == ErpRolePermission.permission_id)
+            .where(
+                ErpStoreMembership.user_id == operator_user_id,
+                ErpStoreMembership.membership_status == "active",
+                ErpRole.status == "active",
+                Store.status == "active",
+                Store.tenant_id == tenant_id,
+                Store.ziniao_directory_status != "removed",
+                Store.ziniao_operational_mode != "open_only",
+                ErpPermission.status == "active",
+                ErpPermission.permission_key.in_(("dashboard.read", "*")),
+            )
+            .distinct()
+        )
+    stores = db.scalars(statement.order_by(Store.id.asc())).all()
     del include_inactive
     rows = []
     store_workbenches: list[tuple[Store, dict[str, Any]]] = []
     for store in stores:
         row = _store_overview_row(db, store)
-        if row.get("automatic_read_status") and not _has_automatic_read_admin_access(
+        if row.get("automatic_read_status") and not platform_admin and not _has_automatic_read_admin_access(
             db, user_id=operator_user_id, store_id=store.id,
         ):
             row["automatic_read_status"] = _redact_automatic_read_admin_fields(row["automatic_read_status"])

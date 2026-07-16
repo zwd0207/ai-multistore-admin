@@ -41,6 +41,7 @@ class StoreOnboardingCredentialUpdate(BaseModel):
 
 class StoreOnboardingRead(BaseModel):
     id: int
+    tenant_id: int | None
     idempotency_key: str
     requested_store_name: str
     store_id: int | None

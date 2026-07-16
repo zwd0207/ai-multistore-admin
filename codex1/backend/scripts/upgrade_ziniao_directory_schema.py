@@ -12,6 +12,7 @@ from app.config import get_settings
 
 TABLE_COLUMNS = {
     "stores": {
+        "tenant_id": "INTEGER",
         "ziniao_external_id_encrypted": "TEXT",
         "ziniao_external_id_hash": "VARCHAR(64)",
         "ziniao_source_name": "VARCHAR(200)",
@@ -43,8 +44,8 @@ TABLE_COLUMNS = {
 }
 
 INDEXES = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_stores_ziniao_external_hash "
-    "ON stores(ziniao_external_id_hash) WHERE ziniao_external_id_hash IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_stores_tenant_ziniao_external_hash "
+    "ON stores(tenant_id, ziniao_external_id_hash) WHERE ziniao_external_id_hash IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_stores_ziniao_directory_status "
     "ON stores(ziniao_directory_status)",
     "CREATE INDEX IF NOT EXISTS ix_stores_ziniao_operational_mode "
@@ -91,6 +92,7 @@ def upgrade() -> dict[str, list[str]]:
                         f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
                     )
                     changed[table_name].append(column_name)
+        connection.execute("DROP INDEX IF EXISTS uq_stores_ziniao_external_hash")
         for statement in INDEXES:
             table_name = statement.split(" ON ", 1)[1].split("(", 1)[0].strip()
             if table_name in tables:

@@ -1550,6 +1550,7 @@ def verify_stage_scripts() -> None:
         "verify_t18_naver_shipping_pilot.py",
         "verify_t19_ziniao_browser_open.py",
         "verify_t20_ziniao_directory_sync.py",
+        "verify_t23_tenant_auth.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",

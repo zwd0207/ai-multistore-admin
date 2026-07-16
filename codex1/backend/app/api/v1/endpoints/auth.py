@@ -7,6 +7,20 @@ from app.core.exceptions import ApiError
 from app.core.responses import success_response
 from app.database import get_db
 from app.schemas.auth import LoginRequest, MfaVerifyRequest
+from app.schemas.tenant_auth import (
+    MfaEnrollmentComplete,
+    PasswordResetComplete,
+    PasswordResetRequest,
+    TenantInvitationAccept,
+    TenantInvitationCreate,
+)
+from app.services import tenant_auth_service
+from app.services.operator_access_service import (
+    OperatorIdentity,
+    get_operator_identity,
+    require_operator_recent_auth,
+    require_platform_admin,
+)
 from app.services.session_service import (
     begin_login,
     complete_mfa,
@@ -115,3 +129,71 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
     response.delete_cookie(settings.session_cookie_name, path="/", secure=settings.session_cookie_secure, httponly=True, samesite="lax")
     response.headers["Cache-Control"] = "no-store, private"
     return success_response(data={"status": "logged_out"}, message="logout completed")
+
+
+@router.post("/invitations")
+def create_tenant_invitation(
+    payload: TenantInvitationCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    identity: OperatorIdentity = Depends(get_operator_identity),
+) -> dict:
+    _require_allowed_origin(request)
+    require_platform_admin(identity)
+    require_operator_recent_auth(identity)
+    result = tenant_auth_service.create_invitation(
+        db,
+        email=str(payload.email),
+        display_name=payload.display_name,
+        tenant_name=payload.tenant_name,
+        invited_by_user_id=identity.user_id,
+    )
+    return success_response(data=result, message="invitation created")
+
+
+@router.post("/invitations/accept")
+def accept_tenant_invitation(
+    payload: TenantInvitationAccept,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_allowed_origin(request)
+    result = tenant_auth_service.accept_invitation(db, token=payload.token, password=payload.password)
+    return success_response(data=result, message="invitation accepted")
+
+
+@router.post("/mfa/enroll/complete")
+def complete_mfa_enrollment(
+    payload: MfaEnrollmentComplete,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_allowed_origin(request)
+    result = tenant_auth_service.complete_mfa_enrollment(
+        db,
+        enrollment_token=payload.enrollment_token,
+        code=payload.code,
+    )
+    return success_response(data=result, message="MFA enrollment completed")
+
+
+@router.post("/password-reset/request")
+def request_password_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_allowed_origin(request)
+    result = tenant_auth_service.request_password_reset(db, email=str(payload.email))
+    return success_response(data=result, message="password reset request accepted")
+
+
+@router.post("/password-reset/complete")
+def complete_password_reset(
+    payload: PasswordResetComplete,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_allowed_origin(request)
+    result = tenant_auth_service.complete_password_reset(db, token=payload.token, password=payload.password)
+    return success_response(data=result, message="password reset completed")

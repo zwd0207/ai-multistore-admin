@@ -22,7 +22,7 @@ ONBOARDING_STATES = (
 class StoreOnboarding(Base):
     __tablename__ = "store_onboardings"
     __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_store_onboarding_idempotency_key"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_store_onboarding_tenant_idempotency_key"),
         CheckConstraint(
             "status IN ('validating', 'blocked', 'provisioning', 'backfilling', "
             "'partially_synced', 'active_incremental', 'retry_wait', 'cancelled')",
@@ -31,6 +31,7 @@ class StoreOnboarding(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     idempotency_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     requested_store_name: Mapped[str] = mapped_column(String(200), nullable=False)
     creator_user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), nullable=False, index=True)

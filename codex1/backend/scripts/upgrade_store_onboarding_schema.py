@@ -28,7 +28,8 @@ def upgrade() -> list[str]:
             connection.execute("""
             CREATE TABLE store_onboardings (
                 id INTEGER PRIMARY KEY,
-                idempotency_key VARCHAR(120) NOT NULL UNIQUE,
+                tenant_id INTEGER,
+                idempotency_key VARCHAR(120) NOT NULL,
                 requested_store_name VARCHAR(200) NOT NULL,
                 creator_user_id INTEGER NOT NULL,
                 store_id INTEGER UNIQUE,
@@ -50,6 +51,7 @@ def upgrade() -> list[str]:
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL,
                 FOREIGN KEY(creator_user_id) REFERENCES erp_users(id),
+                FOREIGN KEY(tenant_id) REFERENCES tenants(id),
                 FOREIGN KEY(store_id) REFERENCES stores(id),
                 FOREIGN KEY(credential_id) REFERENCES api_credentials(id),
                 CHECK(status IN ('validating', 'blocked', 'provisioning', 'backfilling', 'partially_synced', 'active_incremental', 'retry_wait', 'cancelled'))
@@ -58,6 +60,7 @@ def upgrade() -> list[str]:
             changed.append("store_onboardings")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(store_onboardings)").fetchall()}
         for name, definition in {
+            "tenant_id": "INTEGER",
             "worker_claim_token": "VARCHAR(64)",
             "worker_claimed_at": "DATETIME",
             "configuration_version": "INTEGER NOT NULL DEFAULT 1",
@@ -66,6 +69,7 @@ def upgrade() -> list[str]:
                 connection.execute(f"ALTER TABLE store_onboardings ADD COLUMN {name} {definition}")
                 changed.append(name)
         connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_idempotency_key ON store_onboardings(idempotency_key)")
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_tenant_id ON store_onboardings(tenant_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_creator_user_id ON store_onboardings(creator_user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_status ON store_onboardings(status)")
         connection.execute("CREATE INDEX IF NOT EXISTS ix_store_onboardings_worker_claim_token ON store_onboardings(worker_claim_token)")
