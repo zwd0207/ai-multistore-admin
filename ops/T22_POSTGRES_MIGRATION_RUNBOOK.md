@@ -19,7 +19,7 @@ Do not put database files, reports containing identifiers, environment files, in
 
 ## Dry Run
 
-Run from the checked-out backend release with the protected database URL loaded from `/etc/ai-multistore/postgresql.env`:
+Run from a root shell (`sudo -i`) in the checked-out backend release. The database environment is mode `0600` and must not be copied into a user-readable file:
 
 ```bash
 set -a
