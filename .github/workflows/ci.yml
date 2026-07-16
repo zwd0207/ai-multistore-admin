@@ -69,6 +69,22 @@ jobs:
   backend:
     name: Backend full verification
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: t22_test
+          POSTGRES_USER: t22_test
+          POSTGRES_PASSWORD: t22_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U t22_test -d t22_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      T22_TEST_POSTGRES_URL: postgresql+psycopg://t22_test:t22_test_password@127.0.0.1:5432/t22_test
     defaults:
       run:
         working-directory: codex1/backend

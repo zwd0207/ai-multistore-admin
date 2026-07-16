@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.auth import ErpSession, ErpUser, ErpUserSecurity
+from app.models.operation_audit_log import OperationAuditLog
 from app.models.tenant import ErpMfaRecoveryCode, PasswordResetToken, Tenant, TenantInvitation
 from app.services.encryption import decrypt_value, encrypt_value
 from app.services.session_service import (
@@ -103,6 +104,84 @@ def create_invitation(
     return result
 
 
+def create_platform_admin_bootstrap_invitation(
+    db: Session,
+    *,
+    email: str,
+    display_name: str,
+    tenant_id: int,
+    commit: bool = True,
+) -> dict:
+    settings = get_settings()
+    tenant = db.scalar(select(Tenant).where(Tenant.id == tenant_id).with_for_update())
+    if tenant is None or tenant.status != "active":
+        raise ApiError("bootstrap tenant is unavailable", "tenant_scope_forbidden", 403)
+    if db.scalar(select(ErpUser.id).where(ErpUser.platform_role == "platform_admin")) is not None:
+        raise ApiError("platform administrator already exists", "platform_admin_already_exists", 409)
+    if db.scalar(select(TenantInvitation.id).where(
+        TenantInvitation.invited_platform_role == "platform_admin",
+        TenantInvitation.status.in_(("pending", "pending_mfa")),
+    )) is not None:
+        raise ApiError("platform administrator invitation already exists", "platform_admin_invitation_exists", 409)
+    normalized_email = email.strip().casefold()
+    email_hash = hash_login_identifier(normalized_email)
+    if db.scalar(select(ErpUser.id).where(ErpUser.login_identifier_hash == email_hash)) is not None:
+        raise ApiError("email is already registered", "account_already_exists", 409)
+    now = get_utc_now()
+    raw_token = secrets.token_urlsafe(48)
+    invitation = TenantInvitation(
+        email_hash=email_hash,
+        email_encrypted=encrypt_value(normalized_email),
+        email_masked=_mask_email(normalized_email),
+        display_name=display_name.strip(),
+        tenant_name=tenant.name,
+        target_tenant_id=tenant.id,
+        invited_platform_role="platform_admin",
+        token_hash=_token_hash(raw_token),
+        invited_by_user_id=None,
+        expires_at=now + timedelta(hours=settings.auth_invitation_hours),
+    )
+    db.add(invitation)
+    db.flush()
+    correlation_id = f"platform-admin-bootstrap-{uuid.uuid4().hex}"
+    db.add(OperationAuditLog(
+        created_at=now,
+        updated_at=now,
+        environment=settings.app_env,
+        actor_type="system",
+        actor_id="platform-admin-bootstrap-cli",
+        actor_role="bootstrap",
+        action="platform_admin_invitation_created",
+        operation_phase="tenant_bootstrap",
+        correlation_id=correlation_id,
+        request_id=correlation_id,
+        status="success",
+        reason_code="initial_platform_admin_required",
+        target_type="tenant",
+        target_id=tenant.id,
+        changed_field_names=["tenant_invitations"],
+        counts_summary={"invitations_created": 1},
+        safety_flags={"platform_write": False, "secrets_recorded": False},
+        sensitive_scan_passed=True,
+        raw_response_saved=False,
+        secrets_saved=False,
+        privacy_fields_redacted=True,
+        notes="Initial platform administrator invitation created without storing its token in audit data.",
+    ))
+    if commit:
+        db.commit()
+        db.refresh(invitation)
+    else:
+        db.flush()
+    return {
+        **_safe_invitation(invitation),
+        "invitation_token": raw_token,
+        "invitation_url": f"{settings.public_app_url.rstrip('/')}/#/accept-invite?token={quote(raw_token)}",
+        "target_tenant_id": tenant.id,
+        "platform_role": "platform_admin",
+    }
+
+
 def accept_invitation(db: Session, *, token: str, password: str) -> dict:
     _validate_password(password)
     now = get_utc_now()
@@ -118,7 +197,16 @@ def accept_invitation(db: Session, *, token: str, password: str) -> dict:
     if db.scalar(select(ErpUser.id).where(ErpUser.login_identifier_hash == invitation.email_hash)) is not None:
         raise ApiError("email is already registered", "account_already_exists", 409)
 
-    tenant = Tenant(tenant_key=uuid.uuid4().hex, name=invitation.tenant_name, status="active")
+    if invitation.invited_platform_role == "platform_admin":
+        tenant = db.scalar(
+            select(Tenant).where(Tenant.id == invitation.target_tenant_id).with_for_update()
+        ) if invitation.target_tenant_id else None
+        if tenant is None or tenant.status != "active":
+            raise ApiError("invitation is unavailable", "invitation_invalid", 404)
+        if db.scalar(select(ErpUser.id).where(ErpUser.platform_role == "platform_admin")) is not None:
+            raise ApiError("platform administrator already exists", "platform_admin_already_exists", 409)
+    else:
+        tenant = Tenant(tenant_key=uuid.uuid4().hex, name=invitation.tenant_name, status="active")
     email = decrypt_value(invitation.email_encrypted)
     mfa_secret = base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
     user = ErpUser(
@@ -129,7 +217,7 @@ def accept_invitation(db: Session, *, token: str, password: str) -> dict:
         login_identifier_masked=invitation.email_masked,
         email_encrypted=invitation.email_encrypted,
         email_verified_at=now,
-        platform_role="tenant_owner",
+        platform_role=invitation.invited_platform_role,
         status="invited",
         auth_provider="local_pending",
     )

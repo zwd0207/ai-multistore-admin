@@ -36,7 +36,7 @@ class PxgNaverReadonlyRecordState(Base):
             "resource_type IN ('product', 'order', 'recipient', 'logistics', 'customer_inquiry')",
             name="ck_pxg_naver_readonly_state_resource",
         ),
-        CheckConstraint("is_stale IN (0, 1)", name="ck_pxg_naver_readonly_state_stale"),
+        CheckConstraint("is_stale IN (FALSE, TRUE)", name="ck_pxg_naver_readonly_state_stale"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -70,7 +70,7 @@ class PxgNaverOrderRecipientSecureRecord(Base):
         Index("ix_pxg_naver_recipient_store_order", "store_id", "order_id"),
         Index("ix_pxg_naver_recipient_expiry", "expires_at", "is_stale"),
         CheckConstraint("platform = 'naver'", name="ck_pxg_naver_recipient_platform"),
-        CheckConstraint("is_stale IN (0, 1)", name="ck_pxg_naver_recipient_stale"),
+        CheckConstraint("is_stale IN (FALSE, TRUE)", name="ck_pxg_naver_recipient_stale"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -97,7 +97,7 @@ class PxgNaverReadonlyLogisticsRecord(Base):
         Index("ix_pxg_naver_logistics_store_status", "store_id", "platform", "is_stale"),
         Index("ix_pxg_naver_logistics_expiry", "expires_at", "is_stale"),
         CheckConstraint("platform = 'naver'", name="ck_pxg_naver_logistics_platform"),
-        CheckConstraint("is_stale IN (0, 1)", name="ck_pxg_naver_logistics_stale"),
+        CheckConstraint("is_stale IN (FALSE, TRUE)", name="ck_pxg_naver_logistics_stale"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -134,7 +134,7 @@ class PxgNaverReadonlyCustomerInquiry(Base):
         Index("ix_pxg_naver_readonly_inquiry_store_status", "store_id", "platform", "status"),
         Index("ix_pxg_naver_readonly_inquiry_expiry", "expires_at", "is_stale"),
         CheckConstraint("platform = 'naver'", name="ck_pxg_naver_readonly_inquiry_platform"),
-        CheckConstraint("is_stale IN (0, 1)", name="ck_pxg_naver_readonly_inquiry_stale"),
+        CheckConstraint("is_stale IN (FALSE, TRUE)", name="ck_pxg_naver_readonly_inquiry_stale"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

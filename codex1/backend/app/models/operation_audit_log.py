@@ -7,6 +7,13 @@ from app.database import Base
 from app.models.store import utc_now
 
 
+def _sha256_check(column_name: str) -> str:
+    remainder = column_name
+    for character in "0123456789abcdef":
+        remainder = f"replace({remainder}, '{character}', '')"
+    return f"{column_name} IS NULL OR (length({column_name}) = 64 AND length({remainder}) = 0)"
+
+
 class OperationAuditLog(Base):
     __tablename__ = "operation_audit_logs"
     __table_args__ = (
@@ -24,17 +31,11 @@ class OperationAuditLog(Base):
         CheckConstraint("length(trim(action)) > 0", name="ck_operation_audit_logs_action_not_empty"),
         CheckConstraint("length(trim(correlation_id)) > 0", name="ck_operation_audit_logs_correlation_id_not_empty"),
         CheckConstraint("length(trim(status)) > 0", name="ck_operation_audit_logs_status_not_empty"),
-        CheckConstraint("raw_response_saved IN (0, 1)", name="ck_operation_audit_logs_raw_response_saved_bool"),
-        CheckConstraint("secrets_saved IN (0, 1)", name="ck_operation_audit_logs_secrets_saved_bool"),
-        CheckConstraint("privacy_fields_redacted IN (0, 1)", name="ck_operation_audit_logs_privacy_fields_bool"),
-        CheckConstraint(
-            "backup_sha256 IS NULL OR (length(backup_sha256) = 64 AND backup_sha256 NOT GLOB '*[^0-9a-f]*')",
-            name="ck_operation_audit_logs_backup_sha256",
-        ),
-        CheckConstraint(
-            "restore_source_sha256 IS NULL OR (length(restore_source_sha256) = 64 AND restore_source_sha256 NOT GLOB '*[^0-9a-f]*')",
-            name="ck_operation_audit_logs_restore_sha256",
-        ),
+        CheckConstraint("raw_response_saved IN (FALSE, TRUE)", name="ck_operation_audit_logs_raw_response_saved_bool"),
+        CheckConstraint("secrets_saved IN (FALSE, TRUE)", name="ck_operation_audit_logs_secrets_saved_bool"),
+        CheckConstraint("privacy_fields_redacted IN (FALSE, TRUE)", name="ck_operation_audit_logs_privacy_fields_bool"),
+        CheckConstraint(_sha256_check("backup_sha256"), name="ck_operation_audit_logs_backup_sha256"),
+        CheckConstraint(_sha256_check("restore_source_sha256"), name="ck_operation_audit_logs_restore_sha256"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

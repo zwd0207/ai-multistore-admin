@@ -26,6 +26,10 @@ COLUMNS = {
     "erp_sessions": {
         "selected_tenant_id": "INTEGER",
     },
+    "tenant_invitations": {
+        "target_tenant_id": "INTEGER",
+        "invited_platform_role": "VARCHAR(30) NOT NULL DEFAULT 'tenant_owner'",
+    },
 }
 
 INDEXES = (

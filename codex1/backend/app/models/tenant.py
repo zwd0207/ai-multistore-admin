@@ -38,6 +38,10 @@ class TenantInvitation(Base):
             "status IN ('pending', 'pending_mfa', 'accepted', 'revoked', 'expired')",
             name="ck_tenant_invitations_status",
         ),
+        CheckConstraint(
+            "invited_platform_role IN ('tenant_owner', 'platform_admin')",
+            name="ck_tenant_invitations_platform_role",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -46,9 +50,13 @@ class TenantInvitation(Base):
     email_masked: Mapped[str] = mapped_column(String(160), nullable=False)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     tenant_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True)
+    invited_platform_role: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="tenant_owner", server_default="tenant_owner",
+    )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", server_default="pending")
-    invited_by_user_id: Mapped[int] = mapped_column(ForeignKey("erp_users.id"), nullable=False)
+    invited_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("erp_users.id"), nullable=True)
     accepted_user_id: Mapped[int | None] = mapped_column(ForeignKey("erp_users.id"), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
