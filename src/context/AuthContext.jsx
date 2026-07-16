@@ -18,6 +18,12 @@ function sessionStateFromError(error) {
 function normalizeSession(session) {
   return {
     user: session?.user || null,
+    tenant: session?.tenant || null,
+    administration: session?.administration || {
+      is_platform_admin: false,
+      selected_tenant_id: null,
+      cross_tenant_mode: false,
+    },
     stores: Array.isArray(session?.stores) ? session.stores : [],
     authnLevel: session?.authn_level || null,
     expiresAt: session?.absolute_expires_at || null,
@@ -90,6 +96,11 @@ export function AuthProvider({ children }) {
     }
   }, [clearSession]);
 
+  const selectTenant = useCallback(async (tenantId) => {
+    await backendApi.selectTenant(tenantId);
+    return refreshSession();
+  }, [refreshSession]);
+
   const canAccessStore = useCallback((storeId, permissionKey) => {
     const store = session.stores.find((item) => String(item.store_id) === String(storeId));
     if (!store) return false;
@@ -102,6 +113,11 @@ export function AuthProvider({ children }) {
     isAuthenticated: status === 'authenticated',
     isChecking: status === 'checking',
     user: session.user,
+    tenant: session.tenant,
+    administration: session.administration,
+    isPlatformAdmin: session.administration.is_platform_admin === true,
+    selectedTenantId: session.administration.selected_tenant_id,
+    crossTenantMode: session.administration.cross_tenant_mode === true,
     stores: session.stores,
     authnLevel: session.authnLevel,
     expiresAt: session.expiresAt,
@@ -110,8 +126,9 @@ export function AuthProvider({ children }) {
     login,
     verifyMfa,
     refreshSession,
+    selectTenant,
     logout,
-  }), [status, session, canAccessStore, login, verifyMfa, refreshSession, logout]);
+  }), [status, session, canAccessStore, login, verifyMfa, refreshSession, selectTenant, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

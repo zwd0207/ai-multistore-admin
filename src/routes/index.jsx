@@ -1,7 +1,12 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
-import { AuthPage, AuthStatePage } from '../pages/AuthPages';
+import {
+  Navigate, Route, Routes, useLocation,
+} from 'react-router-dom';
+import {
+  AcceptInvitationPage, AuthPage, AuthStatePage, PasswordResetPage,
+} from '../pages/AuthPages';
 import { useAuthContext } from '../context/AuthContext';
+import { TenantAdminPage, TenantSelectionPage } from '../pages/TenantPages';
 
 const AdminLayout = lazy(() => import('../layouts/AdminLayout'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
@@ -30,19 +35,31 @@ function DeferredPage({ children }) {
 }
 
 function RequireAuth({ children }) {
-  const { status, isAuthenticated, stores } = useAuthContext();
+  const {
+    status, isAuthenticated, stores, isPlatformAdmin, selectedTenantId,
+  } = useAuthContext();
+  const location = useLocation();
   if (['unauthenticated', 'mfa_required'].includes(status)) return <AuthPage />;
   if (status === 'checking') return <AuthPage />;
   if (status === 'unavailable') return <AuthStatePage type="unavailable" />;
   if (status === 'expired') return <AuthStatePage type="expired" />;
   if (status === 'reauthentication_required') return <AuthStatePage type="reauthentication_required" />;
-  if (status === 'forbidden' || (isAuthenticated && !stores.length)) return <AuthStatePage type="forbidden" />;
+  if (status === 'forbidden') return <AuthStatePage type="forbidden" />;
+  if (isAuthenticated && isPlatformAdmin && !selectedTenantId) return <Navigate to="/select-tenant" replace />;
+  if (isAuthenticated && !stores.length && !['/stores', '/tenants'].includes(location.pathname)) {
+    return <Navigate to="/stores" replace />;
+  }
   return isAuthenticated ? children : <AuthPage />;
 }
 
 export default function AppRoutes() {
   return (
     <Routes>
+      <Route path="/" element={<AuthPage />} />
+      <Route path="accept-invite" element={<AcceptInvitationPage />} />
+      <Route path="forgot-password" element={<PasswordResetPage requestOnly />} />
+      <Route path="reset-password" element={<PasswordResetPage />} />
+      <Route path="select-tenant" element={<TenantSelectionPage />} />
       <Route element={<RequireAuth><DeferredPage><AdminLayout /></DeferredPage></RequireAuth>}>
         <Route index element={<Navigate to="/workbench" replace />} />
         <Route path="workbench" element={<DeferredPage><Dashboard /></DeferredPage>} />
@@ -62,6 +79,7 @@ export default function AppRoutes() {
         <Route path="api-capabilities" element={<DeferredPage><ApiCapabilities /></DeferredPage>} />
         <Route path="settings" element={<DeferredPage><Settings /></DeferredPage>} />
         <Route path="logs" element={<DeferredPage><Logs /></DeferredPage>} />
+        <Route path="tenants" element={<DeferredPage><TenantAdminPage /></DeferredPage>} />
       </Route>
       <Route path="*" element={<Navigate to="/workbench" replace />} />
     </Routes>

@@ -39,7 +39,9 @@ function pickSelectedStoreId(nextStores, preferredStoreId) {
 }
 
 export function StoreProvider({ children }) {
-  const { isAuthenticated, refreshSession, status: authStatus } = useAuthContext();
+  const {
+    isAuthenticated, refreshSession, selectedTenantId, status: authStatus,
+  } = useAuthContext();
   const [stores, setStores] = useState([]);
   const [selectedStoreId, setSelectedStoreIdState] = useState(readStoredStoreId);
   const [loading, setLoading] = useState(true);
@@ -105,7 +107,7 @@ export function StoreProvider({ children }) {
       });
 
     return () => { cancelled = true; };
-  }, [authStatus, isAuthenticated]);
+  }, [authStatus, isAuthenticated, selectedTenantId]);
 
   useEffect(() => {
     if (!isBackendSource || !isAuthenticated) return undefined;

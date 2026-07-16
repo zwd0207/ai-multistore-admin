@@ -434,7 +434,7 @@ function OnboardingProgress({ onboarding }) {
 
 export default function Stores() {
   const { selectedStoreId, setSelectedStoreId, refreshStores } = useStoreContext();
-  const { stores: authorizedStores } = useAuthContext();
+  const { stores: authorizedStores, refreshSession } = useAuthContext();
   const [searchParams] = useSearchParams();
   const queryStoreId = searchParams.get('storeId') || '';
   const queryFocus = searchParams.get('focus') || '';
@@ -473,6 +473,7 @@ export default function Stores() {
         if (cancelled) return;
         setOnboarding(result);
         if (result?.storeId) {
+          await refreshSession();
           await refreshStores({ preferredStoreId: result.storeId });
           if (!cancelled) setSelectedStoreId(result.storeId);
         }
@@ -486,7 +487,7 @@ export default function Stores() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [onboardingId, pollVersion, refreshStores, setSelectedStoreId]);
+  }, [onboardingId, pollVersion, refreshSession, refreshStores, setSelectedStoreId]);
 
   const validateOnboarding = (correction = false) => {
     const errors = {};

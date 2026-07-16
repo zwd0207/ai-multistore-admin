@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import OpenStoreBackendButton from '../components/common/OpenStoreBackendButton';
 import StoreSelector from '../components/common/StoreSelector';
+import TenantScopeSelector from '../components/common/TenantScopeSelector';
 import { BUSINESS_TIME_LABEL } from '../utils/time';
 import { useAuthContext } from '../context/AuthContext';
 import { useStoreContext } from '../context/StoreContext';
@@ -29,7 +30,8 @@ const menuGroups = [
   {
     label: '管理员',
     items: [
-      ['□', '店铺与平台连接', '/stores', ['store_membership.assign', 'store.manage']],
+      ['租', '租户与邀请', '/tenants', null, false],
+      ['□', '店铺与平台连接', '/stores', ['store_membership.assign', 'store.manage'], false],
       ['@', '邮箱与平台通知', '/emails', ['store_membership.assign', 'store.manage']],
       ['⚙', '管理员设置', '/settings', ['store_membership.assign', 'store.manage']],
     ],
@@ -37,14 +39,23 @@ const menuGroups = [
 ];
 
 export default function AdminLayout() {
-  const { user, canAccessStore, logout } = useAuthContext();
+  const {
+    user, canAccessStore, logout, isPlatformAdmin, crossTenantMode,
+  } = useAuthContext();
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const visibleMenuGroups = useMemo(
-    () => filterMenuGroupsForStore(menuGroups, selectedStoreId, canAccessStore),
-    [selectedStoreId, canAccessStore],
+    () => filterMenuGroupsForStore(
+      menuGroups.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item[2] !== '/tenants' || isPlatformAdmin),
+      })),
+      selectedStoreId,
+      canAccessStore,
+    ),
+    [selectedStoreId, canAccessStore, isPlatformAdmin],
   );
   const primaryItems = visibleMenuGroups
     .find((group) => group.label === '每日运营')?.items.slice(0, 4) || [];
@@ -85,6 +96,7 @@ export default function AdminLayout() {
           <div>
             <strong>多店铺运营中心</strong>
             <span className="environment-chip">韩国时间 {BUSINESS_TIME_LABEL}</span>
+            <TenantScopeSelector />
             <StoreSelector />
             <OpenStoreBackendButton store={selectedStore} compact />
             <ManualStoreSyncButton />
@@ -93,7 +105,7 @@ export default function AdminLayout() {
             <span className="avatar">运</span>
             <span>
               <strong>{user?.display_name || user?.name || user?.login_identifier_masked || '运营人员'}</strong>
-              <small>日常运营</small>
+              <small>{isPlatformAdmin ? (crossTenantMode ? '平台管理员 · 跨租户管理' : '平台管理员') : '租户负责人'}</small>
             </span>
             <button className="button ghost compact" type="button" onClick={logout}>退出</button>
           </div>

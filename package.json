@@ -17,7 +17,8 @@
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "react-router-dom": "latest"
+    "react-router-dom": "latest",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {}
 }
