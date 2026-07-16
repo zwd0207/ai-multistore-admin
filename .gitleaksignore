@@ -1,0 +1,5 @@
+# Verified synthetic test fixtures. Keep each exception fingerprint-specific.
+d864f2800acc869bbcf1d671dfe4175012c3f812:codex1/backend/scripts/verify_t13_onboarding.py:generic-api-key:148
+065ac831fa27d9d7fa48e9ca40f643d009ac69c0:codex1/backend/scripts/verify_t13_onboarding.py:generic-api-key:71
+19aa7fe25cf4bd87ce40f10d09735c6a05490687:backend/scripts/verify_all.py:generic-api-key:707
+5c96948fb54b849c1e09ed637fa832fa0179c2de:backend/scripts/verify_all.py:generic-api-key:289
