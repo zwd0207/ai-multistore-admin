@@ -191,6 +191,9 @@ def verify_safe_errors_and_limits():
         )
         assert result["error_code"] == "naver_customer_inquiry_rate_limit" and result["retryable"] is True
         assert result["safe_error"]["retry_after_seconds"] == 3600
+        assert sync_service._parse_bounded_retry_after("9" * 100_000) == 3600
+        assert sync_service._parse_bounded_retry_after("0" * 100_000) == 0
+        assert sync_service._parse_bounded_retry_after("not-a-date") is None
         assert result["safe_error"]["rate_limit"] == {
             "gncp-gw-ratelimit-limit": "10",
             "gncp-gw-quota-remaining": "0",

@@ -3,9 +3,11 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
@@ -37,10 +39,17 @@ from scripts.recover_t24_dual_store_logistics import (
     APPROVAL_ENV,
     APPROVAL_VALUE,
     APPROVED_STORE_IDS_ENV,
+    CLOSE_APPROVAL_ENV,
+    CLOSE_APPROVAL_VALUE,
+    CLOSE_ERROR_CODE,
+    CLOSE_SERVICE_STOPPED_ENV,
+    CLOSE_SERVICE_STOPPED_VALUE,
+    CLOSE_SYNC_TYPE,
     FIRST_RUN_SPACING,
     RECOVERABLE_ERROR_CODE,
     RECOVERY_SYNC_TYPE,
     LogisticsRecoveryBlocked,
+    close_dual_store_logistics,
     recover_dual_store_logistics,
 )
 
@@ -220,14 +229,18 @@ def verify_postgres_concurrent_recovery() -> None:
 
         os.environ[APPROVAL_ENV] = APPROVAL_VALUE
         os.environ[APPROVED_STORE_IDS_ENV] = "1,2"
-        barrier = threading.Barrier(2)
+        barrier = threading.Barrier(3)
         results: list[str] = []
         errors: list[Exception] = []
+        backend_pids: list[int] = []
         result_lock = threading.Lock()
 
         def execute_recovery() -> None:
             with IsolatedSession() as db:
                 try:
+                    backend_pid = int(db.scalar(text("SELECT pg_backend_pid()")))
+                    with result_lock:
+                        backend_pids.append(backend_pid)
                     barrier.wait(timeout=5)
                     outcome = recover_dual_store_logistics(
                         db,
@@ -245,9 +258,31 @@ def verify_postgres_concurrent_recovery() -> None:
                 with result_lock:
                     results.append(value)
 
-        workers = [threading.Thread(target=execute_recovery, daemon=True) for _ in range(2)]
-        for worker in workers:
-            worker.start()
+        with IsolatedSession() as blocker:
+            blocker.scalars(select(Store).order_by(Store.id.asc()).with_for_update()).all()
+            workers = [threading.Thread(target=execute_recovery, daemon=True) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            barrier.wait(timeout=5)
+
+            deadline = time.monotonic() + 5
+            waiting_pids: set[int] = set()
+            while time.monotonic() < deadline:
+                with admin_engine.connect() as connection:
+                    rows = connection.execute(text(
+                        "SELECT pid FROM pg_stat_activity "
+                        "WHERE pid IN (:pid_1, :pid_2) AND wait_event_type = 'Lock'"
+                    ), {
+                        "pid_1": backend_pids[0],
+                        "pid_2": backend_pids[1],
+                    }).scalars().all()
+                waiting_pids = {int(pid) for pid in rows}
+                if waiting_pids == set(backend_pids):
+                    break
+                time.sleep(0.05)
+            assert waiting_pids == set(backend_pids)
+            blocker.commit()
+
         for worker in workers:
             worker.join(timeout=15)
         assert all(not worker.is_alive() for worker in workers)
@@ -279,6 +314,8 @@ def main() -> None:
     store_ids = [spec.store_id for spec in specs]
     os.environ.pop(APPROVAL_ENV, None)
     os.environ.pop(APPROVED_STORE_IDS_ENV, None)
+    os.environ.pop(CLOSE_APPROVAL_ENV, None)
+    os.environ.pop(CLOSE_SERVICE_STOPPED_ENV, None)
 
     with SessionLocal() as db:
         _expect_blocked(
@@ -446,6 +483,30 @@ def main() -> None:
             ).cursor_value
             for store_id in store_ids
         }
+
+        commit_failed = False
+        with patch.object(db, "commit", side_effect=RuntimeError("synthetic commit failure")):
+            try:
+                recover_dual_store_logistics(
+                    db,
+                    specs=specs,
+                    settings=_settings(),
+                    now=NOW,
+                )
+            except RuntimeError as exc:
+                commit_failed = str(exc) == "synthetic commit failure"
+        assert commit_failed
+        db.expire_all()
+        assert db.query(SyncLog).filter_by(sync_type=RECOVERY_SYNC_TYPE).count() == 0
+        assert all(
+            (row.status, row.automatic_read_enabled, row.last_error_code)
+            == ("blocked", False, RECOVERABLE_ERROR_CODE)
+            for row in (
+                db.get(SyncCheckpoint, seeded[store_id]["logistics"].id)
+                for store_id in store_ids
+            )
+        )
+
         result = recover_dual_store_logistics(
             db,
             specs=list(reversed(specs)),
@@ -543,6 +604,76 @@ def main() -> None:
         )
         db.rollback()
         assert db.query(SyncLog).filter_by(sync_type=RECOVERY_SYNC_TYPE).count() == 2
+
+        _expect_blocked(
+            "t24_logistics_close_owner_approval_missing",
+            lambda: close_dual_store_logistics(
+                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=3)
+            ),
+        )
+        db.rollback()
+        os.environ[CLOSE_APPROVAL_ENV] = CLOSE_APPROVAL_VALUE
+        _expect_blocked(
+            "t24_logistics_close_service_stop_unconfirmed",
+            lambda: close_dual_store_logistics(
+                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=3)
+            ),
+        )
+        db.rollback()
+        os.environ[CLOSE_SERVICE_STOPPED_ENV] = CLOSE_SERVICE_STOPPED_VALUE
+        closed = close_dual_store_logistics(
+            db,
+            specs=list(reversed(specs)),
+            settings=_settings(),
+            now=NOW + timedelta(minutes=3),
+        )
+        assert closed == {
+            "status": "closed",
+            "store_ids": store_ids,
+            "checkpoint_count": 2,
+            "platform_write": False,
+            "network_called": False,
+            "records_deleted": False,
+        }
+        for store_id in store_ids:
+            row = db.get(SyncCheckpoint, seeded[store_id]["logistics"].id)
+            assert row.status == "blocked" and row.automatic_read_enabled is False
+            assert row.next_run_at is None and row.last_error_code == CLOSE_ERROR_CODE
+            assert row.lease_token is None and row.lease_expires_at is None
+            assert row.cursor_value == original_cursors[store_id]
+        assert {
+            row.id: (
+                row.status,
+                row.automatic_read_enabled,
+                row.next_run_at,
+                row.fresh_until,
+                row.last_error_code,
+                row.lease_token,
+                row.lease_expires_at,
+            )
+            for row in db.scalars(select(SyncCheckpoint).where(
+                SyncCheckpoint.id.in_(non_logistics_ids)
+            )).all()
+        } == before_non_logistics
+        close_logs = db.scalars(select(SyncLog).where(
+            SyncLog.sync_type == CLOSE_SYNC_TYPE
+        ).order_by(SyncLog.store_id.asc())).all()
+        assert len(close_logs) == 2
+        assert all(log.raw_summary == {
+            "status": "closed",
+            "resource": "logistics",
+            "platform_write": False,
+            "network_called": False,
+            "records_deleted": False,
+        } for log in close_logs)
+        _expect_blocked(
+            "t24_logistics_close_already_applied",
+            lambda: close_dual_store_logistics(
+                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=4)
+            ),
+        )
+        db.rollback()
+        assert db.query(SyncLog).filter_by(sync_type=CLOSE_SYNC_TYPE).count() == 2
 
     print("verify_recover_t24_dual_store_logistics: ok")
 

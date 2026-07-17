@@ -1282,7 +1282,10 @@ def _parse_bounded_retry_after(value: str | None, *, now: datetime | None = None
         return None
     seconds: int
     if normalized.isdigit():
-        seconds = int(normalized)
+        digits = normalized.lstrip("0") or "0"
+        if len(digits) > len(str(NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS)):
+            return NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS
+        seconds = int(digits)
     else:
         try:
             target = parsedate_to_datetime(normalized)

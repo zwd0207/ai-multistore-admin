@@ -280,6 +280,80 @@ def main():
             PxgNaverReadonlyRecordState.source_key_hash
             == pxg_naver_readonly_persistence_service._hash(f"logistics:{batch_first.id}"),
         )) is None
+
+        atomic_store = Store(name="T17 Atomic Runner", platform="naver", status="active")
+        db.add(atomic_store)
+        db.flush()
+        db.add_all((
+            PxgNaverReadonlyCleanupStatus(
+                store_id=atomic_store.id,
+                platform="naver",
+                status="healthy",
+                last_success_at=NOW,
+            ),
+            ApiCredential(
+                store_id=atomic_store.id,
+                platform="naver",
+                credential_name="T17 Atomic",
+                client_id="t17-atomic",
+                encrypted_secret_key=encrypt_value("t17-atomic-secret"),
+                auth_status="test_passed",
+                status="active",
+                extra_config={"channel_no": "atomic"},
+            ),
+        ))
+        runner_first = seed_order(
+            db, atomic_store, "po-runner-first", "runner-first-order"
+        )
+        runner_second = seed_order(
+            db, atomic_store, "po-runner-second", "runner-second-order"
+        )
+        db.commit()
+        automatic_read_sync_service.ensure_automatic_read_schedule(
+            db, store_id=atomic_store.id, now=NOW
+        )
+        runner_checkpoint = db.scalar(select(SyncCheckpoint).where(
+            SyncCheckpoint.store_id == atomic_store.id,
+            SyncCheckpoint.sync_type == "naver_automatic_logistics",
+        ))
+        runner_orders = db.scalar(select(SyncCheckpoint).where(
+            SyncCheckpoint.store_id == atomic_store.id,
+            SyncCheckpoint.sync_type == "naver_automatic_orders",
+        ))
+        runner_orders.status = "success"
+        runner_orders.last_synced_at = NOW
+        runner_orders.fresh_until = NOW + timedelta(minutes=25)
+        runner_orders.last_error_code = None
+        runner_checkpoint.status = "idle"
+        runner_checkpoint.next_run_at = NOW
+        db.commit()
+        runner_reader = Reader([
+            detail("po-runner-first", "runner-first-order"),
+            detail("po-runner-second", "wrong-runner-second-order"),
+        ])
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=runner_checkpoint.id,
+            now=NOW,
+            reader=runner_reader,
+        ) == "failed"
+        db.refresh(runner_checkpoint)
+        assert runner_checkpoint.status == "blocked"
+        assert runner_checkpoint.last_error_code == "naver_logistics_external_order_id_mismatch"
+        assert db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == runner_first.id,
+        )) is None
+        assert db.query(OrderStatusEvent).filter_by(order_id=runner_first.id).count() == 0
+        assert db.scalar(select(PxgNaverReadonlyRecordState).where(
+            PxgNaverReadonlyRecordState.store_id == atomic_store.id,
+            PxgNaverReadonlyRecordState.resource_type == "logistics",
+            PxgNaverReadonlyRecordState.source_key_hash
+            == pxg_naver_readonly_persistence_service._hash(f"logistics:{runner_first.id}"),
+        )) is None
+        runner_first.order_status = "CANCELLED"
+        runner_second.order_status = "CANCELLED"
+        db.commit()
+
         batch_first.order_status = "CANCELLED"
         batch_second.order_status = "CANCELLED"
         db.commit()

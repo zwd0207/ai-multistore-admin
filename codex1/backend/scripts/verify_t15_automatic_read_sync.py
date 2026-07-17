@@ -240,6 +240,29 @@ def main():
             reader=blocked_reader,
         ) == "not_due"
         assert blocked_reader.logistics_calls == []
+
+        # The database claim must re-check orders if they become unhealthy
+        # after the initial dependency read but before the logistics lease.
+        second_logistics_cp.status = "idle"
+        second_logistics_cp.next_run_at = NOW
+        second_logistics_cp.last_error_code = None
+        db.commit()
+        with patch.object(
+            automatic_read_sync_service,
+            "_orders_dependency_ready",
+            side_effect=(True, False),
+        ):
+            assert run_automatic_checkpoint(
+                db,
+                checkpoint_id=second_logistics_cp.id,
+                now=NOW,
+                reader=blocked_reader,
+            ) == "not_due"
+        db.refresh(second_logistics_cp)
+        assert second_logistics_cp.status == "retry_wait"
+        assert second_logistics_cp.last_error_code == "orders_dependency_not_ready"
+        assert second_logistics_cp.lease_token is None
+        assert blocked_reader.logistics_calls == []
         second_order_cp.automatic_read_enabled = True
 
         order_cp.status = "success"

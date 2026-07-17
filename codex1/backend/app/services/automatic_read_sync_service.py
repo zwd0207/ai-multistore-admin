@@ -296,6 +296,21 @@ def _orders_dependency_ready(db: Session, *, store_id: int, now: datetime) -> bo
     )
 
 
+def _orders_dependency_claim_condition(*, store_id: int, now: datetime):
+    orders = SyncCheckpoint.__table__.alias("logistics_orders_dependency")
+    return select(orders.c.id).where(
+        orders.c.store_id == store_id,
+        orders.c.platform == NAVER,
+        orders.c.sync_type == RESOURCE_CONFIG["orders"]["sync_type"],
+        orders.c.automatic_read_enabled.is_(True),
+        orders.c.status.in_(LOGISTICS_ORDERS_HEALTHY_STATUSES),
+        orders.c.last_synced_at.is_not(None),
+        orders.c.fresh_until.is_not(None),
+        orders.c.fresh_until > now,
+        orders.c.last_error_code.is_(None),
+    ).exists()
+
+
 def _defer_logistics_for_orders_dependency(
     db: Session,
     *,
@@ -319,25 +334,40 @@ def _defer_logistics_for_orders_dependency(
 
 def _claim(db: Session, *, checkpoint_id: int, now: datetime) -> str | None:
     pending = db.get(SyncCheckpoint, checkpoint_id)
-    if (
+    is_logistics = bool(
         pending is not None
         and pending.sync_type == RESOURCE_CONFIG["logistics"]["sync_type"]
-        and not _orders_dependency_ready(db, store_id=pending.store_id, now=now)
+    )
+    if is_logistics and not _orders_dependency_ready(
+        db, store_id=pending.store_id, now=now
     ):
         _defer_logistics_for_orders_dependency(db, checkpoint=pending, now=now)
         return None
     token = secrets.token_urlsafe(24)
-    claimed = db.execute(update(SyncCheckpoint).where(
+    claim_conditions = [
         SyncCheckpoint.id == checkpoint_id,
         SyncCheckpoint.automatic_read_enabled.is_(True),
         SyncCheckpoint.status != "blocked",
         or_(SyncCheckpoint.next_run_at.is_(None), SyncCheckpoint.next_run_at <= now),
         or_(SyncCheckpoint.lease_expires_at.is_(None), SyncCheckpoint.lease_expires_at <= now),
-    ).values(
+    ]
+    if is_logistics:
+        claim_conditions.append(_orders_dependency_claim_condition(
+            store_id=pending.store_id,
+            now=now,
+        ))
+    claimed = db.execute(update(SyncCheckpoint).where(*claim_conditions).values(
         status="running", lease_token=token, lease_expires_at=now + _resource_lease(checkpoint_id, db),
         last_attempt_at=now, last_error_code=None,
     ).execution_options(synchronize_session=False)).rowcount
     db.commit()
+    if claimed != 1 and is_logistics:
+        db.expire_all()
+        pending = db.get(SyncCheckpoint, checkpoint_id)
+        if pending is not None and not _orders_dependency_ready(
+            db, store_id=pending.store_id, now=now
+        ):
+            _defer_logistics_for_orders_dependency(db, checkpoint=pending, now=now)
     return token if claimed == 1 else None
 
 
