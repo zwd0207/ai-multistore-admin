@@ -17,7 +17,7 @@ assert.match(authPages, /acceptTenantInvitation/);
 assert.match(authPages, /completeMfaEnrollment/);
 assert.match(authPages, /requestPasswordReset/);
 assert.match(authPages, /completePasswordReset/);
-assert.match(authPages, /function useSensitiveHashParam\(name\)[\s\S]*useState\(\(\) => searchParams\.get\(name\) \|\| ''\)[\s\S]*stripSensitiveHashParam\(name\)/);
+assert.match(authPages, /function useSensitiveHashParam\(name\)[\s\S]*incomingValue = searchParams\.get\(name\) \|\| ''[\s\S]*useState\(\(\) => incomingValue\)[\s\S]*if \(!incomingValue\) return[\s\S]*setValue\(incomingValue\)[\s\S]*stripSensitiveHashParam\(name\)/);
 assert.match(authPages, /AcceptInvitationPage\(\)[\s\S]*useSensitiveHashParam\('token'\)/);
 assert.match(authPages, /PasswordResetPage\([\s\S]*useSensitiveHashParam\('token'\)/);
 assert.match(authContext, /selectedTenantId/);

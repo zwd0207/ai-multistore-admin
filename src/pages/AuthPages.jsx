@@ -37,11 +37,14 @@ function stripSensitiveHashParam(name) {
 
 function useSensitiveHashParam(name) {
   const [searchParams] = useSearchParams();
-  const [value] = useState(() => searchParams.get(name) || '');
+  const incomingValue = searchParams.get(name) || '';
+  const [value, setValue] = useState(() => incomingValue);
 
   useEffect(() => {
-    if (value) stripSensitiveHashParam(name);
-  }, [name, value]);
+    if (!incomingValue) return;
+    setValue(incomingValue);
+    stripSensitiveHashParam(name);
+  }, [incomingValue, name]);
 
   return value;
 }
