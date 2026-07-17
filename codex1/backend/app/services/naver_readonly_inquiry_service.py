@@ -102,7 +102,12 @@ def _cleanup_status(db: Session, store_id: int) -> PxgNaverReadonlyCleanupStatus
 
 
 def run_naver_inquiry_retention_cleanup(
-    db: Session, *, store_id: int, settings: Settings | None = None, now=None
+    db: Session,
+    *,
+    store_id: int,
+    settings: Settings | None = None,
+    now=None,
+    allow_configuration_recovery: bool = False,
 ) -> dict[str, Any]:
     """Delete expired encrypted inquiry content and leave a per-store health signal."""
     settings = settings or get_settings()
@@ -112,7 +117,13 @@ def run_naver_inquiry_retention_cleanup(
     status.last_run_at = current
     # This table is shared with the approved PXG lifecycle. Never let the
     # inquiry scheduler clear a pre-existing manual-review or failure stop.
-    if status.status in {"manual_review_required", "failed"}:
+    configuration_recovery_allowed = bool(
+        allow_configuration_recovery
+        and status.status == "failed"
+        and status.last_failure_code == "readonly_retention_cleanup_disabled"
+        and settings.pxg_naver_local_read_retention_cleanup_enabled
+    )
+    if status.status in {"manual_review_required", "failed"} and not configuration_recovery_allowed:
         db.commit()
         raise ApiError("inquiry cleanup health is already blocking use", "readonly_retention_cleanup_failed", 409)
     if not settings.pxg_naver_local_read_retention_cleanup_enabled:

@@ -144,6 +144,9 @@ def _finish_attempt(
         "updated": int((result or {}).get("updated_count") or 0),
         "skipped": int((result or {}).get("skipped_count") or 0),
         "pages_read": int((result or {}).get("pages_read") or 0),
+        "cleanup_recovery_status": str(
+            (result or {}).get("cleanup_recovery_status") or "not_run"
+        )[:40],
         "legacy_plaintext_sanitized": int(
             (result or {}).get("legacy_plaintext_sanitized_count") or 0
         ),
@@ -278,6 +281,12 @@ def run_import(
     actor_id = hashlib.sha256(b"owner-approved-t24-one-time-inquiry-import").hexdigest()
     runner = refresh_runner or naver_readonly_inquiry_service.refresh_naver_readonly_inquiries
     try:
+        cleanup_result = naver_readonly_inquiry_service.run_naver_inquiry_retention_cleanup(
+            db,
+            store_id=store.id,
+            settings=approved_settings,
+            allow_configuration_recovery=True,
+        )
         result = runner(
             db,
             store_id=store.id,
@@ -286,6 +295,7 @@ def run_import(
         )
         result = {
             **result,
+            "cleanup_recovery_status": cleanup_result["status"],
             "legacy_plaintext_sanitized_count": _sanitize_superseded_legacy_inquiries(
                 db,
                 store_id=store.id,
@@ -318,6 +328,7 @@ def run_import(
         "updated_count": int(result.get("updated_count") or 0),
         "skipped_count": int(result.get("skipped_count") or 0),
         "pages_read": int(result.get("pages_read") or 0),
+        "cleanup_recovery_status": str(result.get("cleanup_recovery_status") or "not_run"),
         "classification_counts": _classification_counts(db, store_id=store.id),
         "legacy_plaintext_sanitized_count": int(result.get("legacy_plaintext_sanitized_count") or 0),
         "raw_response_saved": False,

@@ -42,14 +42,19 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.core.exceptions import ApiError
 from app.database import Base
 from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
 from app.models.api_credential import ApiCredential
 from app.models.customer_inquiry import CustomerInquiry
-from app.models.pxg_naver_readonly import PxgNaverReadonlyCustomerInquiry
+from app.models.pxg_naver_readonly import (
+    PxgNaverReadonlyCleanupStatus,
+    PxgNaverReadonlyCustomerInquiry,
+)
 from app.models.store import Store
 from app.models.sync_log import SyncLog
 from app.services.encryption import encrypt_value
+from app.services import naver_readonly_inquiry_service
 from app.services.customer_inquiry_service import _is_superseded_naver_legacy
 from app.services.naver_inquiry_identity import naver_inquiry_external_id_hash
 from run_t24_controlled_naver_inquiry_probe import ProbeBlocked
@@ -118,6 +123,14 @@ def main() -> None:
                     "order_id": "ORDER-1",
                 },
             ))
+            db.add(PxgNaverReadonlyCleanupStatus(
+                store_id=1,
+                platform="naver",
+                status="failed",
+                last_run_at=now,
+                last_failure_at=now,
+                last_failure_code="readonly_retention_cleanup_disabled",
+            ))
             db.commit()
 
             runner_calls = 0
@@ -181,7 +194,11 @@ def main() -> None:
                     "platform_write": False,
                 }
 
-            settings = Settings(app_env="production", credential_encryption_key=ENCRYPTION_KEY)
+            settings = Settings(
+                app_env="production",
+                credential_encryption_key=ENCRYPTION_KEY,
+                pxg_naver_local_read_retention_cleanup_enabled=True,
+            )
             result = run_import(
                 db,
                 store_id=1,
@@ -192,11 +209,16 @@ def main() -> None:
             )
             assert runner_calls == 1
             assert result["classification_counts"] == {"all": 2, "answered": 1, "unanswered": 1}
+            assert result["cleanup_recovery_status"] == "completed"
             assert result["legacy_plaintext_sanitized_count"] == 1
             assert result["automatic_sync_enabled"] is False and result["reply_enabled"] is False
             marker = db.scalar(select(SyncLog).where(SyncLog.sync_type == IMPORT_SYNC_TYPE))
             assert marker.status == "success" and marker.raw_summary["platform_write"] is False
             assert marker.raw_summary["legacy_plaintext_sanitized"] == 1
+            cleanup_status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ))
+            assert cleanup_status.status == "healthy" and cleanup_status.last_success_at is not None
             legacy = db.scalar(select(CustomerInquiry).where(CustomerInquiry.external_inquiry_id == "legacy-answered"))
             assert legacy.customer_name is None and legacy.content == ""
             assert legacy.title == "Migrated to encrypted readonly inquiry"
@@ -250,6 +272,27 @@ def main() -> None:
                 assert exc.error_code == "t24_import_approved_store_mismatch"
             else:
                 raise AssertionError("process approval must remain bound to the exact store")
+            db.add(Store(id=2, name="Other cleanup failure", platform="naver", status="active"))
+            db.add(PxgNaverReadonlyCleanupStatus(
+                store_id=2,
+                platform="naver",
+                status="failed",
+                last_run_at=now,
+                last_failure_at=now,
+                last_failure_code="readonly_inquiry_cleanup_failed",
+            ))
+            db.commit()
+            try:
+                naver_readonly_inquiry_service.run_naver_inquiry_retention_cleanup(
+                    db,
+                    store_id=2,
+                    settings=settings,
+                    allow_configuration_recovery=True,
+                )
+            except ApiError as exc:
+                assert exc.error_code == "readonly_retention_cleanup_failed"
+            else:
+                raise AssertionError("non-configuration cleanup failures must remain blocked")
             assert db.scalar(select(func.count()).select_from(PxgNaverReadonlyCustomerInquiry)) == 2
         print("verify_t24_one_time_naver_inquiry_import: ok")
     finally:
