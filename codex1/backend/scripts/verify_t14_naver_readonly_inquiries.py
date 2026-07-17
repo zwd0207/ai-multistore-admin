@@ -50,6 +50,7 @@ PASSWORD = "T14-test-password-not-production"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 CONTENT = "Customer contact must not appear in a list response."
 ANSWER_CONTENT = "The store reply must remain encrypted at rest."
+CUSTOMER_NAME = "Kim Customer Full Name"
 
 
 def _user(db, login, role, store):
@@ -110,7 +111,7 @@ def main():
         page = kwargs["page"]
         if page == 1:
             content = [
-                {"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": True, "answerContent": ANSWER_CONTENT, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "createdAt": "2026-07-01T00:00:00+00:00"},
+                {"inquiryNo": "i-1", "customerName": CUSTOMER_NAME, "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": True, "answerContent": ANSWER_CONTENT, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "createdAt": "2026-07-01T00:00:00+00:00"},
                 *[{"inquiryNo": f"page-one-{index}", "inquiryContent": "x", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(1, 200)],
             ]
             return {"success": True, "payload": inquiry_page(content, page=1, total_pages=2, total_elements=201)}
@@ -140,8 +141,8 @@ def main():
             assert record and record.encrypted_content and CONTENT not in record.encrypted_content and record.content_hash and record.content_length == len(CONTENT)
             assert record.encrypted_answer_content and ANSWER_CONTENT not in record.encrypted_answer_content
             assert record.answer_content_hash and record.answer_content_length == len(ANSWER_CONTENT)
-            assert record.encrypted_customer_name and "Kim" not in record.encrypted_customer_name
-            assert record.customer_name_hash and record.customer_name_length == len("Kim")
+            assert record.encrypted_customer_name and CUSTOMER_NAME not in record.encrypted_customer_name
+            assert record.customer_name_hash and record.customer_name_length == len(CUSTOMER_NAME)
             assert db.scalar(select(CustomerInquiry.id).where(CustomerInquiry.store_id == 1)) is None
             readonly_id, deadline = record.id, record.expires_at
             db.add(CustomerInquiry(
@@ -178,10 +179,10 @@ def main():
             shutil.copy2(DB_PATH, backup_copy)
             assert CONTENT.encode("utf-8") not in backup_copy.read_bytes()
             assert ANSWER_CONTENT.encode("utf-8") not in backup_copy.read_bytes()
-            assert b"Kim" not in backup_copy.read_bytes()
+            assert CUSTOMER_NAME.encode("utf-8") not in backup_copy.read_bytes()
             backup_copy.unlink()
         listed = client.get("/api/v1/customer-inquiries", params={"store_id": 1}, headers=headers)
-        assert listed.status_code == 200 and CONTENT not in listed.text and ANSWER_CONTENT not in listed.text and "Private title" not in listed.text and '"Kim"' not in listed.text, listed.text
+        assert listed.status_code == 200 and CONTENT not in listed.text and ANSWER_CONTENT not in listed.text and "Private title" not in listed.text and CUSTOMER_NAME not in listed.text, listed.text
         assert listed.json()["data"]["total"] == 202, listed.text
         assert listed.json()["data"]["classification_counts"] == {"all": 202, "answered": 1, "unanswered": 201}, listed.text
         assert any(item["source"] == "generic" for item in listed.json()["data"]["items"]), listed.text
@@ -189,7 +190,7 @@ def main():
         detail = client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers)
         assert detail.status_code == 200 and detail.json()["data"]["content"] == CONTENT, detail.text
         assert detail.json()["data"]["classification"] == "answered", detail.text
-        assert detail.json()["data"]["customer_name"] == "Kim", detail.text
+        assert detail.json()["data"]["customer_name"] == CUSTOMER_NAME, detail.text
         conversation = detail.json()["data"]["conversation"]
         assert [message["actor"] for message in conversation] == ["customer", "store"], detail.text
         assert [message["content"] for message in conversation] == [CONTENT, ANSWER_CONTENT], detail.text
@@ -220,7 +221,7 @@ def main():
             db.add_all([product_order, order_fallback]); db.flush()
             assert _related_order(db, 1, {"productOrderIdList": ["product-preferred"], "orderId": "order-fallback"}).id == product_order.id
             assert _related_order(db, 1, {"productOrderIdList": ["missing"], "orderId": "order-fallback"}).id == order_fallback.id
-            initial = {"inquiryNo": "ordering", "customerName": "Kim", "inquiryContent": "first", "answerContent": "first answer", "answered": True, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "title": "t", "createdAt": "2026-07-01T00:00:00+00:00"}
+            initial = {"inquiryNo": "ordering", "customerName": CUSTOMER_NAME, "inquiryContent": "first", "answerContent": "first answer", "answered": True, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "title": "t", "createdAt": "2026-07-01T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=initial, observed_at=now) == "created"
             db.flush()
             ordering = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(
