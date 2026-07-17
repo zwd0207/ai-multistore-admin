@@ -48,9 +48,13 @@ from scripts.recover_t24_dual_store_logistics import (
     FIRST_RUN_SPACING,
     RECOVERABLE_ERROR_CODE,
     RECOVERY_SYNC_TYPE,
+    REOPEN_APPROVAL_ENV,
+    REOPEN_APPROVAL_VALUE,
+    REOPEN_SYNC_TYPE,
     LogisticsRecoveryBlocked,
     close_dual_store_logistics,
     recover_dual_store_logistics,
+    reopen_closed_dual_store_logistics,
 )
 
 
@@ -350,6 +354,7 @@ def main() -> None:
     os.environ.pop(APPROVED_STORE_IDS_ENV, None)
     os.environ.pop(CLOSE_APPROVAL_ENV, None)
     os.environ.pop(CLOSE_SERVICE_STOPPED_ENV, None)
+    os.environ.pop(REOPEN_APPROVAL_ENV, None)
 
     with SessionLocal() as db:
         _expect_blocked(
@@ -732,6 +737,70 @@ def main() -> None:
         )
         db.rollback()
         assert db.query(SyncLog).filter_by(sync_type=CLOSE_SYNC_TYPE).count() == 2
+
+        _expect_blocked(
+            "t24_logistics_reopen_owner_approval_missing",
+            lambda: reopen_closed_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=5),
+                service_stopped_probe=lambda: True,
+            ),
+        )
+        db.rollback()
+        os.environ[REOPEN_APPROVAL_ENV] = REOPEN_APPROVAL_VALUE
+        _expect_blocked(
+            "t24_logistics_reopen_service_not_inactive",
+            lambda: reopen_closed_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=5),
+                service_stopped_probe=lambda: False,
+            ),
+        )
+        db.rollback()
+        reopened = reopen_closed_dual_store_logistics(
+            db,
+            specs=list(reversed(specs)),
+            settings=_settings(),
+            now=NOW + timedelta(minutes=5),
+            service_stopped_probe=lambda: True,
+        )
+        assert reopened["status"] == "scheduled"
+        assert reopened["store_ids"] == store_ids
+        assert reopened["checkpoint_count"] == 2
+        assert reopened["first_run_spacing_seconds"] == 60
+        assert reopened["platform_write"] is False
+        assert reopened["network_called"] is False
+        assert reopened["records_deleted"] is False
+        assert [item["next_run_at"] for item in reopened["schedules"]] == [
+            (NOW + timedelta(minutes=5)).isoformat(),
+            (NOW + timedelta(minutes=6)).isoformat(),
+        ]
+        for store_id in store_ids:
+            row = db.get(SyncCheckpoint, seeded[store_id]["logistics"].id)
+            assert row.status == "idle" and row.automatic_read_enabled is True
+            assert row.last_error_code is None and row.retry_count == 0
+            assert row.lease_token is None and row.lease_expires_at is None
+            assert row.cursor_value == original_cursors[store_id]
+        reopen_logs = db.scalars(select(SyncLog).where(
+            SyncLog.sync_type == REOPEN_SYNC_TYPE
+        ).order_by(SyncLog.store_id.asc())).all()
+        assert len(reopen_logs) == 2
+        _expect_blocked(
+            "t24_logistics_reopen_already_applied",
+            lambda: reopen_closed_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=7),
+                service_stopped_probe=lambda: True,
+            ),
+        )
+        db.rollback()
+        assert db.query(SyncLog).filter_by(sync_type=REOPEN_SYNC_TYPE).count() == 2
 
     print("verify_recover_t24_dual_store_logistics: ok")
 

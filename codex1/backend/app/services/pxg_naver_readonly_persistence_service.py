@@ -849,7 +849,11 @@ def persist_naver_order_detail_logistics_page(
         shipment_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
         shipped_at = _snapshot_time(detail.get("shipped_at"), current) if detail.get("shipped_at") else None
         source_updated_at = _strict_snapshot_time(
-            detail.get("last_changed_at") or detail.get("source_updated_at") or detail.get("shipped_at")
+            detail.get("last_changed_at")
+            or detail.get("source_updated_at")
+            or detail.get("shipped_at")
+            or detail.get("paid_at")
+            or detail.get("ordered_at")
         )
         if source_updated_at is None:
             raise ApiError("Naver logistics source timestamp is invalid", "naver_logistics_source_time_invalid", 409)

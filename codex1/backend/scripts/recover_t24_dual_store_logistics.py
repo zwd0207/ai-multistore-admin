@@ -42,6 +42,9 @@ CLOSE_SERVICE_STOPPED_VALUE = "api-service-confirmed-stopped"
 CLOSE_SERVICE_STOPPED_ENV = "T24_DUAL_STORE_LOGISTICS_CLOSE_SERVICE_STATE"
 CLOSE_SYNC_TYPE = "t24_dual_store_logistics_close"
 CLOSE_ERROR_CODE = "t24_logistics_rollback_closed"
+REOPEN_APPROVAL_VALUE = "owner-approved-dual-store-logistics-reopen"
+REOPEN_APPROVAL_ENV = "T24_DUAL_STORE_LOGISTICS_REOPEN_APPROVAL"
+REOPEN_SYNC_TYPE = "t24_dual_store_logistics_reopen"
 API_SYSTEMD_UNIT = "ai-multistore-api.service"
 ORDERS_SYNC_TYPE = "naver_automatic_orders"
 LOGISTICS_SYNC_TYPE = "naver_automatic_logistics"
@@ -134,6 +137,14 @@ def _assert_close_runtime(settings: Settings, *, target_ids: list[int]) -> None:
     if settings.naver_readonly_inquiry_approved_store_id_set != frozenset(target_ids):
         raise LogisticsRecoveryBlocked("t24_logistics_close_allowlist_mismatch")
     _assert_write_gates_closed(settings)
+
+
+def _require_reopen_process_approval(specs: list[StoreSpec]) -> None:
+    if os.environ.get(REOPEN_APPROVAL_ENV) != REOPEN_APPROVAL_VALUE:
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_owner_approval_missing")
+    if os.environ.get(CLOSE_SERVICE_STOPPED_ENV) != CLOSE_SERVICE_STOPPED_VALUE:
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_service_stop_unconfirmed")
+    _require_process_approval(specs)
 
 
 def _api_service_is_inactive() -> bool:
@@ -457,16 +468,163 @@ def close_dual_store_logistics(
     }
 
 
+def reopen_closed_dual_store_logistics(
+    db: Session,
+    *,
+    specs: list[StoreSpec],
+    settings: Settings,
+    now: datetime | None = None,
+    service_stopped_probe: Callable[[], bool] | None = None,
+) -> dict[str, object]:
+    normalized_specs = _normalized_specs(specs)
+    _require_reopen_process_approval(normalized_specs)
+    _assert_runtime_approved(settings)
+    current = _utc(now or get_utc_now())
+    target_ids = [spec.store_id for spec in normalized_specs]
+    if settings.naver_readonly_inquiry_approved_store_id_set != frozenset(target_ids):
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_allowlist_mismatch")
+    if not (service_stopped_probe or _api_service_is_inactive)():
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_service_not_inactive")
+    _lock_and_validate_stores(
+        db,
+        specs=normalized_specs,
+        target_ids=target_ids,
+    )
+
+    checkpoints = db.scalars(
+        select(SyncCheckpoint)
+        .where(
+            SyncCheckpoint.store_id.in_(target_ids),
+            SyncCheckpoint.platform == "naver",
+        )
+        .order_by(SyncCheckpoint.store_id.asc(), SyncCheckpoint.id.asc())
+        .with_for_update()
+    ).all()
+    if any(_active_or_uncleared_lease(row, current) for row in checkpoints):
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_active_lease_present")
+
+    logistics_rows: list[SyncCheckpoint] = []
+    for store_id in target_ids:
+        orders = _checkpoint_by_scope(
+            checkpoints,
+            store_id=store_id,
+            sync_type=ORDERS_SYNC_TYPE,
+        )
+        if (
+            orders.status != "success"
+            or not orders.automatic_read_enabled
+            or orders.last_synced_at is None
+            or orders.fresh_until is None
+            or _utc(orders.fresh_until) <= current
+            or orders.last_error_code is not None
+        ):
+            raise LogisticsRecoveryBlocked("t24_logistics_reopen_orders_not_fresh")
+        logistics_rows.append(_checkpoint_by_scope(
+            checkpoints,
+            store_id=store_id,
+            sync_type=LOGISTICS_SYNC_TYPE,
+        ))
+
+    def locked_markers(sync_type: str) -> list[SyncLog]:
+        return db.scalars(select(SyncLog).where(
+            SyncLog.store_id.in_(target_ids),
+            SyncLog.platform == "naver",
+            SyncLog.sync_type == sync_type,
+            SyncLog.status == "success",
+        ).order_by(SyncLog.store_id.asc(), SyncLog.id.asc()).with_for_update()).all()
+
+    for sync_type, error_code in (
+        (RECOVERY_SYNC_TYPE, "t24_logistics_reopen_recovery_marker_incomplete"),
+        (CLOSE_SYNC_TYPE, "t24_logistics_reopen_close_marker_incomplete"),
+    ):
+        markers = locked_markers(sync_type)
+        if len(markers) != len(target_ids) or {
+            marker.store_id for marker in markers
+        } != set(target_ids):
+            raise LogisticsRecoveryBlocked(error_code)
+
+    reopen_markers = locked_markers(REOPEN_SYNC_TYPE)
+    if reopen_markers:
+        if len(reopen_markers) == len(target_ids) and {
+            marker.store_id for marker in reopen_markers
+        } == set(target_ids):
+            raise LogisticsRecoveryBlocked("t24_logistics_reopen_already_applied")
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_marker_incomplete")
+
+    if any(
+        row.status != "blocked"
+        or row.automatic_read_enabled
+        or row.last_error_code != CLOSE_ERROR_CODE
+        or row.next_run_at is not None
+        or row.lease_token is not None
+        or row.lease_expires_at is not None
+        for row in logistics_rows
+    ):
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_checkpoint_state_invalid")
+
+    schedules: list[dict[str, object]] = []
+    try:
+        for index, row in enumerate(logistics_rows):
+            next_run_at = current + FIRST_RUN_SPACING * index
+            row.status = "idle"
+            row.automatic_read_enabled = True
+            row.next_run_at = next_run_at
+            row.retry_count = 0
+            row.last_error_code = None
+            row.lease_token = None
+            row.lease_expires_at = None
+            db.add(SyncLog(
+                store_id=row.store_id,
+                platform="naver",
+                sync_type=REOPEN_SYNC_TYPE,
+                status="success",
+                started_at=current,
+                finished_at=current,
+                message="Guarded logistics checkpoint reopen scheduled",
+                raw_summary={
+                    "status": "scheduled",
+                    "resource": "logistics",
+                    "first_run_offset_seconds": int((FIRST_RUN_SPACING * index).total_seconds()),
+                    "platform_write": False,
+                    "network_called": False,
+                    "records_deleted": False,
+                },
+            ))
+            schedules.append({
+                "store_id": row.store_id,
+                "next_run_at": next_run_at.isoformat(),
+            })
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "status": "scheduled",
+        "store_ids": target_ids,
+        "checkpoint_count": len(logistics_rows),
+        "first_run_spacing_seconds": int(FIRST_RUN_SPACING.total_seconds()),
+        "schedules": schedules,
+        "platform_write": False,
+        "network_called": False,
+        "records_deleted": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Recover exactly two guarded T24 Naver logistics checkpoints"
     )
-    parser.add_argument("--mode", choices=("recover", "close"), required=True)
+    parser.add_argument("--mode", choices=("recover", "close", "reopen"), required=True)
     parser.add_argument("--store", action="append", required=True, type=_parse_store_spec)
     args = parser.parse_args()
     try:
         with SessionLocal() as db:
-            action = recover_dual_store_logistics if args.mode == "recover" else close_dual_store_logistics
+            actions = {
+                "recover": recover_dual_store_logistics,
+                "close": close_dual_store_logistics,
+                "reopen": reopen_closed_dual_store_logistics,
+            }
+            action = actions[args.mode]
             result = action(db, specs=args.store, settings=get_settings())
     except LogisticsRecoveryBlocked as exc:
         print(json.dumps({"status": "blocked", "error_code": exc.error_code}), file=sys.stderr)

@@ -89,3 +89,19 @@ is required:
 - Confirmation that ordinary logs, audits, and responses contain no complete
   tracking number, credential, token, or raw platform response
 - Confirmation that every platform-write and AI setting remained false
+
+## Reopen After A Closed Rollback
+
+Do not delete recovery or close markers to retry a deployment. After the cause
+of the rollback is fixed and a new release passes the full release gate:
+
+1. Stop the API service and confirm `systemd` reports it as inactive.
+2. Verify both logistics checkpoints are exactly blocked by
+   `t24_logistics_rollback_closed`, with no lease or next run.
+3. Verify both recovery markers and both close markers are present, and no
+   reopen marker exists.
+4. Export the separate reopen approval in the protected shell.
+5. Run the same command as controlled recovery with `--mode reopen`.
+6. Parse the JSON result structurally. Never validate JSON by field order.
+7. Start the repaired release and follow the normal observation and backup
+   steps. Reopen is one-time and cannot be repeated.

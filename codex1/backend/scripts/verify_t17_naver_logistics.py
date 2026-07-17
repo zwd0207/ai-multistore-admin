@@ -186,6 +186,54 @@ def main():
         assert unavailable_payload["logistics_stale"] is True and not unavailable_payload["tracking_number"]
         assert unavailable_context["is_stale"] is True and not unavailable_context["tracking_number_masked"]
 
+        # Naver may omit change/shipping/payment time for an unshipped order.
+        # Its platform order time is a stable baseline until a newer shipment
+        # timestamp appears.
+        fallback_order = seed_order(db, store, "po-time-fallback", "o-time-fallback")
+        db.commit()
+        fallback_time = NOW - timedelta(days=1)
+        fallback_detail = detail(
+            "po-time-fallback",
+            "o-time-fallback",
+            tracking=None,
+            carrier=None,
+            delivery=None,
+        )
+        fallback_detail.pop("shipped_at")
+        fallback_detail["last_changed_at"] = None
+        fallback_detail["paid_at"] = None
+        fallback_detail["ordered_at"] = fallback_time.isoformat()
+        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db,
+            store_id=store.id,
+            details=[fallback_detail],
+            now=NOW,
+        )["not_available"] == 1
+        db.commit()
+        fallback_record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == fallback_order.id,
+        ))
+        assert fallback_record is None
+        assert pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+            db,
+            store_id=store.id,
+            details=[detail(
+                "po-time-fallback",
+                "o-time-fallback",
+                changed=NOW,
+                delivery="DELIVERING",
+            )],
+            now=NOW,
+        )["saved"] == 1
+        db.commit()
+        fallback_record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == fallback_order.id,
+        ))
+        assert fallback_record is not None
+        assert fallback_record.shipment_status == "DELIVERING"
+        fallback_order.order_status = "CANCELLED"
+        db.commit()
+
         # Exact association, multi-product orders, candidate filters, terminal exclusion, and historical side-save.
         try:
             pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(db, store_id=store.id, details=[detail("po-primary", "wrong-order")], now=NOW)
