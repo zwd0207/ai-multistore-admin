@@ -38,10 +38,10 @@ class Reader:
     def __init__(self, fail=False, failure_code="network_timeout"): self.fail, self.failure_code = fail, failure_code
     def validate(self, **kwargs): raise AssertionError("not used")
     def read_products(self, context, *, start_at, end_at, cursor):
-        if self.fail: raise NaverReadFailure(self.failure_code, retryable=True)
+        if self.fail: raise NaverReadFailure(self.failure_code, retryable=self.failure_code == "network_timeout")
         return NaverReadPage([{"external_product_id": "p-1" if not cursor else "p-2", "name": "Product", "status": "active", "price": 1, "stock_quantity": 1}], "next" if not cursor else None)
     def read_orders(self, context, *, start_at, end_at, cursor):
-        if self.fail: raise NaverReadFailure(self.failure_code, retryable=True)
+        if self.fail: raise NaverReadFailure(self.failure_code, retryable=self.failure_code == "network_timeout")
         return NaverReadPage([{"external_order_id": "o-1", "external_product_order_id": "po-1", "product_name": "Product", "quantity": 1, "order_amount": 1, "currency": "KRW", "order_status": "PAID", "ordered_at": NOW.isoformat(), "paid_at": NOW.isoformat()}])
 
 
@@ -63,7 +63,7 @@ def main():
         legacy_store = Store(name="T15 Legacy PXG", platform="naver", status="active")
         rejected_store = Store(name="T15 Fictional", platform="naver", status="active")
         db.add_all((legacy_store, rejected_store)); db.flush()
-        db.add(ApiCredential(store_id=legacy_store.id, platform="naver", credential_name="T15 legacy", client_id="legacy-client", encrypted_secret_key=encrypt_value("legacy-secret-never-in-log"), auth_status="configured", status="active", extra_config={"channel_no": "1"}))
+        db.add(ApiCredential(store_id=legacy_store.id, platform="naver", credential_name="T15 legacy", client_id="legacy-client", encrypted_secret_key=encrypt_value("legacy-secret-never-in-log"), auth_status="test_passed", status="active", extra_config={"channel_no": "1"}))
         db.add(SyncLog(store_id=legacy_store.id, platform="naver", sync_type="manual_batch_sync", status="success", message="approved legacy readonly sync", raw_summary={"status": "success", "platform_write": False}))
         db.commit()
         assert db.query(StoreOnboarding).filter_by(store_id=legacy_store.id).count() == 0

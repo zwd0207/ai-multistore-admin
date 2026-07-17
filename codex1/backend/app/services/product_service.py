@@ -10,7 +10,14 @@ def serialize_product(product: Product) -> dict:
     return ProductRead.model_validate(product).model_dump(mode="json")
 
 
-def upsert_products(db: Session, store_id: int, platform: str, items: list[dict]) -> dict:
+def upsert_products(
+    db: Session,
+    store_id: int,
+    platform: str,
+    items: list[dict],
+    *,
+    commit: bool = True,
+) -> dict:
     ensure_store_exists(db, store_id)
     created = 0
     updated = 0
@@ -34,7 +41,8 @@ def upsert_products(db: Session, store_id: int, platform: str, items: list[dict]
             setattr(product, field, value)
         updated += 1
 
-    db.commit()
+    if commit:
+        db.commit()
     return {"created": created, "updated": updated, "total": len(items)}
 
 

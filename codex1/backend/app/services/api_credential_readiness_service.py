@@ -1795,6 +1795,18 @@ def _persist_real_readonly_capability_results(db: Session, results: list[dict]) 
         credential_id = result.get("credential_id")
         if store_id is None or credential_id is None:
             continue
+        credential = db.scalar(select(ApiCredential).where(
+            ApiCredential.id == credential_id,
+            ApiCredential.store_id == store_id,
+            ApiCredential.platform == result["platform"],
+        ).with_for_update())
+        if credential is None:
+            raise ApiError(
+                message="Capability result credential binding is unavailable",
+                error_code="credential_not_ready",
+                status_code=409,
+                detail={"store_id": store_id, "credential_id": credential_id},
+            )
 
         capability = db.scalars(
             select(ApiCapabilityCheck)

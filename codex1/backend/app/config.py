@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import EmailStr, Field, SecretStr, model_validator
+from pydantic import EmailStr, Field, SecretStr, StrictInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     automatic_read_sync_interval_seconds: int = 45
     naver_readonly_inquiry_real_read_enabled: bool = False
     naver_readonly_inquiry_approved_store_id: int | None = Field(default=None, gt=0)
+    naver_readonly_inquiry_approved_store_ids: list[StrictInt] = Field(default_factory=list)
     lifecycle_schedulers_enabled: bool = True
     pxg_naver_local_read_first_sync_limit: int = 3
     ai_automatic_operations_enabled: bool = False
@@ -105,15 +106,36 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_naver_readonly_inquiry_real_read(self) -> "Settings":
+        if any(type(store_id) is not int or store_id <= 0 for store_id in self.naver_readonly_inquiry_approved_store_ids):
+            raise ValueError("NAVER_READONLY_INQUIRY_APPROVED_STORE_IDS requires positive integer store IDs")
+        if len(self.naver_readonly_inquiry_approved_store_ids) != len(
+            set(self.naver_readonly_inquiry_approved_store_ids)
+        ):
+            raise ValueError("NAVER_READONLY_INQUIRY_APPROVED_STORE_IDS cannot contain duplicate store IDs")
         if (
-            self.naver_readonly_inquiry_real_read_enabled
-            and self.naver_readonly_inquiry_approved_store_id is None
+            self.naver_readonly_inquiry_approved_store_ids
+            and self.naver_readonly_inquiry_approved_store_id is not None
+            and self.naver_readonly_inquiry_approved_store_id
+            not in self.naver_readonly_inquiry_approved_store_ids
         ):
             raise ValueError(
+                "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID must be unset or included in "
+                "NAVER_READONLY_INQUIRY_APPROVED_STORE_IDS"
+            )
+        if self.naver_readonly_inquiry_real_read_enabled and not self.naver_readonly_inquiry_approved_store_id_set:
+            raise ValueError(
                 "NAVER_READONLY_INQUIRY_REAL_READ_ENABLED requires "
+                "NAVER_READONLY_INQUIRY_APPROVED_STORE_IDS or "
                 "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID"
             )
         return self
+
+    @property
+    def naver_readonly_inquiry_approved_store_id_set(self) -> frozenset[int]:
+        store_ids = set(self.naver_readonly_inquiry_approved_store_ids)
+        if self.naver_readonly_inquiry_approved_store_id is not None:
+            store_ids.add(self.naver_readonly_inquiry_approved_store_id)
+        return frozenset(store_ids)
 
     @model_validator(mode="after")
     def validate_auth_email_delivery(self) -> "Settings":

@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_business_date, get_utc_now
+from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
+from app.models.api_credential import ApiCredential
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyCustomerInquiry
 from app.models.store import Store
@@ -42,6 +44,8 @@ INQUIRY_PAGE_DELAY_SECONDS = 1.0
 INQUIRY_SYNC_TYPE = "naver_automatic_inquiries"
 INQUIRY_LEASE_DURATION = timedelta(minutes=15)
 INQUIRY_MANUAL_LEASE_NOTE = "t24_manual_inquiry_lease"
+INQUIRY_CAPABILITY_KEY = "naver.customer_inquiry_read"
+DUAL_STORE_PREPARATION_SYNC_TYPE = "t24_dual_store_auto_read_preparation"
 _SAFE_LABEL = re.compile(r"[^a-zA-Z0-9_.:-]+")
 
 
@@ -74,12 +78,126 @@ def assert_naver_inquiry_real_read_allowed(*, store_id: int, settings: Settings)
             "naver_inquiry_real_read_disabled",
             403,
         )
-    if settings.naver_readonly_inquiry_approved_store_id != store_id:
+    if store_id not in settings.naver_readonly_inquiry_approved_store_id_set:
         raise ApiError(
             "Naver inquiry readonly access is not approved for this store",
             "naver_inquiry_store_not_approved",
             403,
         )
+
+
+def _prepared_marker_summary(
+    db: Session,
+    *,
+    store_id: int,
+    lock: bool = True,
+) -> dict[str, Any] | None:
+    statement = select(SyncLog).where(
+        SyncLog.store_id == store_id,
+        SyncLog.platform == "naver",
+        SyncLog.sync_type == DUAL_STORE_PREPARATION_SYNC_TYPE,
+    ).order_by(SyncLog.id.desc())
+    if lock:
+        statement = statement.with_for_update()
+    marker = db.scalar(statement)
+    if marker is None:
+        return None
+    summary = marker.raw_summary if isinstance(marker.raw_summary, dict) else {}
+    credential_id = summary.get("credential_id")
+    activation_value = summary.get("activation_at")
+    first_run_offset_seconds = summary.get("first_run_offset_seconds")
+    try:
+        activation_at = datetime.fromisoformat(str(activation_value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        activation_at = None
+    if (
+        type(credential_id) is not int
+        or credential_id <= 0
+        or marker.status != "success"
+        or summary.get("status") != "success"
+        or activation_at is None
+        or activation_at.tzinfo is None
+        or activation_at.utcoffset() is None
+        or summary.get("order_initial_lookback_days") != 30
+        or type(first_run_offset_seconds) is not int
+        or first_run_offset_seconds < 0
+        or summary.get("platform_write") is not False
+        or summary.get("network_called") is not False
+    ):
+        raise ApiError(
+            "automatic-read preparation evidence is invalid",
+            "automatic_read_preparation_evidence_invalid",
+            409,
+        )
+    return summary
+
+
+def _prepared_credential_id(db: Session, *, store_id: int) -> int | None:
+    summary = _prepared_marker_summary(db, store_id=store_id)
+    return int(summary["credential_id"]) if summary is not None else None
+
+
+def _prepared_activation_at(db: Session, *, store_id: int) -> datetime | None:
+    summary = _prepared_marker_summary(db, store_id=store_id)
+    if summary is None:
+        return None
+    return _utc(datetime.fromisoformat(str(summary["activation_at"]).replace("Z", "+00:00")))
+
+
+def _approved_inquiry_credential(db: Session, *, store_id: int) -> ApiCredential:
+    credentials = db.scalars(select(ApiCredential).where(
+        ApiCredential.store_id == store_id,
+        ApiCredential.platform == "naver",
+        ApiCredential.status == "active",
+    ).order_by(ApiCredential.id.asc()).with_for_update()).all()
+    if len(credentials) != 1:
+        raise ApiError(
+            "exactly one active Naver credential is required",
+            "naver_inquiry_credential_ambiguous",
+            409,
+        )
+    credential = credentials[0]
+    extra_config = credential.extra_config if isinstance(credential.extra_config, dict) else {}
+    if (
+        credential.auth_status != "test_passed"
+        or not credential.client_id
+        or not credential.encrypted_secret_key
+        or not str(extra_config.get("channel_no") or "").strip()
+    ):
+        raise ApiError(
+            "a validated Naver credential and channel are required",
+            "credential_not_ready",
+            409,
+        )
+    latest_evidence = db.scalar(select(ApiCapabilityTestResult).join(
+        ApiCapabilityCheck,
+        ApiCapabilityCheck.id == ApiCapabilityTestResult.capability_id,
+    ).where(
+        ApiCapabilityTestResult.store_id == store_id,
+        ApiCapabilityTestResult.credential_id == credential.id,
+        ApiCapabilityCheck.platform == "naver",
+        ApiCapabilityCheck.capability_key == INQUIRY_CAPABILITY_KEY,
+    ).order_by(ApiCapabilityTestResult.id.desc()).with_for_update(of=ApiCapabilityTestResult))
+    if (
+        latest_evidence is None
+        or latest_evidence.test_mode != "real_readonly"
+        or latest_evidence.test_status != "tested_success"
+        or latest_evidence.http_status != 200
+        or latest_evidence.permission_result != "order_seller_confirmed"
+    ):
+        raise ApiError(
+            "Naver inquiry readonly capability has not been verified",
+            "naver_inquiry_capability_not_verified",
+            409,
+        )
+    prepared_credential_id = _prepared_credential_id(db, store_id=store_id)
+    if prepared_credential_id is not None and prepared_credential_id != credential.id:
+        raise ApiError(
+            "Naver credential changed after automatic-read preparation",
+            "automatic_read_prepared_credential_changed",
+            409,
+        )
+    return credential
 
 
 def _store(db: Session, store_id: int) -> Store:
@@ -481,6 +599,50 @@ def _renew_inquiry_lease(
         )
 
 
+def _fence_inquiry_commit(
+    db: Session,
+    *,
+    lease: dict[str, Any],
+    store_id: int,
+    credential_id: int,
+    automatic: bool,
+    settings: Settings,
+    now: datetime | None = None,
+) -> None:
+    assert_naver_inquiry_real_read_allowed(store_id=store_id, settings=settings)
+    current = _utc(now or get_utc_now())
+    conditions = [
+        SyncCheckpoint.id == int(lease["checkpoint_id"]),
+        SyncCheckpoint.store_id == store_id,
+        SyncCheckpoint.platform == "naver",
+        SyncCheckpoint.sync_type == INQUIRY_SYNC_TYPE,
+        SyncCheckpoint.lease_token == str(lease["token"]),
+        SyncCheckpoint.lease_expires_at.is_not(None),
+        SyncCheckpoint.lease_expires_at > current,
+    ]
+    if automatic:
+        conditions.extend((
+            SyncCheckpoint.automatic_read_enabled.is_(True),
+            SyncCheckpoint.status == "running",
+        ))
+    fenced = db.execute(update(SyncCheckpoint).where(*conditions).values(
+        lease_expires_at=current + INQUIRY_LEASE_DURATION,
+    ).execution_options(synchronize_session=False)).rowcount
+    if fenced != 1:
+        raise ApiError(
+            "Naver inquiry refresh lost its commit lease",
+            "naver_inquiry_commit_fence_lost",
+            409,
+        )
+    current_credential = _approved_inquiry_credential(db, store_id=store_id)
+    if current_credential.id != credential_id:
+        raise ApiError(
+            "Naver inquiry credential changed during refresh",
+            "naver_inquiry_credential_changed",
+            409,
+        )
+
+
 def _safe_request_error_detail(result: dict[str, Any]) -> dict[str, Any]:
     safe_error = result.get("safe_error") if isinstance(result.get("safe_error"), dict) else {}
     detail: dict[str, Any] = {"platform_http_status": result.get("http_status")}
@@ -707,11 +869,7 @@ def refresh_naver_readonly_inquiries(
             now=now,
         )
         initialize_naver_inquiry_store(db, store_id=store_id, settings=settings)
-        credential = sync_service._ensure_naver_product_preview_credential(
-            db,
-            store_id=store_id,
-            credential_id=None,
-        )
+        credential = _approved_inquiry_credential(db, store_id=store_id)
         context = sync_service._build_naver_token_context_from_credential(credential)
         _renew_inquiry_lease(db, lease=lease)
         token, _ = api_credential_readiness_service._request_naver_token_from_context(context)
@@ -728,6 +886,14 @@ def refresh_naver_readonly_inquiries(
         for item in fetched["items"]:
             outcome = _upsert_item(db, store_id=store_id, item=item, observed_at=now)
             counts[outcome] += 1
+        _fence_inquiry_commit(
+            db,
+            lease=lease,
+            store_id=store_id,
+            credential_id=credential.id,
+            automatic=actor_id == "automatic-read",
+            settings=settings,
+        )
         from app.services.pxg_naver_readonly_persistence_service import _audit_local_ingestion
 
         _audit_local_ingestion(

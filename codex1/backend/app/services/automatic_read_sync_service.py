@@ -32,9 +32,11 @@ RESOURCE_CONFIG = {
     "products": {"sync_type": "naver_automatic_products", "interval": timedelta(hours=2), "freshness": timedelta(hours=4), "lease": timedelta(minutes=30)},
     "logistics": {"sync_type": "naver_automatic_logistics", "interval": timedelta(minutes=30), "freshness": timedelta(minutes=75), "lease": timedelta(minutes=20)},
 }
+PREPARED_ACTIVATION_RESOURCE_ORDER = ("orders", "customer_inquiries", "logistics", "products")
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
 MAX_RETRY_DELAY_SECONDS = 60 * 60
+PREPARED_ACTIVATION_START_GRACE = timedelta(minutes=1)
 INQUIRY_GATE_ERROR_CODES = frozenset({
     "naver_inquiry_real_read_disabled",
     "naver_inquiry_store_not_approved",
@@ -120,7 +122,7 @@ def _legacy_compatible_store_ids_query():
         ApiCredential.store_id == Store.id,
         ApiCredential.platform == NAVER,
         ApiCredential.status == "active",
-        ApiCredential.auth_status.in_(("configured", "test_passed")),
+        ApiCredential.auth_status == "test_passed",
     )).where(
         Store.status == "active",
         Store.platform == NAVER,
@@ -136,19 +138,10 @@ def _legacy_compatible_store_ids_query():
     )
 
 
-def _legacy_configured_credential_is_approved(db: Session, credential: ApiCredential) -> bool:
-    if credential.auth_status != "configured":
-        return False
-    return db.scalar(_legacy_compatible_store_ids_query().where(
-        Store.id == credential.store_id,
-        ApiCredential.id == credential.id,
-    )) is not None
-
-
 def _inquiry_gate_error(settings: Settings, store_id: int) -> str | None:
     if not settings.naver_readonly_inquiry_real_read_enabled:
         return "naver_inquiry_real_read_disabled"
-    if settings.naver_readonly_inquiry_approved_store_id != store_id:
+    if store_id not in settings.naver_readonly_inquiry_approved_store_id_set:
         return "naver_inquiry_store_not_approved"
     return None
 
@@ -174,6 +167,66 @@ def _apply_inquiry_real_read_gate(db: Session, *, settings: Settings, now: datet
             checkpoint.last_error_code = None
             checkpoint.retry_count = 0
     db.commit()
+
+
+def _apply_prepared_activation_gate(db: Session, *, now: datetime) -> int:
+    current = _utc(now)
+    store_ids = sorted(set(db.scalars(select(SyncLog.store_id).where(
+        SyncLog.platform == NAVER,
+        SyncLog.sync_type == naver_readonly_inquiry_service.DUAL_STORE_PREPARATION_SYNC_TYPE,
+    )).all()))
+    blocked_count = 0
+    sync_types = [RESOURCE_CONFIG[resource]["sync_type"] for resource in PREPARED_ACTIVATION_RESOURCE_ORDER]
+    for store_id in store_ids:
+        rows = db.scalars(select(SyncCheckpoint).where(
+            SyncCheckpoint.store_id == store_id,
+            SyncCheckpoint.platform == NAVER,
+            SyncCheckpoint.sync_type.in_(sync_types),
+        )).all()
+        if any(row.last_attempt_at is not None for row in rows):
+            continue
+        failure_code = None
+        try:
+            marker = naver_readonly_inquiry_service._prepared_marker_summary(
+                db,
+                store_id=store_id,
+                lock=False,
+            )
+            if marker is None:
+                continue
+            activation_at = _utc(datetime.fromisoformat(
+                str(marker["activation_at"]).replace("Z", "+00:00")
+            ))
+            offset_seconds = int(marker["first_run_offset_seconds"])
+        except ApiError:
+            activation_at = None
+            offset_seconds = 0
+            failure_code = "automatic_read_preparation_evidence_invalid"
+        if len(rows) != len(PREPARED_ACTIVATION_RESOURCE_ORDER):
+            failure_code = "automatic_read_preparation_checkpoint_incomplete"
+        elif activation_at is not None:
+            by_resource = {_resource_for_checkpoint(row): row for row in rows}
+            for index, resource in enumerate(PREPARED_ACTIVATION_RESOURCE_ORDER):
+                row = by_resource.get(resource)
+                expected = activation_at + timedelta(seconds=offset_seconds) + timedelta(minutes=index)
+                if row is None or row.next_run_at is None or _utc(row.next_run_at) != expected:
+                    failure_code = "automatic_read_activation_schedule_changed"
+                    break
+            first_run_at = activation_at + timedelta(seconds=offset_seconds)
+            if failure_code is None and current > first_run_at + PREPARED_ACTIVATION_START_GRACE:
+                failure_code = "automatic_read_activation_window_missed"
+        if failure_code is None:
+            continue
+        for row in rows:
+            row.status = "blocked"
+            row.automatic_read_enabled = False
+            row.next_run_at = None
+            row.last_error_code = failure_code
+            row.lease_token = None
+            row.lease_expires_at = None
+            blocked_count += 1
+    db.commit()
+    return blocked_count
 
 
 def ensure_automatic_read_schedule(
@@ -230,19 +283,22 @@ def _resource_lease(checkpoint_id: int, db: Session) -> timedelta:
 
 
 def _context(db: Session, store_id: int) -> store_onboarding_service.NaverReadContext:
-    credential = db.scalar(select(ApiCredential).where(
-        ApiCredential.store_id == store_id, ApiCredential.platform == NAVER,
-        ApiCredential.status == "active", ApiCredential.auth_status == "test_passed",
-    ).order_by(ApiCredential.id.desc()))
-    if credential is None:
-        configured_credential = db.scalar(select(ApiCredential).where(
-            ApiCredential.store_id == store_id, ApiCredential.platform == NAVER,
-            ApiCredential.status == "active", ApiCredential.auth_status == "configured",
-        ).order_by(ApiCredential.id.desc()))
-        if configured_credential is not None and _legacy_configured_credential_is_approved(db, configured_credential):
-            credential = configured_credential
-    if credential is None or not credential.client_id:
+    credentials = db.scalars(select(ApiCredential).where(
+        ApiCredential.store_id == store_id,
+        ApiCredential.platform == NAVER,
+        ApiCredential.status == "active",
+    ).order_by(ApiCredential.id.asc()).with_for_update()).all()
+    if len(credentials) != 1:
+        raise store_onboarding_service.NaverReadFailure("credential_ambiguous")
+    credential = credentials[0]
+    if credential.auth_status != "test_passed" or not credential.client_id:
         raise store_onboarding_service.NaverReadFailure("credential_unavailable")
+    prepared_credential_id = naver_readonly_inquiry_service._prepared_credential_id(
+        db,
+        store_id=store_id,
+    )
+    if prepared_credential_id is not None and prepared_credential_id != credential.id:
+        raise store_onboarding_service.NaverReadFailure("credential_changed_since_activation")
     secret = decrypt_value(credential.encrypted_secret_key)
     if not secret:
         raise store_onboarding_service.NaverReadFailure("credential_unavailable")
@@ -275,9 +331,63 @@ def _resource_for_checkpoint(checkpoint: SyncCheckpoint) -> str:
     raise ValueError("unsupported automatic checkpoint")
 
 
+def _renew_page_lease(
+    db: Session,
+    *,
+    checkpoint_id: int,
+    token: str,
+    resource: str,
+    now: datetime,
+) -> None:
+    renewed = db.execute(update(SyncCheckpoint).where(
+        SyncCheckpoint.id == checkpoint_id,
+        SyncCheckpoint.automatic_read_enabled.is_(True),
+        SyncCheckpoint.status == "running",
+        SyncCheckpoint.lease_token == token,
+        SyncCheckpoint.lease_expires_at.is_not(None),
+        SyncCheckpoint.lease_expires_at > now,
+    ).values(
+        lease_expires_at=now + RESOURCE_CONFIG[resource]["lease"],
+    ).execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    if renewed != 1:
+        raise store_onboarding_service.NaverReadFailure("automatic_read_lease_lost")
+
+
+def _fence_page_commit(
+    db: Session,
+    *,
+    checkpoint_id: int,
+    token: str,
+    resource: str,
+    credential_id: int,
+    now: datetime,
+) -> None:
+    fenced = db.execute(update(SyncCheckpoint).where(
+        SyncCheckpoint.id == checkpoint_id,
+        SyncCheckpoint.automatic_read_enabled.is_(True),
+        SyncCheckpoint.status == "running",
+        SyncCheckpoint.lease_token == token,
+        SyncCheckpoint.lease_expires_at.is_not(None),
+        SyncCheckpoint.lease_expires_at > now,
+    ).values(
+        lease_expires_at=now + RESOURCE_CONFIG[resource]["lease"],
+    ).execution_options(synchronize_session=False)).rowcount
+    if fenced != 1:
+        raise store_onboarding_service.NaverReadFailure("automatic_read_commit_fence_lost")
+    checkpoint = db.get(SyncCheckpoint, checkpoint_id)
+    if checkpoint is None:
+        raise store_onboarding_service.NaverReadFailure("automatic_read_commit_fence_lost")
+    current_context = _context(db, checkpoint.store_id)
+    if current_context.credential_id != credential_id:
+        raise store_onboarding_service.NaverReadFailure("credential_changed_during_automatic_read")
+    db.commit()
+
+
 def _sync_t13_resource(
     db: Session, *, checkpoint: SyncCheckpoint, resource: str,
     reader: store_onboarding_service.NaverReadAdapter, now: datetime,
+    token: str, clock: Callable[[], datetime],
 ) -> dict[str, int]:
     context = _context(db, checkpoint.store_id)
     if checkpoint.cursor_value:
@@ -293,18 +403,32 @@ def _sync_t13_resource(
     while True:
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
+        page_now = _utc(clock())
+        _renew_page_lease(
+            db,
+            checkpoint_id=checkpoint.id,
+            token=token,
+            resource=resource,
+            now=page_now,
+        )
         page = reader.read_orders(context, start_at=start_at, end_at=end_at, cursor=cursor) if resource == "orders" else reader.read_products(context, start_at=start_at, end_at=end_at, cursor=cursor)
         if not isinstance(page, store_onboarding_service.NaverReadPage):
             raise store_onboarding_service.NaverReadFailure("invalid_read_adapter_page")
         items = store_onboarding_service._canonical_orders(page.items, "automatic_incremental") if resource == "orders" else store_onboarding_service._canonical_products(page.items, "automatic_incremental")
-        outcome = order_service.upsert_orders(db, checkpoint.store_id, NAVER, items, commit=False) if resource == "orders" else product_service.upsert_products(db, checkpoint.store_id, NAVER, items)
-        # The writer commits before this cursor transition is persisted.
+        outcome = order_service.upsert_orders(db, checkpoint.store_id, NAVER, items, commit=False) if resource == "orders" else product_service.upsert_products(db, checkpoint.store_id, NAVER, items, commit=False)
         created += outcome["created"]
         updated += outcome["updated"]
         pages += 1
         cursor = page.next_cursor
         checkpoint.cursor_value = cursor
-        db.commit()
+        _fence_page_commit(
+            db,
+            checkpoint_id=checkpoint.id,
+            token=token,
+            resource=resource,
+            credential_id=context.credential_id,
+            now=_utc(clock()),
+        )
         if not cursor:
             break
     return {"created": created, "updated": updated, "pages": pages}
@@ -313,6 +437,7 @@ def _sync_t13_resource(
 def _sync_t17_logistics(
     db: Session, *, checkpoint: SyncCheckpoint,
     reader: store_onboarding_service.NaverReadAdapter, now: datetime,
+    token: str, clock: Callable[[], datetime],
 ) -> dict[str, int]:
     """Read existing order-detail snapshots and persist only local logistics data."""
     from app.services import pxg_naver_readonly_persistence_service
@@ -325,6 +450,13 @@ def _sync_t17_logistics(
     while True:
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
+        _renew_page_lease(
+            db,
+            checkpoint_id=checkpoint.id,
+            token=token,
+            resource="logistics",
+            now=_utc(clock()),
+        )
         batch = _t17_logistics_candidates(
             db, store_id=checkpoint.store_id, now=now, after_order_id=last_order_id,
         )[:store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
@@ -347,8 +479,14 @@ def _sync_t17_logistics(
         pages += 1
         last_order_id = batch[-1].id
         checkpoint.cursor_value = _encode_logistics_cursor(last_order_id)
-        # Snapshot writes and this cursor transition commit as one page transaction.
-        db.commit()
+        _fence_page_commit(
+            db,
+            checkpoint_id=checkpoint.id,
+            token=token,
+            resource="logistics",
+            credential_id=context.credential_id,
+            now=_utc(clock()),
+        )
     return {"created": saved, "updated": 0, "pages": pages, "not_available": not_available, "skipped": skipped}
 
 
@@ -405,18 +543,27 @@ def _t17_logistics_candidates(db: Session, *, store_id: int, now: datetime, afte
 
 
 def _finish_success(db: Session, *, checkpoint: SyncCheckpoint, token: str, now: datetime, result: dict[str, int]) -> bool:
-    if checkpoint.lease_token != token:
-        return False
     resource = _resource_for_checkpoint(checkpoint)
     interval = RESOURCE_CONFIG[resource]["interval"]
-    checkpoint.status = "success"
-    checkpoint.last_synced_at = now
-    checkpoint.fresh_until = now + RESOURCE_CONFIG[resource]["freshness"]
-    checkpoint.next_run_at = now + interval + _stagger(checkpoint.store_id, resource, interval)
-    checkpoint.retry_count = 0
-    checkpoint.last_error_code = None
-    checkpoint.lease_token = None
-    checkpoint.lease_expires_at = None
+    _context(db, checkpoint.store_id)
+    finished = db.execute(update(SyncCheckpoint).where(
+        SyncCheckpoint.id == checkpoint.id,
+        SyncCheckpoint.automatic_read_enabled.is_(True),
+        SyncCheckpoint.status == "running",
+        SyncCheckpoint.lease_token == token,
+    ).values(
+        status="success",
+        last_synced_at=now,
+        fresh_until=now + RESOURCE_CONFIG[resource]["freshness"],
+        next_run_at=now + interval + _stagger(checkpoint.store_id, resource, interval),
+        retry_count=0,
+        last_error_code=None,
+        lease_token=None,
+        lease_expires_at=None,
+    ).execution_options(synchronize_session=False)).rowcount
+    if finished != 1:
+        db.rollback()
+        return False
     db.add(SyncLog(store_id=checkpoint.store_id, platform=NAVER, sync_type=checkpoint.sync_type, status="success", finished_at=now,
                    message="automatic readonly sync completed", raw_summary={**result, "raw_response_saved": False, "platform_write": False}))
     db.commit()
@@ -427,7 +574,7 @@ def _finish_failure(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
     if checkpoint.lease_token != token:
         return False
     checkpoint.last_error_code = _safe_error_code(exc)
-    if _retryable_error(checkpoint.last_error_code):
+    if bool(getattr(exc, "retryable", False)) or _retryable_error(checkpoint.last_error_code):
         checkpoint.retry_count += 1
         checkpoint.status = "retry_wait"
         exponential_seconds = min(
@@ -590,6 +737,7 @@ def run_automatic_checkpoint(
 ) -> str:
     fixed_now = _utc(now) if now is not None else None
     current = fixed_now or _utc(get_utc_now())
+    _apply_prepared_activation_gate(db, now=current)
     pending_checkpoint = db.get(SyncCheckpoint, checkpoint_id)
     if (
         pending_checkpoint is not None
@@ -604,6 +752,7 @@ def run_automatic_checkpoint(
     checkpoint = db.get(SyncCheckpoint, checkpoint_id)
     assert checkpoint is not None
     resource = _resource_for_checkpoint(checkpoint)
+    clock = (lambda: current) if fixed_now is not None else get_utc_now
     try:
         if resource == "customer_inquiries":
             result = (inquiry_runner or naver_readonly_inquiry_service.refresh_naver_readonly_inquiries)(
@@ -612,10 +761,23 @@ def run_automatic_checkpoint(
             summary = {"created": int(result.get("created_count", 0)), "updated": int(result.get("updated_count", 0)), "pages": int(result.get("pages_read", 0))}
         elif resource == "logistics":
             summary = _sync_t17_logistics(
-                db, checkpoint=checkpoint, reader=reader or store_onboarding_service.get_naver_read_adapter(), now=current,
+                db,
+                checkpoint=checkpoint,
+                reader=reader or store_onboarding_service.get_naver_read_adapter(),
+                now=current,
+                token=token,
+                clock=clock,
             )
         else:
-            summary = _sync_t13_resource(db, checkpoint=checkpoint, resource=resource, reader=reader or store_onboarding_service.get_naver_read_adapter(), now=current)
+            summary = _sync_t13_resource(
+                db,
+                checkpoint=checkpoint,
+                resource=resource,
+                reader=reader or store_onboarding_service.get_naver_read_adapter(),
+                now=current,
+                token=token,
+                clock=clock,
+            )
         return "success" if _finish_success(db, checkpoint=checkpoint, token=token, now=current, result=summary) else "not_due"
     except Exception as exc:
         db.rollback()
@@ -636,6 +798,7 @@ def run_due_automatic_read_syncs(
     current = _utc(now or get_utc_now())
     with session_factory() as db:
         ensure_onboarded_store_schedules(db, now=current, settings=settings)
+        _apply_prepared_activation_gate(db, now=current)
         due_ids = db.scalars(select(SyncCheckpoint.id).where(
             SyncCheckpoint.platform == NAVER, SyncCheckpoint.automatic_read_enabled.is_(True),
             SyncCheckpoint.status != "blocked", or_(SyncCheckpoint.next_run_at.is_(None), SyncCheckpoint.next_run_at <= current),

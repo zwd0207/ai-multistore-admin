@@ -32,6 +32,7 @@ from sqlalchemy import select
 from app.core.timezone import get_utc_now
 from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.models.api_capability import ApiCapabilityCheck, ApiCapabilityTestResult
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.customer_inquiry import CustomerInquiry
@@ -72,8 +73,40 @@ def seed():
         for permission in (read, sync, content): db.add(ErpRolePermission(role_id=full.id, permission_id=permission.id))
         db.add(ErpRolePermission(role_id=denied.id, permission_id=read.id))
         _user(db, "full@example.test", full, one); _user(db, "denied@example.test", denied, one); _user(db, "other@example.test", full, two)
+        capability = ApiCapabilityCheck(
+            platform="naver",
+            capability_key="naver.customer_inquiry_read",
+            capability_name="Naver inquiry readonly",
+            api_category="customer_inquiry",
+            test_status="tested_success",
+            test_mode="real_readonly",
+            data_usefulness="high",
+            first_phase_candidate=True,
+            sales_source_type="not_applicable",
+        )
+        db.add(capability); db.flush()
         for store in (one, two):
-            db.add(ApiCredential(store_id=store.id, platform="naver", credential_name="t14", client_id="id", encrypted_secret_key=encrypt_value("secret"), status="active"))
+            credential = ApiCredential(
+                store_id=store.id,
+                platform="naver",
+                credential_name="t14",
+                client_id="id",
+                encrypted_secret_key=encrypt_value("secret"),
+                auth_status="test_passed",
+                status="active",
+                extra_config={"channel_no": f"channel-{store.id}"},
+            )
+            db.add(credential); db.flush()
+            db.add(ApiCapabilityTestResult(
+                store_id=store.id,
+                credential_id=credential.id,
+                capability_id=capability.id,
+                test_mode="real_readonly",
+                test_status="tested_success",
+                http_status=200,
+                permission_result="order_seller_confirmed",
+                tested_at=get_utc_now(),
+            ))
             db.add(PxgNaverReadonlyCleanupStatus(store_id=store.id, platform="naver", status="healthy", last_run_at=get_utc_now(), last_success_at=get_utc_now()))
         db.commit()
 
