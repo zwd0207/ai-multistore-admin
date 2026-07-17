@@ -588,7 +588,8 @@ def run_automatic_checkpoint(
     reader: store_onboarding_service.NaverReadAdapter | None = None,
     inquiry_runner: Callable[..., dict[str, Any]] | None = None,
 ) -> str:
-    current = _utc(now or get_utc_now())
+    fixed_now = _utc(now) if now is not None else None
+    current = fixed_now or _utc(get_utc_now())
     pending_checkpoint = db.get(SyncCheckpoint, checkpoint_id)
     if (
         pending_checkpoint is not None
@@ -620,7 +621,8 @@ def run_automatic_checkpoint(
         db.rollback()
         checkpoint = db.get(SyncCheckpoint, checkpoint_id)
         assert checkpoint is not None
-        return "failed" if _finish_failure(db, checkpoint=checkpoint, token=token, now=current, exc=exc) else "not_due"
+        failure_time = fixed_now or _utc(get_utc_now())
+        return "failed" if _finish_failure(db, checkpoint=checkpoint, token=token, now=failure_time, exc=exc) else "not_due"
 
 
 def run_due_automatic_read_syncs(
@@ -641,7 +643,13 @@ def run_due_automatic_read_syncs(
     counts = {"scheduled": len(due_ids), "success": 0, "failed": 0}
     for checkpoint_id in due_ids:
         with session_factory() as db:
-            result = run_automatic_checkpoint(db, checkpoint_id=checkpoint_id, now=current, reader=reader, inquiry_runner=inquiry_runner)
+            result = run_automatic_checkpoint(
+                db,
+                checkpoint_id=checkpoint_id,
+                now=current if now is not None else None,
+                reader=reader,
+                inquiry_runner=inquiry_runner,
+            )
             if result in counts:
                 counts[result] += 1
     return counts

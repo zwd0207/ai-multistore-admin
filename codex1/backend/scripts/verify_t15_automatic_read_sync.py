@@ -4,6 +4,7 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
@@ -124,6 +125,22 @@ def main():
         assert inquiry_cp.status == "retry_wait"
         assert inquiry_cp.next_run_at.replace(tzinfo=timezone.utc) == NOW + timedelta(hours=1)
         assert inquiry_cp.lease_token is None
+        inquiry_cp.status = "due"
+        inquiry_cp.retry_count = 0
+        inquiry_cp.next_run_at = NOW
+        db.commit()
+        failure_time = NOW + timedelta(minutes=30)
+        with patch(
+            "app.services.automatic_read_sync_service.get_utc_now",
+            side_effect=[NOW, failure_time],
+        ):
+            assert run_automatic_checkpoint(
+                db,
+                checkpoint_id=inquiry_cp.id,
+                inquiry_runner=rate_limited,
+            ) == "failed"
+        db.refresh(inquiry_cp)
+        assert inquiry_cp.next_run_at.replace(tzinfo=timezone.utc) == failure_time + timedelta(hours=1)
         product_cp.next_run_at, product_cp.lease_token, product_cp.lease_expires_at = NOW, "expired", NOW - timedelta(seconds=1)
         db.commit()
         assert run_automatic_checkpoint(db, checkpoint_id=product_cp.id, now=NOW, reader=Reader()) == "success"
