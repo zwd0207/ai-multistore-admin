@@ -35,6 +35,17 @@ function stripSensitiveHashParam(name) {
   window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${window.location.search}${nextHash}`);
 }
 
+function useSensitiveHashParam(name) {
+  const [searchParams] = useSearchParams();
+  const [value] = useState(() => searchParams.get(name) || '');
+
+  useEffect(() => {
+    if (value) stripSensitiveHashParam(name);
+  }, [name, value]);
+
+  return value;
+}
+
 function isSafeOtpAuthUri(value) {
   if (typeof value !== 'string' || value.length > 2048) return false;
   try {
@@ -194,9 +205,8 @@ export function AuthPage() {
 }
 
 export function AcceptInvitationPage() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const token = searchParams.get('token') || '';
+  const token = useSensitiveHashParam('token');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [enrollment, setEnrollment] = useState(null);
@@ -207,10 +217,6 @@ export function AcceptInvitationPage() {
   const [recoveryCodes, setRecoveryCodes] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (token) stripSensitiveHashParam('token');
-  }, [token]);
 
   useEffect(() => {
     let active = true;
@@ -333,18 +339,13 @@ export function AcceptInvitationPage() {
 }
 
 export function PasswordResetPage({ requestOnly = false }) {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') || '';
+  const token = useSensitiveHashParam('token');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (token) stripSensitiveHashParam('token');
-  }, [token]);
 
   const submit = async (event) => {
     event.preventDefault();
