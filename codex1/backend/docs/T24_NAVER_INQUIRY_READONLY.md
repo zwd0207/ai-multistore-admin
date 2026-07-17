@@ -32,3 +32,5 @@ The reader requires `totalPages`, `totalElements`, `first`, `last`, `number`, `s
 Logs and errors may contain only store/resource scope, page and count values, HTTP status, safe error code and field names, bounded rate values, and a sanitized trace ID. They must never contain credentials, authorization headers, raw responses, inquiry content/title, customer identifiers, order identifiers, or product-order identifiers.
 
 `naver.customer_inquiry_read.implemented_now` is true after offline contract verification. `safe_to_real_test` remains false until an operator approves one store, confirms the Naver application has the order-seller permission, waits for the existing 429 cooldown, and performs exactly one controlled readonly GET. Platform writes remain false.
+
+The runtime is separately fail-closed. `NAVER_READONLY_INQUIRY_REAL_READ_ENABLED` defaults to `false`; enabling it also requires the exact positive `NAVER_READONLY_INQUIRY_APPROVED_STORE_ID`. The service checks both values before checkpoint creation, credential lookup, token exchange, or network access. A different store remains blocked.

@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal, init_db
 from app.config import Settings
+from app.core.exceptions import ApiError
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpUser
 from app.models.order import Order
@@ -102,6 +103,27 @@ def main():
         assert run_automatic_checkpoint(db, checkpoint_id=order_cp.id, now=NOW, reader=Reader()) == "success"
         assert db.query(Order).filter_by(store_id=stores[0].id).count() == 1 and db.query(Order).filter_by(store_id=stores[1].id).count() == 0
         assert run_automatic_checkpoint(db, checkpoint_id=inquiry_cp.id, now=NOW, inquiry_runner=lambda *args, **kwargs: {"created_count": 1, "updated_count": 0, "pages_read": 1}) == "success"
+        inquiry_cp.next_run_at = NOW
+        db.commit()
+
+        def rate_limited(*_args, **_kwargs):
+            raise ApiError(
+                "Naver inquiry rate limited",
+                "naver_customer_inquiry_rate_limit",
+                503,
+                detail={"retry_after_seconds": 3600},
+            )
+
+        assert run_automatic_checkpoint(
+            db,
+            checkpoint_id=inquiry_cp.id,
+            now=NOW,
+            inquiry_runner=rate_limited,
+        ) == "failed"
+        db.refresh(inquiry_cp)
+        assert inquiry_cp.status == "retry_wait"
+        assert inquiry_cp.next_run_at.replace(tzinfo=timezone.utc) == NOW + timedelta(hours=1)
+        assert inquiry_cp.lease_token is None
         product_cp.next_run_at, product_cp.lease_token, product_cp.lease_expires_at = NOW, "expired", NOW - timedelta(seconds=1)
         db.commit()
         assert run_automatic_checkpoint(db, checkpoint_id=product_cp.id, now=NOW, reader=Reader()) == "success"

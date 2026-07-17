@@ -90,7 +90,7 @@ python scripts/bootstrap_platform_admin.py \
 
 ## Acceptance Checks
 
-- Alembic reports revision `608122e7c9e6` and `alembic check` reports no changes.
+- Alembic reports revision `d4b7a91c2e6f` and `alembic check` reports no changes.
 - Migrated table counts and canonical row digests match the reviewed SQLite source.
 - The original SQLite file hash remains unchanged.
 - Existing encrypted credentials can be decrypted with the unchanged production encryption key.

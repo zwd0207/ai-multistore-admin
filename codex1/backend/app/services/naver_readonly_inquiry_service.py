@@ -638,6 +638,7 @@ def refresh_naver_readonly_inquiries(
             end_date=end_date,
             before_request=lambda: _renew_inquiry_lease(db, lease=lease),
         )
+        _renew_inquiry_lease(db, lease=lease)
         counts = {"created": 0, "updated": 0, "skipped": 0}
         for item in fetched["items"]:
             outcome = _upsert_item(db, store_id=store_id, item=item, observed_at=now)

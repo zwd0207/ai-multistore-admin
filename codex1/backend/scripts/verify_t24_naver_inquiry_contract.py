@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -344,6 +345,16 @@ def verify_shared_lease_and_safe_log():
         manual = naver_readonly_inquiry_service._acquire_inquiry_lease(
             db, store_id=store.id, actor_id="manual-user", settings=settings, now=now,
         )
+        heartbeat_at = now + timedelta(minutes=9)
+        for _ in range(1000):
+            naver_readonly_inquiry_service._renew_inquiry_lease(
+                db,
+                lease=manual,
+                now=heartbeat_at,
+            )
+            heartbeat_at += timedelta(minutes=9)
+        db.refresh(checkpoint)
+        assert checkpoint.lease_expires_at.replace(tzinfo=timezone.utc) > heartbeat_at
         with SessionLocal() as second_db:
             try:
                 naver_readonly_inquiry_service._acquire_inquiry_lease(
@@ -383,6 +394,70 @@ def verify_shared_lease_and_safe_log():
         assert log.raw_summary["trace_id"] == "trace-safe"
 
 
+def verify_server_side_approval_gate():
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        store = Store(name="T24 Approval Gate", platform="naver", status="active")
+        db.add(store)
+        db.commit()
+        store_id = store.id
+
+        original_credential = sync_service._ensure_naver_product_preview_credential
+        credential_called = False
+
+        def forbidden_credential(*_args, **_kwargs):
+            nonlocal credential_called
+            credential_called = True
+            raise AssertionError("credential lookup must remain unreachable")
+
+        sync_service._ensure_naver_product_preview_credential = forbidden_credential
+        try:
+            for settings, expected_code in (
+                (Settings(), "naver_inquiry_real_read_disabled"),
+                (
+                    Settings(
+                        naver_readonly_inquiry_real_read_enabled=True,
+                        naver_readonly_inquiry_approved_store_id=store_id + 1,
+                    ),
+                    "naver_inquiry_store_not_approved",
+                ),
+            ):
+                try:
+                    naver_readonly_inquiry_service.refresh_naver_readonly_inquiries(
+                        db,
+                        store_id=store_id,
+                        actor_id="gate-test",
+                        settings=settings,
+                    )
+                except ApiError as exc:
+                    assert exc.error_code == expected_code
+                else:
+                    raise AssertionError("unapproved inquiry read must fail closed")
+                assert db.scalar(select(SyncCheckpoint).where(
+                    SyncCheckpoint.store_id == store_id,
+                )) is None
+                assert db.scalar(select(SyncLog).where(SyncLog.store_id == store_id)) is None
+            assert credential_called is False
+        finally:
+            sync_service._ensure_naver_product_preview_credential = original_credential
+
+
+def verify_invalid_environment_fails_closed():
+    try:
+        Settings(app_env="prodction")
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("unknown APP_ENV must fail settings validation")
+
+    try:
+        Settings(naver_readonly_inquiry_real_read_enabled=True)
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("real inquiry reads require one approved store id")
+
+
 def verify_capability_and_write_boundary():
     capability = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.customer_inquiry_read"]
     assert capability["docs_reference_version"] == "current/2.82.0"
@@ -400,6 +475,8 @@ def main():
         verify_safe_errors_and_limits()
         verify_kst_window_and_pagination()
         verify_shared_lease_and_safe_log()
+        verify_server_side_approval_gate()
+        verify_invalid_environment_fails_closed()
         verify_capability_and_write_boundary()
         print("verify_t24_naver_inquiry_contract: ok")
     finally:

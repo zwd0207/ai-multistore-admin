@@ -246,6 +246,21 @@ def _requires_recent_auth_for_write(path: str) -> bool:
     )
 
 
+def _is_platform_admin_global_write(path: str) -> bool:
+    if path in {
+        "/api/v1/auth/invitations",
+        "/api/v1/admin/tenants/selection",
+    }:
+        return True
+    parts = [part for part in path.split("/") if part]
+    return (
+        len(parts) == 6
+        and parts[:4] == ["api", "v1", "admin", "tenants"]
+        and parts[4].isdigit()
+        and parts[5] == "select"
+    )
+
+
 def _write_permission_for_path(path: str) -> str:
     if path == "/api/v1/customer-inquiries/naver/refresh":
         return "platform.sync"
@@ -340,6 +355,7 @@ async def _enforce_write_protection(request: Request) -> None:
         OperatorIdentity,
         audit_platform_admin_tenant_access,
         require_any_store_permission,
+        require_platform_admin,
         require_store_permission,
     )
     from app.services.session_service import require_csrf, require_recent_auth, require_session
@@ -361,7 +377,9 @@ async def _enforce_write_protection(request: Request) -> None:
         )
         permission_key = _write_permission_for_path(request.url.path)
         store_id = _request_store_id(request, body, db)
-        if request.url.path.startswith("/api/v1/store-onboardings/"):
+        if _is_platform_admin_global_write(request.url.path):
+            require_platform_admin(identity)
+        elif request.url.path.startswith("/api/v1/store-onboardings/"):
             parts = [part for part in request.url.path.split("/") if part]
             try:
                 onboarding_id = int(parts[3])

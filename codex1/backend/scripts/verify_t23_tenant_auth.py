@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -25,14 +26,16 @@ os.environ.update({
 })
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal, engine, init_db
 from app.main import app
 from app.models.auth import ErpStoreMembership, ErpUser, ErpUserSecurity
 from app.models.operation_audit_log import OperationAuditLog
 from app.models.store import Store
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantInvitation
+from app.core.timezone import get_utc_now
 from app.services.encryption import encrypt_value
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
@@ -126,6 +129,26 @@ def main() -> None:
     admin_client = TestClient(app, base_url="https://testserver")
     admin_csrf = authenticate(admin_client, ADMIN_EMAIL, ADMIN_PASSWORD, generate_totp(ADMIN_MFA_SECRET))
 
+    invitation_payload = {
+        "email": "csrf-check@example.com",
+        "display_name": "CSRF Check",
+        "tenant_name": "CSRF Check Tenant",
+    }
+    no_invitation_csrf = admin_client.post(
+        "/api/v1/auth/invitations",
+        json=invitation_payload,
+        headers=ORIGIN,
+    )
+    assert no_invitation_csrf.status_code == 403, no_invitation_csrf.text
+    assert no_invitation_csrf.json()["error_code"] == "csrf_validation_failed"
+    wrong_invitation_origin = admin_client.post(
+        "/api/v1/auth/invitations",
+        json=invitation_payload,
+        headers={"Origin": "https://wrong.example", "X-CSRF-Token": admin_csrf},
+    )
+    assert wrong_invitation_origin.status_code == 403, wrong_invitation_origin.text
+    assert wrong_invitation_origin.json()["error_code"] == "csrf_validation_failed"
+
     owner1, recovery1 = invite_and_activate(
         admin_client,
         csrf=admin_csrf,
@@ -168,6 +191,13 @@ def main() -> None:
     tenants = admin_client.get("/api/v1/admin/tenants")
     assert tenants.status_code == 200, tenants.text
     assert tenants.json()["data"]["total"] == 2
+
+    select_without_csrf = admin_client.post(
+        f"/api/v1/admin/tenants/{owner2['tenant_id']}/select",
+        headers=ORIGIN,
+    )
+    assert select_without_csrf.status_code == 403, select_without_csrf.text
+    assert select_without_csrf.json()["error_code"] == "csrf_validation_failed"
 
     selected = admin_client.post(
         f"/api/v1/admin/tenants/{owner2['tenant_id']}/select",
@@ -220,6 +250,59 @@ def main() -> None:
         raw = DB_PATH.read_bytes()
         assert b"owner-one@example.com" not in raw
         assert b"owner-two@example.com" not in raw
+
+        indexes = {
+            row[1]
+            for table_name in ("erp_users", "tenant_invitations")
+            for row in db.execute(text(f"PRAGMA index_list('{table_name}')")).all()
+        }
+        assert "uq_erp_users_login_identifier_hash" in indexes
+        assert "uq_tenant_invitations_active_email_hash" in indexes
+
+        duplicate_user = ErpUser(
+            user_key_hash="t23-duplicate-login-user",
+            display_name="Duplicate Login",
+            login_identifier_hash=hash_login_identifier("owner-one@example.com"),
+            login_identifier_masked="du********@example.com",
+            status="active",
+            auth_provider="password",
+        )
+        db.add(duplicate_user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        else:
+            raise AssertionError("login identifier hash must be database-unique")
+
+        now = get_utc_now()
+        active_email_hash = hash_login_identifier("pending-duplicate@example.com")
+        first_pending = TenantInvitation(
+            email_hash=active_email_hash,
+            email_encrypted=encrypt_value("pending-duplicate@example.com"),
+            email_masked="pe***************@example.com",
+            display_name="Pending One",
+            tenant_name="Pending Tenant One",
+            token_hash="a" * 64,
+            expires_at=now + timedelta(hours=24),
+        )
+        db.add(first_pending)
+        db.commit()
+        db.add(TenantInvitation(
+            email_hash=active_email_hash,
+            email_encrypted=encrypt_value("pending-duplicate@example.com"),
+            email_masked="pe***************@example.com",
+            display_name="Pending Two",
+            tenant_name="Pending Tenant Two",
+            token_hash="b" * 64,
+            expires_at=now + timedelta(hours=24),
+        ))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        else:
+            raise AssertionError("active invitation email hash must be database-unique")
 
     print("verify_t23_tenant_auth: ok")
 

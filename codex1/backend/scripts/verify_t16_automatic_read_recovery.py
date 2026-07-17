@@ -22,6 +22,8 @@ os.environ.update({
     "ALLOW_DEV_AUTH": "false",
     "CORS_ALLOWED_ORIGINS": '["https://t16.test"]',
     "AUTOMATIC_READ_SYNC_ENABLED": "true",
+    "NAVER_READONLY_INQUIRY_REAL_READ_ENABLED": "true",
+    "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID": "1",
     "REAL_API_TEST_ENABLED": "false",
     "REAL_API_WRITE_ENABLED": "false",
 })
