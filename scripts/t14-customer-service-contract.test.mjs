@@ -26,6 +26,9 @@ assert.match(customerPage, /客服消息详情暂不可用/);
 assert.match(customerPage, /conversation-message-\$\{message\.actor\}/);
 assert.match(customerPage, /message\.actor === 'store'/);
 assert.match(customerPage, /当前对话中没有店铺回复/);
+assert.match(customerPage, /Naver 已记录店铺回复/);
+assert.match(customerPage, /平台未提供历史回复正文/);
+assert.match(customerPage, /platformReplyContentUnavailable/);
 assert.match(customerPage, /<option value="">全部<\/option>/);
 assert.match(customerPage, /value: 'unanswered', label: '未回复'/);
 assert.match(customerPage, /value: 'answered', label: '已回复'/);
@@ -90,6 +93,8 @@ assert.deepEqual(conversation, [
 
 const conversationDetail = adaptCustomerInquiryDetail({
   classification: 'answered',
+  has_answer_content: true,
+  answered_at: '2026-07-17T10:02:00+09:00',
   conversation: [
     { actor: 'customer', content: '请问有货吗？', sent_at: '2026-07-17T10:00:00+09:00' },
     { actor: 'store', content: '有货。', sent_at: '2026-07-17T10:02:00+09:00' },
@@ -98,6 +103,18 @@ const conversationDetail = adaptCustomerInquiryDetail({
 assert.equal(conversationDetail.replyClassification, 'answered');
 assert.equal(conversationDetail.replyClassificationLabel, '已回复');
 assert.equal(conversationDetail.conversation.length, 2);
+assert.equal(conversationDetail.hasAnswerContent, true);
+assert.equal(conversationDetail.answeredAt, '2026-07-17T10:02:00+09:00');
+
+const answeredWithoutBody = adaptCustomerInquiryDetail({
+  classification: 'answered',
+  has_answer_content: false,
+  answered_at: '2026-07-17T11:00:00+09:00',
+  conversation: [{ actor: 'customer', content: 'question', sent_at: '2026-07-17T10:50:00+09:00' }],
+});
+assert.equal(answeredWithoutBody.replyClassification, 'answered');
+assert.equal(answeredWithoutBody.hasAnswerContent, false);
+assert.equal(answeredWithoutBody.conversation.length, 1);
 
 const activeListRow = adaptCustomerInquiry({
   inquiry_id: 'pxg_naver_readonly:17',

@@ -660,6 +660,7 @@ export function adaptCustomerInquiry(item = {}) {
     replyClassification,
     replyClassificationLabel: CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification],
     status: CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification],
+    hasAnswerContent: Boolean(item.has_answer_content ?? item.hasAnswerContent),
     priority: item.priority || '일반',
     replyEnabled,
     replyDisabledReason: item.reply_disabled_reason || item.replyDisabledReason || '',
@@ -736,6 +737,7 @@ export function adaptCustomerInquiryDetail(item = {}) {
   const readonlyId = source.readonly_id ?? source.readonlyId;
   const storeId = source.store_id ?? source.storeId;
   const customerName = source.customer_name ?? source.customerName;
+  const hasAnswerContent = source.has_answer_content ?? source.hasAnswerContent;
   const conversation = adaptCustomerInquiryConversation(source.conversation);
   if (content !== undefined && content !== null) detail.content = content;
   detail.conversation = conversation;
@@ -745,6 +747,11 @@ export function adaptCustomerInquiryDetail(item = {}) {
   if (typeof customerName === 'string' && customerName.trim()) {
     detail.customer = customerName;
     detail.customerName = customerName;
+  }
+  if (hasAnswerContent !== undefined) detail.hasAnswerContent = Boolean(hasAnswerContent);
+  if (source.answered_at !== undefined || source.answeredAt !== undefined) {
+    detail.answeredAt = source.answered_at ?? source.answeredAt;
+    detail.lastReplyAt = source.answered_at ?? source.answeredAt;
   }
   if (typeof source.platform === 'string' && source.platform.trim()) detail.platform = source.platform;
   if (

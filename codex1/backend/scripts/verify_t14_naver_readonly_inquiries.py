@@ -190,6 +190,7 @@ def main():
         detail = client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers)
         assert detail.status_code == 200 and detail.json()["data"]["content"] == CONTENT, detail.text
         assert detail.json()["data"]["classification"] == "answered", detail.text
+        assert detail.json()["data"]["has_answer_content"] is True, detail.text
         assert detail.json()["data"]["customer_name"] == CUSTOMER_NAME, detail.text
         conversation = detail.json()["data"]["conversation"]
         assert [message["actor"] for message in conversation] == ["customer", "store"], detail.text

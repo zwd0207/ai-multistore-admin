@@ -273,6 +273,8 @@ export default function CustomerService() {
 
   const activeConversation = activeMessage?.conversation || [];
   const hasStoreReply = activeConversation.some((message) => message.actor === 'store');
+  const platformReplyContentUnavailable = activeMessage?.replyClassification === 'answered'
+    && !hasStoreReply;
 
   return (
     <div className="customer-service-page">
@@ -386,7 +388,13 @@ export default function CustomerService() {
                       </div>
                     </article>
                   )) : <p className="conversation-empty">暂无可显示的对话内容</p>}
-                  {!hasStoreReply ? (
+                  {platformReplyContentUnavailable ? (
+                    <div className="conversation-answer-unavailable" role="status">
+                      <strong>已回复</strong>
+                      <span>Naver 已记录店铺回复{activeMessage.answeredAt ? `，回复时间为 ${formatKstDateTimeWithLabel(activeMessage.answeredAt)}` : ''}，但平台未提供历史回复正文。</span>
+                    </div>
+                  ) : null}
+                  {!hasStoreReply && !platformReplyContentUnavailable ? (
                     <div className="conversation-unanswered" role="status">
                       <strong>未回复</strong>
                       <span>当前对话中没有店铺回复。</span>

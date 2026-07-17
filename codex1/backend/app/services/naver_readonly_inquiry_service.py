@@ -831,6 +831,9 @@ def inquiry_detail(db: Session, *, store_id: int, readonly_id: int, settings: Se
             "content": customer_content,
             "content_length": record.content_length,
             "classification": "answered" if record.status == "answered" else "unanswered",
+            "has_answer_content": bool(
+                record.encrypted_answer_content and record.answer_content_hash
+            ),
             "received_at": record.received_at,
             "answered_at": record.answered_at,
             "conversation": conversation,

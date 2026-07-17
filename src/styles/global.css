@@ -279,6 +279,9 @@ tbody tr:hover { background: #fafbff; }
 .conversation-unanswered { display: flex; align-items: center; gap: 10px; min-width: 0; padding-top: 12px; border-top: 1px solid #e6eaf0; color: #6f4c08; }
 .conversation-unanswered strong { flex: 0 0 auto; }
 .conversation-unanswered span { min-width: 0; overflow-wrap: anywhere; }
+.conversation-answer-unavailable { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #475569; }
+.conversation-answer-unavailable strong { flex: 0 0 auto; color: #166534; }
+.conversation-answer-unavailable span { min-width: 0; overflow-wrap: anywhere; }
 .inquiry-reply-button:disabled { cursor: not-allowed; opacity: .52; }
 .inline-action-group { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .button.compact { min-height: 30px; padding: 6px 10px; font-size: 12px; }
@@ -392,6 +395,7 @@ a.product-cell-id:hover { text-decoration: underline; }
   .conversation-meta { align-items: flex-start; flex-direction: column; gap: 2px; }
   .conversation-meta time { white-space: normal; }
   .conversation-unanswered { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .conversation-answer-unavailable { flex-direction: column; gap: 3px; }
   .summary-card { min-width: 0; border-radius: 8px; padding: 14px; }
   .product-cell { min-width: 210px; max-width: 280px; }
   .product-cell-detail { min-width: 0; max-width: 100%; }
