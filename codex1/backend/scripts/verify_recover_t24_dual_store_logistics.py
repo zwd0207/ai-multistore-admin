@@ -1,4 +1,6 @@
 import hashlib
+import io
+import json
 import os
 import sys
 import tempfile
@@ -6,6 +8,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,6 +38,7 @@ from app.models.store import Store
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from scripts.prepare_t24_dual_store_automatic_read import StoreSpec
+import scripts.recover_t24_dual_store_logistics as recovery_script
 from scripts.recover_t24_dual_store_logistics import (
     APPROVAL_ENV,
     APPROVAL_VALUE,
@@ -47,6 +51,8 @@ from scripts.recover_t24_dual_store_logistics import (
     CLOSE_SYNC_TYPE,
     FIRST_RUN_SPACING,
     RECOVERABLE_ERROR_CODE,
+    RECOVERY_SERVICE_STOPPED_ENV,
+    RECOVERY_SERVICE_STOPPED_VALUE,
     RECLOSE_SYNC_TYPE,
     RECOVERY_SYNC_TYPE,
     REOPEN_APPROVAL_ENV,
@@ -54,7 +60,7 @@ from scripts.recover_t24_dual_store_logistics import (
     REOPEN_SYNC_TYPE,
     LogisticsRecoveryBlocked,
     close_dual_store_logistics,
-    recover_dual_store_logistics,
+    recover_dual_store_logistics as _recover_dual_store_logistics,
     reopen_closed_dual_store_logistics,
 )
 
@@ -70,6 +76,11 @@ WRITE_FLAGS = (
     "pxg_naver_shipping_pilot_enabled",
     "ai_automatic_operations_enabled",
 )
+
+
+def recover_dual_store_logistics(*args, **kwargs):
+    kwargs.setdefault("service_stopped_probe", lambda: True)
+    return _recover_dual_store_logistics(*args, **kwargs)
 
 
 def _settings(**overrides) -> Settings:
@@ -103,6 +114,104 @@ def _expect_blocked(code: str, call) -> None:
         assert exc.error_code == code, (exc.error_code, code)
     else:
         raise AssertionError(f"expected recovery blocker: {code}")
+
+
+def verify_cli_json_contract(specs: list[StoreSpec]) -> None:
+    cli_store_args = [
+        value
+        for spec in specs
+        for value in ("--store", f"{spec.store_id}:{spec.name_sha256}")
+    ]
+    success_result = {
+        "status": "scheduled",
+        "store_ids": [spec.store_id for spec in specs],
+        "checkpoint_count": 2,
+        "first_run_spacing_seconds": 60,
+        "schedules": [
+            {
+                "store_id": spec.store_id,
+                "next_run_at": (NOW + FIRST_RUN_SPACING * index).isoformat(),
+            }
+            for index, spec in enumerate(specs)
+        ],
+        "platform_write": False,
+        "network_called": False,
+        "records_deleted": False,
+    }
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with (
+        patch.object(sys, "argv", ["recover_t24_dual_store_logistics.py", "--mode", "reopen", *cli_store_args]),
+        patch.object(recovery_script, "SessionLocal", return_value=nullcontext(object())),
+        patch.object(recovery_script, "get_settings", return_value=_settings()),
+        patch.object(recovery_script, "reopen_closed_dual_store_logistics", return_value=success_result),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        exit_code = recovery_script.main()
+    assert exit_code == 0
+    assert stderr.getvalue() == ""
+    assert json.loads(stdout.getvalue()) == success_result
+    assert all(spec.name_sha256 not in stdout.getvalue() for spec in specs)
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    unsafe_result = {**success_result, "platform_write": True}
+    with (
+        patch.object(sys, "argv", ["recover_t24_dual_store_logistics.py", "--mode", "reopen", *cli_store_args]),
+        patch.object(recovery_script, "SessionLocal", return_value=nullcontext(object())),
+        patch.object(recovery_script, "get_settings", return_value=_settings()),
+        patch.object(recovery_script, "reopen_closed_dual_store_logistics", return_value=unsafe_result),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        exit_code = recovery_script.main()
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert json.loads(stderr.getvalue()) == {
+        "status": "failed",
+        "error_code": "t24_logistics_recovery_failed",
+    }
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with (
+        patch.object(sys, "argv", ["recover_t24_dual_store_logistics.py", "--mode", "recover", *cli_store_args]),
+        patch.object(recovery_script, "SessionLocal", return_value=nullcontext(object())),
+        patch.object(recovery_script, "get_settings", return_value=_settings()),
+        patch.object(
+            recovery_script,
+            "recover_dual_store_logistics",
+            side_effect=LogisticsRecoveryBlocked("t24_logistics_recovery_service_not_inactive"),
+        ),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        exit_code = recovery_script.main()
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert json.loads(stderr.getvalue()) == {
+        "status": "blocked",
+        "error_code": "t24_logistics_recovery_service_not_inactive",
+    }
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with (
+        patch.object(sys, "argv", ["recover_t24_dual_store_logistics.py", "--mode", "close", *cli_store_args]),
+        patch.object(recovery_script, "SessionLocal", return_value=nullcontext(object())),
+        patch.object(recovery_script, "get_settings", return_value=_settings()),
+        patch.object(recovery_script, "close_dual_store_logistics", side_effect=RuntimeError("synthetic")),
+        redirect_stdout(stdout),
+        redirect_stderr(stderr),
+    ):
+        exit_code = recovery_script.main()
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert json.loads(stderr.getvalue()) == {
+        "status": "failed",
+        "error_code": "t24_logistics_recovery_failed",
+    }
 
 
 def _seed() -> tuple[list[StoreSpec], dict[int, dict[str, SyncCheckpoint]]]:
@@ -237,6 +346,7 @@ def verify_postgres_concurrent_recovery() -> None:
 
         os.environ[APPROVAL_ENV] = APPROVAL_VALUE
         os.environ[APPROVED_STORE_IDS_ENV] = "1,2"
+        os.environ[RECOVERY_SERVICE_STOPPED_ENV] = RECOVERY_SERVICE_STOPPED_VALUE
         barrier = threading.Barrier(3)
         results: list[str] = []
         errors: list[Exception] = []
@@ -353,6 +463,7 @@ def main() -> None:
     store_ids = [spec.store_id for spec in specs]
     os.environ.pop(APPROVAL_ENV, None)
     os.environ.pop(APPROVED_STORE_IDS_ENV, None)
+    os.environ.pop(RECOVERY_SERVICE_STOPPED_ENV, None)
     os.environ.pop(CLOSE_APPROVAL_ENV, None)
     os.environ.pop(CLOSE_SERVICE_STOPPED_ENV, None)
     os.environ.pop(REOPEN_APPROVAL_ENV, None)
@@ -379,6 +490,25 @@ def main() -> None:
 
     os.environ[APPROVED_STORE_IDS_ENV] = ",".join(str(store_id) for store_id in store_ids)
     with SessionLocal() as db:
+        _expect_blocked(
+            "t24_logistics_recovery_service_stop_unconfirmed",
+            lambda: recover_dual_store_logistics(
+                db, specs=specs, settings=_settings(), now=NOW
+            ),
+        )
+        db.rollback()
+        os.environ[RECOVERY_SERVICE_STOPPED_ENV] = RECOVERY_SERVICE_STOPPED_VALUE
+        _expect_blocked(
+            "t24_logistics_recovery_service_not_inactive",
+            lambda: recover_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW,
+                service_stopped_probe=lambda: False,
+            ),
+        )
+        db.rollback()
         _expect_blocked(
             "t24_logistics_recovery_production_required",
             lambda: recover_dual_store_logistics(
@@ -645,6 +775,7 @@ def main() -> None:
         db.rollback()
         assert db.query(SyncLog).filter_by(sync_type=RECOVERY_SYNC_TYPE).count() == 2
 
+        os.environ.pop(RECOVERY_SERVICE_STOPPED_ENV, None)
         _expect_blocked(
             "t24_logistics_close_owner_approval_missing",
             lambda: close_dual_store_logistics(
@@ -832,6 +963,7 @@ def main() -> None:
         db.rollback()
         assert db.query(SyncLog).filter_by(sync_type=RECLOSE_SYNC_TYPE).count() == 2
 
+    verify_cli_json_contract(specs)
     print("verify_recover_t24_dual_store_logistics: ok")
 
 

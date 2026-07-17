@@ -18,6 +18,7 @@ from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
+from app.models.pxg_naver_readonly import PxgNaverOrderRecipientSecureRecord
 from app.models.shipping import (
     LogisticsInventoryMapping,
     ShippingTrackingImportBatch,
@@ -866,7 +867,12 @@ def create_warehouse_batch(
         return {"status": "blocked", "skip_reason": "platform_not_supported"}
     ensure_store_exists(db, store_id)
     unique_ids = sorted(set(order_ids))
-    orders = db.scalars(select(Order).where(Order.id.in_(unique_ids))).all()
+    orders = db.scalars(
+        select(Order)
+        .where(Order.id.in_(unique_ids))
+        .order_by(Order.id.asc())
+        .with_for_update()
+    ).all()
     order_by_id = {order.id: order for order in orders}
     missing = [order_id for order_id in unique_ids if order_id not in order_by_id]
     invalid = [order.id for order in orders if order.store_id != store_id or order.platform != normalized_platform]
@@ -908,6 +914,37 @@ def create_warehouse_batch(
         }
 
     now = get_utc_now()
+    readonly_order_ids = [
+        order.id
+        for order in orders
+        if order.source_type == "pxg_naver_readonly_local_v1"
+    ]
+    if readonly_order_ids:
+        secure_by_order_id = {
+            row.order_id: row
+            for row in db.scalars(select(PxgNaverOrderRecipientSecureRecord).where(
+                PxgNaverOrderRecipientSecureRecord.order_id.in_(readonly_order_ids),
+                PxgNaverOrderRecipientSecureRecord.store_id == store_id,
+                PxgNaverOrderRecipientSecureRecord.platform == "naver",
+            )).all()
+        }
+        unavailable_recipient_order_ids = [
+            order_id
+            for order_id in readonly_order_ids
+            if (
+                (secure := secure_by_order_id.get(order_id)) is None
+                or secure.is_stale
+                or _as_utc(secure.expires_at) <= now
+            )
+        ]
+        if unavailable_recipient_order_ids:
+            db.rollback()
+            return {
+                "status": "blocked",
+                "skip_reason": "recipient_data_unavailable_or_expired",
+                "order_ids": sorted(unavailable_recipient_order_ids),
+            }
+
     batch_no = f"SHIP-{now.astimezone(timezone.utc):%Y%m%d%H%M%S%f}-{store_id:04d}"
     batch = WarehouseShippingBatch(
         batch_no=batch_no,

@@ -2,13 +2,16 @@ import os
 import sys
 import tempfile
 import gc
+import threading
+import time
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-from sqlalchemy.orm import close_all_sessions
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.orm import close_all_sessions, sessionmaker
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -36,7 +39,8 @@ os.environ["LIFECYCLE_SCHEDULERS_ENABLED"] = "false"
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
 from app.core.timezone import get_utc_now
-from app.database import SessionLocal, engine, init_db
+from app.database import Base, SessionLocal, engine, init_db
+from app import models as _models  # noqa: F401 - register the complete schema
 import app.main as app_main
 from app.main import app
 from app.models.auth import ErpRole, ErpStoreMembership, ErpUser
@@ -62,6 +66,7 @@ from app.services import warehouse_shipping_service
 from app.services.encryption import encrypt_value
 from app.services.pxg_naver_readonly_persistence_service import (
     PXG_NAVER_READONLY_LOCAL_SOURCE,
+    TRACKING_RETENTION_FAILURE_CODE,
     assert_pxg_naver_cleanup_healthy,
     persist_pxg_naver_readonly_adapter_batch,
     recipient_contract_for_authorized_warehouse,
@@ -99,6 +104,403 @@ def fictional_batch(store_id: int) -> PxgNaverReadonlyAdapterBatch:
             "source_updated_at": "2026-01-01T00:00:00+00:00",
         }],
     })
+
+
+def verify_postgres_atomic_tracking_cleanup() -> None:
+    postgres_url = os.environ.get("T22_TEST_POSTGRES_URL")
+    if not postgres_url:
+        print("verify_pxg_naver_readonly_retention_cleanup: PostgreSQL concurrency skipped")
+        return
+    schema = f"tracking_retention_{uuid.uuid4().hex[:12]}"
+    admin_engine = create_engine(postgres_url, future=True)
+    isolated_engine = None
+    worker: threading.Thread | None = None
+    backend_pid: int | None = None
+    cleanup_errors: list[str] = []
+    now = get_utc_now()
+    try:
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        isolated_engine = create_engine(
+            postgres_url,
+            future=True,
+            connect_args={"options": f"-csearch_path={schema}"},
+        )
+        Base.metadata.create_all(isolated_engine)
+        IsolatedSession = sessionmaker(
+            bind=isolated_engine,
+            expire_on_commit=False,
+            future=True,
+        )
+        with IsolatedSession() as db:
+            store = Store(id=1, name=TRIAL_STORE_NAME, platform="naver", status="active")
+            db.add(store)
+            db.flush()
+            tracking_order = Order(
+                store_id=store.id,
+                platform="naver",
+                external_order_id="tracking-retention-order",
+                external_product_order_id="tracking-retention-product-order",
+                product_name="Tracking retention product",
+                quantity=1,
+                order_amount=1,
+                currency="KRW",
+                order_status="DELIVERED",
+                ordered_at=now - timedelta(days=40),
+                source_type="naver_onboarding_sync",
+                last_synced_at=now,
+            )
+            metadata_order = Order(
+                store_id=store.id,
+                platform="naver",
+                external_order_id="metadata-retention-order",
+                external_product_order_id="metadata-retention-product-order",
+                product_name="Metadata retention product",
+                quantity=1,
+                order_amount=1,
+                currency="KRW",
+                order_status="SHIPPED",
+                ordered_at=now - timedelta(days=100),
+                source_type="naver_onboarding_sync",
+                last_synced_at=now,
+            )
+            db.add_all((tracking_order, metadata_order))
+            db.flush()
+            tracking_record = PxgNaverReadonlyLogisticsRecord(
+                order_id=tracking_order.id,
+                store_id=store.id,
+                platform="naver",
+                carrier="CJ",
+                encrypted_tracking_number="encrypted-before-refresh",
+                tracking_number_hash="tracking-hash",
+                tracking_number_masked="****1234",
+                shipment_status="DELIVERY_COMPLETION",
+                shipped_at=now - timedelta(days=40),
+                source_updated_at=now - timedelta(days=40),
+                source_observed_at=now - timedelta(days=31),
+                expires_at=now + timedelta(days=1),
+                is_stale=False,
+            )
+            metadata_record = PxgNaverReadonlyLogisticsRecord(
+                order_id=metadata_order.id,
+                store_id=store.id,
+                platform="naver",
+                carrier="CJ",
+                encrypted_tracking_number="metadata-encrypted-before-refresh",
+                tracking_number_hash="metadata-tracking-hash",
+                tracking_number_masked="****5678",
+                shipment_status="DELIVERING",
+                shipped_at=now - timedelta(days=100),
+                source_updated_at=now - timedelta(days=100),
+                source_observed_at=now - timedelta(days=100),
+                expires_at=now - timedelta(days=1),
+                is_stale=True,
+            )
+            db.add_all((tracking_record, metadata_record))
+            db.flush()
+            db.add_all((
+                PxgNaverReadonlyCleanupStatus(
+                    store_id=store.id,
+                    platform="naver",
+                    status="healthy",
+                    last_success_at=now,
+                ),
+                PxgNaverReadonlyRecordState(
+                    store_id=store.id,
+                    platform="naver",
+                    resource_type="logistics",
+                    source_key_hash="metadata-source-key-hash",
+                    local_record_id=metadata_record.id,
+                    content_fingerprint="metadata-content-fingerprint",
+                    source_updated_at=now - timedelta(days=100),
+                    source_observed_at=now - timedelta(days=91),
+                    expires_at=now - timedelta(days=1),
+                    retention_review_at=now - timedelta(days=1),
+                    is_stale=True,
+                ),
+            ))
+            db.commit()
+
+        test_settings = Settings(
+            database_url=postgres_url,
+            credential_encryption_key=os.environ["CREDENTIAL_ENCRYPTION_KEY"],
+            pxg_naver_local_read_retention_cleanup_enabled=True,
+        )
+
+        def start_blocked_cleanup(operation):
+            nonlocal backend_pid
+            result_holder: list[dict] = []
+            errors: list[Exception] = []
+            ready = threading.Event()
+
+            def run_cleanup() -> None:
+                nonlocal backend_pid
+                with IsolatedSession() as db:
+                    try:
+                        db.execute(text("SET lock_timeout = '10s'"))
+                        backend_pid = int(db.scalar(text("SELECT pg_backend_pid()")))
+                        ready.set()
+                        result_holder.append(operation(db))
+                    except Exception as exc:  # pragma: no cover - reported below
+                        errors.append(exc)
+
+            current_worker = threading.Thread(target=run_cleanup, daemon=True)
+            current_worker.start()
+            assert ready.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with admin_engine.connect() as connection:
+                    waiting = bool(connection.scalar(text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE pid = :pid AND wait_event_type = 'Lock')"
+                    ), {"pid": backend_pid}))
+                if waiting:
+                    break
+                time.sleep(0.05)
+            assert waiting
+            return current_worker, result_holder, errors
+
+        with IsolatedSession() as refresh_db:
+            record = refresh_db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+                PxgNaverReadonlyLogisticsRecord.tracking_number_hash == "tracking-hash",
+            ).with_for_update())
+            record.source_observed_at = now
+            record.encrypted_tracking_number = "encrypted-after-refresh"
+            refresh_db.flush()
+            worker, result_holder, errors = start_blocked_cleanup(
+                lambda db: run_naver_logistics_tracking_retention_cleanup(
+                    db,
+                    settings=test_settings,
+                    now=now,
+                    store_ids={1},
+                )
+            )
+            refresh_db.commit()
+
+        worker.join(timeout=15)
+        assert not worker.is_alive()
+        assert not errors, errors
+        assert result_holder[0]["status"] == "completed"
+        assert result_holder[0]["tracking_cleanup_count"] == 0
+        with IsolatedSession() as db:
+            record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+                PxgNaverReadonlyLogisticsRecord.tracking_number_hash == "tracking-hash",
+            ))
+            assert record.encrypted_tracking_number == "encrypted-after-refresh"
+            assert record.is_stale is False
+
+        with IsolatedSession() as refresh_db:
+            record = refresh_db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+                PxgNaverReadonlyLogisticsRecord.tracking_number_hash == "metadata-tracking-hash",
+            ).with_for_update())
+            state = refresh_db.scalar(select(PxgNaverReadonlyRecordState).where(
+                PxgNaverReadonlyRecordState.local_record_id == record.id,
+                PxgNaverReadonlyRecordState.resource_type == "logistics",
+            ).with_for_update())
+            record.source_observed_at = now
+            record.encrypted_tracking_number = "metadata-encrypted-after-refresh"
+            record.is_stale = False
+            state.source_observed_at = now
+            state.is_stale = False
+            refresh_db.flush()
+            worker, result_holder, errors = start_blocked_cleanup(
+                lambda db: run_pxg_naver_readonly_retention_cleanup(
+                    db,
+                    settings=test_settings,
+                    preview=False,
+                    manual_confirmation=True,
+                    actor_id="postgres-concurrency-test",
+                    now=now,
+                )
+            )
+            refresh_db.commit()
+
+        worker.join(timeout=15)
+        assert not worker.is_alive()
+        assert not errors, errors
+        assert result_holder[0]["status"] == "completed"
+        assert result_holder[0]["metadata_cleanup_count"] == 0
+        with IsolatedSession() as db:
+            record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+                PxgNaverReadonlyLogisticsRecord.tracking_number_hash == "metadata-tracking-hash",
+            ))
+            state = db.scalar(select(PxgNaverReadonlyRecordState).where(
+                PxgNaverReadonlyRecordState.local_record_id == record.id,
+                PxgNaverReadonlyRecordState.resource_type == "logistics",
+            ))
+            assert record.encrypted_tracking_number == "metadata-encrypted-after-refresh"
+            assert record.is_stale is False
+            assert state is not None and state.source_observed_at == now
+
+        with IsolatedSession() as db:
+            status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ))
+            status.status = "failed"
+            status.last_failure_code = TRACKING_RETENTION_FAILURE_CODE
+            status.last_failure_at = now
+            db.commit()
+
+        with IsolatedSession() as status_db:
+            status = status_db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ).with_for_update())
+            status.status = "manual_review_required"
+            status.last_failure_code = None
+            status.manual_review_count = 2
+            status_db.flush()
+            worker, result_holder, errors = start_blocked_cleanup(
+                lambda db: run_naver_logistics_tracking_retention_cleanup(
+                    db,
+                    settings=test_settings,
+                    now=now,
+                    store_ids={1},
+                )
+            )
+            status_db.commit()
+
+        worker.join(timeout=15)
+        assert not worker.is_alive()
+        assert not errors, errors
+        assert result_holder[0]["status"] == "completed"
+        with IsolatedSession() as db:
+            status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ))
+            assert status.status == "manual_review_required"
+            assert status.manual_review_count == 2
+
+        with IsolatedSession() as db:
+            status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ))
+            status.status = "healthy"
+            status.last_failure_code = None
+            status.manual_review_count = 0
+            batch_race_order = Order(
+                store_id=1,
+                platform="naver",
+                external_order_id="retention-batch-race-order",
+                external_product_order_id="retention-batch-race-product-order",
+                product_name="Retention batch race product",
+                quantity=1,
+                order_amount=1,
+                currency="KRW",
+                order_status="READY",
+                ordered_at=now - timedelta(days=31),
+                source_type=PXG_NAVER_READONLY_LOCAL_SOURCE,
+                last_synced_at=now,
+            )
+            db.add(batch_race_order)
+            db.flush()
+            batch_race_recipient = PxgNaverOrderRecipientSecureRecord(
+                order_id=batch_race_order.id,
+                store_id=1,
+                platform="naver",
+                encrypted_recipient_payload="encrypted-recipient",
+                recipient_payload_hash="batch-race-recipient-hash",
+                source_updated_at=now - timedelta(days=31),
+                source_observed_at=now - timedelta(days=31),
+                expires_at=now - timedelta(days=1),
+                is_stale=True,
+            )
+            db.add(batch_race_recipient)
+            db.flush()
+            db.add(PxgNaverReadonlyRecordState(
+                store_id=1,
+                platform="naver",
+                resource_type="recipient",
+                source_key_hash="batch-race-recipient-state",
+                local_record_id=batch_race_recipient.id,
+                content_fingerprint="batch-race-recipient-fingerprint",
+                source_updated_at=now - timedelta(days=31),
+                source_observed_at=now,
+                expires_at=now + timedelta(days=1),
+                retention_review_at=now + timedelta(days=1),
+                is_stale=False,
+            ))
+            db.commit()
+            batch_race_order_id = batch_race_order.id
+            batch_race_recipient_id = batch_race_recipient.id
+
+        with IsolatedSession() as batch_db:
+            order = batch_db.scalar(select(Order).where(
+                Order.id == batch_race_order_id,
+            ).with_for_update())
+            worker, result_holder, errors = start_blocked_cleanup(
+                lambda db: run_pxg_naver_readonly_retention_cleanup(
+                    db,
+                    settings=test_settings,
+                    preview=False,
+                    manual_confirmation=True,
+                    actor_id="postgres-batch-race-test",
+                    now=now,
+                )
+            )
+            batch = WarehouseShippingBatch(
+                batch_no="POSTGRES-RETENTION-BATCH-RACE",
+                store_id=1,
+                platform="naver",
+                status="created",
+            )
+            batch_db.add(batch)
+            batch_db.flush()
+            batch_db.add(WarehouseShippingBatchOrder(
+                batch_id=batch.id,
+                local_order_id=order.id,
+                store_id=1,
+                platform="naver",
+                order_reference=order.external_order_id,
+                product_order_reference=order.external_product_order_id,
+                product_name=order.product_name,
+                quantity=order.quantity,
+                pre_batch_order_status=order.order_status,
+                row_status="pending_export",
+                is_active=True,
+                active_lock="active",
+            ))
+            batch_db.commit()
+
+        worker.join(timeout=15)
+        assert not worker.is_alive()
+        assert not errors, errors
+        assert result_holder[0]["status"] == "completed"
+        assert result_holder[0]["manual_review_frozen_count"] == 1
+        with IsolatedSession() as db:
+            assert db.get(PxgNaverOrderRecipientSecureRecord, batch_race_recipient_id) is not None
+            status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+                PxgNaverReadonlyCleanupStatus.store_id == 1,
+            ))
+            assert status.status == "manual_review_required"
+    finally:
+        if worker is not None:
+            worker.join(timeout=12)
+        if worker is not None and worker.is_alive() and backend_pid is not None:
+            with admin_engine.begin() as connection:
+                connection.execute(text(
+                    "SELECT pg_terminate_backend(:pid)"
+                ), {"pid": backend_pid})
+            worker.join(timeout=5)
+        if worker is not None and worker.is_alive():
+            cleanup_errors.append("tracking cleanup worker did not stop")
+        if isolated_engine is not None:
+            isolated_engine.dispose()
+        try:
+            with admin_engine.begin() as connection:
+                connection.execute(text("SET LOCAL lock_timeout = '10s'"))
+                connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+                if connection.scalar(text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.schemata "
+                    "WHERE schema_name = :schema)"
+                ), {"schema": schema}):
+                    cleanup_errors.append("tracking cleanup schema still exists")
+        except Exception as exc:  # pragma: no cover - reported below
+            cleanup_errors.append(f"tracking cleanup schema cleanup failed: {type(exc).__name__}")
+        finally:
+            admin_engine.dispose()
+        if cleanup_errors:
+            raise AssertionError("; ".join(cleanup_errors))
 
 
 def main() -> None:
@@ -212,33 +614,130 @@ def main() -> None:
             shipment_status="DELIVERY_COMPLETION",
             shipped_at=now - timedelta(days=40),
             source_updated_at=now,
-            source_observed_at=now - timedelta(days=31),
+            source_observed_at=now - timedelta(days=29),
             expires_at=now + timedelta(days=1),
             is_stale=False,
         )
-        db.add(second_tracking)
+        stopped_order = Order(
+            store_id=second_store.id,
+            platform="naver",
+            external_order_id="retention-stopped-order",
+            external_product_order_id="retention-stopped-product-order",
+            product_name="Stopped tracking product",
+            quantity=1,
+            order_amount=1,
+            currency="KRW",
+            order_status="PURCHASE_CONFIRMED",
+            ordered_at=now - timedelta(days=10),
+            source_type="naver_onboarding_sync",
+            last_synced_at=now,
+        )
+        db.add_all((second_tracking, stopped_order))
+        db.flush()
+        stopped_tracking = PxgNaverReadonlyLogisticsRecord(
+            order_id=stopped_order.id,
+            store_id=second_store.id,
+            platform="naver",
+            carrier="CJ",
+            encrypted_tracking_number=encrypt_value("STOPPED-TRACKING-1234"),
+            tracking_number_hash="stopped-tracking-hash",
+            tracking_number_masked="****1234",
+            shipment_status="DELIVERING",
+            shipped_at=now - timedelta(days=40),
+            source_updated_at=now,
+            source_observed_at=now - timedelta(days=29),
+            expires_at=now + timedelta(days=1),
+            is_stale=False,
+        )
+        db.add(stopped_tracking)
+        db.commit()
+        not_due_cleanup = run_naver_logistics_tracking_retention_cleanup(
+            db,
+            settings=get_settings(),
+            now=now,
+        )
+        assert not_due_cleanup["store_count"] >= 2
+        assert not_due_cleanup["tracking_cleanup_count"] == 0
+        db.refresh(second_tracking)
+        assert second_tracking.encrypted_tracking_number
+        db.refresh(stopped_tracking)
+        assert stopped_tracking.encrypted_tracking_number
+        second_tracking.source_observed_at = now - timedelta(days=31)
+        stopped_tracking.source_observed_at = now - timedelta(days=30)
         db.commit()
         multi_store_cleanup = run_naver_logistics_tracking_retention_cleanup(
             db,
             settings=get_settings(),
             now=now,
-            store_ids={second_store.id},
         )
         assert multi_store_cleanup == {
             "status": "completed",
-            "store_count": 1,
-            "tracking_cleanup_count": 1,
+            "store_count": 2,
+            "tracking_cleanup_count": 2,
             "platform_write": False,
         }
         db.refresh(second_tracking)
         assert second_tracking.encrypted_tracking_number == ""
         assert second_tracking.is_stale is True and second_tracking.tracking_number_hash
+        db.refresh(stopped_tracking)
+        assert stopped_tracking.encrypted_tracking_number == ""
+        assert stopped_tracking.is_stale is True and stopped_tracking.tracking_number_hash
+        unavailable_order = Order(
+            store_id=second_store.id,
+            platform="naver",
+            external_order_id="retention-recipient-unavailable",
+            external_product_order_id="retention-recipient-unavailable-product",
+            product_name="Recipient unavailable product",
+            quantity=1,
+            order_amount=1,
+            currency="KRW",
+            order_status="READY",
+            ordered_at=now,
+            source_type=PXG_NAVER_READONLY_LOCAL_SOURCE,
+            last_synced_at=now,
+        )
+        db.add(unavailable_order)
+        db.commit()
+        unavailable_batch = warehouse_shipping_service.create_warehouse_batch(
+            db,
+            store_id=second_store.id,
+            platform="naver",
+            order_ids=[unavailable_order.id],
+            manual_approval=True,
+            actor_context={"role": "admin", "actor_id": "retention-test"},
+        )
+        assert unavailable_batch == {
+            "status": "blocked",
+            "skip_reason": "recipient_data_unavailable_or_expired",
+            "order_ids": [unavailable_order.id],
+        }
+        assert db.scalar(select(WarehouseShippingBatchOrder).where(
+            WarehouseShippingBatchOrder.local_order_id == unavailable_order.id,
+        )) is None
         second_cleanup_status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
             PxgNaverReadonlyCleanupStatus.store_id == second_store.id,
         ))
         assert second_cleanup_status is not None
         assert second_cleanup_status.status == "healthy"
-        assert second_cleanup_status.last_success_at is not None
+        assert second_cleanup_status.last_success_at is None
+        try:
+            assert_pxg_naver_cleanup_healthy(db, store_id=second_store.id, settings=get_settings())
+        except ApiError as exc:
+            assert exc.error_code == "readonly_retention_cleanup_no_successful_run"
+        else:
+            raise AssertionError("tracking-only cleanup must not certify full retention health")
+        second_cleanup_status.status = "manual_review_required"
+        second_cleanup_status.manual_review_count = 1
+        db.commit()
+        preserved_review = run_naver_logistics_tracking_retention_cleanup(
+            db,
+            settings=get_settings(),
+            now=now,
+        )
+        assert preserved_review["tracking_cleanup_count"] == 0
+        db.refresh(second_cleanup_status)
+        assert second_cleanup_status.status == "manual_review_required"
+        assert second_cleanup_status.manual_review_count == 1
         for state in db.scalars(select(PxgNaverReadonlyRecordState).where(PxgNaverReadonlyRecordState.store_id == store.id)).all():
             if state.resource_type in {"product", "order", "customer_inquiry"}:
                 state.source_observed_at = now - timedelta(days=91)
@@ -310,6 +809,10 @@ def main() -> None:
             force_failure_for_test=True,
         )
         assert failure["status"] == "failed", failure
+        assert failure["recipient_cleanup_count"] == 0
+        assert failure["tracking_cleanup_count"] == 0
+        assert failure["metadata_cleanup_count"] == 0
+        assert failure["manual_review_frozen_count"] == 0
         try:
             assert_pxg_naver_cleanup_healthy(db, store_id=store.id)
         except ApiError as exc:
@@ -440,6 +943,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+        verify_postgres_atomic_tracking_cleanup()
     finally:
         close_all_sessions()
         engine.dispose()

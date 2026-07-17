@@ -35,6 +35,8 @@ from scripts.prepare_t24_dual_store_automatic_read import (
 APPROVAL_VALUE = "owner-approved-dual-store-logistics-recovery"
 APPROVAL_ENV = "T24_DUAL_STORE_LOGISTICS_RECOVERY_APPROVAL"
 APPROVED_STORE_IDS_ENV = "T24_DUAL_STORE_LOGISTICS_RECOVERY_STORE_IDS"
+RECOVERY_SERVICE_STOPPED_VALUE = "api-service-confirmed-stopped"
+RECOVERY_SERVICE_STOPPED_ENV = "T24_DUAL_STORE_LOGISTICS_RECOVERY_SERVICE_STATE"
 RECOVERY_SYNC_TYPE = "t24_dual_store_logistics_recovery"
 CLOSE_APPROVAL_VALUE = "owner-approved-dual-store-logistics-close"
 CLOSE_APPROVAL_ENV = "T24_DUAL_STORE_LOGISTICS_CLOSE_APPROVAL"
@@ -87,6 +89,12 @@ def _require_process_approval(specs: list[StoreSpec]) -> None:
         raise LogisticsRecoveryBlocked("t24_logistics_recovery_approved_ids_duplicate")
     if sorted(raw_ids) != [spec.store_id for spec in specs]:
         raise LogisticsRecoveryBlocked("t24_logistics_recovery_approved_ids_mismatch")
+
+
+def _require_recovery_process_approval(specs: list[StoreSpec]) -> None:
+    _require_process_approval(specs)
+    if os.environ.get(RECOVERY_SERVICE_STOPPED_ENV) != RECOVERY_SERVICE_STOPPED_VALUE:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_service_stop_unconfirmed")
 
 
 def _assert_write_gates_closed(settings: Settings) -> None:
@@ -223,14 +231,17 @@ def recover_dual_store_logistics(
     specs: list[StoreSpec],
     settings: Settings,
     now: datetime | None = None,
+    service_stopped_probe: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     normalized_specs = _normalized_specs(specs)
-    _require_process_approval(normalized_specs)
+    _require_recovery_process_approval(normalized_specs)
     _assert_runtime_approved(settings)
     current = _utc(now or get_utc_now())
     target_ids = [spec.store_id for spec in normalized_specs]
     if settings.naver_readonly_inquiry_approved_store_id_set != frozenset(target_ids):
         raise LogisticsRecoveryBlocked("t24_logistics_recovery_allowlist_mismatch")
+    if not (service_stopped_probe or _api_service_is_inactive)():
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_service_not_inactive")
 
     _lock_and_validate_stores(
         db,
@@ -341,19 +352,21 @@ def recover_dual_store_logistics(
                 "store_id": store_id,
                 "next_run_at": next_run_at.isoformat(),
             })
+        result = {
+            "status": "scheduled",
+            "store_ids": target_ids,
+            "checkpoint_count": len(logistics_rows),
+            "first_run_spacing_seconds": int(FIRST_RUN_SPACING.total_seconds()),
+            "schedules": schedules,
+            "platform_write": False,
+            "network_called": False,
+        }
+        _validate_cli_result("recover", result)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return {
-        "status": "scheduled",
-        "store_ids": target_ids,
-        "checkpoint_count": len(logistics_rows),
-        "first_run_spacing_seconds": int(FIRST_RUN_SPACING.total_seconds()),
-        "schedules": schedules,
-        "platform_write": False,
-        "network_called": False,
-    }
+    return result
 
 
 def close_dual_store_logistics(
@@ -480,18 +493,20 @@ def close_dual_store_logistics(
                     "records_deleted": False,
                 },
             ))
+        result = {
+            "status": "closed",
+            "store_ids": target_ids,
+            "checkpoint_count": len(logistics_rows),
+            "platform_write": False,
+            "network_called": False,
+            "records_deleted": False,
+        }
+        _validate_cli_result("close", result)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return {
-        "status": "closed",
-        "store_ids": target_ids,
-        "checkpoint_count": len(logistics_rows),
-        "platform_write": False,
-        "network_called": False,
-        "records_deleted": False,
-    }
+    return result
 
 
 def reopen_closed_dual_store_logistics(
@@ -622,20 +637,55 @@ def reopen_closed_dual_store_logistics(
                 "store_id": row.store_id,
                 "next_run_at": next_run_at.isoformat(),
             })
+        result = {
+            "status": "scheduled",
+            "store_ids": target_ids,
+            "checkpoint_count": len(logistics_rows),
+            "first_run_spacing_seconds": int(FIRST_RUN_SPACING.total_seconds()),
+            "schedules": schedules,
+            "platform_write": False,
+            "network_called": False,
+            "records_deleted": False,
+        }
+        _validate_cli_result("reopen", result)
         db.commit()
     except Exception:
         db.rollback()
         raise
-    return {
-        "status": "scheduled",
-        "store_ids": target_ids,
-        "checkpoint_count": len(logistics_rows),
-        "first_run_spacing_seconds": int(FIRST_RUN_SPACING.total_seconds()),
-        "schedules": schedules,
-        "platform_write": False,
-        "network_called": False,
-        "records_deleted": False,
-    }
+    return result
+
+
+def _validate_cli_result(mode: str, result: dict[str, object]) -> None:
+    if result.get("status") != ("closed" if mode == "close" else "scheduled"):
+        raise ValueError("invalid T24 logistics action status")
+    store_ids = result.get("store_ids")
+    if (
+        not isinstance(store_ids, list)
+        or len(store_ids) != 2
+        or any(not isinstance(store_id, int) or store_id <= 0 for store_id in store_ids)
+        or len(set(store_ids)) != 2
+        or result.get("checkpoint_count") != 2
+        or result.get("platform_write") is not False
+        or result.get("network_called") is not False
+    ):
+        raise ValueError("invalid T24 logistics action safety contract")
+    if mode in {"close", "reopen"} and result.get("records_deleted") is not False:
+        raise ValueError("invalid T24 logistics record-retention contract")
+    if mode != "close":
+        schedules = result.get("schedules")
+        if (
+            result.get("first_run_spacing_seconds") != int(FIRST_RUN_SPACING.total_seconds())
+            or not isinstance(schedules, list)
+            or len(schedules) != 2
+            or [item.get("store_id") for item in schedules if isinstance(item, dict)] != store_ids
+            or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("next_run_at"), str)
+                or not item["next_run_at"]
+                for item in schedules
+            )
+        ):
+            raise ValueError("invalid T24 logistics schedule contract")
 
 
 def main() -> int:
@@ -654,6 +704,7 @@ def main() -> int:
             }
             action = actions[args.mode]
             result = action(db, specs=args.store, settings=get_settings())
+            _validate_cli_result(args.mode, result)
     except LogisticsRecoveryBlocked as exc:
         print(json.dumps({"status": "blocked", "error_code": exc.error_code}), file=sys.stderr)
         return 2

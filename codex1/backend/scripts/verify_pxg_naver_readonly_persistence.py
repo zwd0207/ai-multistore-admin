@@ -556,23 +556,11 @@ def main() -> None:
             manual_approval=True,
             actor_context=actor,
         )
-        assert stale_batch["status"] == "created", stale_batch
-        stale_batch_id = stale_batch["batch"]["id"]
-        stale_approval = warehouse_shipping_service.issue_approval_grant(
-            db,
-            batch_id=stale_batch_id,
-            user_id=admin.id,
-            grant_scope="manifest",
-        )
-        assert stale_approval == {"status": "blocked", "skip_reason": "recipient_data_stale"}, stale_approval
-        stale_manifest = warehouse_shipping_service.download_warehouse_manifest(
-            db,
-            batch_id=stale_batch_id,
-            manual_approval=True,
-            privacy_access_acknowledged=True,
-            actor_context=actor,
-        )
-        assert stale_manifest == {"status": "blocked", "skip_reason": "recipient_data_stale"}, stale_manifest
+        assert stale_batch == {
+            "status": "blocked",
+            "skip_reason": "recipient_data_unavailable_or_expired",
+            "order_ids": [second_local_order.id],
+        }, stale_batch
 
         audits = db.scalars(select(OperationAuditLog).where(OperationAuditLog.store_id == store.id)).all()
         assert audits

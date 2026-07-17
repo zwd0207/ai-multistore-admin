@@ -86,7 +86,7 @@ def main():
             require_store_permission(db, identity=identity, store_id=store.id + 999, permission_key="recipient_pii.view")
             raise AssertionError("cross-store recipient PII access should be denied")
         except Exception as exc:
-            assert getattr(exc, "error_code", None) == "recipient_pii_store_scope_forbidden", exc
+            assert getattr(exc, "error_code", None) == "store_scope_forbidden", exc
         summary = order_service.list_orders(db, store_id=store.id, platform="naver", include_test_orders=True)[0]
         assert "receiver_name" not in summary and "receiver_address" not in summary and "raw_data" not in summary, summary
         operations = order_service.list_operations_orders(db, store_id=store.id, platform="naver", include_test_orders=True)[0]

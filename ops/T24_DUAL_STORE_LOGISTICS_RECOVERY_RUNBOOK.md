@@ -8,8 +8,9 @@ does not enable any platform write, delete logistics history, or weaken order
 association rules.
 
 Keep store IDs, store-name hashes, database URLs, credentials, and approval
-values in the protected operator shell. Do not place them in Git, logs, or
-deployment artifacts.
+values in the protected operator shell. The command result may echo the two
+store IDs to that shell for verification; do not persist the command or result
+in Git, application logs, or deployment artifacts.
 
 ## Release Gate
 
@@ -28,8 +29,10 @@ deployment artifacts.
 2. Stop `ai-multistore-api.service` and confirm it is inactive.
 3. Confirm there are no other scheduler processes using the production
    database.
-4. Export the protected recovery approval, exact two store IDs, and exact
-   store-name SHA-256 values in the current shell only.
+4. Export the protected recovery approval, exact two store IDs, exact
+   store-name SHA-256 values, and
+   `T24_DUAL_STORE_LOGISTICS_RECOVERY_SERVICE_STATE=api-service-confirmed-stopped`
+   in the current shell only.
 5. Run:
 
    ```text
@@ -38,8 +41,13 @@ deployment artifacts.
      --store STORE_ID_2:STORE_NAME_SHA256_2
    ```
 
-6. Require `status=scheduled`, `checkpoint_count=2`,
-   `platform_write=false`, and `network_called=false`.
+6. Capture stdout separately from stderr and parse it with a JSON parser.
+   Require `status=scheduled`, exactly two unique `store_ids`,
+   `checkpoint_count=2`, two schedules, `platform_write=false`, and
+   `network_called=false`. Never validate with substring matching or field
+   order. Exit code `2` is a closed safety blocker; exit code `1` is a failure.
+   On either nonzero exit, keep the service stopped and read back markers and
+   both checkpoints before deciding whether any transaction committed.
 7. Start the API service immediately. The existing scheduler performs the
    readonly work; the recovery command never contacts Naver.
 8. Verify public and local health, then observe both logistics checkpoints
@@ -55,8 +63,9 @@ is required:
 
 1. Stop `ai-multistore-api.service` and confirm it is inactive.
 2. Keep the repaired release available long enough to run its close mode.
-3. Export the separate close approval and the service-stopped confirmation in
-   the protected shell. Keep the original exact store approvals in place.
+3. Export the separate close approval and
+   `T24_DUAL_STORE_LOGISTICS_CLOSE_SERVICE_STATE=api-service-confirmed-stopped`
+   in the protected shell. Keep the original exact store approvals in place.
 4. Run:
 
    ```text
@@ -65,9 +74,12 @@ is required:
      --store STORE_ID_2:STORE_NAME_SHA256_2
    ```
 
-5. Require `status=closed`, `checkpoint_count=2`,
-   `platform_write=false`, `network_called=false`, and
-   `records_deleted=false`.
+5. Capture stdout separately from stderr and parse it with a JSON parser.
+   Require `status=closed`, exactly two unique `store_ids`,
+   `checkpoint_count=2`, `platform_write=false`, `network_called=false`, and
+   `records_deleted=false`. Never validate with substring matching or field
+   order; treat any nonzero exit as a failed close until checkpoint readback
+   proves otherwise.
 6. Read back both logistics checkpoints. They must be disabled and blocked by
    `t24_logistics_rollback_closed`, with no lease or next run.
 7. Restore the retained backend release and environment file, then compile it.
@@ -101,10 +113,15 @@ of the rollback is fixed and a new release passes the full release gate:
 3. Verify both recovery markers and both close markers are present, and no
    reopen marker exists.
 4. Export the original recovery approval, exact two store IDs, the service
-   stopped confirmation, and the separate reopen approval in the protected
-   shell.
+   stopped confirmation
+   `T24_DUAL_STORE_LOGISTICS_CLOSE_SERVICE_STATE=api-service-confirmed-stopped`,
+   and the separate reopen approval in the protected shell.
 5. Run the same command as controlled recovery with `--mode reopen`.
-6. Parse the JSON result structurally. Never validate JSON by field order.
+6. Parse stdout separately from stderr with a JSON parser. Require the same
+   scheduled safety contract as controlled recovery plus
+   `records_deleted=false`; never validate by substring or field order. On a
+   nonzero exit, keep the service stopped and read back markers and both
+   checkpoints before deciding whether reopen committed.
 7. Start the repaired release and follow the normal observation and backup
    steps. Reopen is one-time and cannot be repeated. If rollback is required
    again, the existing `--mode close` command writes a separate reclose audit

@@ -562,6 +562,14 @@ def main():
         for bad_detail, code in (
             (detail("po-second", "wrong-order", changed=NOW + timedelta(minutes=4)), "naver_logistics_external_order_id_mismatch"),
             ({**detail("po-second", "o-shared", changed=NOW + timedelta(minutes=4)), "last_changed_at": "not-a-time"}, "naver_logistics_source_time_invalid"),
+            ({
+                **detail("po-second", "o-shared", changed=NOW + timedelta(minutes=4)),
+                "last_changed_at": None,
+                "shipped_at": None,
+                "source_updated_at": None,
+                "paid_at": NOW.isoformat(),
+                "ordered_at": (NOW - timedelta(days=1)).isoformat(),
+            }, "naver_logistics_source_time_invalid"),
             (detail("po-second", "o-shared", changed=NOW + timedelta(minutes=3), tracking="same-version-conflict"), "naver_logistics_same_version_conflict"),
         ):
             checkpoint.status = "idle"; checkpoint.automatic_read_enabled = True; checkpoint.next_run_at = NOW
