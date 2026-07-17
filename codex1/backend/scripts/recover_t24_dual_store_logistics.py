@@ -4,9 +4,11 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,6 +42,7 @@ CLOSE_SERVICE_STOPPED_VALUE = "api-service-confirmed-stopped"
 CLOSE_SERVICE_STOPPED_ENV = "T24_DUAL_STORE_LOGISTICS_CLOSE_SERVICE_STATE"
 CLOSE_SYNC_TYPE = "t24_dual_store_logistics_close"
 CLOSE_ERROR_CODE = "t24_logistics_rollback_closed"
+API_SYSTEMD_UNIT = "ai-multistore-api.service"
 ORDERS_SYNC_TYPE = "naver_automatic_orders"
 LOGISTICS_SYNC_TYPE = "naver_automatic_logistics"
 RECOVERABLE_ERROR_CODE = "naver_logistics_external_order_id_mismatch"
@@ -131,6 +134,26 @@ def _assert_close_runtime(settings: Settings, *, target_ids: list[int]) -> None:
     if settings.naver_readonly_inquiry_approved_store_id_set != frozenset(target_ids):
         raise LogisticsRecoveryBlocked("t24_logistics_close_allowlist_mismatch")
     _assert_write_gates_closed(settings)
+
+
+def _api_service_is_inactive() -> bool:
+    try:
+        result = subprocess.run(
+            (
+                "systemctl",
+                "show",
+                API_SYSTEMD_UNIT,
+                "--property=ActiveState",
+                "--value",
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "inactive"
 
 
 def _active_or_uncleared_lease(checkpoint: SyncCheckpoint, now: datetime) -> bool:
@@ -327,12 +350,15 @@ def close_dual_store_logistics(
     specs: list[StoreSpec],
     settings: Settings,
     now: datetime | None = None,
+    service_stopped_probe: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     normalized_specs = _normalized_specs(specs)
     _require_close_process_approval(normalized_specs)
     current = _utc(now or get_utc_now())
     target_ids = [spec.store_id for spec in normalized_specs]
     _assert_close_runtime(settings, target_ids=target_ids)
+    if not (service_stopped_probe or _api_service_is_inactive)():
+        raise LogisticsRecoveryBlocked("t24_logistics_close_service_not_inactive")
     _lock_and_validate_stores(
         db,
         specs=normalized_specs,

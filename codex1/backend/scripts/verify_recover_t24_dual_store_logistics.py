@@ -608,7 +608,11 @@ def main() -> None:
         _expect_blocked(
             "t24_logistics_close_owner_approval_missing",
             lambda: close_dual_store_logistics(
-                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=3)
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=3),
+                service_stopped_probe=lambda: True,
             ),
         )
         db.rollback()
@@ -616,16 +620,32 @@ def main() -> None:
         _expect_blocked(
             "t24_logistics_close_service_stop_unconfirmed",
             lambda: close_dual_store_logistics(
-                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=3)
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=3),
+                service_stopped_probe=lambda: True,
             ),
         )
         db.rollback()
         os.environ[CLOSE_SERVICE_STOPPED_ENV] = CLOSE_SERVICE_STOPPED_VALUE
+        _expect_blocked(
+            "t24_logistics_close_service_not_inactive",
+            lambda: close_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=3),
+                service_stopped_probe=lambda: False,
+            ),
+        )
+        db.rollback()
         closed = close_dual_store_logistics(
             db,
             specs=list(reversed(specs)),
             settings=_settings(),
             now=NOW + timedelta(minutes=3),
+            service_stopped_probe=lambda: True,
         )
         assert closed == {
             "status": "closed",
@@ -669,7 +689,11 @@ def main() -> None:
         _expect_blocked(
             "t24_logistics_close_already_applied",
             lambda: close_dual_store_logistics(
-                db, specs=specs, settings=_settings(), now=NOW + timedelta(minutes=4)
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=4),
+                service_stopped_probe=lambda: True,
             ),
         )
         db.rollback()

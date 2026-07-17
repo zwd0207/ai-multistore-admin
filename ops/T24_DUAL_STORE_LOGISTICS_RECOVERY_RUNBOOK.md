@@ -45,6 +45,8 @@ deployment artifacts.
 8. Verify public and local health, then observe both logistics checkpoints
    until each reaches `success`, a legitimate `retry_wait`, or a new closed
    failure. Never rerun the recovery command.
+9. Create and remotely verify a fresh encrypted PostgreSQL backup after both
+   stores reach an accepted state.
 
 ## Emergency Code Rollback
 
@@ -68,11 +70,13 @@ is required:
    `records_deleted=false`.
 6. Read back both logistics checkpoints. They must be disabled and blocked by
    `t24_logistics_rollback_closed`, with no lease or next run.
-7. Restore the retained backend release and environment file, compile it, and
-   start the API service.
-8. Verify health, PostgreSQL connectivity, all write gates, and the absence of
-   new logistics scheduling. Preserve already-read logistics records for
-   audit; do not delete them during code rollback.
+7. Restore the retained backend release and environment file, then compile it.
+8. Before starting the service, use an offline configuration and readonly
+   database probe to verify PostgreSQL connectivity and confirm every platform
+   write and AI setting remains false.
+9. Start the API service and verify health and the absence of new logistics
+   scheduling. Preserve already-read logistics records for audit; do not
+   delete them during code rollback.
 
 ## Acceptance Evidence
 
