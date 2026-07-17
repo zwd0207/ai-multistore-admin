@@ -462,8 +462,11 @@ def verify_capability_and_write_boundary():
     capability = api_credential_readiness_service.NAVER_CAPABILITY_MAP["naver.customer_inquiry_read"]
     assert capability["docs_reference_version"] == "current/2.82.0"
     assert capability["implemented_now"] is True
-    assert capability["safe_to_real_test"] is False
+    assert capability["safe_to_real_test"] is True
     assert capability["required_permission"] == "order_seller"
+    assert capability["grant_confirmed"] is True
+    assert capability["token_type_required"] == "SELF"
+    assert capability["blocked_reason"] is None
     source = Path(naver_readonly_inquiry_service.__file__).read_text(encoding="utf-8")
     assert "reply_naver_customer_inquiry" not in source
     assert "platform_write\": False" in source
