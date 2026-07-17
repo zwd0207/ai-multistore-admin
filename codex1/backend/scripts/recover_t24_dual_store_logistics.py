@@ -76,9 +76,21 @@ def _require_process_approval(specs: list[StoreSpec]) -> None:
         raise LogisticsRecoveryBlocked("t24_logistics_recovery_approved_ids_mismatch")
 
 
-def _assert_runtime_closed(settings: Settings) -> None:
+def _assert_runtime_approved(settings: Settings) -> None:
     if settings.app_env != "production":
         raise LogisticsRecoveryBlocked("t24_logistics_recovery_production_required")
+    if settings.real_api_test_enabled:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_parallel_real_test_enabled")
+    if not settings.automatic_read_sync_enabled:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_automatic_read_disabled")
+    if not settings.lifecycle_schedulers_enabled:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_lifecycle_scheduler_disabled")
+    if not settings.naver_readonly_inquiry_real_read_enabled:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_inquiry_runtime_disabled")
+    if not settings.pxg_naver_local_read_retention_cleanup_enabled:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_cleanup_disabled")
+    if not settings.credential_encryption_key:
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_encryption_key_missing")
     write_flags = (
         settings.real_api_write_enabled,
         settings.platform_product_write_enabled,
@@ -128,9 +140,11 @@ def recover_dual_store_logistics(
 ) -> dict[str, object]:
     normalized_specs = _normalized_specs(specs)
     _require_process_approval(normalized_specs)
-    _assert_runtime_closed(settings)
+    _assert_runtime_approved(settings)
     current = _utc(now or get_utc_now())
     target_ids = [spec.store_id for spec in normalized_specs]
+    if settings.naver_readonly_inquiry_approved_store_id_set != frozenset(target_ids):
+        raise LogisticsRecoveryBlocked("t24_logistics_recovery_allowlist_mismatch")
 
     stores = db.scalars(
         select(Store)
@@ -172,7 +186,14 @@ def recover_dual_store_logistics(
             store_id=store_id,
             sync_type=LOGISTICS_SYNC_TYPE,
         )
-        if orders.fresh_until is None or _utc(orders.fresh_until) <= current:
+        if (
+            orders.status != "success"
+            or not orders.automatic_read_enabled
+            or orders.last_synced_at is None
+            or orders.fresh_until is None
+            or _utc(orders.fresh_until) <= current
+            or orders.last_error_code is not None
+        ):
             raise LogisticsRecoveryBlocked("t24_logistics_recovery_orders_not_fresh")
         logistics_by_store[store_id] = logistics
 

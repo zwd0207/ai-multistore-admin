@@ -287,10 +287,12 @@ def _orders_dependency_ready(db: Session, *, store_id: int, now: datetime) -> bo
     checkpoint = _orders_dependency_checkpoint(db, store_id=store_id)
     return bool(
         checkpoint is not None
+        and checkpoint.automatic_read_enabled
         and checkpoint.last_synced_at is not None
         and checkpoint.status in LOGISTICS_ORDERS_HEALTHY_STATUSES
         and checkpoint.fresh_until is not None
         and _utc(checkpoint.fresh_until) > _utc(now)
+        and checkpoint.last_error_code is None
     )
 
 

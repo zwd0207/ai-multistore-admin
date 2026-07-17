@@ -1547,6 +1547,7 @@ def verify_stage_scripts() -> None:
         "verify_t15_automatic_read_sync.py",
         "verify_t16_automatic_read_recovery.py",
         "verify_t17_naver_logistics.py",
+        "verify_recover_t24_dual_store_logistics.py",
         "verify_t18_naver_shipping_pilot.py",
         "verify_t19_ziniao_browser_open.py",
         "verify_t20_ziniao_directory_sync.py",

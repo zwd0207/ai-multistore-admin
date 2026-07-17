@@ -2,6 +2,7 @@ import hashlib
 import os
 import sys
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,10 +23,12 @@ os.environ.update({
     "LIFECYCLE_SCHEDULERS_ENABLED": "false",
 })
 
-from sqlalchemy import select
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
-from app.database import SessionLocal, engine, init_db
+from app.database import Base, SessionLocal, engine, init_db
+from app import models as _models  # noqa: F401 - register the complete schema
 from app.models.store import Store
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
@@ -60,6 +63,12 @@ def _settings(**overrides) -> Settings:
         "app_env": "production",
         "database_url": f"sqlite:///{DB_PATH.as_posix()}",
         "credential_encryption_key": os.environ["CREDENTIAL_ENCRYPTION_KEY"],
+        "real_api_test_enabled": False,
+        "automatic_read_sync_enabled": True,
+        "lifecycle_schedulers_enabled": True,
+        "naver_readonly_inquiry_real_read_enabled": True,
+        "naver_readonly_inquiry_approved_store_ids": [1, 2],
+        "pxg_naver_local_read_retention_cleanup_enabled": True,
         "real_api_write_enabled": False,
         "platform_product_write_enabled": False,
         "platform_inventory_write_enabled": False,
@@ -106,6 +115,7 @@ def _seed() -> tuple[list[StoreSpec], dict[int, dict[str, SyncCheckpoint]]]:
                     sync_type="naver_automatic_orders",
                     automatic_read_enabled=True,
                     status="success",
+                    last_synced_at=NOW,
                     fresh_until=NOW + timedelta(minutes=20),
                     next_run_at=NOW + timedelta(minutes=5),
                 ),
@@ -146,6 +156,122 @@ def _seed() -> tuple[list[StoreSpec], dict[int, dict[str, SyncCheckpoint]]]:
             for checkpoint in resources.values():
                 db.refresh(checkpoint)
     return specs, rows
+
+
+def _seed_recovery_scope(db, *, now: datetime) -> list[StoreSpec]:
+    specs: list[StoreSpec] = []
+    for store_id in (1, 2):
+        name = f"T24 PostgreSQL Logistics Recovery {store_id}"
+        store = Store(id=store_id, name=name, platform="naver", status="active")
+        db.add(store)
+        db.flush()
+        specs.append(StoreSpec(
+            store_id,
+            hashlib.sha256(name.encode("utf-8")).hexdigest(),
+        ))
+        db.add_all((
+            SyncCheckpoint(
+                store_id=store_id,
+                platform="naver",
+                sync_type="naver_automatic_orders",
+                automatic_read_enabled=True,
+                status="success",
+                last_synced_at=now,
+                fresh_until=now + timedelta(minutes=20),
+                next_run_at=now + timedelta(minutes=5),
+            ),
+            SyncCheckpoint(
+                store_id=store_id,
+                platform="naver",
+                sync_type="naver_automatic_logistics",
+                automatic_read_enabled=False,
+                status="blocked",
+                retry_count=1,
+                last_error_code=RECOVERABLE_ERROR_CODE,
+            ),
+        ))
+    db.commit()
+    return specs
+
+
+def verify_postgres_concurrent_recovery() -> None:
+    postgres_url = os.environ.get("T22_TEST_POSTGRES_URL")
+    if not postgres_url:
+        return
+    schema = f"t24_logistics_recovery_{uuid.uuid4().hex[:12]}"
+    admin_engine = create_engine(postgres_url, future=True)
+    isolated_engine = None
+    try:
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        isolated_engine = create_engine(
+            postgres_url,
+            future=True,
+            connect_args={"options": f"-csearch_path={schema}"},
+        )
+        Base.metadata.create_all(isolated_engine)
+        IsolatedSession = sessionmaker(
+            bind=isolated_engine,
+            expire_on_commit=False,
+            future=True,
+        )
+        with IsolatedSession() as db:
+            specs = _seed_recovery_scope(db, now=NOW)
+
+        os.environ[APPROVAL_ENV] = APPROVAL_VALUE
+        os.environ[APPROVED_STORE_IDS_ENV] = "1,2"
+        barrier = threading.Barrier(2)
+        results: list[str] = []
+        errors: list[Exception] = []
+        result_lock = threading.Lock()
+
+        def execute_recovery() -> None:
+            with IsolatedSession() as db:
+                try:
+                    barrier.wait(timeout=5)
+                    outcome = recover_dual_store_logistics(
+                        db,
+                        specs=specs,
+                        settings=_settings(database_url=postgres_url),
+                        now=NOW,
+                    )
+                    value = str(outcome["status"])
+                except LogisticsRecoveryBlocked as exc:
+                    value = exc.error_code
+                except Exception as exc:  # pragma: no cover - reported below
+                    with result_lock:
+                        errors.append(exc)
+                    return
+                with result_lock:
+                    results.append(value)
+
+        workers = [threading.Thread(target=execute_recovery, daemon=True) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=15)
+        assert all(not worker.is_alive() for worker in workers)
+        assert not errors, errors
+        assert sorted(results) == ["scheduled", "t24_logistics_recovery_already_applied"]
+
+        with IsolatedSession() as db:
+            assert db.query(SyncLog).filter_by(sync_type=RECOVERY_SYNC_TYPE).count() == 2
+            logistics = db.scalars(select(SyncCheckpoint).where(
+                SyncCheckpoint.sync_type == "naver_automatic_logistics"
+            ).order_by(SyncCheckpoint.store_id.asc())).all()
+            assert len(logistics) == 2
+            assert all(
+                row.status == "idle"
+                and row.automatic_read_enabled
+                and row.last_error_code is None
+                for row in logistics
+            )
+    finally:
+        if isolated_engine is not None:
+            isolated_engine.dispose()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        admin_engine.dispose()
 
 
 def main() -> None:
@@ -195,6 +321,26 @@ def main() -> None:
             )
             db.rollback()
 
+        for override, code in (
+            ({"real_api_test_enabled": True}, "t24_logistics_recovery_parallel_real_test_enabled"),
+            ({"automatic_read_sync_enabled": False}, "t24_logistics_recovery_automatic_read_disabled"),
+            ({"lifecycle_schedulers_enabled": False}, "t24_logistics_recovery_lifecycle_scheduler_disabled"),
+            ({"naver_readonly_inquiry_real_read_enabled": False}, "t24_logistics_recovery_inquiry_runtime_disabled"),
+            ({"pxg_naver_local_read_retention_cleanup_enabled": False}, "t24_logistics_recovery_cleanup_disabled"),
+            ({"credential_encryption_key": ""}, "t24_logistics_recovery_encryption_key_missing"),
+            ({"naver_readonly_inquiry_approved_store_ids": [store_ids[0]]}, "t24_logistics_recovery_allowlist_mismatch"),
+        ):
+            _expect_blocked(
+                code,
+                lambda override=override: recover_dual_store_logistics(
+                    db,
+                    specs=specs,
+                    settings=_settings(**override),
+                    now=NOW,
+                ),
+            )
+            db.rollback()
+
         wrong_hash_specs = [
             StoreSpec(specs[0].store_id, "0" * 64),
             specs[1],
@@ -235,6 +381,19 @@ def main() -> None:
         db.rollback()
         orders = db.get(SyncCheckpoint, orders.id)
         orders.fresh_until = NOW + timedelta(minutes=20)
+        db.commit()
+
+        orders.status = "retry_wait"
+        db.commit()
+        _expect_blocked(
+            "t24_logistics_recovery_orders_not_fresh",
+            lambda: recover_dual_store_logistics(
+                db, specs=specs, settings=_settings(), now=NOW
+            ),
+        )
+        db.rollback()
+        orders = db.get(SyncCheckpoint, orders.id)
+        orders.status = "success"
         db.commit()
 
         second_logistics = db.get(
@@ -391,6 +550,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+        verify_postgres_concurrent_recovery()
     finally:
         engine.dispose()
         DB_PATH.unlink(missing_ok=True)

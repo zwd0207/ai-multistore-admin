@@ -225,6 +225,23 @@ def main():
         assert second_logistics_cp.lease_token is None and second_logistics_cp.retry_count == 0
         assert blocked_reader.logistics_calls == []
 
+        second_order_cp.status = "success"
+        second_order_cp.automatic_read_enabled = False
+        second_order_cp.last_synced_at = NOW
+        second_order_cp.fresh_until = NOW + timedelta(minutes=25)
+        second_order_cp.last_error_code = None
+        second_logistics_cp.status = "idle"
+        second_logistics_cp.next_run_at = NOW
+        db.commit()
+        assert run_automatic_checkpoint(
+            db,
+            checkpoint_id=second_logistics_cp.id,
+            now=NOW,
+            reader=blocked_reader,
+        ) == "not_due"
+        assert blocked_reader.logistics_calls == []
+        second_order_cp.automatic_read_enabled = True
+
         order_cp.status = "success"
         order_cp.last_synced_at = NOW
         order_cp.fresh_until = NOW + timedelta(minutes=25)

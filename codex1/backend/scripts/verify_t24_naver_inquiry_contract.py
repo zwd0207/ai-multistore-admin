@@ -72,6 +72,14 @@ class FakeClient:
         return self.response
 
 
+class FakeOrderClient(FakeClient):
+    def post(self, url, *, headers, json):
+        self.capture.append({"url": url, "headers": headers, "json": json})
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+
 def verify_http_contract():
     capture = []
     request = httpx.Request("GET", "https://api.test/external/v1/pay-user/inquiries")
@@ -206,6 +214,97 @@ def verify_safe_errors_and_limits():
         assert result["error_code"] == "naver_customer_inquiry_network_retryable"
         assert automatic_read_sync_service._retryable_error(result["error_code"])
         assert automatic_read_sync_service._retryable_error("naver_customer_inquiry_rate_limit")
+    finally:
+        sync_service.httpx.Client = original_client
+
+
+def verify_order_safe_errors_and_limits():
+    original_client = sync_service.httpx.Client
+    capture = []
+    feed_request = httpx.Request(
+        "GET",
+        "https://api.test/external/v1/pay-order/seller/product-orders/last-changed-statuses",
+    )
+    start_kst = datetime(2026, 7, 16, tzinfo=timezone.utc)
+    end_kst = start_kst + timedelta(days=1)
+    try:
+        invalid = httpx.Response(
+            400,
+            request=feed_request,
+            json={
+                "code": "INVALID_PARAMETER",
+                "message": "orderId=12345678901234567890 must remain masked",
+                "invalidParams": [{"field": "lastChangedFrom", "value": "private"}],
+            },
+            headers={"GNCP-GW-Trace-ID": "trace-order-400"},
+        )
+        sync_service.httpx.Client = lambda **_kwargs: FakeOrderClient(invalid, capture)
+        result = sync_service._request_naver_order_last_changed_feed(
+            api_base="https://api.test/external",
+            headers={"Authorization": "Bearer order-token-must-not-leak"},
+            start_kst=start_kst,
+            end_kst=end_kst,
+            size=20,
+            attempt="safe-contract",
+            include_last_changed_to=True,
+            datetime_format_shape="offset_milliseconds",
+        )
+        assert result["error_code"] == "readonly_request_failed"
+        assert result["http_status"] == 400 and result["retry_after_seconds"] is None
+        assert result["diagnostics"]["naver_error_fields"] == ["lastChangedFrom"]
+        serialized = str(result)
+        assert "order-token-must-not-leak" not in serialized
+        assert "12345678901234567890" not in serialized
+
+        limited = httpx.Response(
+            429,
+            request=feed_request,
+            json={"code": "GW.RATE_LIMIT", "message": "rate limit"},
+            headers={
+                "GNCP-GW-Trace-ID": "trace-order-429",
+                "GNCP-GW-RateLimit-Limit": "20",
+                "GNCP-GW-Quota-Remaining": "0",
+                "Retry-After": "99999",
+            },
+        )
+        sync_service.httpx.Client = lambda **_kwargs: FakeOrderClient(limited, capture)
+        result = sync_service._request_naver_order_last_changed_feed(
+            api_base="https://api.test/external",
+            headers={},
+            start_kst=start_kst,
+            end_kst=end_kst,
+            size=20,
+            attempt="safe-contract",
+            include_last_changed_to=True,
+            datetime_format_shape="offset_milliseconds",
+        )
+        assert result["error_code"] == "readonly_request_failed"
+        assert result["retry_after_seconds"] == 3600
+        assert result["diagnostics"]["rate_limit"] == {
+            "gncp-gw-ratelimit-limit": "20",
+            "gncp-gw-quota-remaining": "0",
+        }
+
+        detail_request = httpx.Request(
+            "POST",
+            "https://api.test/external/v1/pay-order/seller/product-orders/query",
+        )
+        upstream = httpx.Response(
+            503,
+            request=detail_request,
+            json={"code": "UPSTREAM", "message": "temporarily unavailable"},
+            headers={"Retry-After": "120"},
+        )
+        sync_service.httpx.Client = lambda **_kwargs: FakeOrderClient(upstream, capture)
+        result = sync_service._request_naver_order_detail_query(
+            api_base="https://api.test/external",
+            headers={"Authorization": "Bearer detail-token-must-not-leak"},
+            product_order_ids=["synthetic-product-order"],
+        )
+        assert result["error_code"] == "readonly_request_failed"
+        assert result["retry_after_seconds"] == 120
+        assert "detail-token-must-not-leak" not in str(result)
+        assert "synthetic-product-order" not in str(result)
     finally:
         sync_service.httpx.Client = original_client
 
@@ -476,6 +575,7 @@ def main():
     try:
         verify_http_contract()
         verify_safe_errors_and_limits()
+        verify_order_safe_errors_and_limits()
         verify_kst_window_and_pagination()
         verify_shared_lease_and_safe_log()
         verify_server_side_approval_gate()

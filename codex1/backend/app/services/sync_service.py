@@ -5354,12 +5354,14 @@ def _request_naver_order_last_changed_feed(
         )
     diagnostics["http_status"] = response.status_code
     if response.status_code >= 400:
+        diagnostics.update(_extract_naver_order_safe_headers(response))
         diagnostics.update(_extract_naver_error_diagnostics(response))
         return {
             "attempt": attempt,
             "success": False,
             "http_status": response.status_code,
             "error_code": _naver_readonly_error_code(response),
+            "retry_after_seconds": diagnostics.get("retry_after_seconds"),
             "diagnostics": diagnostics,
         }
     return {
@@ -5504,11 +5506,13 @@ def _request_naver_order_detail_query(
         )
     diagnostics["http_status"] = response.status_code
     if response.status_code >= 400:
+        diagnostics.update(_extract_naver_order_safe_headers(response))
         diagnostics.update(_extract_naver_error_diagnostics(response))
         return {
             "success": False,
             "http_status": response.status_code,
             "error_code": _naver_readonly_error_code(response),
+            "retry_after_seconds": diagnostics.get("retry_after_seconds"),
             "diagnostics": diagnostics,
         }
     return {
@@ -5517,6 +5521,13 @@ def _request_naver_order_detail_query(
         "payload": response.json(),
         "diagnostics": diagnostics,
     }
+
+
+def _extract_naver_order_safe_headers(response: httpx.Response) -> dict[str, object]:
+    """Return only bounded gateway metadata that is safe for retry scheduling."""
+    if not hasattr(response, "headers"):
+        return {}
+    return _extract_naver_inquiry_safe_headers(response)
 
 
 def _extract_naver_product_order_ids(payload: object) -> list[str]:
