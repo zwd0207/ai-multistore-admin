@@ -161,3 +161,14 @@ Worker tasks return only:
 `STATUS / BRANCH / COMMIT / TESTS / BLOCKER`
 
 The commander records accepted results here. Detailed evidence stays in Git, tests, and `.codex-handoff/`.
+
+## T21-T22 Production Baseline Evidence (2026-07-17)
+
+- Candidate release `ca3a213e2aa7eee557c78c2fa37aa52547b8e63a` is pushed to `origin/release/operator-v1`; GitHub `Verify release candidate` run `29565215300` completed successfully.
+- Local frontend gates passed: encoding scan, session security, bundle budget, and production build. The entry chunk is about 268 KB and 38 JavaScript chunks pass the budget.
+- Backend `verify_all.py` passed in `codex1/backend/.venv`, including T13-T20, production sessions, PostgreSQL migration contract, backup contract, and security scans. T22 live migration verification remains intentionally skipped until the migration window.
+- Server baseline archive `/srv/release-archives/t21-baseline-20260717T080903Z` was created with root-only permissions. Its SHA256 manifest passed. SQLite integrity is `ok`, source and backup counts match, and `production_database_modified=false` (2 stores, 18 orders, 10 products, 2 credentials).
+- HTTPS, Nginx, PostgreSQL, and `ai-multistore-api` are active on the production host. Certbot renewal dry-run passed. The live application still points to the formal SQLite database; this is intentional until migration approval.
+- PostgreSQL `ai_multistore` has the Alembic revision `608122e7c9e6` and no application rows. The candidate release was staged at `/srv/releases/t21-ca3a213`; an isolated release virtualenv was used for the rehearsal.
+- SQLite-to-PostgreSQL dry-run returned `migration_ready`, preserved the source SHA-256, reported `platform_admin_bootstrap_required=true`, and did not copy rows. Target counts remain zero except `alembic_version=1`.
+- T22 is not production-complete: do not execute the one-time migration, bootstrap the initial platform administrator, switch `DATABASE_URL`, or enable the PostgreSQL OSS timer until the owner confirms the migration window, approved administrator email/display name, and private OSS bucket name. Do not request or store AccessKeys in chat.
