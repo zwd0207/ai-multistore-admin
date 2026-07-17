@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -35,7 +37,11 @@ RESOURCE_CONFIG = {
 PREPARED_ACTIVATION_RESOURCE_ORDER = ("orders", "customer_inquiries", "logistics", "products")
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
+READ_PAGE_THROTTLE_SECONDS = 1.0
 MAX_RETRY_DELAY_SECONDS = 60 * 60
+LOGISTICS_ORDERS_DEPENDENCY_RETRY_DELAY = timedelta(minutes=1)
+LOGISTICS_ORDERS_HEALTHY_STATUSES = frozenset({"success", "idle", "due"})
+LOGISTICS_ORDERS_DEPENDENCY_ERROR = "orders_dependency_not_ready"
 PREPARED_ACTIVATION_START_GRACE = timedelta(minutes=1)
 INQUIRY_GATE_ERROR_CODES = frozenset({
     "naver_inquiry_real_read_disabled",
@@ -60,6 +66,16 @@ RECOVERABLE_ERROR_CODES = frozenset({
     "order_api_not_allowed",
     "ip_not_allowed",
 })
+
+
+def _no_sleep(_seconds: float) -> None:
+    return None
+
+
+def _read_page_sleep(sleep_fn: Callable[[float], None] | None) -> Callable[[float], None]:
+    if sleep_fn is not None:
+        return sleep_fn
+    return _no_sleep if get_settings().app_env == "test" else time.sleep
 
 
 def _utc(value: datetime) -> datetime:
@@ -259,7 +275,55 @@ def ensure_onboarded_store_schedules(
     return len(store_ids)
 
 
+def _orders_dependency_checkpoint(db: Session, *, store_id: int) -> SyncCheckpoint | None:
+    return db.scalar(select(SyncCheckpoint).where(
+        SyncCheckpoint.store_id == store_id,
+        SyncCheckpoint.platform == NAVER,
+        SyncCheckpoint.sync_type == RESOURCE_CONFIG["orders"]["sync_type"],
+    ))
+
+
+def _orders_dependency_ready(db: Session, *, store_id: int, now: datetime) -> bool:
+    checkpoint = _orders_dependency_checkpoint(db, store_id=store_id)
+    return bool(
+        checkpoint is not None
+        and checkpoint.last_synced_at is not None
+        and checkpoint.status in LOGISTICS_ORDERS_HEALTHY_STATUSES
+        and checkpoint.fresh_until is not None
+        and _utc(checkpoint.fresh_until) > _utc(now)
+    )
+
+
+def _defer_logistics_for_orders_dependency(
+    db: Session,
+    *,
+    checkpoint: SyncCheckpoint,
+    now: datetime,
+) -> None:
+    retry_at = _utc(now) + LOGISTICS_ORDERS_DEPENDENCY_RETRY_DELAY
+    orders_checkpoint = _orders_dependency_checkpoint(db, store_id=checkpoint.store_id)
+    if orders_checkpoint is not None and orders_checkpoint.next_run_at is not None:
+        retry_at = max(retry_at, _utc(orders_checkpoint.next_run_at))
+    due = checkpoint.next_run_at is None or _utc(checkpoint.next_run_at) <= _utc(now)
+    lease_available = checkpoint.lease_expires_at is None or _utc(checkpoint.lease_expires_at) <= _utc(now)
+    if checkpoint.automatic_read_enabled and checkpoint.status != "blocked" and due and lease_available:
+        checkpoint.status = "retry_wait"
+        checkpoint.next_run_at = retry_at
+        checkpoint.last_error_code = LOGISTICS_ORDERS_DEPENDENCY_ERROR
+        checkpoint.lease_token = None
+        checkpoint.lease_expires_at = None
+        db.commit()
+
+
 def _claim(db: Session, *, checkpoint_id: int, now: datetime) -> str | None:
+    pending = db.get(SyncCheckpoint, checkpoint_id)
+    if (
+        pending is not None
+        and pending.sync_type == RESOURCE_CONFIG["logistics"]["sync_type"]
+        and not _orders_dependency_ready(db, store_id=pending.store_id, now=now)
+    ):
+        _defer_logistics_for_orders_dependency(db, checkpoint=pending, now=now)
+        return None
     token = secrets.token_urlsafe(24)
     claimed = db.execute(update(SyncCheckpoint).where(
         SyncCheckpoint.id == checkpoint_id,
@@ -312,13 +376,19 @@ def _context(db: Session, store_id: int) -> store_onboarding_service.NaverReadCo
 
 def _safe_error_code(exc: Exception) -> str:
     if isinstance(exc, store_onboarding_service.NaverReadFailure):
-        return exc.code[:80]
-    return str(getattr(exc, "error_code", "automatic_read_failed"))[:80]
+        candidate = exc.code
+    else:
+        candidate = str(getattr(exc, "error_code", "automatic_read_failed"))
+    normalized = str(candidate or "").strip().lower()
+    return normalized if re.fullmatch(r"[a-z0-9_]{1,80}", normalized) else "automatic_read_failed"
 
 
 def _bounded_retry_after_seconds(exc: Exception) -> int | None:
-    detail = exc.detail if isinstance(exc, ApiError) and isinstance(exc.detail, dict) else {}
-    value = detail.get("retry_after_seconds")
+    if isinstance(exc, store_onboarding_service.NaverReadFailure):
+        value = exc.retry_after_seconds
+    else:
+        detail = exc.detail if isinstance(exc, ApiError) and isinstance(exc.detail, dict) else {}
+        value = detail.get("retry_after_seconds")
     if type(value) is not int or value < 0:
         return None
     return min(value, MAX_RETRY_DELAY_SECONDS)
@@ -388,6 +458,7 @@ def _sync_t13_resource(
     db: Session, *, checkpoint: SyncCheckpoint, resource: str,
     reader: store_onboarding_service.NaverReadAdapter, now: datetime,
     token: str, clock: Callable[[], datetime],
+    sleep_fn: Callable[[float], None],
 ) -> dict[str, int]:
     context = _context(db, checkpoint.store_id)
     if checkpoint.cursor_value:
@@ -403,6 +474,8 @@ def _sync_t13_resource(
     while True:
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
+        if resource == "orders" and pages:
+            sleep_fn(READ_PAGE_THROTTLE_SECONDS)
         page_now = _utc(clock())
         _renew_page_lease(
             db,
@@ -438,6 +511,7 @@ def _sync_t17_logistics(
     db: Session, *, checkpoint: SyncCheckpoint,
     reader: store_onboarding_service.NaverReadAdapter, now: datetime,
     token: str, clock: Callable[[], datetime],
+    sleep_fn: Callable[[float], None],
 ) -> dict[str, int]:
     """Read existing order-detail snapshots and persist only local logistics data."""
     from app.services import pxg_naver_readonly_persistence_service
@@ -448,8 +522,16 @@ def _sync_t17_logistics(
     checkpoint.window_start_at, checkpoint.window_end_at = _utc(now - timedelta(days=30)), now
     pages = saved = not_available = skipped = 0
     while True:
+        batch = _t17_logistics_candidates(
+            db, store_id=checkpoint.store_id, now=now, after_order_id=last_order_id,
+        )[:store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
+        if not batch:
+            checkpoint.cursor_value = None
+            break
         if pages >= MAX_PAGES_PER_RUN:
             raise store_onboarding_service.NaverReadFailure("read_page_limit_reached", retryable=True)
+        if pages:
+            sleep_fn(READ_PAGE_THROTTLE_SECONDS)
         _renew_page_lease(
             db,
             checkpoint_id=checkpoint.id,
@@ -457,12 +539,6 @@ def _sync_t17_logistics(
             resource="logistics",
             now=_utc(clock()),
         )
-        batch = _t17_logistics_candidates(
-            db, store_id=checkpoint.store_id, now=now, after_order_id=last_order_id,
-        )[:store_onboarding_service.ORDER_DETAIL_BATCH_SIZE]
-        if not batch:
-            checkpoint.cursor_value = None
-            break
         product_order_ids = [str(order.external_product_order_id) for order in batch]
         details = reader.read_logistics(context, product_order_ids=product_order_ids)
         if not isinstance(details, list):
@@ -608,7 +684,12 @@ def _finish_failure(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
 
 def _retryable_error(code: str) -> bool:
     normalized = code.lower()
-    return normalized in {"naver_read_retryable", "network_timeout", "network_error", "readonly_request_failed"} or any(
+    return normalized in {
+        "naver_read_retryable",
+        "network_timeout",
+        "network_error",
+        LOGISTICS_ORDERS_DEPENDENCY_ERROR,
+    } or any(
         marker in normalized for marker in ("timeout", "rate_limit", "http_429", "http_5", "retryable")
     )
 
@@ -734,6 +815,7 @@ def run_automatic_checkpoint(
     db: Session, *, checkpoint_id: int, now: datetime | None = None,
     reader: store_onboarding_service.NaverReadAdapter | None = None,
     inquiry_runner: Callable[..., dict[str, Any]] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> str:
     fixed_now = _utc(now) if now is not None else None
     current = fixed_now or _utc(get_utc_now())
@@ -760,23 +842,29 @@ def run_automatic_checkpoint(
             )
             summary = {"created": int(result.get("created_count", 0)), "updated": int(result.get("updated_count", 0)), "pages": int(result.get("pages_read", 0))}
         elif resource == "logistics":
+            active_reader = reader or store_onboarding_service.get_naver_read_adapter()
+            page_sleep = _read_page_sleep(sleep_fn)
             summary = _sync_t17_logistics(
                 db,
                 checkpoint=checkpoint,
-                reader=reader or store_onboarding_service.get_naver_read_adapter(),
+                reader=active_reader,
                 now=current,
                 token=token,
                 clock=clock,
+                sleep_fn=page_sleep,
             )
         else:
+            active_reader = reader or store_onboarding_service.get_naver_read_adapter()
+            page_sleep = _read_page_sleep(sleep_fn)
             summary = _sync_t13_resource(
                 db,
                 checkpoint=checkpoint,
                 resource=resource,
-                reader=reader or store_onboarding_service.get_naver_read_adapter(),
+                reader=active_reader,
                 now=current,
                 token=token,
                 clock=clock,
+                sleep_fn=page_sleep,
             )
         return "success" if _finish_success(db, checkpoint=checkpoint, token=token, now=current, result=summary) else "not_due"
     except Exception as exc:
@@ -791,6 +879,7 @@ def run_due_automatic_read_syncs(
     *, session_factory: Callable[[], Session], now: datetime | None = None,
     reader: store_onboarding_service.NaverReadAdapter | None = None,
     inquiry_runner: Callable[..., dict[str, Any]] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> dict[str, int]:
     settings = get_settings()
     if not settings.automatic_read_sync_enabled:
@@ -812,6 +901,7 @@ def run_due_automatic_read_syncs(
                 now=current if now is not None else None,
                 reader=reader,
                 inquiry_runner=inquiry_runner,
+                sleep_fn=sleep_fn,
             )
             if result in counts:
                 counts[result] += 1

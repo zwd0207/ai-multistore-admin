@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Callable, Protocol
 
 import httpx
@@ -31,6 +34,7 @@ HISTORY_MAX_DAYS = 31
 MAX_READ_PAGES = 100
 PRODUCT_PAGE_SIZE = 5
 ORDER_DETAIL_BATCH_SIZE = sync_service.NAVER_ORDER_MANUAL_BATCH_MAX_COUNT
+MAX_RETRY_AFTER_SECONDS = 60 * 60
 WORKER_CLAIM_TTL = timedelta(minutes=15)
 ONBOARDING_PRODUCT_SYNC = "naver_onboarding_products"
 ONBOARDING_ORDER_SYNC = "naver_onboarding_orders"
@@ -81,10 +85,17 @@ class NaverReadPage:
 
 
 class NaverReadFailure(Exception):
-    def __init__(self, code: str, *, retryable: bool = False):
-        self.code = code
-        self.retryable = retryable
-        super().__init__(code)
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        retry_after_seconds: object | None = None,
+    ):
+        self.code = _safe_failure_code(code)
+        self.retryable = bool(retryable)
+        self.retry_after_seconds = _bounded_retry_after_seconds(retry_after_seconds)
+        super().__init__(self.code)
 
 
 class NaverReadAdapter(Protocol):
@@ -176,27 +187,37 @@ class DefaultNaverReadAdapter:
         after = _parse_cursor_datetime(state.get("after")) or slice_start
         if after < slice_start or after >= slice_end:
             after = slice_start
-        feed = self._order_feed(
-            api_base=context.api_base,
-            headers=self._headers(context),
-            start_kst=after,
-            end_kst=slice_end,
-            size=ORDER_DETAIL_BATCH_SIZE,
-            attempt="onboarding_daily_read",
-            include_last_changed_to=True,
-            datetime_format_shape="offset_milliseconds",
-        )
+        try:
+            feed = self._order_feed(
+                api_base=context.api_base,
+                headers=self._headers(context),
+                start_kst=after,
+                end_kst=slice_end,
+                size=ORDER_DETAIL_BATCH_SIZE,
+                attempt="onboarding_daily_read",
+                include_last_changed_to=True,
+                datetime_format_shape="offset_milliseconds",
+            )
+        except httpx.TimeoutException as exc:
+            raise NaverReadFailure("naver_order_network_timeout", retryable=True) from exc
+        except httpx.HTTPError as exc:
+            raise NaverReadFailure("naver_order_network_retryable", retryable=True) from exc
         _raise_for_read_result(feed, scope="order")
         feed_payload = feed.get("payload")
         product_order_ids = sync_service._extract_naver_product_order_ids(feed_payload)
         details: list[dict] = []
         for offset in range(0, len(product_order_ids), ORDER_DETAIL_BATCH_SIZE):
             batch = product_order_ids[offset:offset + ORDER_DETAIL_BATCH_SIZE]
-            detail_result = self._order_detail(
-                api_base=context.api_base,
-                headers=self._headers(context),
-                product_order_ids=batch,
-            )
+            try:
+                detail_result = self._order_detail(
+                    api_base=context.api_base,
+                    headers=self._headers(context),
+                    product_order_ids=batch,
+                )
+            except httpx.TimeoutException as exc:
+                raise NaverReadFailure("naver_order_network_timeout", retryable=True) from exc
+            except httpx.HTTPError as exc:
+                raise NaverReadFailure("naver_order_network_retryable", retryable=True) from exc
             _raise_for_read_result(detail_result, scope="order")
             records = sync_service._extract_naver_order_detail_records(detail_result.get("payload"), batch)
             details.extend(sync_service._build_naver_order_internal_detail(item, store_id=context.store_id) for item in records)
@@ -216,11 +237,16 @@ class DefaultNaverReadAdapter:
         safe_ids = [str(item).strip() for item in product_order_ids if str(item or "").strip()]
         if not safe_ids or len(safe_ids) > ORDER_DETAIL_BATCH_SIZE:
             raise NaverReadFailure("invalid_logistics_detail_batch")
-        detail_result = self._order_detail(
-            api_base=context.api_base,
-            headers=self._headers(context),
-            product_order_ids=safe_ids,
-        )
+        try:
+            detail_result = self._order_detail(
+                api_base=context.api_base,
+                headers=self._headers(context),
+                product_order_ids=safe_ids,
+            )
+        except httpx.TimeoutException as exc:
+            raise NaverReadFailure("naver_order_network_timeout", retryable=True) from exc
+        except httpx.HTTPError as exc:
+            raise NaverReadFailure("naver_order_network_retryable", retryable=True) from exc
         _raise_for_read_result(detail_result, scope="order")
         records = sync_service._extract_naver_order_detail_records(detail_result.get("payload"), safe_ids)
         return [sync_service._build_naver_order_internal_detail(item, store_id=context.store_id) for item in records]
@@ -247,22 +273,115 @@ class DefaultNaverReadAdapter:
 
 
 def _read_failure_from_response(response: httpx.Response, *, scope: str) -> NaverReadFailure:
-    if response.status_code == 429 or response.status_code >= 500:
-        return NaverReadFailure("naver_read_retryable", retryable=True)
+    retry_after_seconds = _retry_after_from_response(response)
+    if response.status_code == 429:
+        return NaverReadFailure(
+            f"naver_{scope}_rate_limit",
+            retryable=True,
+            retry_after_seconds=retry_after_seconds,
+        )
+    if response.status_code >= 500:
+        return NaverReadFailure(
+            f"naver_{scope}_server_retryable",
+            retryable=True,
+            retry_after_seconds=retry_after_seconds,
+        )
     if response.status_code == 403:
         code, flags = api_credential_readiness_service._classify_naver_forbidden_response(response, stage=scope, scope=scope)
         if flags.get("ip_keyword"):
             code = "ip_not_allowed"
         return NaverReadFailure(code)
-    return NaverReadFailure("auth_failed" if response.status_code == 401 else "naver_read_failed")
+    if response.status_code == 401:
+        return NaverReadFailure("auth_failed")
+    return NaverReadFailure(f"naver_{scope}_request_invalid")
 
 
 def _raise_for_read_result(result: dict, *, scope: str) -> None:
     if result.get("success"):
         return
-    code = str(result.get("error_code") or f"{scope}_read_failed")
-    status = result.get("http_status")
-    raise NaverReadFailure(code, retryable=status == 429 or isinstance(status, int) and status >= 500)
+    raw_code = str(result.get("error_code") or f"{scope}_read_failed")
+    status = _http_status(result.get("http_status"))
+    retry_after_seconds = _retry_after_from_result(result)
+    if status == 429:
+        code = f"naver_{scope}_rate_limit"
+        retryable = True
+    elif status is not None and status >= 500:
+        code = f"naver_{scope}_server_retryable"
+        retryable = True
+    elif status is not None and 400 <= status < 500:
+        code = f"naver_{scope}_request_invalid" if raw_code == "readonly_request_failed" else raw_code
+        retryable = False
+    elif raw_code == "readonly_request_failed":
+        code = f"naver_{scope}_request_failed"
+        retryable = False
+    else:
+        code = raw_code
+        retryable = result.get("retryable") is True
+    raise NaverReadFailure(
+        code,
+        retryable=retryable,
+        retry_after_seconds=retry_after_seconds,
+    )
+
+
+def _safe_failure_code(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if re.fullmatch(r"[a-z0-9_]{1,80}", normalized) else "naver_read_failed"
+
+
+def _http_status(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        status = int(value)
+    except (TypeError, ValueError):
+        return None
+    return status if 100 <= status <= 599 else None
+
+
+def _bounded_retry_after_seconds(value: object, *, now: datetime | None = None) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    seconds: float
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(str(value).strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            return None
+        seconds = (retry_at - _as_aware_utc(now or get_utc_now())).total_seconds()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return min(MAX_RETRY_AFTER_SECONDS, int(math.ceil(seconds)))
+
+
+def _retry_after_from_response(response: httpx.Response) -> int | None:
+    return _bounded_retry_after_seconds(response.headers.get("Retry-After"))
+
+
+def _retry_after_from_result(result: dict) -> int | None:
+    containers = [
+        result,
+        result.get("safe_error"),
+        result.get("detail"),
+        result.get("diagnostics"),
+    ]
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        value = container.get("retry_after_seconds")
+        bounded = _bounded_retry_after_seconds(value)
+        if bounded is not None:
+            return bounded
+        headers = container.get("headers")
+        if isinstance(headers, dict):
+            for key, header_value in headers.items():
+                if str(key).lower() == "retry-after":
+                    return _bounded_retry_after_seconds(header_value)
+    return None
 
 
 def _encode_cursor(kind: str, state: dict) -> str:
@@ -819,9 +938,12 @@ def _sync_dataset(
         sync_log.finished_at = get_utc_now()
         sync_log.message = "sanitized Naver read failure"
         sync_log.error_detail = failure.code
-        sync_log.raw_summary = {"scope": scope, "dataset": dataset, "raw_response_saved": False, "platform_write": False, "error_code": failure.code}
+        failure_summary = {"scope": scope, "dataset": dataset, "raw_response_saved": False, "platform_write": False, "error_code": failure.code}
+        if failure.retry_after_seconds is not None:
+            failure_summary["retry_after_seconds"] = failure.retry_after_seconds
+        sync_log.raw_summary = failure_summary
         progress = dict(onboarding.progress_summary or _empty_progress())
-        progress[dataset] = {
+        progress_failure = {
             "status": "failed",
             "created": created,
             "updated": updated,
@@ -833,9 +955,15 @@ def _sync_dataset(
             "raw_response_saved": False,
             "platform_write": False,
         }
+        if failure.retry_after_seconds is not None:
+            progress_failure["retry_after_seconds"] = failure.retry_after_seconds
+        progress[dataset] = progress_failure
         onboarding.progress_summary = progress
         db.commit()
-        return {"status": "failed", "created": created, "updated": updated, "pages": pages, "remote_items": remote_items, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": failure.code, "retryable": failure.retryable, "raw_response_saved": False, "platform_write": False}
+        result = {"status": "failed", "created": created, "updated": updated, "pages": pages, "remote_items": remote_items, "window_start_at": start_at.isoformat(), "window_end_at": end_at.isoformat(), "error_code": failure.code, "retryable": failure.retryable, "raw_response_saved": False, "platform_write": False}
+        if failure.retry_after_seconds is not None:
+            result["retry_after_seconds"] = failure.retry_after_seconds
+        return result
 
 
 def _provision_validated_store(db: Session, *, onboarding: StoreOnboarding, client_id: str, client_secret: str, selected_channel_no: str | None, now: datetime) -> bool:

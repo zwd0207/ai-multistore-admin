@@ -344,12 +344,34 @@ def main():
         db.commit()
         automatic_read_sync_service.ensure_automatic_read_schedule(db, store_id=store.id, now=NOW)
         checkpoint = db.scalar(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store.id, SyncCheckpoint.sync_type == "naver_automatic_logistics"))
+        orders_checkpoint = db.scalar(select(SyncCheckpoint).where(SyncCheckpoint.store_id == store.id, SyncCheckpoint.sync_type == "naver_automatic_orders"))
         assert checkpoint and checkpoint.automatic_read_enabled and checkpoint.status == "idle"
+        assert orders_checkpoint and orders_checkpoint.automatic_read_enabled
         assert automatic_read_sync_service.RESOURCE_CONFIG["logistics"]["interval"] == timedelta(minutes=30)
         assert automatic_read_sync_service.RESOURCE_CONFIG["logistics"]["lease"] == timedelta(minutes=20)
         assert automatic_read_sync_service.RESOURCE_CONFIG["logistics"]["freshness"] == timedelta(minutes=75)
         assert "logistics" in automatic_read_sync_service.RECOVERABLE_RESOURCES
-        checkpoint.next_run_at = NOW; db.commit()
+        orders_checkpoint.status = "retry_wait"
+        orders_checkpoint.last_synced_at = None
+        orders_checkpoint.fresh_until = None
+        orders_checkpoint.next_run_at = NOW + timedelta(minutes=4)
+        checkpoint.next_run_at = NOW
+        db.commit()
+        dependency_reader = Reader([detail("po-second", "o-shared", changed=NOW + timedelta(minutes=3), delivery="DELIVERING", tracking="T17-SECOND")])
+        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=dependency_reader) == "not_due"
+        db.refresh(checkpoint)
+        assert checkpoint.status == "retry_wait" and checkpoint.automatic_read_enabled is True
+        assert checkpoint.last_error_code == "orders_dependency_not_ready"
+        assert checkpoint.next_run_at.replace(tzinfo=timezone.utc) == NOW + timedelta(minutes=4)
+        assert checkpoint.lease_token is None and checkpoint.retry_count == 0
+        assert dependency_reader.feed_calls == 0 and dependency_reader.detail_calls == []
+
+        orders_checkpoint.status = "success"
+        orders_checkpoint.last_synced_at = NOW
+        orders_checkpoint.fresh_until = NOW + timedelta(minutes=25)
+        orders_checkpoint.next_run_at = NOW + timedelta(minutes=10)
+        checkpoint.next_run_at = NOW
+        db.commit()
         reader = Reader([detail("po-second", "o-shared", changed=NOW + timedelta(minutes=3), delivery="DELIVERING", tracking="T17-SECOND")])
         assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=reader) == "success"
         assert reader.feed_calls == 0 and reader.detail_calls == [["po-second"]]
@@ -371,15 +393,31 @@ def main():
         checkpoint.cursor_value = None; checkpoint.lease_token = None; checkpoint.lease_expires_at = None
         db.commit()
         interrupted_reader = BatchReader(paged_orders, fail_on_second=True)
-        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=interrupted_reader) == "failed"
+        page_sleeps = []
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=checkpoint.id,
+            now=NOW,
+            reader=interrupted_reader,
+            sleep_fn=page_sleeps.append,
+        ) == "failed"
+        assert page_sleeps == [1.0]
         db.refresh(checkpoint)
         first_page_last_id = db.scalar(select(Order.id).where(Order.store_id == store.id, Order.external_product_order_id == "po-page-19"))
         assert checkpoint.cursor_value == f"logistics-local-id:{first_page_last_id}"
         resumed_reader = BatchReader(paged_orders)
         checkpoint.next_run_at = NOW; checkpoint.status = "retry_wait"; checkpoint.automatic_read_enabled = True
         db.commit()
-        assert automatic_read_sync_service.run_automatic_checkpoint(db, checkpoint_id=checkpoint.id, now=NOW, reader=resumed_reader) == "success"
+        resumed_sleeps = []
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=checkpoint.id,
+            now=NOW,
+            reader=resumed_reader,
+            sleep_fn=resumed_sleeps.append,
+        ) == "success"
         assert resumed_reader.detail_calls == [["po-page-20"]]
+        assert resumed_sleeps == []
 
         duplicate_checkpoint = checkpoint
         scheduler_dup_a = seed_order(db, store, "po-scheduler-duplicate", "o-scheduler-duplicate-a")

@@ -498,6 +498,7 @@ class ThirtySliceOrderReader:
 
 def verify_thirty_day_order_resume() -> None:
     reader = ThirtySliceOrderReader()
+    sleeps: list[float] = []
     with SessionLocal() as db:
         checkpoint = db.scalar(select(SyncCheckpoint).where(
             SyncCheckpoint.store_id == 1,
@@ -508,6 +509,7 @@ def verify_thirty_day_order_resume() -> None:
             checkpoint_id=checkpoint.id,
             now=ACTIVATION_AT,
             reader=reader,
+            sleep_fn=sleeps.append,
         )
         assert first == "failed"
         db.refresh(checkpoint)
@@ -515,18 +517,113 @@ def verify_thirty_day_order_resume() -> None:
         assert checkpoint.automatic_read_enabled is True
         assert checkpoint.last_error_code == "read_page_limit_reached"
         assert checkpoint.cursor_value == "20"
+        assert sleeps == [1.0] * 19
         retry_at = checkpoint.next_run_at.replace(tzinfo=timezone.utc)
         second = automatic_read_sync_service.run_automatic_checkpoint(
             db,
             checkpoint_id=checkpoint.id,
             now=retry_at,
             reader=reader,
+            sleep_fn=sleeps.append,
         )
         assert second == "success"
         db.refresh(checkpoint)
         assert checkpoint.status == "success"
         assert checkpoint.cursor_value is None
         assert reader.slices == list(range(30))
+        assert sleeps == [1.0] * 28
+
+
+class NoNetworkLogisticsReader:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def read_products(self, *_args, **_kwargs):
+        raise AssertionError("logistics dependency test must not read products")
+
+    def read_orders(self, *_args, **_kwargs):
+        raise AssertionError("logistics dependency test must not read the order feed")
+
+    def read_logistics(self, *_args, **_kwargs):
+        self.calls += 1
+        raise AssertionError("empty local candidates must not call the logistics reader")
+
+
+def verify_dual_store_logistics_dependency() -> None:
+    with SessionLocal() as db:
+        orders_by_store = {
+            checkpoint.store_id: checkpoint
+            for checkpoint in db.scalars(select(SyncCheckpoint).where(
+                SyncCheckpoint.sync_type == automatic_read_sync_service.RESOURCE_CONFIG["orders"]["sync_type"],
+            )).all()
+        }
+        logistics_by_store = {
+            checkpoint.store_id: checkpoint
+            for checkpoint in db.scalars(select(SyncCheckpoint).where(
+                SyncCheckpoint.sync_type == automatic_read_sync_service.RESOURCE_CONFIG["logistics"]["sync_type"],
+            )).all()
+        }
+        assert set(orders_by_store) == set(logistics_by_store) == {1, 2}
+        store1_orders = orders_by_store[1]
+        store2_orders = orders_by_store[2]
+        store1_logistics = logistics_by_store[1]
+        store2_logistics = logistics_by_store[2]
+        assert store1_orders.status == "success" and store1_orders.fresh_until is not None
+        check_at = store1_orders.last_synced_at.replace(tzinfo=timezone.utc)
+
+        assert store2_orders.last_synced_at is not None
+        store2_orders.status = "retry_wait"
+        store2_orders.fresh_until = None
+        store2_orders.next_run_at = check_at + timedelta(minutes=5)
+        store2_orders.last_attempt_at = check_at
+        for checkpoint in (store1_logistics, store2_logistics):
+            checkpoint.status = "idle"
+            checkpoint.automatic_read_enabled = True
+            checkpoint.next_run_at = check_at
+            checkpoint.lease_token = None
+            checkpoint.lease_expires_at = None
+        db.commit()
+
+        reader = NoNetworkLogisticsReader()
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=store2_logistics.id,
+            now=check_at,
+            reader=reader,
+        ) == "not_due"
+        db.refresh(store2_logistics)
+        assert store2_logistics.status == "retry_wait"
+        assert store2_logistics.automatic_read_enabled is True
+        assert store2_logistics.last_error_code == "orders_dependency_not_ready"
+        assert store2_logistics.next_run_at.replace(tzinfo=timezone.utc) == check_at + timedelta(minutes=5)
+        assert store2_logistics.lease_token is None and reader.calls == 0
+
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=store1_logistics.id,
+            now=check_at,
+            reader=reader,
+        ) == "success"
+        db.refresh(store1_logistics)
+        db.refresh(store2_logistics)
+        assert store1_logistics.status == "success"
+        assert store2_logistics.status == "retry_wait" and reader.calls == 0
+
+        resume_at = check_at + timedelta(minutes=5)
+        store2_orders.status = "success"
+        store2_orders.last_synced_at = resume_at
+        store2_orders.fresh_until = resume_at + timedelta(minutes=25)
+        store2_orders.next_run_at = resume_at + timedelta(minutes=10)
+        store2_logistics.next_run_at = resume_at
+        db.commit()
+        assert automatic_read_sync_service.run_automatic_checkpoint(
+            db,
+            checkpoint_id=store2_logistics.id,
+            now=resume_at,
+            reader=reader,
+        ) == "success"
+        db.refresh(store2_logistics)
+        assert store2_logistics.status == "success" and reader.calls == 0
 
 
 def verify_postgres_revocation_rolls_back_pending_inquiries() -> None:
@@ -804,6 +901,7 @@ def main() -> None:
         verify_preparation(specs, resumes)
         verify_activation_gate()
         verify_thirty_day_order_resume()
+        verify_dual_store_logistics_dependency()
         verify_commit_fence()
         verify_postgres_revocation_rolls_back_pending_inquiries()
         verify_fail_closed(specs)
