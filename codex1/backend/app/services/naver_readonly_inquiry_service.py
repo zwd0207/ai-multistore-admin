@@ -7,19 +7,24 @@ generic and never invokes the legacy generic ``CustomerInquiry`` writer.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any
+import secrets
+import time
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.core.exceptions import ApiError
-from app.core.timezone import get_utc_now
+from app.core.timezone import get_business_date, get_utc_now
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyCustomerInquiry
 from app.models.store import Store
+from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from app.services import api_credential_readiness_service, sync_service
 from app.services.encryption import decrypt_value, encrypt_value
@@ -28,8 +33,12 @@ from app.services.encryption import decrypt_value, encrypt_value
 INQUIRY_CONTENT_MAX_LENGTH = 4000
 INQUIRY_TITLE_MAX_LENGTH = 300
 INQUIRY_RETENTION_DAYS = 30
-INQUIRY_PAGE_SIZE = 50
-INQUIRY_MAX_PAGES = 10
+INQUIRY_PAGE_SIZE = 200
+INQUIRY_MAX_PAGES = 1000
+INQUIRY_PAGE_DELAY_SECONDS = 1.0
+INQUIRY_SYNC_TYPE = "naver_automatic_inquiries"
+INQUIRY_LEASE_DURATION = timedelta(minutes=15)
+INQUIRY_MANUAL_LEASE_NOTE = "t24_manual_inquiry_lease"
 _SAFE_LABEL = re.compile(r"[^a-zA-Z0-9_.:-]+")
 
 
@@ -230,56 +239,417 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
     return "updated"
 
 
+def _recent_naver_inquiry_date_range(*, business_date: date | None = None) -> tuple[date, date]:
+    end_date = business_date or get_business_date()
+    return end_date - timedelta(days=29), end_date
+
+
+def _active_lease(checkpoint: SyncCheckpoint, now: datetime) -> bool:
+    return bool(
+        checkpoint.lease_token
+        and checkpoint.lease_expires_at
+        and _utc(checkpoint.lease_expires_at) > _utc(now)
+    )
+
+
+def _acquire_inquiry_lease(
+    db: Session,
+    *,
+    store_id: int,
+    actor_id: str | None,
+    settings: Settings,
+    now: datetime,
+) -> dict[str, Any]:
+    checkpoint = db.scalar(select(SyncCheckpoint).where(
+        SyncCheckpoint.store_id == store_id,
+        SyncCheckpoint.platform == "naver",
+        SyncCheckpoint.sync_type == INQUIRY_SYNC_TYPE,
+    ))
+    if checkpoint is None and settings.automatic_read_sync_enabled:
+        from app.services import automatic_read_sync_service
+
+        if store_id in automatic_read_sync_service._eligible_store_ids(db):
+            checkpoint = automatic_read_sync_service._checkpoint(
+                db,
+                store_id=store_id,
+                resource="customer_inquiries",
+                now=_utc(now),
+            )
+            db.commit()
+
+    token = secrets.token_urlsafe(24)
+    if checkpoint is None:
+        checkpoint = SyncCheckpoint(
+            store_id=store_id,
+            platform="naver",
+            sync_type=INQUIRY_SYNC_TYPE,
+            automatic_read_enabled=False,
+            status="idle",
+            lease_token=token,
+            lease_expires_at=_utc(now) + INQUIRY_LEASE_DURATION,
+            last_attempt_at=_utc(now),
+            notes=INQUIRY_MANUAL_LEASE_NOTE,
+        )
+        db.add(checkpoint)
+        try:
+            db.commit()
+            return {"checkpoint_id": checkpoint.id, "token": token, "owned": True, "ephemeral": True}
+        except IntegrityError:
+            db.rollback()
+            checkpoint = db.scalar(select(SyncCheckpoint).where(
+                SyncCheckpoint.store_id == store_id,
+                SyncCheckpoint.platform == "naver",
+                SyncCheckpoint.sync_type == INQUIRY_SYNC_TYPE,
+            ))
+            if checkpoint is None:
+                raise ApiError(
+                    "Naver inquiry refresh lease could not be established",
+                    "naver_inquiry_lease_unavailable",
+                    409,
+                )
+
+    if actor_id == "automatic-read" and checkpoint.status == "running" and _active_lease(checkpoint, now):
+        return {
+            "checkpoint_id": checkpoint.id,
+            "token": checkpoint.lease_token,
+            "owned": False,
+            "ephemeral": False,
+        }
+
+    claimed = db.execute(update(SyncCheckpoint).where(
+        SyncCheckpoint.id == checkpoint.id,
+        or_(SyncCheckpoint.lease_expires_at.is_(None), SyncCheckpoint.lease_expires_at <= _utc(now)),
+    ).values(
+        lease_token=token,
+        lease_expires_at=_utc(now) + INQUIRY_LEASE_DURATION,
+        last_attempt_at=_utc(now),
+    ).execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    if claimed != 1:
+        raise ApiError(
+            "Naver inquiry refresh is already running for this store",
+            "naver_inquiry_sync_in_progress",
+            409,
+        )
+    return {
+        "checkpoint_id": checkpoint.id,
+        "token": token,
+        "owned": True,
+        "ephemeral": checkpoint.notes == INQUIRY_MANUAL_LEASE_NOTE,
+    }
+
+
+def _release_inquiry_lease(db: Session, lease: dict[str, Any] | None) -> None:
+    if not lease or not lease.get("owned"):
+        return
+    db.rollback()
+    checkpoint = db.scalar(select(SyncCheckpoint).where(
+        SyncCheckpoint.id == int(lease["checkpoint_id"]),
+        SyncCheckpoint.lease_token == str(lease["token"]),
+    ))
+    if checkpoint is None:
+        return
+    if lease.get("ephemeral") and checkpoint.notes == INQUIRY_MANUAL_LEASE_NOTE and not checkpoint.automatic_read_enabled:
+        db.delete(checkpoint)
+    else:
+        checkpoint.lease_token = None
+        checkpoint.lease_expires_at = None
+    db.commit()
+
+
+def _safe_request_error_detail(result: dict[str, Any]) -> dict[str, Any]:
+    safe_error = result.get("safe_error") if isinstance(result.get("safe_error"), dict) else {}
+    detail: dict[str, Any] = {"platform_http_status": result.get("http_status")}
+    platform_error_code = _safe_label(safe_error.get("platform_error_code"), "")
+    if platform_error_code:
+        detail["platform_error_code"] = platform_error_code
+    fields = [
+        _safe_label(value, "")
+        for value in (safe_error.get("platform_error_fields") or [])[:10]
+    ]
+    if fields:
+        detail["platform_error_fields"] = [value for value in fields if value]
+    trace_id = _safe_label(safe_error.get("trace_id"), "")
+    if trace_id:
+        detail["trace_id"] = trace_id
+    rate_limit = safe_error.get("rate_limit")
+    if isinstance(rate_limit, dict):
+        detail["rate_limit"] = {
+            _safe_label(name, ""): str(value)[:120]
+            for name, value in list(rate_limit.items())[:20]
+            if _safe_label(name, "")
+        }
+    retry_after = safe_error.get("retry_after_seconds")
+    if isinstance(retry_after, int) and 0 <= retry_after <= 3600:
+        detail["retry_after_seconds"] = retry_after
+    return detail
+
+
+def _raise_request_failure(result: dict[str, Any]) -> None:
+    error_code = str(result.get("error_code") or "naver_customer_inquiry_request_failed")[:80]
+    platform_status = result.get("http_status")
+    status_code = 503 if result.get("retryable") else 502
+    raise ApiError(
+        "Naver inquiry readonly request failed",
+        error_code,
+        status_code,
+        detail=_safe_request_error_detail(result) | {"platform_http_status": platform_status},
+    )
+
+
+def _pagination_error(error_code: str) -> ApiError:
+    return ApiError(
+        "Naver inquiry pagination response is inconsistent",
+        error_code,
+        502,
+    )
+
+
+def _validate_inquiry_page(
+    payload: object,
+    *,
+    requested_page: int,
+    requested_size: int,
+    expected_total_pages: int | None,
+    expected_total_elements: int | None,
+    response_number_base: int | None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise _pagination_error("naver_inquiry_pagination_invalid")
+    required = {
+        "totalPages", "totalElements", "first", "last", "number", "size",
+        "numberOfElements", "content", "empty",
+    }
+    if not required.issubset(payload):
+        raise _pagination_error("naver_inquiry_pagination_metadata_missing")
+    total_pages = payload["totalPages"]
+    total_elements = payload["totalElements"]
+    number = payload["number"]
+    response_size = payload["size"]
+    number_of_elements = payload["numberOfElements"]
+    content = payload["content"]
+    if any(type(value) is not int for value in (total_pages, total_elements, number, response_size, number_of_elements)):
+        raise _pagination_error("naver_inquiry_pagination_metadata_invalid")
+    if type(payload["first"]) is not bool or type(payload["last"]) is not bool or type(payload["empty"]) is not bool:
+        raise _pagination_error("naver_inquiry_pagination_metadata_invalid")
+    if not isinstance(content, list) or any(not isinstance(item, dict) for item in content):
+        raise _pagination_error("naver_inquiry_pagination_content_invalid")
+    if total_pages < 0 or total_elements < 0 or number_of_elements < 0:
+        raise _pagination_error("naver_inquiry_pagination_metadata_invalid")
+    if total_pages > INQUIRY_MAX_PAGES:
+        raise _pagination_error("naver_inquiry_page_limit_reached")
+    if response_size != requested_size or number_of_elements != len(content) or len(content) > requested_size:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if payload["empty"] != (len(content) == 0) or payload["first"] != (requested_page == 1):
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    expected_last = total_pages == 0 or requested_page >= total_pages
+    if payload["last"] != expected_last:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if total_pages == 0 and (total_elements != 0 or content):
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if total_pages > 0 and total_elements == 0:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    calculated_total_pages = (total_elements + requested_size - 1) // requested_size
+    if total_pages != calculated_total_pages:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if not payload["last"] and not content:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if expected_total_pages is not None and total_pages != expected_total_pages:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if expected_total_elements is not None and total_elements != expected_total_elements:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    if response_number_base is None:
+        if requested_page != 1 or number not in {0, 1}:
+            raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+        response_number_base = number
+    expected_number = requested_page - 1 if response_number_base == 0 else requested_page
+    if number != expected_number:
+        raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+    return {
+        "items": content,
+        "total_pages": total_pages,
+        "total_elements": total_elements,
+        "last": payload["last"],
+        "response_number_base": response_number_base,
+    }
+
+
+def _page_signature(items: list[dict[str, Any]]) -> str:
+    encoded = json.dumps(items, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _fetch_naver_inquiry_pages(
+    *,
+    api_base: str,
+    token: str,
+    start_date: date,
+    end_date: date,
+    sleep_fn: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
+    sleep_fn = sleep_fn or time.sleep
+    items: list[dict[str, Any]] = []
+    seen_pages: set[str] = set()
+    total_pages: int | None = None
+    total_elements: int | None = None
+    response_number_base: int | None = None
+    for page in range(1, INQUIRY_MAX_PAGES + 1):
+        if page > 1:
+            sleep_fn(INQUIRY_PAGE_DELAY_SECONDS)
+        result = sync_service._request_naver_customer_inquiries(
+            api_base=api_base,
+            headers={"Authorization": f"Bearer {token}"},
+            start_date=start_date,
+            end_date=end_date,
+            answered=None,
+            page=page,
+            size=INQUIRY_PAGE_SIZE,
+        )
+        if not result.get("success"):
+            _raise_request_failure(result)
+        page_data = _validate_inquiry_page(
+            result.get("payload"),
+            requested_page=page,
+            requested_size=INQUIRY_PAGE_SIZE,
+            expected_total_pages=total_pages,
+            expected_total_elements=total_elements,
+            response_number_base=response_number_base,
+        )
+        total_pages = page_data["total_pages"]
+        total_elements = page_data["total_elements"]
+        response_number_base = page_data["response_number_base"]
+        signature = _page_signature(page_data["items"])
+        if signature in seen_pages:
+            raise _pagination_error("naver_inquiry_duplicate_page")
+        seen_pages.add(signature)
+        items.extend(page_data["items"])
+        if len(items) > total_elements:
+            raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+        if page_data["last"]:
+            if len(items) != total_elements:
+                raise _pagination_error("naver_inquiry_pagination_metadata_conflict")
+            return {"items": items, "pages_read": page, "total_elements": total_elements}
+    raise _pagination_error("naver_inquiry_page_limit_reached")
+
+
+def _record_refresh_failure(db: Session, *, store_id: int, exc: Exception) -> None:
+    detail = exc.detail if isinstance(exc, ApiError) and isinstance(exc.detail, dict) else {}
+    safe_summary: dict[str, Any] = {
+        "resource": "customer_inquiries",
+        "error_code": str(getattr(exc, "error_code", "naver_inquiry_refresh_failed"))[:80],
+        "platform_write": False,
+        "raw_response_saved": False,
+    }
+    for key in (
+        "platform_http_status", "platform_error_code", "platform_error_fields",
+        "trace_id", "rate_limit", "retry_after_seconds",
+    ):
+        if key in detail:
+            safe_summary[key] = detail[key]
+    try:
+        db.add(SyncLog(
+            store_id=store_id,
+            platform="naver",
+            sync_type="naver_readonly_inquiry_refresh",
+            status="failed",
+            message="Naver readonly inquiry refresh failed",
+            error_detail=safe_summary["error_code"],
+            raw_summary=safe_summary,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def refresh_naver_readonly_inquiries(
     db: Session, *, store_id: int, actor_id: str | None, settings: Settings | None = None
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     _store(db, store_id)
-    initialize_naver_inquiry_store(db, store_id=store_id, settings=settings)
-    credential = sync_service._ensure_naver_product_preview_credential(db, store_id=store_id, credential_id=None)
-    context = sync_service._build_naver_token_context_from_credential(credential)
-    token, _ = api_credential_readiness_service._request_naver_token_from_context(context)
     now = get_utc_now()
-    items: list[dict] = []
-    seen_pages: set[tuple[str, ...]] = set()
-    pages_read = 0
-    for page in range(1, INQUIRY_MAX_PAGES + 1):
-        result = sync_service._request_naver_customer_inquiries(
-            api_base=context["api_base"], headers={"Authorization": f"Bearer {token}"},
-            start_date=(now - timedelta(days=30)).date(), end_date=now.date(), answered=None,
-            page=page, size=INQUIRY_PAGE_SIZE,
+    lease: dict[str, Any] | None = None
+    try:
+        lease = _acquire_inquiry_lease(
+            db,
+            store_id=store_id,
+            actor_id=actor_id,
+            settings=settings,
+            now=now,
         )
-        if not result.get("success"):
-            raise ApiError("Naver inquiry readonly request failed", str(result.get("error_code") or "readonly_request_failed"), 502)
-        page_items = sync_service._extract_naver_customer_inquiry_items(result.get("payload"))[:INQUIRY_PAGE_SIZE]
-        if not page_items:
-            break
-        page_keys = tuple(str(item.get("inquiryNo") or item.get("inquiry_no") or "") for item in page_items)
-        if page_keys in seen_pages:
-            break
-        seen_pages.add(page_keys)
-        items.extend(page_items)
-        pages_read += 1
-        if len(page_items) < INQUIRY_PAGE_SIZE:
-            break
-    counts = {"created": 0, "updated": 0, "skipped": 0}
-    for item in items:
-        outcome = _upsert_item(db, store_id=store_id, item=item, observed_at=now)
-        counts[outcome] += 1
-    from app.services.pxg_naver_readonly_persistence_service import _audit_local_ingestion
-    _audit_local_ingestion(
-        db, store_id=store_id, actor_id=actor_id, source_mode="naver_inquiry_only",
-        observed_at=now,
-        counts={
-            "products": {}, "orders": {}, "logistics": {},
-            "customer_inquiries": {"created": counts["created"], "updated": counts["updated"]},
-        },
-    )
-    db.add(SyncLog(store_id=store_id, platform="naver", sync_type="naver_readonly_inquiry_refresh", status="success",
-                   message="Naver readonly inquiry refresh completed",
-                   raw_summary={"created": counts["created"], "updated": counts["updated"], "skipped": counts["skipped"], "pages_read": pages_read, "actor_id_hash": _hash(actor_id or "authorized")[:64], "raw_response_saved": False, "platform_write": False}))
-    db.commit()
-    return {"status": "success", "store_id": store_id, "platform": "naver", "resource": "customer_inquiries", "created_count": counts["created"], "updated_count": counts["updated"], "skipped_count": counts["skipped"], "pages_read": pages_read, "raw_response_saved": False, "platform_write": False, "reply_count": 0}
+        initialize_naver_inquiry_store(db, store_id=store_id, settings=settings)
+        credential = sync_service._ensure_naver_product_preview_credential(
+            db,
+            store_id=store_id,
+            credential_id=None,
+        )
+        context = sync_service._build_naver_token_context_from_credential(credential)
+        token, _ = api_credential_readiness_service._request_naver_token_from_context(context)
+        start_date, end_date = _recent_naver_inquiry_date_range()
+        fetched = _fetch_naver_inquiry_pages(
+            api_base=context["api_base"],
+            token=token,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        counts = {"created": 0, "updated": 0, "skipped": 0}
+        for item in fetched["items"]:
+            outcome = _upsert_item(db, store_id=store_id, item=item, observed_at=now)
+            counts[outcome] += 1
+        from app.services.pxg_naver_readonly_persistence_service import _audit_local_ingestion
+
+        _audit_local_ingestion(
+            db,
+            store_id=store_id,
+            actor_id=actor_id,
+            source_mode="naver_inquiry_only",
+            observed_at=now,
+            counts={
+                "products": {},
+                "orders": {},
+                "logistics": {},
+                "customer_inquiries": {
+                    "created": counts["created"],
+                    "updated": counts["updated"],
+                },
+            },
+        )
+        db.add(SyncLog(
+            store_id=store_id,
+            platform="naver",
+            sync_type="naver_readonly_inquiry_refresh",
+            status="success",
+            message="Naver readonly inquiry refresh completed",
+            raw_summary={
+                "resource": "customer_inquiries",
+                "created": counts["created"],
+                "updated": counts["updated"],
+                "skipped": counts["skipped"],
+                "pages_read": fetched["pages_read"],
+                "total_elements": fetched["total_elements"],
+                "raw_response_saved": False,
+                "platform_write": False,
+            },
+        ))
+        db.commit()
+        return {
+            "status": "success",
+            "store_id": store_id,
+            "platform": "naver",
+            "resource": "customer_inquiries",
+            "created_count": counts["created"],
+            "updated_count": counts["updated"],
+            "skipped_count": counts["skipped"],
+            "pages_read": fetched["pages_read"],
+            "raw_response_saved": False,
+            "platform_write": False,
+            "reply_count": 0,
+        }
+    except Exception as exc:
+        db.rollback()
+        _record_refresh_failure(db, store_id=store_id, exc=exc)
+        raise
+    finally:
+        _release_inquiry_lease(db, lease)
 
 
 def inquiry_detail(db: Session, *, store_id: int, readonly_id: int, settings: Settings | None = None) -> dict[str, Any]:

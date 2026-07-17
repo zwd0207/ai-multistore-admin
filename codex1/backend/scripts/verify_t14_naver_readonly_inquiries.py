@@ -36,7 +36,7 @@ from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlySyncControl
 from app.models.store import Store
-from app.services import api_credential_readiness_service, sync_service
+from app.services import api_credential_readiness_service, naver_readonly_inquiry_service, sync_service
 from app.services.naver_readonly_inquiry_service import _related_order, _upsert_item
 from app.services.encryption import encrypt_value
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
@@ -80,21 +80,39 @@ def auth(client, login):
     return {"Origin": ORIGIN, "X-CSRF-Token": response.json()["data"]["csrf_token"]}
 
 
+def inquiry_page(content, *, page, total_pages, total_elements):
+    return {
+        "totalPages": total_pages,
+        "totalElements": total_elements,
+        "first": page == 1,
+        "last": page == total_pages,
+        "number": page,
+        "size": 200,
+        "numberOfElements": len(content),
+        "content": content,
+        "empty": not content,
+    }
+
+
 def main():
     seed()
     original_context, original_token, original_request = sync_service._build_naver_token_context_from_credential, api_credential_readiness_service._request_naver_token_from_context, sync_service._request_naver_customer_inquiries
     sync_service._build_naver_token_context_from_credential = lambda _credential: {"api_base": "https://test.invalid"}
     api_credential_readiness_service._request_naver_token_from_context = lambda _context: ("test-token", 200)
     calls = {"reply": 0}
+    original_sleep = naver_readonly_inquiry_service.time.sleep
+    naver_readonly_inquiry_service.time.sleep = lambda _seconds: None
     def paged_request(**kwargs):
         page = kwargs["page"]
         if page == 1:
-            return {"success": True, "payload": {"content": [
+            content = [
                 {"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": False, "createdAt": "2026-07-01T00:00:00+00:00"},
-                *[{"inquiryNo": f"page-one-{index}", "inquiryContent": "x", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(1, 50)],
-            ]}}
+                *[{"inquiryNo": f"page-one-{index}", "inquiryContent": "x", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(1, 200)],
+            ]
+            return {"success": True, "payload": inquiry_page(content, page=1, total_pages=2, total_elements=201)}
         if page == 2:
-            return {"success": True, "payload": {"content": [{"inquiryNo": "page-two", "inquiryContent": "y", "createdAt": "2026-07-01T00:00:00+00:00"}]}}
+            content = [{"inquiryNo": "page-two", "inquiryContent": "y", "createdAt": "2026-07-01T00:00:00+00:00"}]
+            return {"success": True, "payload": inquiry_page(content, page=2, total_pages=2, total_elements=201)}
         raise AssertionError(f"unexpected page {page}")
     sync_service._request_naver_customer_inquiries = paged_request
     try:
@@ -104,11 +122,14 @@ def main():
         assert refreshed.status_code == 200, refreshed.text
         assert refreshed.json()["data"]["pages_read"] == 2, refreshed.text
         again = client.post("/api/v1/customer-inquiries/naver/refresh", params={"store_id": 1}, headers=headers)
-        assert again.json()["data"]["created_count"] == 0 and again.json()["data"]["skipped_count"] == 51, again.text
-        repeated_page = [{"inquiryNo": f"repeat-{index}", "inquiryContent": "z", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(50)]
-        sync_service._request_naver_customer_inquiries = lambda **kwargs: {"success": True, "payload": {"content": repeated_page}}
+        assert again.json()["data"]["created_count"] == 0 and again.json()["data"]["skipped_count"] == 201, again.text
+        repeated_page = [{"inquiryNo": f"repeat-{index}", "inquiryContent": "z", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(200)]
+        sync_service._request_naver_customer_inquiries = lambda **kwargs: {
+            "success": True,
+            "payload": inquiry_page(repeated_page, page=kwargs["page"], total_pages=2, total_elements=400),
+        }
         repeated = client.post("/api/v1/customer-inquiries/naver/refresh", params={"store_id": 1}, headers=headers)
-        assert repeated.status_code == 200 and repeated.json()["data"]["pages_read"] == 1, repeated.text
+        assert repeated.status_code == 502 and repeated.json()["error_code"] == "naver_inquiry_duplicate_page", repeated.text
         sync_service._request_naver_customer_inquiries = paged_request
         with SessionLocal() as db:
             record = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.store_id == 1))
@@ -197,6 +218,7 @@ def main():
         print("verify_t14_naver_readonly_inquiries: ok")
     finally:
         sync_service._build_naver_token_context_from_credential, api_credential_readiness_service._request_naver_token_from_context, sync_service._request_naver_customer_inquiries = original_context, original_token, original_request
+        naver_readonly_inquiry_service.time.sleep = original_sleep
 
 
 if __name__ == "__main__": main()

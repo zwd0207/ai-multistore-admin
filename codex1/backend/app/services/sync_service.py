@@ -5,6 +5,8 @@ import re
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
+from math import ceil
 from typing import Any
 from urllib.parse import urlencode
 
@@ -61,6 +63,12 @@ NAVER_PRODUCT_SYNC_SOURCE_TYPE = "naver_real_sync"
 NAVER_ORDER_PREVIEW_SOURCE_TYPE = "naver_order_preview"
 NAVER_ORDER_SYNC_SOURCE_TYPE = "naver_real_order_sync"
 NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE = "naver_customer_inquiry_real_sync"
+NAVER_CUSTOMER_INQUIRY_ACCEPT = "application/json;charset=UTF-8"
+NAVER_CUSTOMER_INQUIRY_MIN_PAGE = 1
+NAVER_CUSTOMER_INQUIRY_MAX_PAGE = 1_000_000
+NAVER_CUSTOMER_INQUIRY_MIN_SIZE = 10
+NAVER_CUSTOMER_INQUIRY_MAX_SIZE = 200
+NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS = 60 * 60
 NAVER_ORDER_TIMELINE_MAPPING_VERSION = "naver_order_status_timeline_mock_mapper_v1"
 COUPANG_ORDER_SOURCE_TYPE = "real_coupang"
 COUPANG_PRODUCT_SOURCE_TYPE = "real_coupang"
@@ -1111,9 +1119,25 @@ def _request_naver_customer_inquiries(
     page: int,
     size: int,
 ) -> dict:
+    if isinstance(page, bool) or not isinstance(page, int) or not (
+        NAVER_CUSTOMER_INQUIRY_MIN_PAGE <= page <= NAVER_CUSTOMER_INQUIRY_MAX_PAGE
+    ):
+        raise ApiError(
+            message="Naver customer inquiry page is outside the approved range",
+            error_code="naver_customer_inquiry_page_invalid",
+            status_code=400,
+        )
+    if isinstance(size, bool) or not isinstance(size, int) or not (
+        NAVER_CUSTOMER_INQUIRY_MIN_SIZE <= size <= NAVER_CUSTOMER_INQUIRY_MAX_SIZE
+    ):
+        raise ApiError(
+            message="Naver customer inquiry size is outside the approved range",
+            error_code="naver_customer_inquiry_size_invalid",
+            status_code=400,
+        )
     params: dict[str, str | int] = {
-        "page": int(page),
-        "size": max(10, min(int(size), 200)),
+        "page": page,
+        "size": size,
         "startSearchDate": start_date.isoformat(),
         "endSearchDate": end_date.isoformat(),
     }
@@ -1122,34 +1146,153 @@ def _request_naver_customer_inquiries(
     diagnostics = {
         "endpoint": "/v1/pay-user/inquiries",
         "query_param_keys": list(params.keys()),
-        "date_format": "YYYY-MM-DD",
+        "date_format": "yyyy-MM-dd",
         "answered_filter_used": answered is not None,
     }
-    with httpx.Client(timeout=10.0) as client:
-        response = client.get(
-            f"{api_base}/v1/pay-user/inquiries",
-            headers=headers,
-            params=params,
-        )
+    request_headers = {**headers, "Accept": NAVER_CUSTOMER_INQUIRY_ACCEPT}
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(
+                f"{api_base}/v1/pay-user/inquiries",
+                headers=request_headers,
+                params=params,
+            )
+    except httpx.TimeoutException:
+        return {
+            "success": False,
+            "http_status": None,
+            "error_code": "naver_customer_inquiry_network_timeout",
+            "retryable": True,
+            "safe_error": {},
+            "diagnostics": diagnostics,
+        }
+    except httpx.RequestError:
+        return {
+            "success": False,
+            "http_status": None,
+            "error_code": "naver_customer_inquiry_network_retryable",
+            "retryable": True,
+            "safe_error": {},
+            "diagnostics": diagnostics,
+        }
     diagnostics["http_status"] = response.status_code
+    safe_headers = _extract_naver_inquiry_safe_headers(response)
+    diagnostics.update(safe_headers)
     if response.status_code >= 400:
-        diagnostics.update(_extract_naver_error_diagnostics(response))
+        error_diagnostics = _extract_naver_error_diagnostics(response)
+        for key in ("naver_error_code", "naver_error_fields"):
+            if error_diagnostics.get(key):
+                diagnostics[key] = error_diagnostics[key]
+        error_code, retryable = _classify_naver_customer_inquiry_error(response)
         return {
             "success": False,
             "http_status": response.status_code,
-            "error_code": _naver_readonly_error_code(response, scope="customer_inquiry"),
+            "error_code": error_code,
+            "retryable": retryable,
             "safe_error": {
                 "platform_error_code": diagnostics.get("naver_error_code"),
                 "platform_error_fields": diagnostics.get("naver_error_fields") or [],
+                "trace_id": diagnostics.get("trace_id"),
+                "rate_limit": diagnostics.get("rate_limit") or {},
+                "retry_after_seconds": diagnostics.get("retry_after_seconds"),
             },
+            "diagnostics": diagnostics,
+        }
+    try:
+        payload = response.json()
+    except Exception:
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": "naver_customer_inquiry_response_invalid",
+            "retryable": False,
+            "safe_error": {"trace_id": diagnostics.get("trace_id")},
+            "diagnostics": diagnostics,
+        }
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "http_status": response.status_code,
+            "error_code": "naver_customer_inquiry_response_invalid",
+            "retryable": False,
+            "safe_error": {"trace_id": diagnostics.get("trace_id")},
             "diagnostics": diagnostics,
         }
     return {
         "success": True,
         "http_status": response.status_code,
-        "payload": response.json(),
+        "payload": payload,
         "diagnostics": diagnostics,
     }
+
+
+def _classify_naver_customer_inquiry_error(response: httpx.Response) -> tuple[str, bool]:
+    if response.status_code == 400:
+        return "naver_customer_inquiry_request_invalid", False
+    if response.status_code == 429:
+        return "naver_customer_inquiry_rate_limit", True
+    if response.status_code >= 500:
+        return "naver_customer_inquiry_http_5xx_retryable", True
+    if response.status_code in {401, 403}:
+        return _naver_readonly_error_code(response, scope="customer_inquiry"), False
+    return "naver_customer_inquiry_http_error", False
+
+
+def _extract_naver_inquiry_safe_headers(response: httpx.Response) -> dict[str, object]:
+    safe: dict[str, object] = {}
+    trace_id = _sanitize_naver_header_value(
+        response.headers.get("GNCP-GW-Trace-ID"),
+        allowed_pattern=r"[^A-Za-z0-9_.:-]",
+    )
+    if trace_id:
+        safe["trace_id"] = trace_id
+
+    rate_limit: dict[str, str] = {}
+    for name, value in response.headers.items():
+        normalized = name.lower()
+        if not (
+            normalized.startswith("gncp-gw-ratelimit-")
+            or normalized.startswith("gncp-gw-quota-")
+        ):
+            continue
+        safe_name = re.sub(r"[^A-Za-z0-9-]", "", name)[:80]
+        safe_value = _sanitize_naver_header_value(
+            value,
+            allowed_pattern=r"[^A-Za-z0-9_.:/;=+ -]",
+        )
+        if safe_name and safe_value:
+            rate_limit[safe_name] = safe_value
+    if rate_limit:
+        safe["rate_limit"] = rate_limit
+
+    retry_after_seconds = _parse_bounded_retry_after(response.headers.get("Retry-After"))
+    if retry_after_seconds is not None:
+        safe["retry_after_seconds"] = retry_after_seconds
+    return safe
+
+
+def _sanitize_naver_header_value(value: str | None, *, allowed_pattern: str) -> str | None:
+    sanitized = re.sub(allowed_pattern, "", str(value or "").strip())[:120]
+    return sanitized or None
+
+
+def _parse_bounded_retry_after(value: str | None, *, now: datetime | None = None) -> int | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    seconds: int
+    if normalized.isdigit():
+        seconds = int(normalized)
+    else:
+        try:
+            target = parsedate_to_datetime(normalized)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if target.tzinfo is None or target.utcoffset() is None:
+            target = target.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        seconds = ceil((target.astimezone(timezone.utc) - current.astimezone(timezone.utc)).total_seconds())
+    return max(0, min(seconds, NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS))
 
 
 def _extract_naver_customer_inquiry_items(payload: object) -> list[dict]:

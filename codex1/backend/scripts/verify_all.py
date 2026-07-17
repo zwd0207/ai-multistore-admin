@@ -1553,6 +1553,7 @@ def verify_stage_scripts() -> None:
         "verify_t22_postgres_migration.py",
         "verify_postgres_backup_contract.py",
         "verify_t23_tenant_auth.py",
+        "verify_t24_naver_inquiry_contract.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",
@@ -20278,6 +20279,7 @@ def main() -> None:
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t17_naver_logistics.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t18_naver_shipping_pilot.py")], check=True)
         subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t19_ziniao_browser_open.py")], check=True)
+        subprocess.run([PYTHON, str(BACKEND_DIR / "scripts" / "verify_t24_naver_inquiry_contract.py")], check=True)
         verify_restore_runbook_mock_drill_gate()
         verify_git_tracking()
         verify_docs_no_real_secrets()
