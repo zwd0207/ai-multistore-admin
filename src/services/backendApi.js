@@ -1,5 +1,33 @@
 import http, { sanitizeForError } from './http';
 
+const SAFE_ERROR_MESSAGES = Object.freeze({
+  invalid_credentials: '账号或密码不正确，请重新输入。',
+  invalid_mfa_code: '验证码或恢复码不正确，请重新输入。',
+  mfa_invalid: '验证码或恢复码不正确，请重新输入。',
+  session_expired: '登录已过期，请重新登录。',
+  reauthentication_required: '请重新验证身份后再继续。',
+  mfa_required: '请先完成身份验证。',
+  session_required: '登录状态已失效，请重新登录。',
+  permission_forbidden: '当前账号没有执行此操作的权限。',
+  store_scope_forbidden: '当前账号没有访问该店铺的权限。',
+  tenant_scope_forbidden: '当前管理租户不可用，请重新选择。',
+  csrf_validation_failed: '页面验证已失效，请刷新后重试。',
+  account_already_exists: '该邮箱已经注册。',
+  invitation_expired: '邀请已过期，请联系管理员重新发送。',
+  invitation_invalid: '邀请链接无效或已被使用，请联系管理员重新发送。',
+  platform_admin_already_exists: '平台管理员账号已经存在。',
+  platform_admin_invitation_exists: '平台管理员邀请正在处理中。',
+  password_policy_failed: '密码至少 12 个字符，并需包含大小写字母和数字。',
+  mfa_enrollment_invalid: '身份验证器绑定已失效，请联系管理员重新发送邀请。',
+  mfa_enrollment_expired: '身份验证器绑定已超时，请联系管理员重新发送邀请。',
+  password_reset_invalid: '重置链接无效或已过期，请重新申请。',
+  request_timeout: '系统响应较慢，请稍后重试。',
+  network_error: '暂时无法连接系统服务，请稍后重试。',
+  rate_limited: '请求过于频繁，请稍后重试。',
+  too_many_requests: '请求过于频繁，请稍后重试。',
+  validation_error: '提交内容不符合要求，请检查后再试。',
+});
+
 const PARAMETER_ALIASES = {
   pageSize: 'page_size',
   storeId: 'store_id',
@@ -24,49 +52,97 @@ function normalizeParams(params = {}) {
   );
 }
 
-async function getData(path, params) {
-  const response = await http.get(path, { params: normalizeParams(params) });
+function normalizeErrorCode(error) {
+  return String(error?.errorCode || error?.code || '').trim().toLowerCase();
+}
 
-  if (!response || response.success !== true) {
-    const error = new Error(response?.message || 'Codex1 后端返回了无效响应');
-    error.name = 'BackendApiError';
-    error.status = 200;
-    error.errorCode = response?.error_code || 'INVALID_BACKEND_RESPONSE';
-    error.detail = sanitizeForError(response?.detail || null);
-    throw error;
+function safeErrorMessage(error, fallback = '请求暂时无法完成，请稍后重试。') {
+  const errorCode = normalizeErrorCode(error);
+  if (SAFE_ERROR_MESSAGES[errorCode]) return SAFE_ERROR_MESSAGES[errorCode];
+  if (error?.status === 401) return '登录状态已失效，请重新登录。';
+  if (error?.status === 403) return '当前账号没有执行此操作的权限。';
+  if (error?.status === 429) return '请求过于频繁，请稍后重试。';
+  if (error?.status >= 500) return '系统服务暂时不可用，请稍后重试。';
+  return fallback;
+}
+
+function toSafeError(error, fallback) {
+  const safe = new Error(safeErrorMessage(error, fallback));
+  safe.name = error?.name || 'BackendApiError';
+  safe.status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 0;
+  safe.errorCode = String(error?.errorCode || 'REQUEST_FAILED');
+  safe.detail = null;
+  safe.data = null;
+  return safe;
+}
+
+async function safeGetData(path, params, fallback) {
+  try {
+    return await getData(path, params);
+  } catch (error) {
+    throw toSafeError(error, fallback);
   }
+}
 
-  return response.data;
+async function safeSendData(method, path, body, params, fallback) {
+  try {
+    return await sendData(method, path, body, params);
+  } catch (error) {
+    throw toSafeError(error, fallback);
+  }
+}
+
+async function getData(path, params) {
+  try {
+    const response = await http.get(path, { params: normalizeParams(params) });
+
+    if (!response || response.success !== true) {
+      const error = new Error('backend response rejected');
+      error.name = 'BackendApiError';
+      error.status = 200;
+      error.errorCode = response?.error_code || 'INVALID_BACKEND_RESPONSE';
+      error.detail = sanitizeForError(response?.detail || null);
+      throw error;
+    }
+
+    return response.data;
+  } catch (error) {
+    throw toSafeError(error, '请求暂时无法完成，请稍后重试。');
+  }
 }
 
 async function sendData(method, path, body, params) {
-  const response = await http[method](path, body, { params: normalizeParams(params) });
+  try {
+    const response = await http[method](path, body, { params: normalizeParams(params) });
 
-  if (!response || response.success !== true) {
-    const error = new Error(response?.message || 'Codex1 后端返回了无效响应');
-    error.name = 'BackendApiError';
-    error.status = 200;
-    error.errorCode = response?.error_code || 'INVALID_BACKEND_RESPONSE';
-    error.detail = sanitizeForError(response?.detail || null);
-    throw error;
+    if (!response || response.success !== true) {
+      const error = new Error('backend response rejected');
+      error.name = 'BackendApiError';
+      error.status = 200;
+      error.errorCode = response?.error_code || 'INVALID_BACKEND_RESPONSE';
+      error.detail = sanitizeForError(response?.detail || null);
+      throw error;
+    }
+
+    return response.data;
+  } catch (error) {
+    throw toSafeError(error, '请求暂时无法完成，请稍后重试。');
   }
-
-  return response.data;
 }
 
 export const backendApi = {
-  login: (payload) => sendData('post', '/auth/login', payload),
-  verifyMfa: (payload) => sendData('post', '/auth/mfa/verify', payload),
+  login: (payload) => safeSendData('post', '/auth/login', payload, undefined, '暂时无法登录，请稍后重试。'),
+  verifyMfa: (payload) => safeSendData('post', '/auth/mfa/verify', payload, undefined, '暂时无法确认验证码，请稍后重试。'),
   getLocalMfaCode: () => getData('/auth/local-mfa-code'),
-  getSession: () => getData('/auth/session'),
-  logout: () => sendData('post', '/auth/logout'),
-  createTenantInvitation: (payload) => sendData('post', '/auth/invitations', payload),
-  acceptTenantInvitation: (payload) => sendData('post', '/auth/invitations/accept', payload),
-  completeMfaEnrollment: (payload) => sendData('post', '/auth/mfa/enroll/complete', payload),
-  requestPasswordReset: (payload) => sendData('post', '/auth/password-reset/request', payload),
-  completePasswordReset: (payload) => sendData('post', '/auth/password-reset/complete', payload),
-  getTenants: () => getData('/admin/tenants'),
-  selectTenant: (tenantId) => sendData('post', `/admin/tenants/${encodeURIComponent(tenantId)}/select`, {}),
+  getSession: () => safeGetData('/auth/session', undefined, '登录状态暂时无法确认，请稍后重试。'),
+  logout: () => safeSendData('post', '/auth/logout', undefined, undefined, '退出登录暂时未完成，请稍后重试。'),
+  createTenantInvitation: (payload) => safeSendData('post', '/auth/invitations', payload, undefined, '邀请暂时无法创建，请稍后重试。'),
+  acceptTenantInvitation: (payload) => safeSendData('post', '/auth/invitations/accept', payload, undefined, '邀请暂时无法使用，请联系管理员确认。'),
+  completeMfaEnrollment: (payload) => safeSendData('post', '/auth/mfa/enroll/complete', payload, undefined, '身份验证器绑定暂时无法完成，请稍后重试。'),
+  requestPasswordReset: (payload) => safeSendData('post', '/auth/password-reset/request', payload, undefined, '暂时无法提交重置申请，请稍后重试。'),
+  completePasswordReset: (payload) => safeSendData('post', '/auth/password-reset/complete', payload, undefined, '重置链接无效或已过期，请重新申请。'),
+  getTenants: () => safeGetData('/admin/tenants', undefined, '租户列表暂时无法加载，请稍后重试。'),
+  selectTenant: (tenantId) => safeSendData('post', `/admin/tenants/${encodeURIComponent(tenantId)}/select`, {}, undefined, '租户切换暂时无法完成，请稍后重试。'),
   healthCheck: () => getData('/health'),
   getStores: (params) => getData('/stores', params),
   createStoreOnboarding: (payload) => sendData('post', '/store-onboardings', payload),
@@ -200,5 +276,5 @@ export const backendApi = {
   getApiCapabilityResult: (resultId) => getData(`/api-capability-results/${resultId}`),
 };
 
-export { getData, normalizeParams, sendData };
+export { getData, normalizeParams, safeErrorMessage, sendData };
 export default backendApi;
