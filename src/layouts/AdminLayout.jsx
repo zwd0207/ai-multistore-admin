@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import ManualStoreSyncButton from '../components/common/ManualStoreSyncButton';
 import OpenStoreBackendButton from '../components/common/OpenStoreBackendButton';
 import StoreSelector from '../components/common/StoreSelector';
@@ -39,12 +39,17 @@ const menuGroups = [
 ];
 
 export default function AdminLayout() {
+  const location = useLocation();
   const {
     user, canAccessStore, logout, isPlatformAdmin, crossTenantMode,
   } = useAuthContext();
   const { selectedStore, selectedStoreId } = useStoreContext();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
 
   const visibleMenuGroups = useMemo(
     () => filterMenuGroupsForStore(

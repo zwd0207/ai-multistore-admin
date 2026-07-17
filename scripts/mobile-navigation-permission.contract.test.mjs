@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { filterMenuGroupsForStore } from '../src/layouts/menuPermissions.js';
+
+const adminLayout = readFileSync(new URL('../src/layouts/AdminLayout.jsx', import.meta.url), 'utf8');
 
 const menuGroups = [
   {
@@ -26,5 +29,11 @@ assert.equal(switchedMenu.some((group) => group.label === '管理员'), false, '
 
 const mobileMenu = filterMenuGroupsForStore(menuGroups, 'storeB', canAccessStore);
 assert.deepEqual(mobileMenu, switchedMenu, '桌面和手机必须使用相同的当前店铺权限结果');
+
+assert.match(
+  adminLayout,
+  /useEffect\(\(\) => \{\s*setMoreOpen\(false\);\s*\}, \[location\.pathname\]\);/,
+  'mobile more menu must close after route changes',
+);
 
 console.log('mobile-navigation-permission contract passed');
