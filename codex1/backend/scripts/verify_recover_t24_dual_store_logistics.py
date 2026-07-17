@@ -206,10 +206,13 @@ def _seed_recovery_scope(db, *, now: datetime) -> list[StoreSpec]:
 def verify_postgres_concurrent_recovery() -> None:
     postgres_url = os.environ.get("T22_TEST_POSTGRES_URL")
     if not postgres_url:
+        print("verify_recover_t24_dual_store_logistics: PostgreSQL concurrency skipped")
         return
     schema = f"t24_logistics_recovery_{uuid.uuid4().hex[:12]}"
     admin_engine = create_engine(postgres_url, future=True)
     isolated_engine = None
+    workers: list[threading.Thread] = []
+    backend_pids: list[int] = []
     try:
         with admin_engine.begin() as connection:
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -232,12 +235,12 @@ def verify_postgres_concurrent_recovery() -> None:
         barrier = threading.Barrier(3)
         results: list[str] = []
         errors: list[Exception] = []
-        backend_pids: list[int] = []
         result_lock = threading.Lock()
 
         def execute_recovery() -> None:
             with IsolatedSession() as db:
                 try:
+                    db.execute(text("SET lock_timeout = '10s'"))
                     backend_pid = int(db.scalar(text("SELECT pg_backend_pid()")))
                     with result_lock:
                         backend_pids.append(backend_pid)
@@ -264,6 +267,7 @@ def verify_postgres_concurrent_recovery() -> None:
             for worker in workers:
                 worker.start()
             barrier.wait(timeout=5)
+            assert len(backend_pids) == 2 and len(set(backend_pids)) == 2
 
             deadline = time.monotonic() + 5
             waiting_pids: set[int] = set()
@@ -302,11 +306,41 @@ def verify_postgres_concurrent_recovery() -> None:
                 for row in logistics
             )
     finally:
+        cleanup_failures: list[str] = []
+        for worker in workers:
+            worker.join(timeout=12)
+        alive_workers = [worker for worker in workers if worker.is_alive()]
+        if alive_workers and backend_pids:
+            with admin_engine.begin() as connection:
+                connection.execute(text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE pid IN (:pid_1, :pid_2) AND pid <> pg_backend_pid()"
+                ), {
+                    "pid_1": backend_pids[0],
+                    "pid_2": backend_pids[-1],
+                })
+            for worker in alive_workers:
+                worker.join(timeout=5)
+        if any(worker.is_alive() for worker in workers):
+            cleanup_failures.append("PostgreSQL recovery workers did not stop")
         if isolated_engine is not None:
             isolated_engine.dispose()
-        with admin_engine.begin() as connection:
-            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-        admin_engine.dispose()
+        try:
+            with admin_engine.begin() as connection:
+                connection.execute(text("SET LOCAL lock_timeout = '10s'"))
+                connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+                schema_exists = connection.scalar(text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.schemata "
+                    "WHERE schema_name = :schema)"
+                ), {"schema": schema})
+                if schema_exists:
+                    cleanup_failures.append("PostgreSQL recovery schema still exists")
+        except Exception as exc:  # pragma: no cover - reported as a cleanup failure
+            cleanup_failures.append(f"PostgreSQL recovery schema cleanup failed: {type(exc).__name__}")
+        finally:
+            admin_engine.dispose()
+        if cleanup_failures:
+            raise AssertionError("; ".join(cleanup_failures))
 
 
 def main() -> None:

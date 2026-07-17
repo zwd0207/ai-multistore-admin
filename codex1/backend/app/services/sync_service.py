@@ -1281,7 +1281,7 @@ def _parse_bounded_retry_after(value: str | None, *, now: datetime | None = None
     if not normalized:
         return None
     seconds: int
-    if normalized.isdigit():
+    if normalized.isascii() and normalized.isdigit():
         digits = normalized.lstrip("0") or "0"
         if len(digits) > len(str(NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS)):
             return NAVER_CUSTOMER_INQUIRY_RETRY_AFTER_MAX_SECONDS
