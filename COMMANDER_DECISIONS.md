@@ -226,3 +226,11 @@ The correct backend virtual environment passed T24, T14, T15, T23 email, T23 ten
 GitHub Actions run `29568334003` completed successfully for `ee3d17f51c994922ec2903e516167e6167166ac0`; secret-history, frontend, and backend jobs all passed.
 
 The owner confirmed completion of the previously requested Aliyun console configuration. That confirmation does not authorize a production cutover, real SMTP transmission, OSS timer activation, or a real Naver request. The live service remains on unchanged SQLite, all platform writes and customer replies remain disabled, and T24 remains `safe_to_real_test=false` until one store, the Naver order-seller permission, the cooldown, and one controlled readonly GET are explicitly confirmed.
+
+## D043 - T22 production cutover window and protected inputs approved
+
+On 2026-07-17, the owner approved the production SQLite-to-PostgreSQL cutover window for `22:00 Asia/Shanghai` and supplied the initial platform administrator identity and private OSS bucket through the operator channel. Because the repository is public, the exact email address and bucket name are deliberately excluded from Git and must be used only through protected runtime configuration.
+
+The final T23/T24 release candidate adds a default-closed exact-store readonly gate, renews the inquiry lease before each page, honors the larger of `Retry-After` and exponential backoff, restores CSRF/origin/recent-auth checks, permits correctly scoped platform-administrator writes without a preselected tenant, restricts `APP_ENV` to an enum, and adds database uniqueness guards at Alembic head `d4b7a91c2e6f`. Focused T13-T24, production-session, frontend, encoding, bundle, and full verification passed locally.
+
+This approval authorizes preparation and the one controlled database cutover only at the named window. Before then, work is limited to CI, release staging, readonly migration rehearsal, and readonly OSS/RAM-role validation. It does not authorize a real Naver request, SMTP delivery, customer reply, shipment dispatch, product or inventory mutation, or AI action. All platform-write settings remain false during migration, acceptance, and rollback readiness.
