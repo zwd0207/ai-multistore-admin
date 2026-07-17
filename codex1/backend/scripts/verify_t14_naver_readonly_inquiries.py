@@ -41,6 +41,7 @@ from app.models.store import Store
 from app.services import api_credential_readiness_service, naver_readonly_inquiry_service, sync_service
 from app.services.naver_readonly_inquiry_service import _related_order, _upsert_item
 from app.services.encryption import encrypt_value
+from app.services.naver_inquiry_identity import naver_inquiry_external_id_hash
 from app.services.session_service import generate_totp, hash_login_identifier, hash_password
 
 
@@ -48,6 +49,7 @@ ORIGIN = "https://erp.test"
 PASSWORD = "T14-test-password-not-production"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 CONTENT = "Customer contact must not appear in a list response."
+ANSWER_CONTENT = "The store reply must remain encrypted at rest."
 
 
 def _user(db, login, role, store):
@@ -108,7 +110,7 @@ def main():
         page = kwargs["page"]
         if page == 1:
             content = [
-                {"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": False, "createdAt": "2026-07-01T00:00:00+00:00"},
+                {"inquiryNo": "i-1", "customerName": "Kim", "title": "Private title", "inquiryContent": CONTENT, "category": "delivery", "answered": True, "answerContent": ANSWER_CONTENT, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "createdAt": "2026-07-01T00:00:00+00:00"},
                 *[{"inquiryNo": f"page-one-{index}", "inquiryContent": "x", "createdAt": "2026-07-01T00:00:00+00:00"} for index in range(1, 200)],
             ]
             return {"success": True, "payload": inquiry_page(content, page=1, total_pages=2, total_elements=201)}
@@ -136,17 +138,62 @@ def main():
         with SessionLocal() as db:
             record = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.store_id == 1))
             assert record and record.encrypted_content and CONTENT not in record.encrypted_content and record.content_hash and record.content_length == len(CONTENT)
+            assert record.encrypted_answer_content and ANSWER_CONTENT not in record.encrypted_answer_content
+            assert record.answer_content_hash and record.answer_content_length == len(ANSWER_CONTENT)
+            assert record.encrypted_customer_name and "Kim" not in record.encrypted_customer_name
+            assert record.customer_name_hash and record.customer_name_length == len("Kim")
             assert db.scalar(select(CustomerInquiry.id).where(CustomerInquiry.store_id == 1)) is None
             readonly_id, deadline = record.id, record.expires_at
+            db.add(CustomerInquiry(
+                store_id=1,
+                platform="naver",
+                external_inquiry_id="i-1",
+                inquiry_type="delivery",
+                customer_name=None,
+                title="legacy duplicate",
+                content="legacy duplicate",
+                status="answered",
+                received_at=get_utc_now(),
+                answered_at=get_utc_now(),
+                raw_data={
+                    "source_type": "naver_customer_inquiry_real_sync",
+                    "answer_content": "legacy duplicate",
+                },
+            ))
+            db.add(CustomerInquiry(
+                store_id=1,
+                platform="naver",
+                external_inquiry_id="page-two",
+                inquiry_type="manual",
+                customer_name=None,
+                title="manual overlap",
+                content="manual overlap",
+                status="open",
+                received_at=get_utc_now(),
+                raw_data={"is_test": True},
+            ))
+            db.commit()
             # The local SQLite source and a raw copy contain ciphertext only.
             backup_copy = DB_PATH.with_suffix(".backup.sqlite")
             shutil.copy2(DB_PATH, backup_copy)
             assert CONTENT.encode("utf-8") not in backup_copy.read_bytes()
+            assert ANSWER_CONTENT.encode("utf-8") not in backup_copy.read_bytes()
+            assert b"Kim" not in backup_copy.read_bytes()
             backup_copy.unlink()
         listed = client.get("/api/v1/customer-inquiries", params={"store_id": 1}, headers=headers)
-        assert listed.status_code == 200 and CONTENT not in listed.text and "Private title" not in listed.text, listed.text
+        assert listed.status_code == 200 and CONTENT not in listed.text and ANSWER_CONTENT not in listed.text and "Private title" not in listed.text and '"Kim"' not in listed.text, listed.text
+        assert listed.json()["data"]["total"] == 202, listed.text
+        assert listed.json()["data"]["classification_counts"] == {"all": 202, "answered": 1, "unanswered": 201}, listed.text
+        assert any(item["source"] == "generic" for item in listed.json()["data"]["items"]), listed.text
+        assert listed.json()["data"]["items"][0]["classification"] in {"answered", "unanswered"}, listed.text
         detail = client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers)
         assert detail.status_code == 200 and detail.json()["data"]["content"] == CONTENT, detail.text
+        assert detail.json()["data"]["classification"] == "answered", detail.text
+        assert detail.json()["data"]["customer_name"] == "Kim", detail.text
+        conversation = detail.json()["data"]["conversation"]
+        assert [message["actor"] for message in conversation] == ["customer", "store"], detail.text
+        assert [message["content"] for message in conversation] == [CONTENT, ANSWER_CONTENT], detail.text
+        assert all(message["sent_at"] for message in conversation), detail.text
         assert client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 2}, headers=headers).status_code == 403
         denied_headers = auth(client, "denied@example.test")
         assert client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=denied_headers).status_code == 403
@@ -173,29 +220,42 @@ def main():
             db.add_all([product_order, order_fallback]); db.flush()
             assert _related_order(db, 1, {"productOrderIdList": ["product-preferred"], "orderId": "order-fallback"}).id == product_order.id
             assert _related_order(db, 1, {"productOrderIdList": ["missing"], "orderId": "order-fallback"}).id == order_fallback.id
-            initial = {"inquiryNo": "ordering", "inquiryContent": "first", "title": "t", "createdAt": "2026-07-01T00:00:00+00:00"}
+            initial = {"inquiryNo": "ordering", "customerName": "Kim", "inquiryContent": "first", "answerContent": "first answer", "answered": True, "answerRegistrationDateTime": "2026-07-01T01:00:00+00:00", "title": "t", "createdAt": "2026-07-01T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=initial, observed_at=now) == "created"
             db.flush()
-            ordering = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.external_inquiry_id_hash == __import__("hashlib").sha256(b"customer-inquiry:ordering").hexdigest()))
+            ordering = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(
+                PxgNaverReadonlyCustomerInquiry.external_inquiry_id_hash
+                == naver_inquiry_external_id_hash("ordering")
+            ))
             ciphertext = ordering.encrypted_content
+            answer_ciphertext = ordering.encrypted_answer_content
             ordering.expires_at = now + timedelta(days=90)
             assert _upsert_item(db, store_id=1, item=initial, observed_at=now + timedelta(minutes=1)) == "skipped"
             assert ordering.encrypted_content == ciphertext
+            assert ordering.encrypted_answer_content == answer_ciphertext
             assert ordering.expires_at.replace(tzinfo=None) <= ordering.created_at.replace(tzinfo=None) + timedelta(days=30)
-            older = {**initial, "inquiryContent": "older", "createdAt": "2026-06-30T00:00:00+00:00"}
+            older = {**initial, "inquiryContent": "older", "answerRegistrationDateTime": "2026-06-30T01:00:00+00:00", "createdAt": "2026-06-30T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=older, observed_at=now + timedelta(minutes=2)) == "skipped"
-            newer = {**initial, "inquiryContent": "newer", "createdAt": "2026-07-02T00:00:00+00:00"}
+            newer = {**initial, "inquiryContent": "newer", "answerContent": "newer answer", "answerRegistrationDateTime": "2026-07-02T01:00:00+00:00", "createdAt": "2026-07-02T00:00:00+00:00"}
             assert _upsert_item(db, store_id=1, item=newer, observed_at=now + timedelta(minutes=3)) == "updated"
             assert ordering.expires_at.replace(tzinfo=None) <= ordering.created_at.replace(tzinfo=None) + timedelta(days=30)
             ordering.encrypted_content = None; ordering.content_hash = None; ordering.content_length = 0
+            ordering.encrypted_answer_content = None; ordering.answer_content_hash = None; ordering.answer_content_length = 0
             assert _upsert_item(db, store_id=1, item=newer, observed_at=now + timedelta(minutes=4)) == "updated"
             assert ordering.encrypted_content is not None and ordering.content_hash is not None
+            assert ordering.encrypted_answer_content is not None and ordering.answer_content_hash is not None
             try:
-                _upsert_item(db, store_id=1, item={**newer, "inquiryContent": "conflict"}, observed_at=now + timedelta(minutes=5))
+                _upsert_item(db, store_id=1, item={**newer, "answerContent": "conflict"}, observed_at=now + timedelta(minutes=5))
             except Exception as exc:
                 assert getattr(exc, "error_code", None) == "readonly_inquiry_source_conflict"
             else:
                 raise AssertionError("same-source timestamp conflict must fail closed")
+            try:
+                _upsert_item(db, store_id=1, item={**newer, "customerName": "Lee"}, observed_at=now + timedelta(minutes=6))
+            except Exception as exc:
+                assert getattr(exc, "error_code", None) == "readonly_inquiry_source_conflict"
+            else:
+                raise AssertionError("same-source customer identity conflict must fail closed")
             db.rollback()
         legacy_path = Path(tempfile.gettempdir()) / "verify-t14-legacy-inquiry-schema.db"
         legacy_path.unlink(missing_ok=True)
@@ -208,7 +268,7 @@ def main():
         """)
         from scripts.upgrade_pxg_naver_readonly_schema import _upgrade_existing_sync_backup_columns
         _upgrade_existing_sync_backup_columns(connection)
-        assert {"encrypted_content", "encrypted_title", "content_hash", "content_length"} <= {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)")}
+        assert {"encrypted_content", "encrypted_title", "content_hash", "content_length", "encrypted_answer_content", "answer_content_hash", "answer_content_length", "encrypted_customer_name", "customer_name_hash", "customer_name_length"} <= {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)")}
         assert connection.execute("SELECT COUNT(*) FROM pxg_naver_readonly_customer_inquiries").fetchone()[0] == 1
         connection.close(); legacy_path.unlink()
         startup_script = BACKEND_DIR.parents[1] / "scripts" / "start-local-pxg-naver-trial.ps1"

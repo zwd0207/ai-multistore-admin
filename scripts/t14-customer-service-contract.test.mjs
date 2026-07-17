@@ -48,10 +48,12 @@ assert.equal(adaptCustomerInquiryClassification({ content: '店铺已经回复',
 const summary = adaptCustomerInquiry({
   inquiry_id: 'readonly-1',
   summary: 'delivery inquiry',
+  customer_name_masked: 'K*m',
   content: 'must not appear in list summary',
   reply_enabled: false,
 });
 assert.equal(summary.content, 'delivery inquiry');
+assert.equal(summary.customerName, 'K*m');
 assert.equal(summary.replyEnabled, false);
 const readonly = adaptCustomerInquiry({ inquiry_id: 'pxg_naver_readonly:17', source: 'pxg_naver_readonly_local_v1', summary: 'safe summary' });
 assert.equal(readonly.readonlyId, '17');
@@ -66,10 +68,12 @@ const detail = adaptCustomerInquiryDetail({
   store_id: 1,
   platform: 'naver',
   title: 'decrypted title',
+  customer_name: 'Kim Customer',
   content: 'decrypted message',
 });
 assert.equal(detail.content, 'decrypted message');
 assert.equal(detail.title, 'decrypted title');
+assert.equal(detail.customerName, 'Kim Customer');
 assert.equal(detail.detailLoaded, true);
 assert.equal(detail.id, undefined);
 assert.deepEqual(detail.conversation, []);
@@ -106,6 +110,7 @@ const activeListRow = adaptCustomerInquiry({
 const mergedDetail = { ...activeListRow, ...detail };
 assert.equal(mergedDetail.ticketNo, 'pxg_naver_readonly:17');
 assert.equal(mergedDetail.store, 'Original Naver Store');
+assert.equal(mergedDetail.customerName, 'Kim Customer');
 assert.equal(mergedDetail.orderNo, 'ORDER-17');
 assert.equal(mergedDetail.productName, 'Product 17');
 assert.equal(mergedDetail.content, 'decrypted message');

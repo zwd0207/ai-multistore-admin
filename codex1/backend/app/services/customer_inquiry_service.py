@@ -10,11 +10,13 @@ from app.models.customer_inquiry import CustomerInquiry
 from app.models.order import Order
 from app.models.pxg_naver_readonly import PxgNaverReadonlyCustomerInquiry, PxgNaverReadonlyLogisticsRecord
 from app.models.shipping import ShippingTrackingImportRow, WarehouseShippingBatchOrder
+from app.services.naver_inquiry_identity import naver_inquiry_external_id_hash
 from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
 from app.services.store_service import ensure_store_exists
 
 
 PXG_NAVER_READONLY_SOURCE = "pxg_naver_readonly_local_v1"
+NAVER_LEGACY_SYNC_SOURCE = "naver_customer_inquiry_real_sync"
 _PHONE_OR_LONG_NUMBER = re.compile(r"(?<!\w)\+?\d[\d\s()-]{6,}\d(?!\w)")
 _EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
 
@@ -30,6 +32,26 @@ def _safe_label(value: object, *, fallback: str) -> str:
 def _safe_summary(*, inquiry_type: object, category: object = None) -> str:
     label = _safe_label(category if category is not None else inquiry_type, fallback="customer inquiry")
     return f"{label} inquiry"
+
+
+def _classification(status: object, answered_at=None) -> str:
+    normalized = str(status or "").strip().lower()
+    return "answered" if answered_at is not None or normalized in {"answered", "resolved", "closed"} else "unanswered"
+
+
+def _is_superseded_naver_legacy(
+    inquiry: CustomerInquiry,
+    readonly_hashes: set[tuple[str, str]],
+) -> bool:
+    if inquiry.platform != "naver":
+        return False
+    raw_data = inquiry.raw_data if isinstance(inquiry.raw_data, dict) else {}
+    if raw_data.get("superseded_by_readonly") is True:
+        return True
+    if raw_data.get("source_type") != NAVER_LEGACY_SYNC_SOURCE:
+        return False
+    inquiry_hash = naver_inquiry_external_id_hash(inquiry.external_inquiry_id)
+    return bool(inquiry_hash and (inquiry.platform, inquiry_hash) in readonly_hashes)
 
 
 def _mask_tracking_number(value: str | None) -> str | None:
@@ -117,6 +139,7 @@ def _find_generic_related_order(db: Session, inquiry: CustomerInquiry) -> Order 
 def _serialize_generic_inquiry(db: Session, inquiry: CustomerInquiry) -> dict:
     order_context, logistics_context = _order_context(db, _find_generic_related_order(db, inquiry))
     inquiry_type = _safe_label(inquiry.inquiry_type, fallback="customer_inquiry")
+    classification = _classification(inquiry.status, inquiry.answered_at)
     return {
         "source": "generic",
         "inquiry_id": f"generic:{inquiry.id}",
@@ -124,6 +147,9 @@ def _serialize_generic_inquiry(db: Session, inquiry: CustomerInquiry) -> dict:
         "category": inquiry_type,
         "inquiry_type": inquiry_type,
         "status": inquiry.status,
+        "classification": classification,
+        "has_answer_content": classification == "answered",
+        "conversation_message_count": 2 if classification == "answered" else 1,
         "summary": _safe_summary(inquiry_type=inquiry_type),
         "created_at": inquiry.received_at,
         "updated_at": inquiry.updated_at,
@@ -140,6 +166,8 @@ def _serialize_pxg_readonly_inquiry(db: Session, inquiry: PxgNaverReadonlyCustom
     order_context, logistics_context = _order_context(db, order)
     inquiry_type = _safe_label(inquiry.inquiry_type, fallback="customer_inquiry")
     category = _safe_label(inquiry.subject_category or inquiry_type, fallback=inquiry_type)
+    classification = _classification(inquiry.status, inquiry.answered_at)
+    has_answer_content = bool(inquiry.encrypted_answer_content and inquiry.answer_content_hash)
     return {
         "source": PXG_NAVER_READONLY_SOURCE,
         "inquiry_id": f"pxg_naver_readonly:{inquiry.id}",
@@ -147,6 +175,10 @@ def _serialize_pxg_readonly_inquiry(db: Session, inquiry: PxgNaverReadonlyCustom
         "category": category,
         "inquiry_type": inquiry_type,
         "status": inquiry.status,
+        "classification": classification,
+        "has_answer_content": has_answer_content,
+        "conversation_message_count": 1 + int(has_answer_content),
+        "customer_name_masked": inquiry.customer_display_masked,
         "summary": _safe_summary(inquiry_type=inquiry_type, category=category),
         "created_at": inquiry.received_at or inquiry.created_at,
         "updated_at": inquiry.updated_at,
@@ -204,19 +236,36 @@ def upsert_customer_inquiries(db: Session, store_id: int, platform: str, items: 
 
 def list_customer_inquiries(db: Session, store_id: int, platform: str | None = None) -> list[dict]:
     ensure_store_exists(db, store_id)
-    statement = select(CustomerInquiry).where(CustomerInquiry.store_id == store_id).order_by(CustomerInquiry.id.asc())
-    if platform:
-        statement = statement.where(CustomerInquiry.platform == platform)
-
-    results = [_serialize_generic_inquiry(db, item) for item in db.scalars(statement).all()]
     readonly_statement = select(PxgNaverReadonlyCustomerInquiry).where(
         PxgNaverReadonlyCustomerInquiry.store_id == store_id,
     ).order_by(PxgNaverReadonlyCustomerInquiry.id.asc())
     if platform:
         readonly_statement = readonly_statement.where(PxgNaverReadonlyCustomerInquiry.platform == platform)
-    results.extend(_serialize_pxg_readonly_inquiry(db, item) for item in db.scalars(readonly_statement).all())
+    readonly_rows = db.scalars(readonly_statement).all()
+    readonly_hashes = {
+        (item.platform, item.external_inquiry_id_hash)
+        for item in readonly_rows
+    }
+
+    statement = select(CustomerInquiry).where(CustomerInquiry.store_id == store_id).order_by(CustomerInquiry.id.asc())
+    if platform:
+        statement = statement.where(CustomerInquiry.platform == platform)
+    generic_rows = [
+        item
+        for item in db.scalars(statement).all()
+        if not _is_superseded_naver_legacy(item, readonly_hashes)
+    ]
+
+    results = [_serialize_generic_inquiry(db, item) for item in generic_rows]
+    results.extend(_serialize_pxg_readonly_inquiry(db, item) for item in readonly_rows)
 
     deduplicated: dict[tuple[str, str], dict] = {}
     for item in results:
         deduplicated[(item["source"], item["inquiry_id"])] = item
     return list(deduplicated.values())
+
+
+def summarize_classifications(items: list[dict]) -> dict[str, int]:
+    answered = sum(1 for item in items if item.get("classification") == "answered")
+    unanswered = len(items) - answered
+    return {"all": len(items), "answered": answered, "unanswered": unanswered}

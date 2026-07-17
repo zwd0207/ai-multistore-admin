@@ -41,6 +41,7 @@ from app.schemas.pxg_naver_readonly import (
     PxgNaverReadonlyProductCandidate,
 )
 from app.services.encryption import decrypt_value, encrypt_value
+from app.services.naver_inquiry_identity import naver_inquiry_external_id_hash
 from app.services.operation_audit_service import LOCAL_WRITER_SCOPE, write_operation_audit_log_local
 from app.services.operator_trial_service import assert_trial_runtime_closed, resolve_trial_store
 
@@ -941,7 +942,9 @@ def _inquiry_outcome(
     observed_at: datetime,
     settings: Settings,
 ) -> str:
-    inquiry_hash = _hash(f"customer-inquiry:{candidate.external_inquiry_id}")
+    inquiry_hash = naver_inquiry_external_id_hash(candidate.external_inquiry_id)
+    if inquiry_hash is None:
+        raise ApiError("Naver inquiry identifier is required", "readonly_inquiry_identifier_missing", 409)
     payload = candidate.model_dump(mode="json", exclude={"source_updated_at", "external_inquiry_id"})
     payload["external_inquiry_id_hash"] = inquiry_hash
     fingerprint = _fingerprint(payload)

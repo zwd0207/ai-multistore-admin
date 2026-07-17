@@ -1555,6 +1555,7 @@ def verify_stage_scripts() -> None:
         "verify_t23_tenant_auth.py",
         "verify_t24_naver_inquiry_contract.py",
         "verify_t24_controlled_naver_inquiry_probe.py",
+        "verify_t24_one_time_naver_inquiry_import.py",
         "verify_production_sessions.py",
         "verify_local_mfa_code_display.py",
         "verify_operator_workbench.py",

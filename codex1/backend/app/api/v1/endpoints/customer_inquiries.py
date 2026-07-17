@@ -33,7 +33,11 @@ def list_customer_inquiries(
         store_id=store_id,
         platform=normalized_platform,
     )
-    return success_response(data={"items": items, "total": len(items)})
+    return success_response(data={
+        "items": items,
+        "total": len(items),
+        "classification_counts": customer_inquiry_service.summarize_classifications(items),
+    })
 
 
 @router.post("/naver/refresh")

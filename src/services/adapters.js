@@ -649,8 +649,8 @@ export function adaptCustomerInquiry(item = {}) {
     externalInquiryId: item.external_inquiry_id || item.inquiry_id,
     type: item.category || item.inquiry_type,
     inquiryType: item.category || item.inquiry_type,
-    customer: item.customer_name,
-    customerName: item.customer_name,
+    customer: item.customer_name || item.customer_name_masked,
+    customerName: item.customer_name || item.customer_name_masked,
     title: item.title || item.summary,
     content: isReadonly ? '' : safeSummary,
     summary: safeSummary,
@@ -735,12 +735,17 @@ export function adaptCustomerInquiryDetail(item = {}) {
   const title = source.decrypted_title ?? source.decryptedTitle ?? source.title;
   const readonlyId = source.readonly_id ?? source.readonlyId;
   const storeId = source.store_id ?? source.storeId;
+  const customerName = source.customer_name ?? source.customerName;
   const conversation = adaptCustomerInquiryConversation(source.conversation);
   if (content !== undefined && content !== null) detail.content = content;
   detail.conversation = conversation;
   if (typeof title === 'string' && title.trim()) detail.title = title;
   if (readonlyId !== undefined && readonlyId !== null && String(readonlyId).trim()) detail.readonlyId = readonlyId;
   if (storeId !== undefined && storeId !== null) detail.storeId = storeId;
+  if (typeof customerName === 'string' && customerName.trim()) {
+    detail.customer = customerName;
+    detail.customerName = customerName;
+  }
   if (typeof source.platform === 'string' && source.platform.trim()) detail.platform = source.platform;
   if (
     source.classification !== undefined

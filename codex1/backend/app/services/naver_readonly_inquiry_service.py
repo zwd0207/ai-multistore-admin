@@ -28,10 +28,13 @@ from app.models.sync_checkpoint import SyncCheckpoint
 from app.models.sync_log import SyncLog
 from app.services import api_credential_readiness_service, sync_service
 from app.services.encryption import decrypt_value, encrypt_value
+from app.services.naver_inquiry_identity import naver_inquiry_external_id_hash
 
 
 INQUIRY_CONTENT_MAX_LENGTH = 4000
+INQUIRY_ANSWER_CONTENT_MAX_LENGTH = 4000
 INQUIRY_TITLE_MAX_LENGTH = 300
+INQUIRY_CUSTOMER_NAME_MAX_LENGTH = 120
 INQUIRY_RETENTION_DAYS = 30
 INQUIRY_PAGE_SIZE = 200
 INQUIRY_MAX_PAGES = 1000
@@ -53,6 +56,15 @@ def _utc(value: datetime) -> datetime:
 def _safe_label(value: object, fallback: str) -> str:
     normalized = _SAFE_LABEL.sub("_", str(value or "").strip())[:120].strip("_.:-")
     return normalized or fallback
+
+
+def _is_answered(item: dict, *, answered_at: datetime | None, answer_content: str) -> bool:
+    raw_value = item.get("answered")
+    if isinstance(raw_value, bool):
+        platform_answered = raw_value
+    else:
+        platform_answered = str(raw_value or "").strip().lower() in {"1", "true", "yes", "answered"}
+    return bool(platform_answered or answered_at is not None or answer_content)
 
 
 def assert_naver_inquiry_real_read_allowed(*, store_id: int, settings: Settings) -> None:
@@ -181,8 +193,16 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
     if not external_id:
         return "skipped"
     content = str(item.get("inquiryContent") or item.get("content") or "")[:INQUIRY_CONTENT_MAX_LENGTH]
+    answer_content = str(item.get("answerContent") or item.get("answer_content") or "")[
+        :INQUIRY_ANSWER_CONTENT_MAX_LENGTH
+    ]
+    customer_name = str(item.get("customerName") or item.get("customer_name") or "")[
+        :INQUIRY_CUSTOMER_NAME_MAX_LENGTH
+    ]
     title = str(item.get("title") or "")[:INQUIRY_TITLE_MAX_LENGTH]
-    inquiry_hash = _hash(f"customer-inquiry:{external_id}")
+    inquiry_hash = naver_inquiry_external_id_hash(external_id)
+    if inquiry_hash is None:
+        return "skipped"
     record = db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(
         PxgNaverReadonlyCustomerInquiry.store_id == store_id,
         PxgNaverReadonlyCustomerInquiry.platform == "naver",
@@ -195,19 +215,28 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
         item, ("answerRegistrationDateTime", "answeredAt")
     ))
     payload_hash = _hash(content) if content else None
+    answer_payload_hash = _hash(answer_content) if answer_content else None
+    customer_name_hash = _hash(customer_name) if customer_name else None
+    answered = _is_answered(item, answered_at=answered_at, answer_content=answer_content)
     source_updated_at = answered_at or received_at or observed_at
     related_order = _related_order(db, store_id, item)
     values = {
         "related_order_id": related_order.id if related_order else None,
         "inquiry_type": _safe_label(item.get("category") or item.get("inquiryType"), "platform_message"),
-        "status": "answered" if bool(item.get("answered")) else "open",
-        "customer_display_masked": sync_service._mask_person_name(item.get("customerName") or item.get("customer_name")) if (item.get("customerName") or item.get("customer_name")) else None,
+        "status": "answered" if answered else "open",
+        "customer_display_masked": sync_service._mask_person_name(customer_name) if customer_name else None,
+        "encrypted_customer_name": encrypt_value(customer_name) if customer_name else None,
+        "customer_name_hash": customer_name_hash,
+        "customer_name_length": len(customer_name),
         "subject_category": _safe_label(item.get("category") or item.get("inquiryType"), "platform_message"),
         "content_available": bool(content),
         "encrypted_content": encrypt_value(content) if content else None,
         "encrypted_title": encrypt_value(title) if title else None,
         "content_hash": payload_hash,
         "content_length": len(content),
+        "encrypted_answer_content": encrypt_value(answer_content) if answer_content else None,
+        "answer_content_hash": answer_payload_hash,
+        "answer_content_length": len(answer_content),
         "received_at": received_at,
         "answered_at": answered_at,
         "source_updated_at": source_updated_at,
@@ -228,21 +257,66 @@ def _upsert_item(db: Session, *, store_id: int, item: dict, observed_at) -> str:
     record.expires_at = min(_utc(record.expires_at), max_deadline)
     existing_source_updated_at = _utc(record.source_updated_at)
     incoming_source_updated_at = _utc(source_updated_at)
+    if payload_hash is None and record.content_hash is not None:
+        values["content_available"] = record.content_available
+        values["encrypted_content"] = record.encrypted_content
+        values["content_hash"] = record.content_hash
+        values["content_length"] = record.content_length
+    if answer_payload_hash is None and record.answer_content_hash is not None:
+        values["encrypted_answer_content"] = record.encrypted_answer_content
+        values["answer_content_hash"] = record.answer_content_hash
+        values["answer_content_length"] = record.answer_content_length
+    if customer_name_hash is None and record.customer_name_hash is not None:
+        values["encrypted_customer_name"] = record.encrypted_customer_name
+        values["customer_name_hash"] = record.customer_name_hash
+        values["customer_name_length"] = record.customer_name_length
+    if not title and record.encrypted_title is not None:
+        values["encrypted_title"] = record.encrypted_title
     if incoming_source_updated_at < existing_source_updated_at:
         return "skipped"
     if incoming_source_updated_at == existing_source_updated_at:
-        if record.encrypted_content is None and record.content_hash is None and payload_hash is not None:
-            # Old metadata-only rows may gain encrypted content exactly once at
-            # their original source version. Later hash changes still conflict.
-            for key, value in values.items():
-                setattr(record, key, value)
-            return "updated"
-        if record.content_hash != payload_hash:
+        question_conflict = bool(
+            record.content_hash is not None
+            and payload_hash is not None
+            and record.content_hash != payload_hash
+        )
+        answer_conflict = bool(
+            record.answer_content_hash is not None
+            and answer_payload_hash is not None
+            and record.answer_content_hash != answer_payload_hash
+        )
+        customer_name_conflict = bool(
+            record.customer_name_hash is not None
+            and customer_name_hash is not None
+            and record.customer_name_hash != customer_name_hash
+        )
+        if question_conflict or answer_conflict or customer_name_conflict:
             raise ApiError(
                 "same-timestamp inquiry content conflict is blocked",
                 "readonly_inquiry_source_conflict",
                 409,
             )
+        gains_question = bool(
+            record.encrypted_content is None
+            and record.content_hash is None
+            and payload_hash is not None
+        )
+        gains_answer = bool(
+            record.encrypted_answer_content is None
+            and record.answer_content_hash is None
+            and answer_payload_hash is not None
+        )
+        gains_customer_name = bool(
+            record.encrypted_customer_name is None
+            and record.customer_name_hash is None
+            and customer_name_hash is not None
+        )
+        if gains_question or gains_answer or gains_customer_name:
+            # Old metadata-only rows may gain encrypted content exactly once at
+            # their original source version. Later hash changes still conflict.
+            for key, value in values.items():
+                setattr(record, key, value)
+            return "updated"
         # An identical source version is only observed again. Do not rotate
         # ciphertext or alter the immutable first-collection deadline.
         record.source_observed_at = observed_at
@@ -712,6 +786,44 @@ def inquiry_detail(db: Session, *, store_id: int, readonly_id: int, settings: Se
     if _utc(record.expires_at) <= _utc(get_utc_now()) or record.is_stale:
         raise ApiError("readonly inquiry has expired", "readonly_inquiry_expired", 409)
     try:
-        return {"id": record.id, "store_id": store_id, "platform": "naver", "title": decrypt_value(record.encrypted_title) if record.encrypted_title else None, "content": decrypt_value(record.encrypted_content) if record.encrypted_content else "", "content_length": record.content_length, "reply_enabled": False}
+        title = decrypt_value(record.encrypted_title) if record.encrypted_title else None
+        customer_name = (
+            decrypt_value(record.encrypted_customer_name)
+            if record.encrypted_customer_name
+            else None
+        )
+        customer_content = decrypt_value(record.encrypted_content) if record.encrypted_content else ""
+        answer_content = (
+            decrypt_value(record.encrypted_answer_content)
+            if record.encrypted_answer_content
+            else ""
+        )
+        conversation = []
+        if customer_content:
+            conversation.append({
+                "actor": "customer",
+                "content": customer_content,
+                "sent_at": record.received_at,
+            })
+        if answer_content:
+            conversation.append({
+                "actor": "store",
+                "content": answer_content,
+                "sent_at": record.answered_at,
+            })
+        return {
+            "id": record.id,
+            "store_id": store_id,
+            "platform": "naver",
+            "title": title,
+            "customer_name": customer_name,
+            "content": customer_content,
+            "content_length": record.content_length,
+            "classification": "answered" if record.status == "answered" else "unanswered",
+            "received_at": record.received_at,
+            "answered_at": record.answered_at,
+            "conversation": conversation,
+            "reply_enabled": False,
+        }
     except Exception as exc:
         raise ApiError("readonly inquiry content cannot be decrypted", "readonly_inquiry_content_invalid", 500) from exc
