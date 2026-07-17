@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly AI Multi-Store PostgreSQL backup
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10min
+Unit=ai-multistore-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

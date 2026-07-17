@@ -17,6 +17,22 @@
 
 Do not put database files, reports containing identifiers, environment files, invitation tokens, or backup archives in Git.
 
+## Encrypted OSS Backups
+
+The production host uses the existing ECS RAM role `aiglxt-prod-backup-role`; no long-lived OSS AccessKey is stored on the host. The bucket must be private and the role must allow only the required bucket-scoped `GetBucketAcl`, `PutObject`, `GetObject`, `HeadObject`, `CopyObject`, `ListObjects`, and `DeleteObject` actions.
+
+After the bucket name is known, run the installer from the checked-out release in a root shell:
+
+```bash
+export BACKUP_OSS_BUCKET='<approved-private-bucket>'
+sudo -E ops/install_postgres_backup_timer.sh
+systemctl status ai-multistore-postgres-backup.timer --no-pager
+```
+
+The installer creates an age key at `/etc/ai-multistore/postgres-backup.agekey` with mode `0600`; only its public recipient is placed in `/etc/ai-multistore/postgres-backup.env`. The backup service refuses SQLite, refuses a non-private bucket, encrypts before upload, verifies the uploaded object by size and SHA-256 read-back, and keeps hourly, daily, and monthly prefixes with 48-hour, 30-day, and 12-month cleanup windows.
+
+Do not run the timer until the application has been migrated to PostgreSQL. Before enabling it, run the service once manually and complete a private-object restore drill.
+
 ## Dry Run
 
 Run from a root shell (`sudo -i`) in the checked-out backend release. The database environment is mode `0600` and must not be copied into a user-readable file:

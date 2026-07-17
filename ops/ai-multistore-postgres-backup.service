@@ -1,0 +1,24 @@
+[Unit]
+Description=Encrypted AI Multi-Store PostgreSQL backup to private OSS
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aiops
+Group=aiops
+WorkingDirectory=/srv/codex1-backend
+EnvironmentFile=/srv/codex1-backend/.env
+EnvironmentFile=/etc/ai-multistore/postgres-backup.env
+ExecStart=/srv/codex1-backend/.venv/bin/python scripts/backup_postgres_to_oss.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RuntimeDirectory=ai-multistore
+RuntimeDirectoryMode=0700
+StateDirectory=ai-multistore/backups
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/ai-multistore/backups /run/ai-multistore
+TimeoutStartSec=30min
+UMask=0077
