@@ -848,12 +848,17 @@ def persist_naver_order_detail_logistics_page(
         tracking_number = _snapshot_text(detail.get("tracking_number"))
         shipment_status = _snapshot_text(detail.get("delivery_status"), max_length=60)
         shipped_at = _snapshot_time(detail.get("shipped_at"), current) if detail.get("shipped_at") else None
+        record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == order.id
+        ))
+        has_logistics_snapshot = any((carrier, tracking_number, shipment_status, shipped_at))
+        if not has_logistics_snapshot and record is None:
+            not_available += 1
+            continue
         source_updated_at = _strict_snapshot_time(
             detail.get("last_changed_at")
             or detail.get("source_updated_at")
             or detail.get("shipped_at")
-            or detail.get("paid_at")
-            or detail.get("ordered_at")
         )
         if source_updated_at is None:
             raise ApiError("Naver logistics source timestamp is invalid", "naver_logistics_source_time_invalid", 409)
@@ -869,8 +874,7 @@ def persist_naver_order_detail_logistics_page(
             continue
         if decision == "same_version_conflict":
             raise ApiError("Naver logistics source version conflicts", "naver_logistics_same_version_conflict", 409)
-        record = db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(PxgNaverReadonlyLogisticsRecord.order_id == order.id))
-        if not any((carrier, tracking_number, shipment_status, shipped_at)):
+        if not has_logistics_snapshot:
             if record is not None:
                 record.carrier = None
                 record.encrypted_tracking_number = ""
@@ -1463,10 +1467,9 @@ def run_pxg_naver_readonly_retention_cleanup(
         PxgNaverOrderRecipientSecureRecord.platform == "naver",
         Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE,
     )).all()
-    logistics = db.scalars(select(PxgNaverReadonlyLogisticsRecord).join(Order).where(
+    logistics = db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
         PxgNaverReadonlyLogisticsRecord.store_id == store.id,
         PxgNaverReadonlyLogisticsRecord.platform == "naver",
-        Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE,
     )).all()
     states = db.scalars(select(PxgNaverReadonlyRecordState).where(
         PxgNaverReadonlyRecordState.store_id == store.id,
@@ -1490,8 +1493,9 @@ def run_pxg_naver_readonly_retention_cleanup(
             recipient_ids.append(secure.id)
     tracking_ids = [
         record.id for record in logistics
-        if str(record.shipment_status or "").strip().upper() in {"DELIVERED", "DELIVERY_COMPLETED"}
-        and _utc(record.source_updated_at) <= current - timedelta(days=TRACKING_RETENTION_DAYS)
+        if str(record.shipment_status or "").strip().upper() in NAVER_DELIVERY_TERMINAL_STATUSES
+        and _utc(record.source_observed_at) <= current - timedelta(days=TRACKING_RETENTION_DAYS)
+        and bool(record.encrypted_tracking_number)
     ]
     metadata_states = [state for state in states if _metadata_state_due(state, now=current)]
     counts["recipient_cleanup_count"] = len(recipient_ids)
@@ -1519,6 +1523,7 @@ def run_pxg_naver_readonly_retention_cleanup(
                 if record is not None:
                     record.encrypted_tracking_number = ""
                     record.is_stale = True
+                    record.expires_at = current
             for state in metadata_states:
                 if state.id in removed_state_ids:
                     continue
@@ -1584,6 +1589,116 @@ def run_pxg_naver_readonly_retention_cleanup(
         cleanup_status.manual_review_count = 0
         _cleanup_audit(db, store_id=store.id, actor_id=actor_id, status="failed", reason_code="retention_cleanup_failed", counts=counts)
         return {"status": "failed", "store_id": store.id, "platform": "naver", **counts, "platform_write": False}
+
+
+def run_naver_logistics_tracking_retention_cleanup(
+    db: Session,
+    *,
+    settings: Settings,
+    now: datetime | None = None,
+    store_ids: set[int] | frozenset[int] | None = None,
+) -> dict[str, Any]:
+    """Clear terminal tracking secrets for every Naver logistics store."""
+    if not settings.pxg_naver_local_read_retention_cleanup_enabled:
+        raise ApiError(
+            "Naver logistics retention cleanup is disabled",
+            "readonly_retention_cleanup_disabled",
+            403,
+        )
+    current = _utc(now or get_utc_now())
+    if store_ids is None:
+        target_ids = set(settings.naver_readonly_inquiry_approved_store_id_set)
+        target_ids.update(db.scalars(select(
+            PxgNaverReadonlyLogisticsRecord.store_id
+        ).distinct()).all())
+    else:
+        target_ids = {int(store_id) for store_id in store_ids}
+    if not target_ids:
+        return {
+            "status": "completed",
+            "store_count": 0,
+            "tracking_cleanup_count": 0,
+            "platform_write": False,
+        }
+
+    stores = db.scalars(select(Store).where(
+        Store.id.in_(sorted(target_ids)),
+        Store.platform == "naver",
+    ).order_by(Store.id.asc())).all()
+    if [store.id for store in stores] != sorted(target_ids):
+        raise ApiError(
+            "Naver logistics cleanup store scope is invalid",
+            "naver_logistics_cleanup_store_scope_invalid",
+            409,
+        )
+
+    cleaned = 0
+    for store in stores:
+        status = _cleanup_status(db, store_id=store.id)
+        try:
+            records = db.scalars(select(PxgNaverReadonlyLogisticsRecord).where(
+                PxgNaverReadonlyLogisticsRecord.store_id == store.id,
+                PxgNaverReadonlyLogisticsRecord.platform == "naver",
+            )).all()
+            due = [
+                record
+                for record in records
+                if str(record.shipment_status or "").strip().upper()
+                in NAVER_DELIVERY_TERMINAL_STATUSES
+                and _utc(record.source_observed_at)
+                <= current - timedelta(days=TRACKING_RETENTION_DAYS)
+                and bool(record.encrypted_tracking_number)
+            ]
+            with db.begin_nested():
+                for record in due:
+                    record.encrypted_tracking_number = ""
+                    record.is_stale = True
+                    record.expires_at = current
+                if status.status != "manual_review_required" and (
+                    status.status != "failed"
+                    or status.last_failure_code
+                    in {None, "naver_logistics_tracking_retention_failed"}
+                ):
+                    status.status = "healthy"
+                    status.last_failure_at = None
+                    status.last_failure_code = None
+                    status.manual_review_count = 0
+                status.last_run_at = current
+                status.last_success_at = current
+            db.commit()
+            cleaned += len(due)
+            _cleanup_audit(
+                db,
+                store_id=store.id,
+                actor_id="system-logistics-retention",
+                status="success",
+                reason_code="logistics_tracking_retention_completed",
+                counts={"tracking_cleanup_count": len(due)},
+            )
+        except Exception:
+            db.rollback()
+            status = _cleanup_status(db, store_id=store.id)
+            status.status = "failed"
+            status.last_run_at = current
+            status.last_failure_at = current
+            status.last_failure_code = "naver_logistics_tracking_retention_failed"
+            status.manual_review_count = 0
+            db.commit()
+            _cleanup_audit(
+                db,
+                store_id=store.id,
+                actor_id="system-logistics-retention",
+                status="failed",
+                reason_code="naver_logistics_tracking_retention_failed",
+                counts={"tracking_cleanup_count": 0},
+            )
+            raise
+    return {
+        "status": "completed",
+        "store_count": len(stores),
+        "tracking_cleanup_count": cleaned,
+        "platform_write": False,
+    }
 
 
 def _state_lookup_for_records(

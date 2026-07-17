@@ -498,22 +498,38 @@ def cleanup_expired_pxg_naver_backups(db: Session, *, settings: Settings, now: d
 
 def run_pxg_naver_daily_cleanup(db: Session, *, settings: Settings) -> dict[str, Any]:
     """Startup and 24-hour cleanup entrypoint. Failures leave the health gate closed."""
-    from app.services.pxg_naver_readonly_persistence_service import run_pxg_naver_readonly_retention_cleanup
+    from app.services.pxg_naver_readonly_persistence_service import (
+        run_naver_logistics_tracking_retention_cleanup,
+        run_pxg_naver_readonly_retention_cleanup,
+    )
 
     store = resolve_trial_store(db)
     try:
         retention = run_pxg_naver_readonly_retention_cleanup(
             db, settings=settings, preview=False, manual_confirmation=True, actor_id="system-daily-cleanup",
         )
+        logistics_tracking = run_naver_logistics_tracking_retention_cleanup(
+            db, settings=settings,
+        )
         backups = cleanup_expired_pxg_naver_backups(db, settings=settings)
-        if retention.get("status") != "completed" or backups.get("status") != "completed":
+        if (
+            retention.get("status") != "completed"
+            or logistics_tracking.get("status") != "completed"
+            or backups.get("status") != "completed"
+        ):
             raise ApiError("PXG/Naver daily cleanup did not complete", "readonly_daily_cleanup_failed", 409)
         control = _control(db, store_id=store.id)
         if control.reason_code == "daily_cleanup_failed":
             control.write_and_refresh_blocked = False
             control.reason_code = None
             db.commit()
-        return {"status": "completed", "store_id": store.id, "retention": retention, "backups": backups}
+        return {
+            "status": "completed",
+            "store_id": store.id,
+            "retention": retention,
+            "logistics_tracking": logistics_tracking,
+            "backups": backups,
+        }
     except Exception:
         control = _control(db, store_id=store.id)
         control.write_and_refresh_blocked = True

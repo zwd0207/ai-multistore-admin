@@ -45,6 +45,7 @@ CLOSE_ERROR_CODE = "t24_logistics_rollback_closed"
 REOPEN_APPROVAL_VALUE = "owner-approved-dual-store-logistics-reopen"
 REOPEN_APPROVAL_ENV = "T24_DUAL_STORE_LOGISTICS_REOPEN_APPROVAL"
 REOPEN_SYNC_TYPE = "t24_dual_store_logistics_reopen"
+RECLOSE_SYNC_TYPE = "t24_dual_store_logistics_reclose"
 API_SYSTEMD_UNIT = "ai-multistore-api.service"
 ORDERS_SYNC_TYPE = "naver_automatic_orders"
 LOGISTICS_SYNC_TYPE = "naver_automatic_logistics"
@@ -411,22 +412,47 @@ def close_dual_store_logistics(
         SyncLog.sync_type == CLOSE_SYNC_TYPE,
         SyncLog.status == "success",
     ).order_by(SyncLog.store_id.asc(), SyncLog.id.asc()).with_for_update()).all()
-    if close_markers:
-        if (
-            len(close_markers) == len(target_ids)
-            and {marker.store_id for marker in close_markers} == set(target_ids)
-            and all(
-                not row.automatic_read_enabled
-                and row.status == "blocked"
-                and row.last_error_code == CLOSE_ERROR_CODE
-                and row.next_run_at is None
-                and row.lease_token is None
-                and row.lease_expires_at is None
-                for row in logistics_rows
-            )
-        ):
-            raise LogisticsRecoveryBlocked("t24_logistics_close_already_applied")
-        raise LogisticsRecoveryBlocked("t24_logistics_close_marker_incomplete")
+    reopen_markers = db.scalars(select(SyncLog).where(
+        SyncLog.store_id.in_(target_ids),
+        SyncLog.platform == "naver",
+        SyncLog.sync_type == REOPEN_SYNC_TYPE,
+        SyncLog.status == "success",
+    ).order_by(SyncLog.store_id.asc(), SyncLog.id.asc()).with_for_update()).all()
+    reclose_markers = db.scalars(select(SyncLog).where(
+        SyncLog.store_id.in_(target_ids),
+        SyncLog.platform == "naver",
+        SyncLog.sync_type == RECLOSE_SYNC_TYPE,
+        SyncLog.status == "success",
+    ).order_by(SyncLog.store_id.asc(), SyncLog.id.asc()).with_for_update()).all()
+
+    def complete_markers(markers: list[SyncLog]) -> bool:
+        return len(markers) == len(target_ids) and {
+            marker.store_id for marker in markers
+        } == set(target_ids)
+
+    for markers in (close_markers, reopen_markers, reclose_markers):
+        if markers and not complete_markers(markers):
+            raise LogisticsRecoveryBlocked("t24_logistics_close_marker_incomplete")
+
+    already_closed = all(
+        not row.automatic_read_enabled
+        and row.status == "blocked"
+        and row.last_error_code == CLOSE_ERROR_CODE
+        and row.next_run_at is None
+        and row.lease_token is None
+        and row.lease_expires_at is None
+        for row in logistics_rows
+    )
+    if close_markers and already_closed:
+        raise LogisticsRecoveryBlocked("t24_logistics_close_already_applied")
+    if not close_markers:
+        if reopen_markers or reclose_markers:
+            raise LogisticsRecoveryBlocked("t24_logistics_close_marker_incomplete")
+        close_sync_type = CLOSE_SYNC_TYPE
+    else:
+        if not complete_markers(reopen_markers) or reclose_markers:
+            raise LogisticsRecoveryBlocked("t24_logistics_close_marker_incomplete")
+        close_sync_type = RECLOSE_SYNC_TYPE
 
     try:
         for row in logistics_rows:
@@ -441,7 +467,7 @@ def close_dual_store_logistics(
             db.add(SyncLog(
                 store_id=row.store_id,
                 platform="naver",
-                sync_type=CLOSE_SYNC_TYPE,
+                sync_type=close_sync_type,
                 status="success",
                 started_at=current,
                 finished_at=current,
@@ -550,6 +576,8 @@ def reopen_closed_dual_store_logistics(
         } == set(target_ids):
             raise LogisticsRecoveryBlocked("t24_logistics_reopen_already_applied")
         raise LogisticsRecoveryBlocked("t24_logistics_reopen_marker_incomplete")
+    if locked_markers(RECLOSE_SYNC_TYPE):
+        raise LogisticsRecoveryBlocked("t24_logistics_reopen_reclose_marker_present")
 
     if any(
         row.status != "blocked"

@@ -47,6 +47,7 @@ from scripts.recover_t24_dual_store_logistics import (
     CLOSE_SYNC_TYPE,
     FIRST_RUN_SPACING,
     RECOVERABLE_ERROR_CODE,
+    RECLOSE_SYNC_TYPE,
     RECOVERY_SYNC_TYPE,
     REOPEN_APPROVAL_ENV,
     REOPEN_APPROVAL_VALUE,
@@ -801,6 +802,35 @@ def main() -> None:
         )
         db.rollback()
         assert db.query(SyncLog).filter_by(sync_type=REOPEN_SYNC_TYPE).count() == 2
+
+        reclosed = close_dual_store_logistics(
+            db,
+            specs=specs,
+            settings=_settings(),
+            now=NOW + timedelta(minutes=8),
+            service_stopped_probe=lambda: True,
+        )
+        assert reclosed["status"] == "closed"
+        assert reclosed["checkpoint_count"] == 2
+        assert reclosed["network_called"] is False
+        assert reclosed["platform_write"] is False
+        assert db.query(SyncLog).filter_by(sync_type=RECLOSE_SYNC_TYPE).count() == 2
+        for store_id in store_ids:
+            row = db.get(SyncCheckpoint, seeded[store_id]["logistics"].id)
+            assert row.status == "blocked" and row.automatic_read_enabled is False
+            assert row.last_error_code == CLOSE_ERROR_CODE and row.next_run_at is None
+        _expect_blocked(
+            "t24_logistics_close_already_applied",
+            lambda: close_dual_store_logistics(
+                db,
+                specs=specs,
+                settings=_settings(),
+                now=NOW + timedelta(minutes=9),
+                service_stopped_probe=lambda: True,
+            ),
+        )
+        db.rollback()
+        assert db.query(SyncLog).filter_by(sync_type=RECLOSE_SYNC_TYPE).count() == 2
 
     print("verify_recover_t24_dual_store_logistics: ok")
 

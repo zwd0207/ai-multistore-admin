@@ -59,12 +59,14 @@ from app.schemas.pxg_naver_readonly import PxgNaverReadonlyAdapterBatch
 from app.services.operator_trial_service import TRIAL_STORE_NAME
 from app.services.pxg_naver_readonly_activation_service import readonly_activation_precheck
 from app.services import warehouse_shipping_service
+from app.services.encryption import encrypt_value
 from app.services.pxg_naver_readonly_persistence_service import (
     PXG_NAVER_READONLY_LOCAL_SOURCE,
     assert_pxg_naver_cleanup_healthy,
     persist_pxg_naver_readonly_adapter_batch,
     recipient_contract_for_authorized_warehouse,
     readonly_local_summary,
+    run_naver_logistics_tracking_retention_cleanup,
     run_pxg_naver_readonly_retention_cleanup,
     _recipient_due,
 )
@@ -155,7 +157,7 @@ def main() -> None:
         recipient.source_observed_at = now
         recipient.terminal_confirmed_at = now - timedelta(days=8)
         order.updated_at = now
-        tracking.source_updated_at = now - timedelta(days=31)
+        tracking.source_observed_at = now - timedelta(days=31)
         for state in db.scalars(select(PxgNaverReadonlyRecordState).where(PxgNaverReadonlyRecordState.store_id == store.id)).all():
             state.source_observed_at = now
             state.retention_review_at = now
@@ -179,6 +181,64 @@ def main() -> None:
         assert db.scalar(select(Product).where(Product.store_id == store.id, Product.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE)) is not None
         assert db.scalar(select(Order).where(Order.store_id == store.id, Order.source_type == PXG_NAVER_READONLY_LOCAL_SOURCE)) is not None
         assert db.scalar(select(PxgNaverReadonlyCustomerInquiry).where(PxgNaverReadonlyCustomerInquiry.store_id == store.id)) is not None
+
+        second_store = Store(name="Retention second Naver", platform="naver", status="active")
+        db.add(second_store)
+        db.flush()
+        second_order = Order(
+            store_id=second_store.id,
+            platform="naver",
+            external_order_id="retention-second-order",
+            external_product_order_id="retention-second-product-order",
+            product_name="Retention product",
+            quantity=1,
+            order_amount=1,
+            currency="KRW",
+            order_status="DELIVERED",
+            ordered_at=now - timedelta(days=10),
+            source_type="naver_onboarding_sync",
+            last_synced_at=now,
+        )
+        db.add(second_order)
+        db.flush()
+        second_tracking = PxgNaverReadonlyLogisticsRecord(
+            order_id=second_order.id,
+            store_id=second_store.id,
+            platform="naver",
+            carrier="CJ",
+            encrypted_tracking_number=encrypt_value("SECOND-TRACKING-1234"),
+            tracking_number_hash="second-tracking-hash",
+            tracking_number_masked="****1234",
+            shipment_status="DELIVERY_COMPLETION",
+            shipped_at=now - timedelta(days=40),
+            source_updated_at=now,
+            source_observed_at=now - timedelta(days=31),
+            expires_at=now + timedelta(days=1),
+            is_stale=False,
+        )
+        db.add(second_tracking)
+        db.commit()
+        multi_store_cleanup = run_naver_logistics_tracking_retention_cleanup(
+            db,
+            settings=get_settings(),
+            now=now,
+            store_ids={second_store.id},
+        )
+        assert multi_store_cleanup == {
+            "status": "completed",
+            "store_count": 1,
+            "tracking_cleanup_count": 1,
+            "platform_write": False,
+        }
+        db.refresh(second_tracking)
+        assert second_tracking.encrypted_tracking_number == ""
+        assert second_tracking.is_stale is True and second_tracking.tracking_number_hash
+        second_cleanup_status = db.scalar(select(PxgNaverReadonlyCleanupStatus).where(
+            PxgNaverReadonlyCleanupStatus.store_id == second_store.id,
+        ))
+        assert second_cleanup_status is not None
+        assert second_cleanup_status.status == "healthy"
+        assert second_cleanup_status.last_success_at is not None
         for state in db.scalars(select(PxgNaverReadonlyRecordState).where(PxgNaverReadonlyRecordState.store_id == store.id)).all():
             if state.resource_type in {"product", "order", "customer_inquiry"}:
                 state.source_observed_at = now - timedelta(days=91)

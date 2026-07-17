@@ -100,8 +100,12 @@ of the rollback is fixed and a new release passes the full release gate:
    `t24_logistics_rollback_closed`, with no lease or next run.
 3. Verify both recovery markers and both close markers are present, and no
    reopen marker exists.
-4. Export the separate reopen approval in the protected shell.
+4. Export the original recovery approval, exact two store IDs, the service
+   stopped confirmation, and the separate reopen approval in the protected
+   shell.
 5. Run the same command as controlled recovery with `--mode reopen`.
 6. Parse the JSON result structurally. Never validate JSON by field order.
 7. Start the repaired release and follow the normal observation and backup
-   steps. Reopen is one-time and cannot be repeated.
+   steps. Reopen is one-time and cannot be repeated. If rollback is required
+   again, the existing `--mode close` command writes a separate reclose audit
+   before old code is restored.
