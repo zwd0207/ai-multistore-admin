@@ -4,7 +4,7 @@ import base64
 import hashlib
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -16,6 +16,11 @@ from app.core.timezone import get_utc_now
 from app.models.auth import ErpSession, ErpUser, ErpUserSecurity
 from app.models.operation_audit_log import OperationAuditLog
 from app.models.tenant import ErpMfaRecoveryCode, PasswordResetToken, Tenant, TenantInvitation
+from app.services.auth_email_delivery_service import (
+    AuthEmailDeliveryError,
+    deliver_invitation_email,
+    deliver_password_reset_email,
+)
 from app.services.encryption import decrypt_value, encrypt_value
 from app.services.session_service import (
     _as_utc,
@@ -58,6 +63,38 @@ def _safe_invitation(invitation: TenantInvitation) -> dict:
     }
 
 
+def _invitation_url(raw_token: str) -> str:
+    settings = get_settings()
+    return f"{settings.public_app_url.rstrip('/')}/#/accept-invite?token={quote(raw_token)}"
+
+
+def _password_reset_url(raw_token: str) -> str:
+    settings = get_settings()
+    return f"{settings.public_app_url.rstrip('/')}/#/reset-password?token={quote(raw_token)}"
+
+
+def _deliver_invitation(*, recipient: str, raw_token: str, expires_at: datetime) -> str:
+    try:
+        return deliver_invitation_email(
+            recipient=recipient,
+            invitation_url=_invitation_url(raw_token),
+            expires_at=expires_at,
+        )
+    except AuthEmailDeliveryError:
+        return "delivery_failed"
+
+
+def _deliver_password_reset(*, recipient: str, raw_token: str, expires_at: datetime) -> None:
+    try:
+        deliver_password_reset_email(
+            recipient=recipient,
+            reset_url=_password_reset_url(raw_token),
+            expires_at=expires_at,
+        )
+    except AuthEmailDeliveryError:
+        pass
+
+
 def create_invitation(
     db: Session,
     *,
@@ -92,14 +129,19 @@ def create_invitation(
     db.add(invitation)
     db.commit()
     db.refresh(invitation)
+    delivery_status = _deliver_invitation(
+        recipient=normalized_email,
+        raw_token=raw_token,
+        expires_at=invitation.expires_at,
+    )
     result = {
         **_safe_invitation(invitation),
-        "delivery_status": "queued" if settings.email_delivery_enabled else "email_delivery_disabled",
+        "delivery_status": delivery_status,
     }
     if settings.app_env != "production":
         result.update({
             "invitation_token": raw_token,
-            "invitation_url": f"{settings.public_app_url.rstrip('/')}/#/accept-invite?token={quote(raw_token)}",
+            "invitation_url": _invitation_url(raw_token),
         })
     return result
 
@@ -176,7 +218,7 @@ def create_platform_admin_bootstrap_invitation(
     return {
         **_safe_invitation(invitation),
         "invitation_token": raw_token,
-        "invitation_url": f"{settings.public_app_url.rstrip('/')}/#/accept-invite?token={quote(raw_token)}",
+        "invitation_url": _invitation_url(raw_token),
         "target_tenant_id": tenant.id,
         "platform_role": "platform_admin",
     }
@@ -294,8 +336,9 @@ def complete_mfa_enrollment(db: Session, *, enrollment_token: str, code: str) ->
 
 def request_password_reset(db: Session, *, email: str) -> dict:
     settings = get_settings()
+    normalized_email = email.strip().casefold()
     user = db.scalar(select(ErpUser).where(
-        ErpUser.login_identifier_hash == hash_login_identifier(email),
+        ErpUser.login_identifier_hash == hash_login_identifier(normalized_email),
         ErpUser.status == "active",
     ))
     raw_token = None
@@ -307,13 +350,22 @@ def request_password_reset(db: Session, *, email: str) -> dict:
         )).all():
             old.used_at = now
         raw_token = secrets.token_urlsafe(48)
-        db.add(PasswordResetToken(
+        reset = PasswordResetToken(
             user_id=user.id,
             token_hash=_token_hash(raw_token),
             expires_at=now + timedelta(minutes=settings.password_reset_minutes),
-        ))
+        )
+        db.add(reset)
         db.commit()
-    result = {"status": "accepted", "delivery_status": "queued" if settings.email_delivery_enabled else "email_delivery_disabled"}
+        _deliver_password_reset(
+            recipient=normalized_email,
+            raw_token=raw_token,
+            expires_at=reset.expires_at,
+        )
+    result = {
+        "status": "accepted",
+        "delivery_status": "accepted" if settings.email_delivery_enabled else "email_delivery_disabled",
+    }
     if settings.app_env != "production" and raw_token:
         result["reset_token"] = raw_token
     return result

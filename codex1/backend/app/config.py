@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import model_validator
+from pydantic import EmailStr, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +70,14 @@ class Settings(BaseSettings):
     auth_invitation_hours: int = 24
     password_reset_minutes: int = 30
     email_delivery_enabled: bool = False
+    auth_email_from_address: EmailStr | None = None
+    auth_email_from_name: str = "AIGLXT"
+    auth_email_smtp_host: str | None = None
+    auth_email_smtp_port: int = Field(default=465, ge=1, le=65535)
+    auth_email_smtp_username: str | None = None
+    auth_email_smtp_password: SecretStr | None = None
+    auth_email_smtp_security: Literal["ssl", "starttls"] = "ssl"
+    auth_email_smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
     coupang_vendor_id: str | None = None
     coupang_access_key: str | None = None
     coupang_secret_key: str | None = None
@@ -90,6 +99,32 @@ class Settings(BaseSettings):
     def validate_local_mfa_code_display(self) -> "Settings":
         if self.local_mfa_code_display_enabled and self.app_env != "test":
             raise ValueError("LOCAL_MFA_CODE_DISPLAY_ENABLED requires APP_ENV=test")
+        return self
+
+    @model_validator(mode="after")
+    def validate_auth_email_delivery(self) -> "Settings":
+        if not self.email_delivery_enabled:
+            return self
+        required_values = {
+            "AUTH_EMAIL_FROM_ADDRESS": self.auth_email_from_address,
+            "AUTH_EMAIL_SMTP_HOST": self.auth_email_smtp_host,
+            "AUTH_EMAIL_SMTP_USERNAME": self.auth_email_smtp_username,
+            "AUTH_EMAIL_SMTP_PASSWORD": (
+                self.auth_email_smtp_password.get_secret_value()
+                if self.auth_email_smtp_password is not None
+                else None
+            ),
+        }
+        missing = [name for name, value in required_values.items() if not value or not value.strip()]
+        if missing:
+            raise ValueError(
+                "EMAIL_DELIVERY_ENABLED requires complete authentication email SMTP configuration"
+            )
+        if not self.public_app_url.startswith("https://"):
+            raise ValueError("EMAIL_DELIVERY_ENABLED requires an HTTPS PUBLIC_APP_URL")
+        header_values = (self.auth_email_from_address, self.auth_email_from_name)
+        if any("\r" in value or "\n" in value for value in header_values if value):
+            raise ValueError("authentication email sender fields cannot contain line breaks")
         return self
 
 
