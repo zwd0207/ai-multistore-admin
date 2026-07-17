@@ -223,4 +223,6 @@ On 2026-07-17, T23 and T24 were integrated into `release/operator-v1` as commits
 
 The correct backend virtual environment passed T24, T14, T15, T23 email, T23 tenant, production-session checks, and the complete `verify_all.py`. Frontend auth/mobile contracts, encoding, build, bundle budget, and Ziniao contracts also passed. The production entry is 273,625 bytes with 38 JavaScript chunks; the enforced bundle gate passed. T22's live PostgreSQL test remains intentionally skipped without a disposable test URL.
 
+GitHub Actions run `29568334003` completed successfully for `ee3d17f51c994922ec2903e516167e6167166ac0`; secret-history, frontend, and backend jobs all passed.
+
 The owner confirmed completion of the previously requested Aliyun console configuration. That confirmation does not authorize a production cutover, real SMTP transmission, OSS timer activation, or a real Naver request. The live service remains on unchanged SQLite, all platform writes and customer replies remain disabled, and T24 remains `safe_to_real_test=false` until one store, the Naver order-seller permission, the cooldown, and one controlled readonly GET are explicitly confirmed.

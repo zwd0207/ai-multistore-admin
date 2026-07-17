@@ -180,6 +180,7 @@ The commander records accepted results here. Detailed evidence stays in Git, tes
 - T24 Naver inquiry readonly uses the approved inquiry endpoint, KST 30-day window, complete pagination validation, one-second page spacing, shared store/resource lease, safe 400/429/5xx classification, and the existing T14 encrypted retention path. The legacy generic inquiry route remains closed and `safe_to_real_test=false`.
 - Correct-environment verification passed: T13-T20, T23, T24, production sessions, frontend auth/mobile contracts, encoding, production build, bundle budget, Ziniao contract, and full `verify_all.py`. The only intentional skip is the T22 live PostgreSQL migration test because no disposable `T22_TEST_POSTGRES_URL` is configured.
 - Current frontend build produced a 273,625-byte entry chunk and 38 JavaScript chunks; `bundle:verify` passed. No bundle warning blocks this candidate.
+- GitHub Actions `Verify release candidate` run `29568334003` for `ee3d17f51c994922ec2903e516167e6167166ac0` passed all three jobs: secret history, frontend contracts/build, and backend full verification.
 - The owner confirmed that the previously requested Aliyun console-side configuration is complete. This does not by itself authorize a production database cutover, real SMTP send, OSS backup activation, or a real Naver request; each remains a separate controlled gate.
 
 ## Current Release Gate
