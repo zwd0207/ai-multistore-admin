@@ -202,8 +202,16 @@ def _upload(bucket: Any, path: Path, key: str) -> None:
 
 
 def _assert_private_bucket(bucket: Any) -> None:
-    result = bucket.get_bucket_acl()
-    if str(getattr(result, "acl", "")).lower() != "private":
+    try:
+        result = bucket.get_bucket_acl()
+        acl = getattr(result, "acl", "")
+    except Exception as exc:
+        details = getattr(exc, "details", {}) or {}
+        if getattr(exc, "status", None) != 403 or details.get("Code") != "AccessDenied":
+            raise
+        info = bucket.get_bucket_info()
+        acl = getattr(getattr(info, "acl", None), "grant", "")
+    if str(acl).lower() != "private":
         raise BackupConfigurationError("oss_bucket_must_be_private")
 
 

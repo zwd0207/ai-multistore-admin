@@ -15,6 +15,7 @@ if str(BACKEND_DIR) not in sys.path:
 from scripts.backup_postgres_to_oss import (  # noqa: E402
     BackupConfigurationError,
     DEFAULT_ECS_METADATA_BASE,
+    _assert_private_bucket,
     _object_key,
     _retention_cutoff,
     _safe_manifest,
@@ -72,6 +73,23 @@ class _PrivateBucket:
         return _Result()
 
 
+class _AclAccessDenied(Exception):
+    status = 403
+    details = {"Code": "AccessDenied"}
+
+
+class _BucketInfoFallback:
+    def __init__(self, acl: str):
+        self.acl = acl
+
+    def get_bucket_acl(self):
+        raise _AclAccessDenied()
+
+    def get_bucket_info(self):
+        acl = type("BucketInfoAcl", (), {"grant": self.acl})()
+        return type("BucketInfo", (), {"acl": acl})()
+
+
 def main() -> None:
     previous = dict(os.environ)
     try:
@@ -126,6 +144,13 @@ def main() -> None:
         assert dry["dry_run"] is True
         assert dry["platform_write"] is False
         assert DEFAULT_ECS_METADATA_BASE == "http://100.100.100.200/latest/meta-data/ram/security-credentials"
+        _assert_private_bucket(_BucketInfoFallback("private"))
+        try:
+            _assert_private_bucket(_BucketInfoFallback("public-read"))
+        except BackupConfigurationError as exc:
+            assert str(exc) == "oss_bucket_must_be_private"
+        else:
+            raise AssertionError("public bucket info must be rejected")
 
         temp_root = Path(tempfile.mkdtemp(prefix="verify-postgres-backup-"))
         bucket = _PrivateBucket()

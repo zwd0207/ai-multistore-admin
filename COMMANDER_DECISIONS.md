@@ -229,7 +229,7 @@ The owner confirmed completion of the previously requested Aliyun console config
 
 ## D043 - T22 production cutover window and protected inputs approved
 
-On 2026-07-17, the owner approved the production SQLite-to-PostgreSQL cutover window for `22:00 Asia/Shanghai` and supplied the initial platform administrator identity and private OSS bucket through the operator channel. Because the repository is public, the exact email address and bucket name are deliberately excluded from Git and must be used only through protected runtime configuration.
+On 2026-07-17, the owner replaced the earlier 22:00 window and approved the production SQLite-to-PostgreSQL cutover for `19:00 Asia/Shanghai`. The initial platform administrator identity and private OSS bucket were supplied through the operator channel. Because the repository is public, the exact email address and bucket name are deliberately excluded from Git and must be used only through protected runtime configuration.
 
 The final T23/T24 release candidate adds a default-closed exact-store readonly gate, renews the inquiry lease before each page, honors the larger of `Retry-After` and exponential backoff, restores CSRF/origin/recent-auth checks, permits correctly scoped platform-administrator writes without a preselected tenant, restricts `APP_ENV` to an enum, and adds database uniqueness guards at Alembic head `d4b7a91c2e6f`. Focused T13-T24, production-session, frontend, encoding, bundle, and full verification passed locally.
 
