@@ -172,3 +172,18 @@ The commander records accepted results here. Detailed evidence stays in Git, tes
 - PostgreSQL `ai_multistore` has the Alembic revision `608122e7c9e6` and no application rows. The candidate release was staged at `/srv/releases/t21-ca3a213`; an isolated release virtualenv was used for the rehearsal.
 - SQLite-to-PostgreSQL dry-run returned `migration_ready`, preserved the source SHA-256, reported `platform_admin_bootstrap_required=true`, and did not copy rows. Target counts remain zero except `alembic_version=1`.
 - T22 is not production-complete: do not execute the one-time migration, bootstrap the initial platform administrator, switch `DATABASE_URL`, or enable the PostgreSQL OSS timer until the owner confirms the migration window, approved administrator email/display name, and private OSS bucket name. Do not request or store AccessKeys in chat.
+
+## T23-T24 Release Candidate Evidence (2026-07-17)
+
+- Terra T23 commit `6498d569e7fe0d19d1509e9af83a72280e572162` and Luna T23/T26 boundary commit `2a970e007f8921ded32ab206fe6ff19eb42f3daa` are integrated into `release/operator-v1`; T24 readonly inquiry hardening is integrated as `e31aa51`.
+- T23 email delivery is guarded and disabled by default. SMTP SSL/STARTTLS, HTTPS public URL, secret redaction, invitation/password-reset safety, and tenant-auth contracts passed with mocked delivery only. No real email was sent.
+- T24 Naver inquiry readonly uses the approved inquiry endpoint, KST 30-day window, complete pagination validation, one-second page spacing, shared store/resource lease, safe 400/429/5xx classification, and the existing T14 encrypted retention path. The legacy generic inquiry route remains closed and `safe_to_real_test=false`.
+- Correct-environment verification passed: T13-T20, T23, T24, production sessions, frontend auth/mobile contracts, encoding, production build, bundle budget, Ziniao contract, and full `verify_all.py`. The only intentional skip is the T22 live PostgreSQL migration test because no disposable `T22_TEST_POSTGRES_URL` is configured.
+- Current frontend build produced a 273,625-byte entry chunk and 38 JavaScript chunks; `bundle:verify` passed. No bundle warning blocks this candidate.
+- The owner confirmed that the previously requested Aliyun console-side configuration is complete. This does not by itself authorize a production database cutover, real SMTP send, OSS backup activation, or a real Naver request; each remains a separate controlled gate.
+
+## Current Release Gate
+
+- Safe next action is push and CI verification of `release/operator-v1`, followed by a read-only server release rehearsal.
+- Keep the live SQLite database unchanged until the owner names a migration window and confirms the bootstrap administrator email/display name and private OSS bucket.
+- Keep real platform writes, real customer replies, and real shipment dispatch disabled. Before T24 real testing, the owner must select one Naver store, confirm the Naver order-seller permission, and authorize exactly one controlled readonly GET after the rate-limit cooldown.

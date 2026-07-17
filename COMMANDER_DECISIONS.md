@@ -216,3 +216,11 @@ On 2026-07-17, candidate `ca3a213e2aa7eee557c78c2fa37aa52547b8e63a` was pushed t
 The production host remains on the untouched formal SQLite database behind HTTPS. PostgreSQL 16 is localhost-only and its Alembic schema is ready at revision `608122e7c9e6`. The candidate backend was staged separately, a dedicated release virtualenv was created, and the SQLite-to-PostgreSQL dry-run returned `migration_ready` with the expected source hash and `platform_admin_bootstrap_required=true`. The target contains only its migration version row and no business data.
 
 This is preparation evidence, not migration authorization. No service stop, `DATABASE_URL` switch, production data import, platform write, or backup timer activation occurred. The remaining owner inputs are the approved migration window, the initial platform administrator email/display name, and the exact private OSS Bucket name. The OSS backup installer must remain uninstalled while the live application uses SQLite.
+
+## D042 - T23/T24 guarded release candidate
+
+On 2026-07-17, T23 and T24 were integrated into `release/operator-v1` as commits `6498d56`, `2a970e0`, and `e31aa51`. T23 adds guarded SMTP delivery and tenant-auth boundary handling without exposing invitation/reset tokens, secrets, MFA secrets, or internal errors. T24 hardens the existing Naver readonly inquiry path without adding a table, endpoint, scheduler, generic sync route, or write capability.
+
+The correct backend virtual environment passed T24, T14, T15, T23 email, T23 tenant, production-session checks, and the complete `verify_all.py`. Frontend auth/mobile contracts, encoding, build, bundle budget, and Ziniao contracts also passed. The production entry is 273,625 bytes with 38 JavaScript chunks; the enforced bundle gate passed. T22's live PostgreSQL test remains intentionally skipped without a disposable test URL.
+
+The owner confirmed completion of the previously requested Aliyun console configuration. That confirmation does not authorize a production cutover, real SMTP transmission, OSS timer activation, or a real Naver request. The live service remains on unchanged SQLite, all platform writes and customer replies remain disabled, and T24 remains `safe_to_real_test=false` until one store, the Naver order-seller permission, the cooldown, and one controlled readonly GET are explicitly confirmed.
