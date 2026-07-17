@@ -28,7 +28,11 @@ from app.database import SessionLocal, engine, init_db
 from app.models.api_credential import ApiCredential
 from app.models.order import Order
 from app.models.order_status_event import OrderStatusEvent
-from app.models.pxg_naver_readonly import PxgNaverReadonlyCleanupStatus, PxgNaverReadonlyLogisticsRecord
+from app.models.pxg_naver_readonly import (
+    PxgNaverReadonlyCleanupStatus,
+    PxgNaverReadonlyLogisticsRecord,
+    PxgNaverReadonlyRecordState,
+)
 from app.models.store import Store
 from app.models.sync_checkpoint import SyncCheckpoint
 from app.services import automatic_read_sync_service, customer_inquiry_service, order_service, pxg_naver_readonly_persistence_service
@@ -227,6 +231,57 @@ def main():
             )],
             now=NOW,
         )["saved"] == 1
+        db.commit()
+
+        # The caller owns the page transaction. If a later detail fails, its
+        # rollback must remove records and events flushed for earlier details.
+        batch_first = seed_order(
+            db,
+            store,
+            "po-atomic-batch-first",
+            "atomic-batch-first-order",
+        )
+        batch_second = seed_order(
+            db,
+            store,
+            "po-atomic-batch-second",
+            "atomic-batch-second-order",
+        )
+        db.commit()
+        try:
+            pxg_naver_readonly_persistence_service.persist_naver_order_detail_logistics_page(
+                db,
+                store_id=store.id,
+                details=[
+                    detail(
+                        "po-atomic-batch-first",
+                        "atomic-batch-first-order",
+                        changed=NOW + timedelta(minutes=2),
+                    ),
+                    detail(
+                        "po-atomic-batch-second",
+                        "wrong-atomic-batch-second-order",
+                        changed=NOW + timedelta(minutes=2),
+                    ),
+                ],
+                now=NOW,
+            )
+            raise AssertionError("a later invalid batch detail must fail the page")
+        except ApiError as exc:
+            assert exc.error_code == "naver_logistics_external_order_id_mismatch"
+            db.rollback()
+        assert db.scalar(select(PxgNaverReadonlyLogisticsRecord).where(
+            PxgNaverReadonlyLogisticsRecord.order_id == batch_first.id,
+        )) is None
+        assert db.query(OrderStatusEvent).filter_by(order_id=batch_first.id).count() == 0
+        assert db.scalar(select(PxgNaverReadonlyRecordState).where(
+            PxgNaverReadonlyRecordState.store_id == store.id,
+            PxgNaverReadonlyRecordState.resource_type == "logistics",
+            PxgNaverReadonlyRecordState.source_key_hash
+            == pxg_naver_readonly_persistence_service._hash(f"logistics:{batch_first.id}"),
+        )) is None
+        batch_first.order_status = "CANCELLED"
+        batch_second.order_status = "CANCELLED"
         db.commit()
 
         canonical = _canonical_orders([{
