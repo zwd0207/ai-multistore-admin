@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -95,6 +96,15 @@ def _deliver_password_reset(*, recipient: str, raw_token: str, expires_at: datet
         pass
 
 
+def _raise_invitation_integrity_conflict(db: Session, exc: IntegrityError) -> None:
+    db.rollback()
+    raise ApiError(
+        "an active invitation or account already exists",
+        "invitation_identity_conflict",
+        409,
+    ) from exc
+
+
 def create_invitation(
     db: Session,
     *,
@@ -109,12 +119,15 @@ def create_invitation(
     if db.scalar(select(ErpUser.id).where(ErpUser.login_identifier_hash == email_hash)) is not None:
         raise ApiError("email is already registered", "account_already_exists", 409)
     now = get_utc_now()
-    for pending in db.scalars(select(TenantInvitation).where(
+    pending_invitations = db.scalars(select(TenantInvitation).where(
         TenantInvitation.email_hash == email_hash,
         TenantInvitation.status.in_(("pending", "pending_mfa")),
-    )).all():
+    )).all()
+    for pending in pending_invitations:
         pending.status = "revoked"
         pending.revoked_at = now
+    if pending_invitations:
+        db.flush()
     raw_token = secrets.token_urlsafe(48)
     invitation = TenantInvitation(
         email_hash=email_hash,
@@ -127,7 +140,10 @@ def create_invitation(
         expires_at=now + timedelta(hours=settings.auth_invitation_hours),
     )
     db.add(invitation)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        _raise_invitation_integrity_conflict(db, exc)
     db.refresh(invitation)
     delivery_status = _deliver_invitation(
         recipient=normalized_email,
@@ -184,7 +200,10 @@ def create_platform_admin_bootstrap_invitation(
         expires_at=now + timedelta(hours=settings.auth_invitation_hours),
     )
     db.add(invitation)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        _raise_invitation_integrity_conflict(db, exc)
     correlation_id = f"platform-admin-bootstrap-{uuid.uuid4().hex}"
     db.add(OperationAuditLog(
         created_at=now,
@@ -272,12 +291,15 @@ def accept_invitation(db: Session, *, token: str, password: str) -> dict:
     )
     enrollment_token = secrets.token_urlsafe(48)
     db.add_all((tenant, user, security))
-    db.flush()
-    invitation.accepted_user_id = user.id
-    invitation.status = "pending_mfa"
-    invitation.mfa_enrollment_token_hash = _token_hash(enrollment_token)
-    invitation.mfa_enrollment_expires_at = now + timedelta(minutes=15)
-    db.commit()
+    try:
+        db.flush()
+        invitation.accepted_user_id = user.id
+        invitation.status = "pending_mfa"
+        invitation.mfa_enrollment_token_hash = _token_hash(enrollment_token)
+        invitation.mfa_enrollment_expires_at = now + timedelta(minutes=15)
+        db.commit()
+    except IntegrityError as exc:
+        _raise_invitation_integrity_conflict(db, exc)
     return {
         "status": "mfa_enrollment_required",
         "email": invitation.email_masked,

@@ -34,6 +34,11 @@ RESOURCE_CONFIG = {
 }
 ORDER_OVERLAP = timedelta(minutes=15)
 MAX_PAGES_PER_RUN = 20
+MAX_RETRY_DELAY_SECONDS = 60 * 60
+INQUIRY_GATE_ERROR_CODES = frozenset({
+    "naver_inquiry_real_read_disabled",
+    "naver_inquiry_store_not_approved",
+})
 LEGACY_APPROVED_READONLY_SYNC_TYPES = (
     "manual_batch_sync",
     "naver_real_order_sync",
@@ -140,20 +145,64 @@ def _legacy_configured_credential_is_approved(db: Session, credential: ApiCreden
     )) is not None
 
 
-def ensure_automatic_read_schedule(db: Session, *, store_id: int, now: datetime | None = None) -> None:
+def _inquiry_gate_error(settings: Settings, store_id: int) -> str | None:
+    if not settings.naver_readonly_inquiry_real_read_enabled:
+        return "naver_inquiry_real_read_disabled"
+    if settings.naver_readonly_inquiry_approved_store_id != store_id:
+        return "naver_inquiry_store_not_approved"
+    return None
+
+
+def _apply_inquiry_real_read_gate(db: Session, *, settings: Settings, now: datetime) -> None:
+    checkpoints = db.scalars(select(SyncCheckpoint).where(
+        SyncCheckpoint.platform == NAVER,
+        SyncCheckpoint.sync_type == RESOURCE_CONFIG["customer_inquiries"]["sync_type"],
+    )).all()
+    for checkpoint in checkpoints:
+        gate_error = _inquiry_gate_error(settings, checkpoint.store_id)
+        if gate_error is not None:
+            checkpoint.status = "blocked"
+            checkpoint.automatic_read_enabled = False
+            checkpoint.next_run_at = None
+            checkpoint.last_error_code = gate_error
+            checkpoint.lease_token = None
+            checkpoint.lease_expires_at = None
+        elif checkpoint.last_error_code in INQUIRY_GATE_ERROR_CODES:
+            checkpoint.status = "idle"
+            checkpoint.automatic_read_enabled = True
+            checkpoint.next_run_at = now
+            checkpoint.last_error_code = None
+            checkpoint.retry_count = 0
+    db.commit()
+
+
+def ensure_automatic_read_schedule(
+    db: Session,
+    *,
+    store_id: int,
+    now: datetime | None = None,
+    settings: Settings | None = None,
+) -> None:
     current = _utc(now or get_utc_now())
     for resource in RESOURCE_CONFIG:
         _checkpoint(db, store_id=store_id, resource=resource, now=current)
     db.commit()
+    _apply_inquiry_real_read_gate(db, settings=settings or get_settings(), now=current)
 
 
-def ensure_onboarded_store_schedules(db: Session, *, now: datetime | None = None) -> int:
+def ensure_onboarded_store_schedules(
+    db: Session,
+    *,
+    now: datetime | None = None,
+    settings: Settings | None = None,
+) -> int:
     current = _utc(now or get_utc_now())
     store_ids = _eligible_store_ids(db)
     for store_id in store_ids:
         for resource in RESOURCE_CONFIG:
             _checkpoint(db, store_id=store_id, resource=resource, now=current)
     db.commit()
+    _apply_inquiry_real_read_gate(db, settings=settings or get_settings(), now=current)
     return len(store_ids)
 
 
@@ -209,6 +258,14 @@ def _safe_error_code(exc: Exception) -> str:
     if isinstance(exc, store_onboarding_service.NaverReadFailure):
         return exc.code[:80]
     return str(getattr(exc, "error_code", "automatic_read_failed"))[:80]
+
+
+def _bounded_retry_after_seconds(exc: Exception) -> int | None:
+    detail = exc.detail if isinstance(exc, ApiError) and isinstance(exc.detail, dict) else {}
+    value = detail.get("retry_after_seconds")
+    if type(value) is not int or value < 0:
+        return None
+    return min(value, MAX_RETRY_DELAY_SECONDS)
 
 
 def _resource_for_checkpoint(checkpoint: SyncCheckpoint) -> str:
@@ -373,16 +430,31 @@ def _finish_failure(db: Session, *, checkpoint: SyncCheckpoint, token: str, now:
     if _retryable_error(checkpoint.last_error_code):
         checkpoint.retry_count += 1
         checkpoint.status = "retry_wait"
-        checkpoint.next_run_at = now + timedelta(minutes=min(60, 2 ** min(checkpoint.retry_count - 1, 6)))
+        exponential_seconds = min(
+            MAX_RETRY_DELAY_SECONDS,
+            60 * (2 ** min(checkpoint.retry_count - 1, 6)),
+        )
+        retry_after_seconds = _bounded_retry_after_seconds(exc) or 0
+        checkpoint.next_run_at = now + timedelta(
+            seconds=max(exponential_seconds, retry_after_seconds),
+        )
     else:
         checkpoint.status = "blocked"
         checkpoint.automatic_read_enabled = False
         checkpoint.next_run_at = None
     checkpoint.lease_token = None
     checkpoint.lease_expires_at = None
+    safe_summary = {
+        "error_code": checkpoint.last_error_code,
+        "raw_response_saved": False,
+        "platform_write": False,
+    }
+    retry_after_seconds = _bounded_retry_after_seconds(exc)
+    if retry_after_seconds is not None:
+        safe_summary["retry_after_seconds"] = retry_after_seconds
     db.add(SyncLog(store_id=checkpoint.store_id, platform=NAVER, sync_type=checkpoint.sync_type, status="failed", finished_at=now,
                    message="automatic readonly sync failed", error_detail=checkpoint.last_error_code,
-                   raw_summary={"error_code": checkpoint.last_error_code, "raw_response_saved": False, "platform_write": False}))
+                   raw_summary=safe_summary))
     db.commit()
     return True
 
@@ -517,6 +589,14 @@ def run_automatic_checkpoint(
     inquiry_runner: Callable[..., dict[str, Any]] | None = None,
 ) -> str:
     current = _utc(now or get_utc_now())
+    pending_checkpoint = db.get(SyncCheckpoint, checkpoint_id)
+    if (
+        pending_checkpoint is not None
+        and pending_checkpoint.sync_type == RESOURCE_CONFIG["customer_inquiries"]["sync_type"]
+        and _inquiry_gate_error(get_settings(), pending_checkpoint.store_id) is not None
+    ):
+        _apply_inquiry_real_read_gate(db, settings=get_settings(), now=current)
+        return "not_due"
     token = _claim(db, checkpoint_id=checkpoint_id, now=current)
     if token is None:
         return "not_due"
@@ -553,7 +633,7 @@ def run_due_automatic_read_syncs(
         return {"scheduled": 0, "success": 0, "failed": 0}
     current = _utc(now or get_utc_now())
     with session_factory() as db:
-        ensure_onboarded_store_schedules(db, now=current)
+        ensure_onboarded_store_schedules(db, now=current, settings=settings)
         due_ids = db.scalars(select(SyncCheckpoint.id).where(
             SyncCheckpoint.platform == NAVER, SyncCheckpoint.automatic_read_enabled.is_(True),
             SyncCheckpoint.status != "blocked", or_(SyncCheckpoint.next_run_at.is_(None), SyncCheckpoint.next_run_at <= current),

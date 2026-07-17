@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -11,6 +11,13 @@ class ErpUser(Base):
     __tablename__ = "erp_users"
     __table_args__ = (
         Index("ix_erp_users_status", "status"),
+        Index(
+            "uq_erp_users_login_identifier_hash",
+            "login_identifier_hash",
+            unique=True,
+            sqlite_where=text("login_identifier_hash IS NOT NULL"),
+            postgresql_where=text("login_identifier_hash IS NOT NULL"),
+        ),
         CheckConstraint("status IN ('invited', 'active', 'inactive', 'locked')", name="ck_erp_users_status"),
         CheckConstraint(
             "auth_provider IN ('local_pending', 'password', 'sso', 'api_operator')",

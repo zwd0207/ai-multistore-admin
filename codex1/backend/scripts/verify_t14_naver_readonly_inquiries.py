@@ -19,6 +19,8 @@ os.environ.update({
     "CREDENTIAL_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
     "CORS_ALLOWED_ORIGINS": '["https://erp.test"]',
     "PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED": "true",
+    "NAVER_READONLY_INQUIRY_REAL_READ_ENABLED": "true",
+    "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID": "1",
 })
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]

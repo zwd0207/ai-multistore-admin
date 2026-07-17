@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +34,13 @@ class TenantInvitation(Base):
         Index("uq_tenant_invitations_token_hash", "token_hash", unique=True),
         Index("uq_tenant_invitations_enrollment_hash", "mfa_enrollment_token_hash", unique=True),
         Index("ix_tenant_invitations_email_status", "email_hash", "status"),
+        Index(
+            "uq_tenant_invitations_active_email_hash",
+            "email_hash",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'pending_mfa')"),
+            postgresql_where=text("status IN ('pending', 'pending_mfa')"),
+        ),
         CheckConstraint(
             "status IN ('pending', 'pending_mfa', 'accepted', 'revoked', 'expired')",
             name="ck_tenant_invitations_status",

@@ -26,7 +26,7 @@ from app.database import Base  # noqa: E402
 
 CONFIRMATION = "EMPTY_TARGET_AND_BACKUP_VERIFIED"
 ADVISORY_LOCK_KEY = 2_102_023
-REQUIRED_TARGET_REVISION = "608122e7c9e6"
+REQUIRED_TARGET_REVISION = "d4b7a91c2e6f"
 SKIPPED_SOURCE_TABLES = {"erp_sessions"}
 TENANT_SCOPED_TABLES = {"erp_users", "stores", "store_onboardings"}
 

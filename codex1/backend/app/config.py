@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     project_name: str = "AI Multi-Store Operations API"
-    app_env: str = "development"
+    app_env: Literal["development", "test", "production"] = "development"
     database_url: str = "sqlite:///./codex1.db"
     api_prefix: str = ""
     app_timezone: str = "Asia/Seoul"
@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     pxg_naver_local_read_thumbnail_generation_enabled: bool = False
     automatic_read_sync_enabled: bool = False
     automatic_read_sync_interval_seconds: int = 45
+    naver_readonly_inquiry_real_read_enabled: bool = False
+    naver_readonly_inquiry_approved_store_id: int | None = Field(default=None, gt=0)
     lifecycle_schedulers_enabled: bool = True
     pxg_naver_local_read_first_sync_limit: int = 3
     ai_automatic_operations_enabled: bool = False
@@ -99,6 +101,18 @@ class Settings(BaseSettings):
     def validate_local_mfa_code_display(self) -> "Settings":
         if self.local_mfa_code_display_enabled and self.app_env != "test":
             raise ValueError("LOCAL_MFA_CODE_DISPLAY_ENABLED requires APP_ENV=test")
+        return self
+
+    @model_validator(mode="after")
+    def validate_naver_readonly_inquiry_real_read(self) -> "Settings":
+        if (
+            self.naver_readonly_inquiry_real_read_enabled
+            and self.naver_readonly_inquiry_approved_store_id is None
+        ):
+            raise ValueError(
+                "NAVER_READONLY_INQUIRY_REAL_READ_ENABLED requires "
+                "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID"
+            )
         return self
 
     @model_validator(mode="after")

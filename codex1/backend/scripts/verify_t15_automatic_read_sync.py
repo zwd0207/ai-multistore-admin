@@ -11,7 +11,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 DB_PATH = Path(tempfile.gettempdir()) / f"codex1-t15-{os.getpid()}-{uuid.uuid4().hex[:8]}.db"
-os.environ.update({"DATABASE_URL": f"sqlite:///{DB_PATH.as_posix()}", "CREDENTIAL_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"), "APP_ENV": "test", "REAL_API_TEST_ENABLED": "false", "REAL_API_WRITE_ENABLED": "false"})
+os.environ.update({"DATABASE_URL": f"sqlite:///{DB_PATH.as_posix()}", "CREDENTIAL_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"), "APP_ENV": "test", "REAL_API_TEST_ENABLED": "false", "REAL_API_WRITE_ENABLED": "false", "NAVER_READONLY_INQUIRY_REAL_READ_ENABLED": "true", "NAVER_READONLY_INQUIRY_APPROVED_STORE_ID": "1"})
 
 from sqlalchemy import select
 

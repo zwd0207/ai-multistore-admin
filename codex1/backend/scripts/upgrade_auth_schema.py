@@ -158,6 +158,14 @@ AUTH_INDEXES = {
     "ix_erp_sessions_user_active": ("erp_sessions", ["user_id", "revoked_at", "absolute_expires_at"], False),
 }
 
+AUTH_PARTIAL_INDEXES = {
+    "uq_erp_users_login_identifier_hash": (
+        "erp_users",
+        ["login_identifier_hash"],
+        "login_identifier_hash IS NOT NULL",
+    ),
+}
+
 FORBIDDEN_AUTH_COLUMNS = {
     "access_token",
     "authorization",
@@ -350,6 +358,11 @@ def create_auth_schema(connection: sqlite3.Connection) -> list[str]:
             f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} "
             f"ON {table_name} ({', '.join(columns)})"
         )
+    for index_name, (table_name, columns, predicate) in AUTH_PARTIAL_INDEXES.items():
+        connection.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} "
+            f"ON {table_name} ({', '.join(columns)}) WHERE {predicate}"
+        )
 
     return sorted(AUTH_TABLES - existing_tables)
 
@@ -443,7 +456,7 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
         for row in connection.execute(f"PRAGMA index_list({table_name})").fetchall():
             all_indexes[row[1]] = (table_name, bool(row[2]))
 
-    missing_indexes = sorted(set(AUTH_INDEXES) - set(all_indexes))
+    missing_indexes = sorted((set(AUTH_INDEXES) | set(AUTH_PARTIAL_INDEXES)) - set(all_indexes))
     if missing_indexes:
         raise RuntimeError(f"Missing auth indexes: {missing_indexes}")
 
@@ -459,6 +472,19 @@ def verify_auth_schema(connection: sqlite3.Connection) -> None:
             raise RuntimeError(
                 f"Unexpected {index_name} columns: {observed_columns}; expected {expected_columns}"
             )
+
+    for index_name, (expected_table, expected_columns, predicate) in AUTH_PARTIAL_INDEXES.items():
+        observed_table, observed_unique = all_indexes[index_name]
+        if observed_table != expected_table or not observed_unique:
+            raise RuntimeError(f"Unexpected partial unique index {index_name}")
+        observed_columns = [row[2] for row in connection.execute(f"PRAGMA index_info({index_name})")]
+        if observed_columns != expected_columns:
+            raise RuntimeError(f"Unexpected {index_name} columns: {observed_columns}")
+        sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (index_name,)
+        ).fetchone()[0]
+        if predicate.upper() not in str(sql).upper():
+            raise RuntimeError(f"Unexpected {index_name} predicate")
 
     role_keys = {
         row[0]
@@ -575,7 +601,7 @@ def upgrade(*, run_create_all: bool = True) -> dict[str, object]:
         verify_auth_schema(connection)
         return {
             "tables": created_tables,
-            "indexes": sorted(AUTH_INDEXES),
+            "indexes": sorted(set(AUTH_INDEXES) | set(AUTH_PARTIAL_INDEXES)),
             "seed_counts": seed_counts,
         }
     finally:

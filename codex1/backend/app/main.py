@@ -19,6 +19,19 @@ from app.routers import health
 settings = get_settings()
 
 
+_UNAUTHENTICATED_WRITE_PATHS = frozenset({
+    "/api/v1/auth/login",
+    "/api/v1/auth/mfa/verify",
+    "/api/v1/auth/invitations/accept",
+    "/api/v1/auth/mfa/enroll/complete",
+    "/api/v1/auth/password-reset/request",
+    "/api/v1/auth/password-reset/complete",
+    # Logout keeps its endpoint-level session and CSRF validation so an
+    # expired session can retain the existing error contract.
+    "/api/v1/auth/logout",
+})
+
+
 async def run_pxg_naver_cleanup_scheduler(
     *,
     runtime_settings: Any,
@@ -214,16 +227,22 @@ def _requires_write_protection(request: Request) -> bool:
         settings.app_env != "development"
         and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
         and request.url.path.startswith("/api/v1/")
-        and not request.url.path.startswith(("/api/v1/auth/invitations", "/api/v1/admin/tenants"))
-        and request.url.path not in {
-            "/api/v1/auth/login",
-            "/api/v1/auth/mfa/verify",
-            "/api/v1/auth/logout",
-            "/api/v1/auth/invitations/accept",
-            "/api/v1/auth/mfa/enroll/complete",
-            "/api/v1/auth/password-reset/request",
-            "/api/v1/auth/password-reset/complete",
-        }
+        and request.url.path not in _UNAUTHENTICATED_WRITE_PATHS
+    )
+
+
+def _requires_recent_auth_for_write(path: str) -> bool:
+    if path in {
+        "/api/v1/auth/invitations",
+        "/api/v1/admin/tenants/selection",
+    }:
+        return True
+    parts = [part for part in path.split("/") if part]
+    return (
+        len(parts) == 6
+        and parts[:4] == ["api", "v1", "admin", "tenants"]
+        and parts[4].isdigit()
+        and parts[5] == "select"
     )
 
 
@@ -323,12 +342,14 @@ async def _enforce_write_protection(request: Request) -> None:
         require_any_store_permission,
         require_store_permission,
     )
-    from app.services.session_service import require_csrf, require_session
+    from app.services.session_service import require_csrf, require_recent_auth, require_session
 
     db = SessionLocal()
     try:
         principal = require_session(request, db)
         require_csrf(request, db, principal)
+        if _requires_recent_auth_for_write(request.url.path):
+            require_recent_auth(principal)
         identity = OperatorIdentity(
             user_id=principal.user_id,
             user_key_hash=principal.user_key_hash,

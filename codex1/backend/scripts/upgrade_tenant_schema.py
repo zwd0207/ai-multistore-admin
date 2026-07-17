@@ -40,6 +40,8 @@ INDEXES = (
     "ON stores(tenant_id, ziniao_external_id_hash) WHERE ziniao_external_id_hash IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_store_onboardings_tenant_id ON store_onboardings(tenant_id)",
     "CREATE INDEX IF NOT EXISTS ix_erp_sessions_selected_tenant_id ON erp_sessions(selected_tenant_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_invitations_active_email_hash "
+    "ON tenant_invitations(email_hash) WHERE status IN ('pending', 'pending_mfa')",
 )
 
 
@@ -67,6 +69,23 @@ def upgrade() -> dict[str, list[str]]:
                 if column_name not in existing:
                     connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
                     changed[table_name].append(column_name)
+        if "tenant_invitations" in tables:
+            connection.execute("""
+                UPDATE tenant_invitations
+                SET status='revoked',
+                    revoked_at=COALESCE(revoked_at, updated_at, created_at),
+                    updated_at=COALESCE(updated_at, created_at)
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY email_hash ORDER BY created_at DESC, id DESC
+                        ) AS duplicate_rank
+                        FROM tenant_invitations
+                        WHERE status IN ('pending', 'pending_mfa')
+                    ) ranked
+                    WHERE duplicate_rank > 1
+                )
+            """)
         connection.execute("DROP INDEX IF EXISTS uq_stores_ziniao_external_hash")
         for statement in INDEXES:
             table_name = statement.split(" ON ", 1)[1].split("(", 1)[0].strip()

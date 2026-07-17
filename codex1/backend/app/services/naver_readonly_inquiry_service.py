@@ -55,6 +55,21 @@ def _safe_label(value: object, fallback: str) -> str:
     return normalized or fallback
 
 
+def assert_naver_inquiry_real_read_allowed(*, store_id: int, settings: Settings) -> None:
+    if not settings.naver_readonly_inquiry_real_read_enabled:
+        raise ApiError(
+            "Naver inquiry readonly access is not approved",
+            "naver_inquiry_real_read_disabled",
+            403,
+        )
+    if settings.naver_readonly_inquiry_approved_store_id != store_id:
+        raise ApiError(
+            "Naver inquiry readonly access is not approved for this store",
+            "naver_inquiry_store_not_approved",
+            403,
+        )
+
+
 def _store(db: Session, store_id: int) -> Store:
     store = db.get(Store, store_id)
     if store is None or str(store.platform).strip().lower() != "naver" or store.status != "active":
@@ -357,6 +372,30 @@ def _release_inquiry_lease(db: Session, lease: dict[str, Any] | None) -> None:
     db.commit()
 
 
+def _renew_inquiry_lease(
+    db: Session,
+    *,
+    lease: dict[str, Any],
+    now: datetime | None = None,
+) -> None:
+    current = _utc(now or get_utc_now())
+    renewed = db.execute(update(SyncCheckpoint).where(
+        SyncCheckpoint.id == int(lease["checkpoint_id"]),
+        SyncCheckpoint.lease_token == str(lease["token"]),
+        SyncCheckpoint.lease_expires_at.is_not(None),
+        SyncCheckpoint.lease_expires_at > current,
+    ).values(
+        lease_expires_at=current + INQUIRY_LEASE_DURATION,
+    ).execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    if renewed != 1:
+        raise ApiError(
+            "Naver inquiry refresh lease was lost",
+            "naver_inquiry_lease_lost",
+            409,
+        )
+
+
 def _safe_request_error_detail(result: dict[str, Any]) -> dict[str, Any]:
     safe_error = result.get("safe_error") if isinstance(result.get("safe_error"), dict) else {}
     detail: dict[str, Any] = {"platform_http_status": result.get("http_status")}
@@ -486,6 +525,7 @@ def _fetch_naver_inquiry_pages(
     start_date: date,
     end_date: date,
     sleep_fn: Callable[[float], None] | None = None,
+    before_request: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     sleep_fn = sleep_fn or time.sleep
     items: list[dict[str, Any]] = []
@@ -496,6 +536,8 @@ def _fetch_naver_inquiry_pages(
     for page in range(1, INQUIRY_MAX_PAGES + 1):
         if page > 1:
             sleep_fn(INQUIRY_PAGE_DELAY_SECONDS)
+        if before_request is not None:
+            before_request()
         result = sync_service._request_naver_customer_inquiries(
             api_base=api_base,
             headers={"Authorization": f"Bearer {token}"},
@@ -565,6 +607,9 @@ def refresh_naver_readonly_inquiries(
     db: Session, *, store_id: int, actor_id: str | None, settings: Settings | None = None
 ) -> dict[str, Any]:
     settings = settings or get_settings()
+    # This approval check deliberately precedes every mutable or secret-bearing
+    # operation, including lease/checkpoint creation and credential lookup.
+    assert_naver_inquiry_real_read_allowed(store_id=store_id, settings=settings)
     _store(db, store_id)
     now = get_utc_now()
     lease: dict[str, Any] | None = None
@@ -583,6 +628,7 @@ def refresh_naver_readonly_inquiries(
             credential_id=None,
         )
         context = sync_service._build_naver_token_context_from_credential(credential)
+        _renew_inquiry_lease(db, lease=lease)
         token, _ = api_credential_readiness_service._request_naver_token_from_context(context)
         start_date, end_date = _recent_naver_inquiry_date_range()
         fetched = _fetch_naver_inquiry_pages(
@@ -590,6 +636,7 @@ def refresh_naver_readonly_inquiries(
             token=token,
             start_date=start_date,
             end_date=end_date,
+            before_request=lambda: _renew_inquiry_lease(db, lease=lease),
         )
         counts = {"created": 0, "updated": 0, "skipped": 0}
         for item in fetched["items"]:
