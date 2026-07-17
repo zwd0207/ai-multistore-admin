@@ -595,6 +595,35 @@ export function adaptNaverOrderCompletePreview(data = {}) {
   };
 }
 
+const CUSTOMER_INQUIRY_CLASSIFICATION_LABELS = {
+  unanswered: '未回复',
+  answered: '已回复',
+  unknown: '状态待确认',
+};
+
+export function adaptCustomerInquiryClassification(item = {}) {
+  const classification = item.classification
+    ?? item.reply_classification
+    ?? item.replyClassification;
+  return classification === 'answered' || classification === 'unanswered'
+    ? classification
+    : 'unknown';
+}
+
+export function adaptCustomerInquiryConversation(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const actor = String(item?.actor ?? '').trim().toLowerCase();
+    const content = String(item?.content ?? '').trim();
+    if (!['customer', 'store'].includes(actor) || !content) return [];
+    return [{
+      actor,
+      content,
+      sentAt: item.sent_at ?? item.sentAt ?? null,
+    }];
+  });
+}
+
 export function adaptCustomerInquiry(item = {}) {
   const rawData = item.raw_data || {};
   const stableOrder = item.order_context || item.orderContext || null;
@@ -609,6 +638,7 @@ export function adaptCustomerInquiry(item = {}) {
     ?? (String(item.inquiry_id || '').startsWith('pxg_naver_readonly:') ? String(item.inquiry_id).split(':')[1] : null);
   const safeSummary = item.summary || item.title || item.inquiry_type || item.category || 'customer inquiry';
   const isReadonly = readonlyId !== null && readonlyId !== undefined && String(readonlyId) !== '';
+  const replyClassification = adaptCustomerInquiryClassification(item);
   return {
     id: item.inquiry_id || item.id,
     readonlyId,
@@ -626,7 +656,10 @@ export function adaptCustomerInquiry(item = {}) {
     summary: safeSummary,
     detailLoaded: !isReadonly,
     rawStatus: item.status,
-    status: adaptStatus(item.status, { open: '문의 대기', answered: '답변 완료', processing: '처리중' }),
+    classification: item.classification ?? null,
+    replyClassification,
+    replyClassificationLabel: CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification],
+    status: CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification],
     priority: item.priority || '일반',
     replyEnabled,
     replyDisabledReason: item.reply_disabled_reason || item.replyDisabledReason || '',
@@ -702,11 +735,24 @@ export function adaptCustomerInquiryDetail(item = {}) {
   const title = source.decrypted_title ?? source.decryptedTitle ?? source.title;
   const readonlyId = source.readonly_id ?? source.readonlyId;
   const storeId = source.store_id ?? source.storeId;
+  const conversation = adaptCustomerInquiryConversation(source.conversation);
   if (content !== undefined && content !== null) detail.content = content;
+  detail.conversation = conversation;
   if (typeof title === 'string' && title.trim()) detail.title = title;
   if (readonlyId !== undefined && readonlyId !== null && String(readonlyId).trim()) detail.readonlyId = readonlyId;
   if (storeId !== undefined && storeId !== null) detail.storeId = storeId;
   if (typeof source.platform === 'string' && source.platform.trim()) detail.platform = source.platform;
+  if (
+    source.classification !== undefined
+    || source.reply_classification !== undefined
+    || source.replyClassification !== undefined
+  ) {
+    const replyClassification = adaptCustomerInquiryClassification(source);
+    detail.classification = source.classification ?? null;
+    detail.replyClassification = replyClassification;
+    detail.replyClassificationLabel = CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification];
+    detail.status = CUSTOMER_INQUIRY_CLASSIFICATION_LABELS[replyClassification];
+  }
   return detail;
 }
 

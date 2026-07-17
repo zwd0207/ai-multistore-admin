@@ -14,10 +14,19 @@ import SummaryCard from '../components/common/SummaryCard';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
 import { classifyCoreDataSource } from '../utils/coreErpContract';
+import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const PAGE_SIZE = 10;
 const NAVER_REPLY_BODY_FIELD = 'answerComment';
-const statusOptions = ['待处理', '处理中', '已记录', '需人工处理'];
+const replyClassificationOptions = [
+  { value: 'unanswered', label: '未回复' },
+  { value: 'answered', label: '已回复' },
+];
+const replyClassificationLabels = {
+  unanswered: '未回复',
+  answered: '已回复',
+  unknown: '状态待确认',
+};
 const priorityOptions = ['普通', '重要', '紧急'];
 const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
 
@@ -30,14 +39,6 @@ function text(value, fallback = '-') {
   return next || fallback;
 }
 
-function statusLabel(value) {
-  const normalized = comparable(value);
-  if (['문의 대기', 'pending', '待处理'].includes(normalized)) return '待处理';
-  if (['처리중', 'processing', '处理中', '환불 요청', '교환 요청'].includes(normalized)) return '处理中';
-  if (['답변 완료', 'done', 'closed', '已回复', '已记录'].includes(normalized)) return '已记录';
-  return value ? '需人工处理' : '待处理';
-}
-
 function priorityLabel(value) {
   const normalized = comparable(value);
   if (['긴급', 'urgent', '紧急'].includes(normalized)) return '紧急';
@@ -47,6 +48,9 @@ function priorityLabel(value) {
 
 function normalizeMessage(row = {}) {
   const sourceInfo = classifyCoreDataSource(row);
+  const replyClassification = ['unanswered', 'answered'].includes(row.replyClassification)
+    ? row.replyClassification
+    : 'unknown';
   return {
     ...row,
     ticketNo: row.ticketNo || row.caseNo || `MSG-${row.id}`,
@@ -58,8 +62,11 @@ function normalizeMessage(row = {}) {
     inquiryType: text(row.inquiryType || row.type || row.category, '客户咨询'),
     summary: text(row.summary || row.content || row.title, '暂无摘要'),
     content: row.content || '',
+    conversation: Array.isArray(row.conversation) ? row.conversation : [],
     detailLoaded: Boolean(row.detailLoaded),
-    statusLabel: statusLabel(row.status),
+    replyClassification,
+    replyClassificationLabel: row.replyClassificationLabel
+      || replyClassificationLabels[replyClassification],
     priorityLabel: priorityLabel(row.priority),
     createdAt: row.createdAt || row.created_at || '',
     lastReplyAt: row.lastReplyAt || row.updatedAt || '',
@@ -85,12 +92,12 @@ function matches(row, query = {}) {
     row.productName,
     row.inquiryType,
     row.summary,
-    row.statusLabel,
+    row.replyClassificationLabel,
     row.priorityLabel,
   ].map(comparable).join(' ');
   if (keyword && !haystack.includes(keyword)) return false;
   if (query.platform && comparable(row.platform) !== comparable(query.platform)) return false;
-  if (query.status && row.statusLabel !== query.status) return false;
+  if (query.classification && row.replyClassification !== query.classification) return false;
   if (query.priority && row.priorityLabel !== query.priority) return false;
   return true;
 }
@@ -104,7 +111,7 @@ const columns = [
   { key: 'productName', title: '商品' },
   { key: 'inquiryType', title: '消息类型' },
   { key: 'summary', title: '内容摘要' },
-  { key: 'statusLabel', title: '状态', render: (value) => <StatusBadge value={value} /> },
+  { key: 'replyClassificationLabel', title: '回复状态', render: (value) => <StatusBadge value={value} /> },
   { key: 'priorityLabel', title: '紧急程度', render: (value) => <StatusBadge value={value} /> },
   { key: 'createdAt', title: '创建时间' },
 ];
@@ -113,7 +120,7 @@ export default function CustomerService() {
   const [searchParams] = useSearchParams();
   const deepLinkInquiryId = searchParams.get('inquiryId');
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
-  const [query, setQuery] = useState({ keyword: '', platform: '', status: '', priority: '', page: 1 });
+  const [query, setQuery] = useState({ keyword: '', platform: '', classification: '', priority: '', page: 1 });
   const [draft, setDraft] = useState(query);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +141,12 @@ export default function CustomerService() {
     setError('');
     try {
       if (isBackendSource && storeError) throw new Error(storeError);
-      const params = { page: 1, pageSize: 100, platform: nextQuery.platform };
+      const params = {
+        page: 1,
+        pageSize: 100,
+        platform: nextQuery.platform,
+        classification: nextQuery.classification,
+      };
       if (isBackendSource && selectedStoreId) params.storeId = selectedStoreId;
       const result = await dataProvider.getCustomerInquiries(params);
       const normalized = (result.data || result.items || []).map(normalizeMessage).filter((item) => matches(item, nextQuery));
@@ -158,9 +170,9 @@ export default function CustomerService() {
 
   const summary = useMemo(() => ({
     total: rows.length,
-    pending: rows.filter((item) => item.statusLabel === '待处理').length,
+    unanswered: rows.filter((item) => item.replyClassification === 'unanswered').length,
+    answered: rows.filter((item) => item.replyClassification === 'answered').length,
     urgent: rows.filter((item) => item.priorityLabel === '紧急').length,
-    manual: rows.filter((item) => item.statusLabel === '需人工处理' || item.priorityLabel === '紧急').length,
   }), [rows]);
 
   const pageRows = rows.slice((query.page - 1) * PAGE_SIZE, query.page * PAGE_SIZE);
@@ -197,7 +209,9 @@ export default function CustomerService() {
       readonlyId: activeMessage.readonlyId || activeMessage.id,
       storeId: selectedStoreId,
     }).then((detail) => {
-      if (!cancelled) setActiveMessage(normalizeMessage({ ...activeMessage, ...detail, detailLoaded: true }));
+      if (!cancelled) {
+        setActiveMessage((current) => normalizeMessage({ ...current, ...detail, detailLoaded: true }));
+      }
     }).catch(() => {
       if (!cancelled) setDetailError('客服消息详情暂不可用，请稍后重试');
     }).finally(() => {
@@ -252,23 +266,26 @@ export default function CustomerService() {
 
   const search = () => setQuery({ ...draft, page: 1 });
   const reset = () => {
-    const clean = { keyword: '', platform: '', status: '', priority: '', page: 1 };
+    const clean = { keyword: '', platform: '', classification: '', priority: '', page: 1 };
     setDraft(clean);
     setQuery(clean);
   };
 
+  const activeConversation = activeMessage?.conversation || [];
+  const hasStoreReply = activeConversation.some((message) => message.actor === 'store');
+
   return (
-    <>
+    <div className="customer-service-page">
       <PageHeader
         title="客户咨询"
         description="查看客户问题、订单和物流进度。当前只读，不发送平台回复。"
       />
 
       <div className="summary-grid">
-        <SummaryCard title="客户咨询" value={summary.total} note="当前可处理咨询" tone="info" />
-        <SummaryCard title="待处理" value={summary.pending} note="需人工查看" tone={summary.pending ? 'warning' : 'success'} />
+        <SummaryCard title="客户咨询" value={summary.total} note="当前咨询总数" tone="info" />
+        <SummaryCard title="未回复" value={summary.unanswered} note="等待店铺回复" tone={summary.unanswered ? 'warning' : 'success'} />
+        <SummaryCard title="已回复" value={summary.answered} note="已有店铺答复" tone="success" />
         <SummaryCard title="紧急消息" value={summary.urgent} note="优先处理" tone={summary.urgent ? 'danger' : 'success'} />
-        <SummaryCard title="需人工到平台后台处理" value={summary.manual} note="不自动回复客户" tone="warning" />
       </div>
 
       <FilterPanel>
@@ -283,9 +300,9 @@ export default function CustomerService() {
             <option value="">全部平台</option>
             {platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
-            <option value="">全部状态</option>
-            {statusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+          <select value={draft.classification} onChange={(event) => setDraft({ ...draft, classification: event.target.value })}>
+            <option value="">全部</option>
+            {replyClassificationOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
           <select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value })}>
             <option value="">全部紧急程度</option>
@@ -311,7 +328,7 @@ export default function CustomerService() {
               renderActions={(row) => (
                 <>
                   <button type="button" onClick={() => openMessage(row)}>详情</button>
-                  <button type="button" disabled={!platformReplyEnabled || !row.replyEnabled} title={platformReplyEnabled && row.replyEnabled ? '' : '当前咨询仅供查看，不能发送'}>回复</button>
+                  <button type="button" className="inquiry-reply-button" disabled={!platformReplyEnabled || !row.replyEnabled} title="当前咨询仅供查看，不能发送">回复</button>
                 </>
               )}
             />
@@ -338,7 +355,7 @@ export default function CustomerService() {
                 ['物流状态', activeMessage.relatedOrder?.deliveryStatusLabelZh || activeMessage.relatedOrder?.deliveryStatus || '尚未发货或平台暂无物流信息'],
                 ['物流更新时间', activeMessage.relatedOrder?.logisticsUpdatedAt || '-'],
                 ['物流有效期', activeMessage.logisticsValidity],
-                ['状态', <StatusBadge value={activeMessage.statusLabel} />],
+                ['回复状态', <StatusBadge value={activeMessage.replyClassificationLabel} />],
                 ['紧急程度', <StatusBadge value={activeMessage.priorityLabel} />],
                 ['记录状态', activeMessage.sourceInfo.label],
               ].map(([label, value]) => (
@@ -348,15 +365,35 @@ export default function CustomerService() {
                 </div>
               ))}
             </div>
-            <section className="detail-section">
-              <h3>消息内容</h3>
+            <section className="detail-section inquiry-conversation-section">
+              <h3>咨询对话</h3>
               {detailLoading ? <p>正在加载客服消息详情...</p> : null}
               {detailError ? <p className="detail-error">{detailError}</p> : null}
-              {!detailLoading && !detailError ? <p>{activeMessage.content || '暂无可显示的消息内容'}</p> : null}
-            </section>
-            <section className="detail-section">
-              <h3>处理提示</h3>
-              <p>当前只显示已保存的客户咨询，不发送平台回复。没有关联订单时，这是正常状态。</p>
+              {!detailLoading && !detailError ? (
+                <div className="conversation-timeline" role="list" aria-label="客户咨询对话">
+                  {activeConversation.length ? activeConversation.map((message, index) => (
+                    <article
+                      className={`conversation-message conversation-message-${message.actor}`}
+                      key={`${message.actor}-${message.sentAt || 'unknown'}-${index}`}
+                      role="listitem"
+                    >
+                      <div className="conversation-bubble">
+                        <div className="conversation-meta">
+                          <strong>{message.actor === 'store' ? '店铺' : '客户'}</strong>
+                          <time>{message.sentAt ? formatKstDateTimeWithLabel(message.sentAt) : '时间未提供'}</time>
+                        </div>
+                        <p>{message.content}</p>
+                      </div>
+                    </article>
+                  )) : <p className="conversation-empty">暂无可显示的对话内容</p>}
+                  {!hasStoreReply ? (
+                    <div className="conversation-unanswered" role="status">
+                      <strong>未回复</strong>
+                      <span>当前对话中没有店铺回复。</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           </>
         ) : <EmptyState title="暂无消息详情" description="请选择消息查看详情。" />}
@@ -393,6 +430,6 @@ export default function CustomerService() {
         </div>
         <p className="mock-sync-note">当前每条客户咨询都需要运营人员核对后单独发送。</p>
       </Modal>
-    </>
+    </div>
   );
 }

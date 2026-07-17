@@ -42,6 +42,16 @@ function queryBackendRows(rows, params = {}) {
   return { data, items: data, total: filtered.length, page, pageSize };
 }
 
+function queryCustomerInquiryRows(rows, params = {}) {
+  const expectedClassification = comparable(
+    params.replyClassification || params.classification,
+  );
+  const classifiedRows = expectedClassification
+    ? rows.filter((item) => comparable(item.replyClassification) === expectedClassification)
+    : rows;
+  return queryBackendRows(classifiedRows, { ...params, status: '' });
+}
+
 async function getBackendStores() {
   if (!backendStoresPromise) {
     backendStoresPromise = backendApi.getStores({ page: 1, pageSize: 100 })
@@ -5233,7 +5243,7 @@ const sourceMethods = {
     const { store, stores } = await resolveBackendStore(params);
     const result = await backendApi.getCustomerInquiries({ storeId: store.id, platform: params?.platform });
     const rows = withStoreName(adapters.list(result, adapters.customerInquiry).data, stores);
-    return queryBackendRows(rows, params);
+    return queryCustomerInquiryRows(rows, params);
   },
   getCustomerInquiryDetail: async (payload = {}) => {
     if (!isBackendSource) return adapters.customerInquiryDetail(payload);

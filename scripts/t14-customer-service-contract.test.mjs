@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { adaptCustomerInquiry, adaptCustomerInquiryDetail, manualBatchSyncResult, naverCustomerInquiryRefresh } from '../src/services/adapters.js';
+import {
+  adaptCustomerInquiry,
+  adaptCustomerInquiryClassification,
+  adaptCustomerInquiryConversation,
+  adaptCustomerInquiryDetail,
+  manualBatchSyncResult,
+  naverCustomerInquiryRefresh,
+} from '../src/services/adapters.js';
 
 const backendApi = fs.readFileSync(new URL('../src/services/backendApi.js', import.meta.url), 'utf8');
 const dataProvider = fs.readFileSync(new URL('../src/services/dataProvider.js', import.meta.url), 'utf8');
@@ -10,11 +17,33 @@ assert.match(backendApi, /sendData\('post', '\/customer-inquiries\/naver\/refres
 assert.match(backendApi, /`\/customer-inquiries\/\$\{encodeURIComponent\(readonlyId\)\}`/);
 assert.match(backendApi, /store_id: storeId/);
 assert.match(dataProvider, /refreshNaverCustomerInquiries/);
+assert.match(dataProvider, /queryCustomerInquiryRows/);
+assert.match(dataProvider, /item\.replyClassification/);
 assert.match(customerPage, /getCustomerInquiryDetail/);
 assert.match(customerPage, /!activeMessage\.readonlyId/);
 assert.match(customerPage, /正在加载客服消息详情/);
 assert.match(customerPage, /客服消息详情暂不可用/);
+assert.match(customerPage, /conversation-message-\$\{message\.actor\}/);
+assert.match(customerPage, /message\.actor === 'store'/);
+assert.match(customerPage, /当前对话中没有店铺回复/);
+assert.match(customerPage, /<option value="">全部<\/option>/);
+assert.match(customerPage, /value: 'unanswered', label: '未回复'/);
+assert.match(customerPage, /value: 'answered', label: '已回复'/);
+assert.match(customerPage, /const platformReplyEnabled = false/);
+assert.match(customerPage, /disabled=\{!platformReplyEnabled \|\| !row\.replyEnabled\}/);
+assert.doesNotMatch(customerPage, /function statusLabel/);
 assert.doesNotMatch(customerPage, /syncNaverCustomerInquiries\(/);
+
+assert.equal(adaptCustomerInquiryClassification({ classification: 'unanswered', status: 'answered' }), 'unanswered');
+assert.equal(adaptCustomerInquiryClassification({ reply_classification: 'answered' }), 'answered');
+assert.equal(adaptCustomerInquiryClassification({ replyClassification: 'unanswered' }), 'unanswered');
+assert.equal(adaptCustomerInquiryClassification({ status: 'answered' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ status: 'closed' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ status: 'done' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ classification: 'Answered' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ classification: ' answered ' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ classification: 'invalid', reply_classification: 'answered' }), 'unknown');
+assert.equal(adaptCustomerInquiryClassification({ content: '店铺已经回复', error: 'answered' }), 'unknown');
 
 const summary = adaptCustomerInquiry({
   inquiry_id: 'readonly-1',
@@ -43,6 +72,28 @@ assert.equal(detail.content, 'decrypted message');
 assert.equal(detail.title, 'decrypted title');
 assert.equal(detail.detailLoaded, true);
 assert.equal(detail.id, undefined);
+assert.deepEqual(detail.conversation, []);
+
+const conversation = adaptCustomerInquiryConversation([
+  { actor: 'customer', content: '什么时候发货？', sent_at: '2026-07-17T09:10:00+09:00' },
+  { actor: 'store', content: '今天安排发货。', sent_at: '2026-07-17T09:18:00+09:00' },
+  { actor: 'system', content: 'must not render', sent_at: '2026-07-17T09:19:00+09:00' },
+]);
+assert.deepEqual(conversation, [
+  { actor: 'customer', content: '什么时候发货？', sentAt: '2026-07-17T09:10:00+09:00' },
+  { actor: 'store', content: '今天安排发货。', sentAt: '2026-07-17T09:18:00+09:00' },
+]);
+
+const conversationDetail = adaptCustomerInquiryDetail({
+  classification: 'answered',
+  conversation: [
+    { actor: 'customer', content: '请问有货吗？', sent_at: '2026-07-17T10:00:00+09:00' },
+    { actor: 'store', content: '有货。', sent_at: '2026-07-17T10:02:00+09:00' },
+  ],
+});
+assert.equal(conversationDetail.replyClassification, 'answered');
+assert.equal(conversationDetail.replyClassificationLabel, '已回复');
+assert.equal(conversationDetail.conversation.length, 2);
 
 const activeListRow = adaptCustomerInquiry({
   inquiry_id: 'pxg_naver_readonly:17',

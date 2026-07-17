@@ -8,4 +8,7 @@ assert.match(globalCss, /\.modal-card\s*\{[^}]*width:\s*calc\(100vw/);
 assert.match(globalCss, /\.detail-grid\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
 assert.match(layoutCss, /\.topbar-actions\s*\{\s*flex-wrap:\s*wrap/);
 assert.match(layoutCss, /\.main-content\s*\{[^}]*overflow-x:\s*hidden/);
+assert.match(globalCss, /\.conversation-bubble\s*\{[^}]*max-width:\s*min\(78%,\s*620px\)/);
+assert.match(globalCss, /\.conversation-bubble p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+assert.match(globalCss, /@media \(max-width:\s*600px\)[\s\S]*\.conversation-bubble\s*\{\s*max-width:\s*90%/);
 console.log('customer inquiry mobile contract checks passed');
