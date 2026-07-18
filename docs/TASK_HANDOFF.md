@@ -1,66 +1,63 @@
 # 当前任务交接
 
-- 任务：审计结论校准与项目基准锁定
+- 任务：紫鸟研究文档版本化归档
 - 完成日期：2026-07-19
 - 分支：`release/operator-v1`
-- HEAD：`4027e761f53b1eef80e32eb1542aa7c83305e713`
-- 任务性质：只读审计后的项目状态文档校准；未执行代码收口
+- 任务开始 HEAD：`8c054d016f30e1d2a9b58042a6f34f861c1d2013`
+- 任务性质：只整理、泛化、归档和提交研究文档；未执行业务代码任务
 
 ## 本次实际完成
 
-- 将 `docs/PROJECT_CONTROL.md` 锁定为唯一当前项目状态入口。
-- 在 `docs/GOAL_ALIGNMENT_AUDIT.md` 保留原始证据并追加一次性“审计校准说明”。
-- 将能力统一校准为 A1/A2/B/C/D/E/F/X，并明确原 A 类能力中哪些降为 A2。
-- 明确 Coupang 为长期核心平台、当前 C 类冻结新增。
-- 明确 Workspace/Tenant/Company/Store 的代码事实与最低风险推荐关系，未修改 schema。
-- 将完成度拆为工程健康、数据模型、真实平台接入、运营界面、核心闭环、AI、安全审计七个维度。
-- 固定下一主阶段及其两个且仅两个工作流。
-- 创建本文件、`docs/DECISION_LOG.md` 和 `CHANGELOG.md`。
-- 在 `COMMANDER_STATE.md`、`COMMANDER_DECISIONS.md` 顶部标记历史职责，并在 `README.md` 增加权威文档入口。
+- 为 7 份正式紫鸟研究资料增加统一快照元数据。
+- 将 `ziniao-demo-review.md` 和 `ziniao-source-map.md` 中的本机绝对路径泛化为 `<local-research-source>` 或仓库相对表达。
+- 将早期路线和摘要移动到 `docs/integrations/ziniao/archive/`，并标记为历史研究资料、不是当前计划。
+- 创建 `docs/integrations/ziniao/README.md`，说明资料用途、权威层级、当前紫鸟定位、冻结范围和重新核实要求。
+- 在 `PROJECT_CONTROL.md` 增加紫鸟研究索引链接；未改变当前阶段、工作流、完成度或冻结边界。
+- 更新本交接文件和 `CHANGELOG.md`；未新增项目决策。
 
 ## 修改文件
 
+- `docs/integrations/ziniao/README.md`
+- `docs/integrations/ziniao/ziniao-api-inventory.md`
+- `docs/integrations/ziniao/ziniao-capability-matrix.md`
+- `docs/integrations/ziniao/ziniao-current-system-reuse-audit.md`
+- `docs/integrations/ziniao/ziniao-manual-verification-checklist.md`
+- `docs/integrations/ziniao/ziniao-demo-review.md`
+- `docs/integrations/ziniao/ziniao-skillhub-inventory.md`
+- `docs/integrations/ziniao/ziniao-source-map.md`
+- `docs/integrations/ziniao/archive/ziniao-expansion-roadmap.md`
+- `docs/integrations/ziniao/archive/ziniao-final-summary.md`
 - `docs/PROJECT_CONTROL.md`
-- `docs/GOAL_ALIGNMENT_AUDIT.md`
 - `docs/TASK_HANDOFF.md`
-- `docs/DECISION_LOG.md`
 - `CHANGELOG.md`
-- `COMMANDER_STATE.md`（仅增加历史说明）
-- `COMMANDER_DECISIONS.md`（仅增加历史说明）
-- `README.md`（仅增加/校正状态文档入口说明）
 
 ## 验证命令与结果
 
-- `git status --short --branch`：分支为 `release/operator-v1`；本任务前只有未跟踪 `docs/`，本任务后变更仍限于文档文件。
-- `git rev-parse HEAD`：`4027e761f53b1eef80e32eb1542aa7c83305e713`。
-- `git diff --check`：通过；已跟踪文件没有空白错误。
-- `git diff --name-only`：仅包含 `COMMANDER_STATE.md`、`COMMANDER_DECISIONS.md` 和 `README.md`；新增内容仅在 `CHANGELOG.md` 与指定 `docs/` 文档目录。
-- 允许路径核验：没有 `codex1/`、`src/`、数据库、迁移、配置、依赖或测试文件改动。
-- `rg` 路由和证据核对：确认 `dashboard/store-overview`、`orders`、`customer-inquiries`、`warehouse-batches/writeback`、`stores/automatic-read/recover` 等现有路径，以及 Tenant/Store/库存/Mock 关键证据路径。
-- 文档结构检查：确认 `PROJECT_CONTROL.md` 含 A1/A2/B/C/D/E/F/X、唯一入口、两个工作流、冻结范围、T24 债务和验收标准；确认本文件、`DECISION_LOG.md`、`CHANGELOG.md` 存在。
-- 字面量合同断言：通过；能力计数、阶段名称、两个工作流、T24 债务和审计校准章节均存在。
-- 本次未重跑业务测试：任务禁止改代码，且既有审计已记录前端构建/合同/Bundle/会话证据通过、`verify_all.py` 在 T24 固定日期夹具处失败、本地 PostgreSQL 专项因缺少 `T22_TEST_POSTGRES_URL` 跳过。
+- `git status --short`、分支和 HEAD 核验：开始时仅有 `docs/integrations/ziniao/` 未跟踪，分支为 `release/operator-v1`，HEAD 为 `8c054d0...`。
+- 目录清单和元数据核验：9 份原始资料、总计 107,609 bytes；移动后 7 份正式参考、2 份历史归档。
+- 敏感字段扫描：未发现可识别的真实 Token、API Key、密码、Cookie、私钥、邮箱账号、店铺账号、代理凭证或完整设备标识；仅保留 API 合同示例和布尔字段。
+- 本机路径扫描：已泛化 Demo 来源和 Source Map 中的下载/临时目录；未发现剩余机器专属绝对路径。
+- Markdown、索引链接和目录结构检查：通过；7 份正式参考、2 份历史归档和目录索引均可解析。
+- `git diff --check`：通过；跟踪文件无空白错误。
+- 允许路径核验：所有变更仅限项目文档和紫鸟研究文档，没有业务代码路径。
+- 业务测试未执行；T24 未修复。
 
 ## 未完成内容
 
-- 尚未修复 T24 测试时钟债务。
-- 尚未统一咨询、库存/SKU、销售/结算、待办和 Backend/Mock 数据合同。
-- 尚未完成服务器当前版本/实时同步复核。
-- 尚未进行任何数据库迁移、部署、真实平台写入或人工客服/发货试运行。
+- 研究结论尚未重新对照紫鸟当前官方平台；资料仅为 2026-07-13 快照。
+- 未来是否把 4 份 A 类研究资料拆分为独立专题提交，仍由项目负责人决定。
 
 ## 当前阻塞
 
-- 不是代码实现阻塞，而是项目负责人审核基准前禁止进入代码收口。
-- 生产服务器实时状态、Company/证照需求、邮箱收信合同、客服回复对账合同和紫鸟助手合同仍待核实。
+没有文档整理阻塞。T24 时钟债务仍是下一任务，不属于本次范围。
 
 ## 下一任务准确起点
 
-从 `docs/PROJECT_CONTROL.md` 的“下一主阶段：两个且仅两个工作流”开始，优先处理工作流一：先为咨询主记录、库存/SKU、销售/结算和后端待办写出字段/状态/主键合同，再设计可注入 T24 时钟。下一任务必须先读取本文件和 `docs/DECISION_LOG.md`，并重新检查 Git 工作树。
+下一任务固定为 `TASK-T24-CLOCK-001`：从 `docs/PROJECT_CONTROL.md`、本文件和 `docs/DECISION_LOG.md` 开始，先统一 T24 可注入测试时钟；不得先扩展紫鸟能力。
 
-## 禁止误操作与范围扩大
+## 禁止误操作
 
-- 不得把 `COMMANDER_STATE.md`、`COMMANDER_DECISIONS.md`、聊天记录或模型上下文当作当前状态来源。
-- 未经负责人新决策，不得修改业务代码、模型、迁移、配置、依赖、测试、Mock、API、前端、分支或提交历史。
-- 不得删除旧实现、旧表、旧 Phase 文档或历史状态文件；只可先标记、冻结并核查依赖。
-- 不得新增第二套表、scheduler、同步日志、咨询/物流/发货流程。
-- 不得启用真实平台写入、自动回复、自动发货、库存/商品修改、AI 自动操作或 Linux 端紫鸟 CLI。
+- 不得把紫鸟研究资料当作当前状态、授权或开发计划来源。
+- 不得修改业务代码、数据库、迁移、配置、依赖、测试、Mock、API或前端。
+- 不得删除归档文件、执行 `git clean`、修改 `.gitignore`、推送或合并。
+- 不得使用研究文档中的字段示例进行真实平台调用。

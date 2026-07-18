@@ -7,6 +7,7 @@
 - 当前 HEAD：`4027e761f53b1eef80e32eb1542aa7c83305e713`
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
+- 紫鸟集成研究索引：[`docs/integrations/ziniao/README.md`](integrations/ziniao/README.md)
 
 本文件是仓库内唯一的当前项目状态入口。`docs/TASK_HANDOFF.md`只记录最近一次任务交接，`docs/DECISION_LOG.md`只记录追加式决策，`CHANGELOG.md`只记录真实变更。`COMMANDER_STATE.md`和`COMMANDER_DECISIONS.md`保留为历史记录，不再作为当前状态或当前决策来源。
 
