@@ -82,3 +82,13 @@
 - 影响：在时钟修复和全量重跑前，不宣称 `verify_all.py` 当前全部通过；不得只替换成另一个固定日期。
 - 状态：待后续工作流处理
 - 证据：`codex1/backend/scripts/verify_t24_dual_store_automatic_read.py:63`、`prepare_t24_dual_store_automatic_read.py:187`；本次审计运行记录。
+
+## D059
+
+- 日期：2026-07-19
+- 决策：正式运行模式必须使用 Backend；Mock 只能通过显式 `VITE_DATA_SOURCE=mock` 启用，任何未知或缺省配置均不得静默选择 Mock。
+- 原因：正式页面不能把演示数据当成真实运营数据，也不能把 Backend 请求失败伪装为空结果。
+- 替代方案：继续以 Mock 为默认值，或在 provider 缺少方法时自动返回 Mock；两者都会造成正式数据混用和误判。
+- 影响：销售页使用现有 Backend 统计与订单读取适配；Settings 在正式模式只展示后端就绪检查；仓库批次和未接入接口在 Mock/Backend 边界上显式失败。
+- 状态：已生效。
+- 证据：`src/services/dataSource.js`、`src/services/dataProvider.js`、`src/pages/Dashboard.jsx`、`src/pages/Sales.jsx`、`src/pages/Settings.jsx`、`scripts/data-boundary.contract.test.mjs`。

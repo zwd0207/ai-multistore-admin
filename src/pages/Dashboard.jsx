@@ -26,10 +26,6 @@ const EMPTY_OVERVIEW_ROWS = [];
 
 function rowsOf(result) { return result?.data || result?.items || []; }
 
-async function loadOr(loader, fallback) {
-  try { return await loader(); } catch { return fallback; }
-}
-
 function WorkbenchTask({ task, onOpen }) {
   return (
     <Link className={`workbench-task ${task.stale ? 'stale' : ''}`} to={task.actionPath} onClick={() => onOpen(task)}>
@@ -93,8 +89,8 @@ export default function Dashboard() {
       try {
         const overview = await dataProvider.getStoreOverview({ includeInactive: false });
         const [orders, activities] = await Promise.all([
-          loadOr(() => dataProvider.getOrders({ ...scope, page: 1, pageSize: 100 }), { data: [] }),
-          loadOr(() => dataProvider.getOperationAuditLogs({ ...scope, page: 1, pageSize: 8 }), { data: [] }),
+          dataProvider.getOrders({ ...scope, page: 1, pageSize: 100 }),
+          dataProvider.getOperationAuditLogs({ ...scope, page: 1, pageSize: 8 }),
         ]);
         if (!cancelled) setState({ loading: false, error: '', overview, orders: rowsOf(orders), activities: rowsOf(activities) });
       } catch (requestError) {

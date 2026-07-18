@@ -8,6 +8,7 @@ import { BUSINESS_TIME_LABEL } from '../utils/time';
 import { useAuthContext } from '../context/AuthContext';
 import { useStoreContext } from '../context/StoreContext';
 import { filterMenuGroupsForStore } from './menuPermissions';
+import { isBackendSource } from '../services/dataSource';
 
 const menuGroups = [
   {
@@ -101,6 +102,9 @@ export default function AdminLayout() {
           <div>
             <strong>多店铺运营中心</strong>
             <span className="environment-chip">韩国时间 {BUSINESS_TIME_LABEL}</span>
+            <span className={`environment-chip data-source-chip ${isBackendSource ? 'backend' : 'mock'}`}>
+              {isBackendSource ? '正式 Backend' : 'Demo / Mock 数据'}
+            </span>
             <TenantScopeSelector />
             <StoreSelector />
             <OpenStoreBackendButton store={selectedStore} compact />

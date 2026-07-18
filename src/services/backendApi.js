@@ -155,6 +155,9 @@ export const backendApi = {
   updateStore: (storeId, payload) => sendData('put', `/stores/${storeId}`, payload),
   openStoreBackend: (storeId) => sendData('post', `/stores/${encodeURIComponent(storeId)}/open-backend`, {}),
   getDashboardSummary: (params) => getData('/dashboard/summary', params),
+  getSalesStats: (params) => getData('/stats/sales', params),
+  getSalesByPlatform: (params) => getData('/stats/sales/by-platform', params),
+  getSalesByDate: (params) => getData('/stats/sales/by-date', params),
   getStoreOverview: (params) => getData('/dashboard/store-overview', params),
   recoverAutomaticRead: (storeId) => sendData(
     'post',

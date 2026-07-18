@@ -11,7 +11,6 @@ import StatusBadge from '../components/common/StatusBadge';
 import TechnicalDetails from '../components/common/TechnicalDetails';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import mockApi from '../services/mockApi';
 import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
@@ -421,6 +420,7 @@ function NaverOrderSalesSummaryPanel() {
 }
 
 export default function Sales() {
+  const { selectedStoreId } = useStoreContext();
   const defaultFilters = useMemo(() => ({
     startDate: getKstDateOffsetString(-7),
     endDate: getKstTodayString(),
@@ -436,25 +436,28 @@ export default function Sales() {
   const [ranking, setRanking] = useState({ stores: [], platforms: [], products: [] });
   const [details, setDetails] = useState({ data: [], total: 0, page: 1, pageSize: 6 });
   const [trend, setTrend] = useState([]);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(async (nextFilters = filters) => {
     setLoading(true);
+    setLoadError('');
     try {
-      const [summaryData, rankingData, detailData, trendData] = await Promise.all([
-        mockApi.getSalesSummary(nextFilters),
-        mockApi.getSalesRanking(nextFilters),
-        mockApi.getSalesDetails(nextFilters),
-        mockApi.getSalesTrend(nextFilters),
-      ]);
+      const report = await dataProvider.getSalesReport({ ...nextFilters, storeId: selectedStoreId });
 
-      setSummary(summaryData);
-      setRanking(rankingData);
-      setDetails(detailData);
-      setTrend(trendData);
+      setSummary(report.summary);
+      setRanking(report.ranking);
+      setDetails(report.details);
+      setTrend(report.trend);
+    } catch (error) {
+      setLoadError(error.message || '销售数据加载失败');
+      setSummary(null);
+      setRanking({ stores: [], platforms: [], products: [] });
+      setDetails({ data: [], total: 0, page: 1, pageSize: nextFilters.pageSize || 6 });
+      setTrend([]);
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, selectedStoreId]);
 
   useEffect(() => {
     load();
@@ -473,6 +476,7 @@ export default function Sales() {
 
       <NaverOrderSalesSummaryPanel />
       <CoupangFinancialPreviewPanel />
+      {loadError ? <EmptyState title="销售数据加载失败" description={loadError} /> : null}
 
       <FilterPanel>
         <div className="filter-row">

@@ -8,7 +8,7 @@
 .sidebar-nav a:hover { background: rgba(255,255,255,.06); color: white; }.sidebar-nav a.active { color: white; background: #2d3e4d; box-shadow: inset 3px 0 0 var(--primary); }
 .menu-icon { width: 20px; flex: 0 0 20px; text-align: center; font-size: 12px; font-weight: 700; }.collapse-button { min-height: 47px; border: 0; border-top: 1px solid rgba(255,255,255,.07); background: transparent; color: #8e9aae; }
 .workspace { min-width: 0; }.topbar { min-height: 76px; display: flex; align-items: center; justify-content: space-between; background: white; padding: 8px 26px; border-bottom: 1px solid var(--border); }
-.topbar > div { display: flex; align-items: center; gap: 10px; }.topbar strong { font-size: 14px; }.environment-chip { font-size: 11px; color: #6c5ed7; background: #efedff; padding: 4px 8px; border-radius: 5px; }
+.topbar > div { display: flex; align-items: center; gap: 10px; }.topbar strong { font-size: 14px; }.environment-chip { font-size: 11px; color: #6c5ed7; background: #efedff; padding: 4px 8px; border-radius: 5px; }.data-source-chip.backend { color: #176b45; background: #e9f7ef; }.data-source-chip.mock { color: #8a5a00; background: #fff4d6; }
 .manual-sync-control { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .manual-sync-button { min-height: 34px; padding: 7px 12px; white-space: nowrap; }
 .manual-sync-status { max-width: 220px; display: inline-flex; align-items: center; min-height: 30px; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -31,7 +31,8 @@
   .topbar { height: auto; min-height: 108px; display: grid; grid-template-columns: 1fr; gap: 9px; padding: 10px 12px; overflow: hidden; }
   .topbar > div { gap: 6px; min-width: 0; }
   .topbar > div:first-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .topbar > div:first-child > strong, .topbar .environment-chip, .manual-sync-status { display: none; }
+  .topbar > div:first-child > strong, .topbar > div:first-child > .environment-chip:not(.data-source-chip), .manual-sync-status { display: none; }
+  .topbar > div:first-child > .data-source-chip { display: inline-flex; grid-column: 1 / -1; justify-self: start; }
   .tenant-scope-selector { grid-column: 1 / -1; width: 100%; }
   .tenant-scope-selector span { flex: 0 0 auto; }
   .tenant-scope-selector select { min-width: 0; max-width: none; width: 100%; }

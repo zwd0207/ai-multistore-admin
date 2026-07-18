@@ -72,10 +72,10 @@ VITE_DATA_SOURCE=backend
 
 `VITE_DATA_SOURCE` 可选值：
 
-- `mock`：默认值，所有已完成页面继续使用本地 Promise mock 接口。
-- `backend`：Dashboard、店铺、商品、订单、客服咨询与同步日志读取 Codex1；其他页面继续使用 mock。
+- `backend`：正式运行模式。缺省值和未知值均进入 Backend；正式页面不会静默回退到 Mock。
+- `mock`：显式 Demo/Mock 模式，仅用于本地演示和测试；顶部会显示 `Demo / Mock 数据`。
 
-修改环境变量后需要重新启动 Vite。商品、订单与客服咨询接口需要 `store_id`；当前 provider 会使用显式传入的 `storeId`，未传时自动选择 Codex1 返回的首个店铺。后续全局店铺选择器接入后可直接覆盖该参数。
+修改环境变量后需要重新启动 Vite。正式 Backend 页面接口失败时显示错误状态，不把空列表当作成功。商品、订单、客服咨询、销售统计和仓库批次都必须经过 `dataProvider` 的显式模式分支；未接入正式接口的设置页只显示后端就绪检查，不读取演示设置。
 
 ## 第五阶段 B 只读联调范围
 

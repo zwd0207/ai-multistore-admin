@@ -81,6 +81,97 @@ function withStoreName(items, stores) {
   return items.map((item) => ({ ...item, store: names.get(String(item.storeId)) || item.store }));
 }
 
+function salesDateInRange(value, startDate, endDate) {
+  const date = String(value || '').slice(0, 10);
+  return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+}
+
+function buildBackendSalesReport({ summary, byPlatform, byDate, orders }, params = {}) {
+  const rows = adapters.list(orders, adapters.order).data
+    .filter((order) => salesDateInRange(order.createdAt, params.startDate, params.endDate))
+    .filter((order) => !params.platform || comparable(order.rawPlatform || order.platform) === comparable(params.platform))
+    .filter((order) => !params.store || comparable(order.store) === comparable(params.store));
+  const totalSales = Number(summary?.total_sales_amount || 0);
+  const totalOrders = Number(summary?.total_orders || 0);
+  const platformRows = (byPlatform?.items || byPlatform || [])
+    .filter((item) => !params.platform || comparable(item.platform) === comparable(params.platform))
+    .map((item) => ({
+    name: item.platform || 'unknown',
+    sales: Number(item.total_sales_amount || 0),
+    orders: Number(item.total_orders || 0),
+    }));
+  const trendRows = (byDate?.items || byDate || []).map((item) => ({
+    date: item.date,
+    sales: Number(item.total_sales_amount || 0),
+    orders: Number(item.total_orders || 0),
+    refund: 0,
+  }));
+  const byStore = Object.values(rows.reduce((acc, order) => {
+    const key = order.store || `store-${order.storeId}`;
+    const current = acc[key] || { name: key, platform: order.platform, sales: 0, orders: 0 };
+    current.sales += Number(order.amount || 0);
+    current.orders += 1;
+    acc[key] = current;
+    return acc;
+  }, {})).sort((a, b) => b.sales - a.sales);
+  const byProduct = Object.values(rows.reduce((acc, order) => {
+    const key = order.productName || order.product || '未命名商品';
+    const current = acc[key] || { name: key, store: order.store, sales: 0, orders: 0 };
+    current.sales += Number(order.amount || 0);
+    current.orders += 1;
+    acc[key] = current;
+    return acc;
+  }, {})).sort((a, b) => b.sales - a.sales);
+  const details = rows
+    .map((order) => ({
+      date: String(order.createdAt || '').slice(0, 10),
+      platform: order.platform,
+      store: order.store,
+      orderCount: 1,
+      grossSales: Number(order.amount || 0),
+      couponAmount: 0,
+      refundAmount: 0,
+      netSales: Number(order.amount || 0),
+      bestSeller: order.productName || order.product || '未命名商品',
+      pendingOrders: ['paid', 'payed'].includes(comparable(order.rawStatus)) ? 1 : 0,
+      status: order.status,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.grossSales - a.grossSales);
+  const page = Number(params.page || 1);
+  const pageSize = Number(params.pageSize || 6);
+  const start = (page - 1) * pageSize;
+  return {
+    summary: {
+      totalSales,
+      totalOrders,
+      refundAmount: 0,
+      totalNetSales: totalSales,
+      averageOrderValue: totalOrders ? Math.round(totalSales / totalOrders) : 0,
+      pendingOrders: rows.reduce((sum, row) => sum + (['paid', 'payed'].includes(comparable(row.rawStatus)) ? 1 : 0), 0),
+    },
+    ranking: { stores: byStore.slice(0, 5), platforms: platformRows, products: byProduct.slice(0, 5) },
+    details: { data: details.slice(start, start + pageSize), items: details.slice(start, start + pageSize), total: details.length, page, pageSize },
+    trend: trendRows,
+  };
+}
+
+async function getBackendSalesReport(params = {}) {
+  const { store } = await resolveBackendStore(params);
+  const request = {
+    storeId: store.id,
+    platform: params.platform || undefined,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  };
+  const [summary, byPlatform, byDate, orders] = await Promise.all([
+    backendApi.getSalesStats(request),
+    backendApi.getSalesByPlatform(request),
+    backendApi.getSalesByDate(request),
+    backendApi.getOrders({ ...request, view: 'current', page: 1, pageSize: 1000 }),
+  ]);
+  return buildBackendSalesReport({ summary, byPlatform, byDate, orders }, params);
+}
+
 function normalizeSyncPlatform(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'naver') return 'naver';
@@ -4204,7 +4295,27 @@ const sourceMethods = {
     if (!isBackendSource) return { status: 'local_only', confirmation: true, storeId };
     return backendApi.recoverAutomaticRead(storeId);
   },
-  getDashboardSalesTrend: mockApi.getDashboardSalesTrend,
+  getDashboardSalesTrend: async (params = {}) => {
+    if (!isBackendSource) return mockApi.getDashboardSalesTrend(params);
+    const { store } = await resolveBackendStore(params);
+    const rows = await backendApi.getSalesByDate({ storeId: store.id, startDate: params.startDate, endDate: params.endDate });
+    return (rows?.items || rows || []).map((item) => ({
+      date: item.date,
+      sales: Number(item.total_sales_amount || 0),
+      orders: Number(item.total_orders || 0),
+      refund: 0,
+    }));
+  },
+  getSalesReport: async (params = {}) => {
+    if (isBackendSource) return getBackendSalesReport(params);
+    const [summary, ranking, details, trend] = await Promise.all([
+      mockApi.getSalesSummary(params),
+      mockApi.getSalesRanking(params),
+      mockApi.getSalesDetails(params),
+      mockApi.getSalesTrend(params),
+    ]);
+    return { summary, ranking, details, trend };
+  },
   getStores: async (params) => {
     if (!isBackendSource) return mockApi.getStores(params);
     if (params?.forceRefresh) resetBackendStoresCache();
@@ -4261,6 +4372,10 @@ const sourceMethods = {
     const result = adapters.store(await backendApi.updateStore(storeId, adapters.toBackendStorePayload(payload)));
     resetBackendStoresCache();
     return result;
+  },
+  deleteStore: async (storeId) => {
+    if (isBackendSource) throw new Error('正式 Backend 未开放店铺删除接口，未回退到 Mock。');
+    return mockApi.deleteStore(storeId);
   },
   openStoreBackend: async (storeId) => {
     if (!isBackendSource) throw new Error('演示数据不能打开真实店铺后台');
@@ -4355,21 +4470,51 @@ const sourceMethods = {
       platform: params?.platform || 'naver',
     }));
   },
-  getWarehouseShippingBatches: async (params = {}) => backendApi.getWarehouseShippingBatches({ ...params, includeRows: true }),
-  getWarehouseShippingTrackingDetails: async (batchId, params) => backendApi.getWarehouseShippingTrackingDetails(batchId, params),
-  createWarehouseShippingBatch: async (payload = {}) => backendApi.createWarehouseShippingBatch(payload),
-  requestWarehouseShippingApproval: async (batchId, scope, payload = {}) => backendApi.requestWarehouseShippingApproval(batchId, scope, payload),
-  downloadWarehouseShippingManifest: async (batchId, payload = {}) => backendApi.downloadWarehouseShippingManifest(batchId, payload),
-  importWarehouseShippingTracking: async (batchId, payload = {}) => backendApi.importWarehouseShippingTracking(batchId, payload),
-  confirmWarehouseShippingBatch: async (batchId, payload = {}) => backendApi.confirmWarehouseShippingBatch(batchId, payload),
-  removeWarehouseShippingRow: async (batchId, rowId, payload = {}) => backendApi.removeWarehouseShippingRow(batchId, rowId, payload),
-  confirmWarehouseShippingWriteback: async (batchId, payload = {}) => backendApi.confirmWarehouseShippingWriteback(batchId, payload),
-  reconcileWarehouseShippingWriteback: async (batchId) => backendApi.confirmWarehouseShippingWriteback(batchId, {
+  getWarehouseShippingBatches: async (params = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库批次数据，请切换正式 Backend。');
+    return backendApi.getWarehouseShippingBatches({ ...params, includeRows: true });
+  },
+  getWarehouseShippingTrackingDetails: async (batchId, params) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库物流详情，请切换正式 Backend。');
+    return backendApi.getWarehouseShippingTrackingDetails(batchId, params);
+  },
+  createWarehouseShippingBatch: async (payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库批次操作，请切换正式 Backend。');
+    return backendApi.createWarehouseShippingBatch(payload);
+  },
+  requestWarehouseShippingApproval: async (batchId, scope, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库审批操作，请切换正式 Backend。');
+    return backendApi.requestWarehouseShippingApproval(batchId, scope, payload);
+  },
+  downloadWarehouseShippingManifest: async (batchId, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库清单操作，请切换正式 Backend。');
+    return backendApi.downloadWarehouseShippingManifest(batchId, payload);
+  },
+  importWarehouseShippingTracking: async (batchId, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库物流导入，请切换正式 Backend。');
+    return backendApi.importWarehouseShippingTracking(batchId, payload);
+  },
+  confirmWarehouseShippingBatch: async (batchId, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库批次确认，请切换正式 Backend。');
+    return backendApi.confirmWarehouseShippingBatch(batchId, payload);
+  },
+  removeWarehouseShippingRow: async (batchId, rowId, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库记录操作，请切换正式 Backend。');
+    return backendApi.removeWarehouseShippingRow(batchId, rowId, payload);
+  },
+  confirmWarehouseShippingWriteback: async (batchId, payload = {}) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库回填操作，请切换正式 Backend。');
+    return backendApi.confirmWarehouseShippingWriteback(batchId, payload);
+  },
+  reconcileWarehouseShippingWriteback: async (batchId) => {
+    if (!isBackendSource) throw new Error('演示模式不提供仓库对账操作，请切换正式 Backend。');
+    return backendApi.confirmWarehouseShippingWriteback(batchId, {
     action: 'reconcile',
     manual_approval: true,
     final_operator_confirmation: false,
     real_api_call_requested: false,
-  }),
+    });
+  },
   checkShippingLogisticsMappingWriteGate: async (payload = {}) => {
     const request = toBackendShippingMappingPayload(payload);
     if (!isBackendSource) {
@@ -5784,6 +5929,50 @@ const sourceMethods = {
       checks,
     };
   },
+  getSystemSettings: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供系统设置接口，当前页面不会读取演示设置。');
+    return mockApi.getSystemSettings();
+  },
+  getPlatformSettings: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供平台设置接口，当前页面不会读取演示设置。');
+    return mockApi.getPlatformSettings();
+  },
+  getNotificationSettings: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供通知设置接口，当前页面不会读取演示设置。');
+    return mockApi.getNotificationSettings();
+  },
+  getRiskRules: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供风险规则接口，当前页面不会读取演示设置。');
+    return mockApi.getRiskRules();
+  },
+  getTemplateSettings: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供模板设置接口，当前页面不会读取演示设置。');
+    return mockApi.getTemplateSettings();
+  },
+  updateSystemSettings: async (payload) => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供系统设置接口，当前页面不会写入演示设置。');
+    return mockApi.updateSystemSettings(payload);
+  },
+  updatePlatformSettings: async (payload) => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供平台设置接口，当前页面不会写入演示设置。');
+    return mockApi.updatePlatformSettings(payload);
+  },
+  updateNotificationSettings: async (payload) => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供通知设置接口，当前页面不会写入演示设置。');
+    return mockApi.updateNotificationSettings(payload);
+  },
+  updateRiskRules: async (payload) => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供风险规则接口，当前页面不会写入演示设置。');
+    return mockApi.updateRiskRules(payload);
+  },
+  updateTemplateSettings: async (payload) => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供模板设置接口，当前页面不会写入演示设置。');
+    return mockApi.updateTemplateSettings(payload);
+  },
+  resetSystemSettings: async () => {
+    if (isBackendSource) throw new Error('正式 Backend 尚未提供系统设置接口，当前页面不会重置演示设置。');
+    return mockApi.resetSystemSettings();
+  },
   getDeviceEnvironments: async (params) => {
     if (!isBackendSource) return mockApi.getEnvironments(params);
     const { store, stores } = await resolveBackendStore(params);
@@ -5930,7 +6119,10 @@ const sourceMethods = {
 export const dataProvider = new Proxy(sourceMethods, {
   get(target, property) {
     if (property in target) return target[property];
-    return mockApi[property];
+    if (!isBackendSource) return mockApi[property];
+    return (...args) => {
+      throw new Error(`正式 Backend 尚未提供 ${String(property)} 接口，未回退到 Mock。`);
+    };
   },
 });
 

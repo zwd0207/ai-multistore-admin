@@ -8,14 +8,13 @@ import StatusBadge from '../components/common/StatusBadge';
 import { useAuthContext } from '../context/AuthContext';
 import { useStoreContext } from '../context/StoreContext';
 import dataProvider, { isBackendSource } from '../services/dataProvider';
-import mockApi from '../services/mockApi';
 import { filterVisibleBusinessStores, normalizeStoreDisplay } from '../utils/storeDisplay';
 
 const baseApi = {
   list: dataProvider.getStores,
-  create: isBackendSource ? dataProvider.createStore : mockApi.createStore,
-  update: isBackendSource ? dataProvider.updateStore : mockApi.updateStore,
-  remove: mockApi.deleteStore,
+  create: dataProvider.createStore,
+  update: dataProvider.updateStore,
+  remove: dataProvider.deleteStore,
 };
 
 function normalizePlatform(value) {

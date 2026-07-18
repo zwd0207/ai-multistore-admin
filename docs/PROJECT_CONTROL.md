@@ -1,5 +1,13 @@
 # 项目控制（唯一当前状态入口）
 
+## TASK-DATA-BOUNDARY-001 当前状态
+
+- 状态：A2，代码边界已实现，待完整回归和真实 Backend 登录态验收。
+- 正式模式：`VITE_DATA_SOURCE` 缺省或未知值使用 Backend；只有显式 `mock` 才使用 Demo/Mock。
+- 已收口：Dashboard 不再静默吞掉 Backend 错误；Sales、Settings、Stores 和仓库批次通过 `dataProvider` 明确选择数据源；顶部显示当前数据源。
+- 未改变：数据库、后端业务合同、同步、咨询、库存、工作台业务规则和平台写入门禁。
+- 当前残余：Settings 的正式后端配置接口尚未存在，因此正式模式只展示运营就绪检查；Sales 的退款/优惠仍按现有订单统计合同显示为零，不能解释为平台结算数据。
+
 - 文档版本：1.0
 - 状态：当前基准
 - 最后校准：2026-07-19
@@ -90,7 +98,7 @@ Workspace / Tenant（内部组织或业务空间）
 | 发货 | `WarehouseShippingBatch`、grant、attempt、reconcile | 旧 Shipping 导出/导入和独立 gate 入口 |
 | 自动同步 | `SyncCheckpoint` + `automatic_read_sync_service` + `SyncLog` | 新 scheduler、任务表或第二套日志 |
 | 待办 | 后端 `operator_workbench` | 前端跨页面自行计算优先级/数量 |
-| 数据源 | 生产 Backend 明确 fail-closed | `VITE_DATA_SOURCE=mock` 默认和 Proxy Mock 回退 |
+| 数据源 | 正式 Backend 明确 fail-closed；Mock 仅显式启用 | 销售、设置和仓库批次边界已统一，仍需后续真实 Backend 联调 |
 
 主要技术债务还包括 `sync_service.py` 单体和设备/环境重复路由。它们需要渐进迁移，不是本次重构前置条件。
 

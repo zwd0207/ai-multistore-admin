@@ -4,6 +4,15 @@
 
 ## 2026-07-19
 
+### Code and Documentation
+
+- 将正式数据源默认值收口为 Backend，Mock 改为显式 Demo 模式，并在顶部显示当前模式。
+- 移除工作台 Backend 请求到空列表的静默回退，销售页改用现有 Backend 销售统计和订单读取适配。
+- 阻止 Settings、仓库批次和 provider 缺省代理在正式模式读取或调用 Mock；未接入的正式接口明确报告不可用。
+- 增加 Mock/Backend 边界契约测试并更新项目状态、决策和 README 说明。
+
+## 2026-07-19
+
 ### Documentation
 
 - 建立项目状态、任务交接、追加决策和真实变更的文档职责边界。

@@ -4,8 +4,7 @@ import PageHeader from '../components/common/PageHeader';
 import SettingsSection from '../components/common/SettingsSection';
 import StatusBadge from '../components/common/StatusBadge';
 import ToggleSwitch from '../components/common/ToggleSwitch';
-import dataProvider, { DATA_SOURCE } from '../services/dataProvider';
-import mockApi from '../services/mockApi';
+import dataProvider, { DATA_SOURCE, isBackendSource } from '../services/dataProvider';
 
 const tabs = [
   ['basic', '基础设置'],
@@ -56,12 +55,21 @@ export default function Settings() {
   const [errors, setErrors] = useState({});
 
   const load = async () => {
+    if (isBackendSource) {
+      try {
+        setOperatorReadiness(await dataProvider.getOperatorReadiness());
+        setReadinessError('');
+      } catch (error) {
+        setReadinessError(error.message || '运营检查加载失败');
+      }
+      return;
+    }
     const [basicData, platformData, notificationData, riskData, templateData, readinessData] = await Promise.all([
-      mockApi.getSystemSettings(),
-      mockApi.getPlatformSettings(),
-      mockApi.getNotificationSettings(),
-      mockApi.getRiskRules(),
-      mockApi.getTemplateSettings(),
+      dataProvider.getSystemSettings(),
+      dataProvider.getPlatformSettings(),
+      dataProvider.getNotificationSettings(),
+      dataProvider.getRiskRules(),
+      dataProvider.getTemplateSettings(),
       dataProvider.getOperatorReadiness().catch((error) => {
         setReadinessError(error.message || '交付检查加载失败');
         return null;
@@ -109,31 +117,32 @@ export default function Settings() {
     let nextErrors = {};
     if (activeTab === 'basic') {
       nextErrors = validateBasic();
-      if (!Object.keys(nextErrors).length) await mockApi.updateSystemSettings({ ...basic, defaultPageSize: Number(basic.defaultPageSize) });
+      if (!Object.keys(nextErrors).length) await dataProvider.updateSystemSettings({ ...basic, defaultPageSize: Number(basic.defaultPageSize) });
     }
     if (activeTab === 'platforms') {
-      await mockApi.updatePlatformSettings(platforms);
+      await dataProvider.updatePlatformSettings(platforms);
     }
     if (activeTab === 'notifications') {
-      await mockApi.updateNotificationSettings(notifications);
+      await dataProvider.updateNotificationSettings(notifications);
     }
     if (activeTab === 'risks') {
       nextErrors = validateRiskRules();
       if (!Object.keys(nextErrors).length) {
         const normalized = Object.fromEntries(Object.entries(riskRules).map(([key, value]) => [key, { ...value, days: Number(value.days) }]));
-        await mockApi.updateRiskRules(normalized);
+        await dataProvider.updateRiskRules(normalized);
       }
     }
     if (activeTab === 'templates') {
       nextErrors = validateTemplates();
-      if (!Object.keys(nextErrors).length) await mockApi.updateTemplateSettings(templates);
+      if (!Object.keys(nextErrors).length) await dataProvider.updateTemplateSettings(templates);
     }
     setErrors(nextErrors);
     if (!Object.keys(nextErrors).length) await load();
   };
 
   const resetAll = async () => {
-    await mockApi.resetSystemSettings();
+    if (isBackendSource) return;
+    await dataProvider.resetSystemSettings();
     setErrors({});
     await load();
   };
@@ -146,6 +155,38 @@ export default function Settings() {
       setReadinessError(error.message || '交付检查加载失败');
     }
   };
+
+  if (isBackendSource) {
+    return (
+      <>
+        <PageHeader title="管理员设置" description="正式 Backend 当前只提供运营就绪检查；未连接的设置不会显示演示数据。" />
+        <SettingsSection title="正式 Backend 数据边界" description="系统设置、平台显示、通知、风险规则和模板接口尚未接入正式后端。">
+          {readinessError ? <div className="form-error">{readinessError}</div> : null}
+          <div className="readiness-grid">
+            <article className="readiness-card">
+              <span>当前数据源</span>
+              <strong>正式 Backend</strong>
+              <p>本页面不会读取或保存 Mock 设置。</p>
+            </article>
+            <article className="readiness-card">
+              <span>运营就绪检查</span>
+              <strong>{operatorReadiness?.storeCount ?? '-'} 个店铺</strong>
+              <p>{operatorReadiness ? '已读取正式后端检查结果。' : '正在读取正式后端检查结果。'}</p>
+            </article>
+          </div>
+          <div className="readiness-check-list">
+            {(operatorReadiness?.checks || []).map((item) => (
+              <div className="settings-row" key={item.key}>
+                <div><strong>{item.label}</strong><p>{item.detail}</p></div>
+                <StatusBadge value={item.status} tone={readinessStatusTone(item)} />
+              </div>
+            ))}
+          </div>
+          <button type="button" className="button ghost" onClick={refreshOperatorReadiness}>刷新运营检查</button>
+        </SettingsSection>
+      </>
+    );
+  }
 
   if (!basic || !notifications || !riskRules || !templates) return null;
 
