@@ -2,7 +2,7 @@
 
 ## TASK-DATA-BOUNDARY-001 当前状态
 
-- 状态：A2，代码边界已实现，待完整回归和真实 Backend 登录态验收。
+- 状态：A2，代码边界和完整回归已通过，待真实 Backend 登录态浏览器验收。
 - 正式模式：`VITE_DATA_SOURCE` 缺省或未知值使用 Backend；只有显式 `mock` 才使用 Demo/Mock。
 - 已收口：Dashboard 不再静默吞掉 Backend 错误；Sales、Settings、Stores 和仓库批次通过 `dataProvider` 明确选择数据源；顶部显示当前数据源。
 - 未改变：数据库、后端业务合同、同步、咨询、库存、工作台业务规则和平台写入门禁。

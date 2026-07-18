@@ -17,6 +17,21 @@
 - Stores 删除动作和仓库批次操作均经过显式 provider 分支；Mock 模式不会调用 Backend，Backend 模式不会回退 Mock。
 - provider 缺少方法时，Backend 模式返回明确不可用错误，不再代理到 Mock。
 
+## 数据源矩阵
+
+| 模块 | 正式数据源 | Mock 数据源 | 选择位置 | 静默降级 | 当前风险 / 推荐主路径 |
+|---|---|---|---|---|---|
+| 店铺 | `backendApi.getStores` 与 Store onboarding | `mockApi.getStores` | `dataProvider.getStores` | 否 | 正式删除未开放并明确失败；继续以 `Store` Backend 为主 |
+| 商品 | `backendApi.getProducts` | `mockApi.getProducts` | `dataProvider.getProducts` | 否 | 继续复用 Backend 商品读取，不新增页面数据源 |
+| 订单 | `backendApi.getOrders` | `mockApi.getOrders` | `dataProvider.getOrders` | 否 | Dashboard 不再吞掉失败；订单主路径保持 Backend |
+| 咨询 | Backend customer-inquiries 接口 | `mockApi.getCustomerTickets` | `dataProvider.getCustomerInquiries` | 否 | 本任务未改咨询双链；后续只收口 Backend 主链 |
+| 物流 / 发货 | Backend warehouse-batches 与物流接口 | 显式 Mock 不可用结果及既有测试夹具 | `dataProvider` 仓库方法 | 否 | Mock 不调用 Backend；平台写入继续受 T18 门禁 |
+| 库存 | Backend 商品/物流库存现有接口 | Mock 商品与 Shipping 测试数据 | `dataProvider` 显式分支 | 否 | 本任务未统一 SKU 口径；后续只接 Backend 主链 |
+| 今日工作台 | Backend `dashboard/store-overview`、订单和审计 | `mockStoreOverview` 与 Mock 列表 | `dataProvider` + Dashboard | 否 | Backend 任一请求失败显示错误，不伪装空结果 |
+| 平台账号 / 凭证 | Backend credentials/platform-logins | `mockApi.getAccounts` | `dataProvider` 显式分支 | 否 | 正式模式不读取 Mock 账号；保持现有脱敏和权限门禁 |
+| 销售 | Backend `/stats/*` 与订单读取 | `mockApi.getSales*` | `dataProvider.getSalesReport` | 否 | 退款/优惠无正式统计接口时显示零，不等同平台结算 |
+| 设置 | Backend 运营就绪检查 | Mock settings CRUD | Settings + `dataProvider` | 否 | 正式设置接口未接入，Backend 模式明确只显示就绪检查 |
+
 ## 修改文件
 
 - `src/services/dataSource.js`
@@ -50,14 +65,14 @@
 - `npm.cmd run build`：通过；显式 `VITE_DATA_SOURCE=mock` 构建也通过。
 - `npm.cmd run encoding:scan`、`npm.cmd run session:verify`、`npm.cmd run bundle:verify`：通过。
 - `operator-readiness-check.mjs`：失败，因本机 `127.0.0.1:8012` 后端未启动，`fetch failed`。
-- `verify_all.py`：124 秒超时，未产生通过结果；未将其标记为通过，需在后端可用且干净工作树中复核。
+- `verify_all.py`：在干净工作树中 123.8 秒完整通过，包含 `git tracking: ok`、`docs secret scan: ok` 和 `verify_all: ok`；T22 PostgreSQL 专项因未配置 `T22_TEST_POSTGRES_URL` 按既有规则跳过。
 - `git diff --check`：通过。
 
 ## 当前未完成内容
 
 - Settings 正式后端配置接口尚未接入，正式模式仅提供运营就绪检查。
 - Sales 退款和优惠字段没有对应正式统计接口，当前按订单销售统计合同显示为零；不得解释为平台结算数据。
-- 尚未完成登录态浏览器验收和全量后端回归。
+- 尚未完成登录态浏览器验收；全量后端回归已通过。
 
 ## 阻塞问题
 
