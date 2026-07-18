@@ -12,7 +12,7 @@
 - 状态：当前基准
 - 最后校准：2026-07-19
 - 当前分支：`release/operator-v1`
-- 当前 HEAD：`4027e761f53b1eef80e32eb1542aa7c83305e713`
+- 当前 HEAD：`ac9375b`（`fix: enforce explicit backend and mock modes`）
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
 - 紫鸟集成研究索引：[`docs/integrations/ziniao/README.md`](integrations/ziniao/README.md)

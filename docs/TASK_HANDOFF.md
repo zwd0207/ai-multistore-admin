@@ -5,6 +5,7 @@
 - 完成日期：2026-07-19
 - 分支：`release/operator-v1`
 - 任务开始 HEAD：`403ed319c2f27c0662cba5e1c1f4d0e5bc15fcaa`
+- 主提交：`ac9375b`（`fix: enforce explicit backend and mock modes`）
 
 ## 实际完成内容
 
