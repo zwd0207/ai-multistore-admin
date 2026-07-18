@@ -1,5 +1,7 @@
 # Commander State
 
+> 历史记录说明（2026-07-19）：本文件保留历史状态和生产证据，不再作为当前状态入口。当前项目状态以 [`docs/PROJECT_CONTROL.md`](docs/PROJECT_CONTROL.md) 为准，最近任务以 [`docs/TASK_HANDOFF.md`](docs/TASK_HANDOFF.md) 为准。
+
 Last updated: 2026-07-13
 Owner: project commander
 Status: T18 guarded Naver shipment writeback implementation accepted; real dispatch not authorized

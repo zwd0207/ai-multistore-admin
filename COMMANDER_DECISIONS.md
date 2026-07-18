@@ -1,5 +1,7 @@
 # Commander Decisions
 
+> 历史记录说明（2026-07-19）：本文件保留历史决策，不再作为当前决策入口。当前状态以 [`docs/PROJECT_CONTROL.md`](docs/PROJECT_CONTROL.md) 为准，新增决策只追加到 [`docs/DECISION_LOG.md`](docs/DECISION_LOG.md)。
+
 This is an append-only record of durable decisions. Implementation progress belongs in `COMMANDER_STATE.md`.
 
 ## D001 - Human-first product strategy

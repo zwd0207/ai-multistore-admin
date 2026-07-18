@@ -1,12 +1,16 @@
 # AI 多店铺运营与环境管理系统（Codex2）
 
+## 项目状态与交接入口
+
+当前项目状态唯一以 [`docs/PROJECT_CONTROL.md`](docs/PROJECT_CONTROL.md) 为准。最近任务读取 [`docs/TASK_HANDOFF.md`](docs/TASK_HANDOFF.md)，架构和业务决策读取 [`docs/DECISION_LOG.md`](docs/DECISION_LOG.md)，一次性目标审计读取 [`docs/GOAL_ALIGNMENT_AUDIT.md`](docs/GOAL_ALIGNMENT_AUDIT.md)，真实变更读取 [`CHANGELOG.md`](CHANGELOG.md)。`COMMANDER_STATE.md`、`COMMANDER_DECISIONS.md` 和历史进度百分比仅作历史参考。
+
 ## 总指挥快速入口
 
 新任务、上下文压缩或模型切换后，依次读取：
 
-1. `COMMANDER_STATE.md`：当前唯一事实、阻塞项和下一步。
+1. `docs/PROJECT_CONTROL.md`：当前唯一事实、阻塞项和下一步。
 2. `MODEL_TASK_ALLOCATION_RULES.md`：Sol、Terra、Luna 强制分工。
-3. `COMMANDER_DECISIONS.md`：不可轻易改变的产品与安全决策。
+3. `docs/DECISION_LOG.md`：不可轻易改变的产品与安全决策。
 
 历史 Phase 文档仅作为证据，不再用于判断当前进度。
 
@@ -14,11 +18,11 @@
 
 所有 Sol、Terra、Luna 任务在派发前必须遵守 [MODEL_TASK_ALLOCATION_RULES.md](MODEL_TASK_ALLOCATION_RULES.md)。模型按任务难度、风险和重复程度分配，优先使用能够可靠完成任务的最低等级模型，禁止重复开发和无理由浪费高等级模型算力。
 
-React + Vite 后台前端，已完成 13 个业务路由、第一至第四阶段页面，以及第五阶段 A 的 Codex1 后端接口适配准备。默认继续使用本地 mock 数据，切换后端数据源不会要求重写页面字段。
+React + Vite 后台前端，已完成 13 个业务路由、第一至第四阶段页面，以及第五阶段 A 的 Codex1 后端接口适配准备。开发环境可使用本地 mock 数据；生产状态和数据源以 `docs/PROJECT_CONTROL.md` 为准。
 
-## 当前项目进度
+## 历史项目进度（不作为当前状态）
 
-最新项目进度、当前定位、未完成阶段和后续计划记录在：
+以下进度口径保留作历史参考，不作为当前项目状态。当前定位、未完成阶段和后续任务记录在：
 
 ```text
 PROJECT_PROGRESS.md
