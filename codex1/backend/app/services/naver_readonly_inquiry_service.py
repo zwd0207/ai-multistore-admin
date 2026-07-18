@@ -275,12 +275,23 @@ def run_naver_inquiry_retention_cleanup(
         raise
 
 
-def assert_naver_inquiry_cleanup_healthy(db: Session, *, store_id: int, settings: Settings | None = None) -> None:
+def assert_naver_inquiry_cleanup_healthy(
+    db: Session,
+    *,
+    store_id: int,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+) -> None:
     # Reuse the full established gate: cleanup state, safety locks, expired
     # encrypted backups, and the 24-hour overdue deadline all apply equally.
     from app.services.pxg_naver_readonly_persistence_service import assert_pxg_naver_cleanup_healthy
 
-    assert_pxg_naver_cleanup_healthy(db, store_id=store_id, settings=settings or get_settings())
+    assert_pxg_naver_cleanup_healthy(
+        db,
+        store_id=store_id,
+        settings=settings or get_settings(),
+        now=now,
+    )
 
 
 def initialize_naver_inquiry_store(db: Session, *, store_id: int, settings: Settings | None = None) -> None:

@@ -1,63 +1,64 @@
 # 当前任务交接
 
-- 任务：紫鸟研究文档版本化归档
+- 任务编号：`TASK-T24-CLOCK-001`
+- 任务：修复 T24 测试夹具时钟不一致
 - 完成日期：2026-07-19
 - 分支：`release/operator-v1`
-- 任务开始 HEAD：`8c054d016f30e1d2a9b58042a6f34f861c1d2013`
-- 任务性质：只整理、泛化、归档和提交研究文档；未执行业务代码任务
+- 任务开始 HEAD：`23edcd94bab0c6bffba7c5fcb2a0424fa37844e3`
+- 任务性质：最小范围测试确定性修复；未开始其他收口任务
 
-## 本次实际完成
+## 根因
 
-- 为 7 份正式紫鸟研究资料增加统一快照元数据。
-- 将 `ziniao-demo-review.md` 和 `ziniao-source-map.md` 中的本机绝对路径泛化为 `<local-research-source>` 或仓库相对表达。
-- 将早期路线和摘要移动到 `docs/integrations/ziniao/archive/`，并标记为历史研究资料、不是当前计划。
-- 创建 `docs/integrations/ziniao/README.md`，说明资料用途、权威层级、当前紫鸟定位、冻结范围和重新核实要求。
-- 在 `PROJECT_CONTROL.md` 增加紫鸟研究索引链接；未改变当前阶段、工作流、完成度或冻结边界。
-- 更新本交接文件和 `CHANGELOG.md`；未新增项目决策。
+T24 使用固定 `NOW=2026-07-17 16:00 UTC`，并将该时间传入 `prepare_dual_store_automatic_read(now=NOW)`。准备函数内部计算出 `current`，但 `_assert_store_ready()` 调用 `assert_naver_inquiry_cleanup_healthy()` 时没有传递该时间。包装函数又调用已有的 `assert_pxg_naver_cleanup_healthy()`，后者未收到 `now` 时使用真实 `get_utc_now()`，导致固定时间的清理成功记录被判定为过期。
+
+## 采用方案
+
+- 给 `assert_naver_inquiry_cleanup_healthy()` 增加可选 `now` 参数，并透传到已有的 `assert_pxg_naver_cleanup_healthy(now=...)`。
+- 给 T24 `_assert_store_ready()` 增加受控时间参数，由 `prepare_dual_store_automatic_read()` 传入已计算的 `current`。
+- 复审并撤销 `verify_all.py` 的临时 `M` 状态允许项；该项会永久放行未来修改，不符合门禁安全原则。完整验证改在与最终 diff 一致的干净工作树执行。
+- 保持生产默认行为：生产调用不传 `now` 时继续使用真实 UTC 时间；没有修改过期阈值、清理规则或数据库结构。
 
 ## 修改文件
 
-- `docs/integrations/ziniao/README.md`
-- `docs/integrations/ziniao/ziniao-api-inventory.md`
-- `docs/integrations/ziniao/ziniao-capability-matrix.md`
-- `docs/integrations/ziniao/ziniao-current-system-reuse-audit.md`
-- `docs/integrations/ziniao/ziniao-manual-verification-checklist.md`
-- `docs/integrations/ziniao/ziniao-demo-review.md`
-- `docs/integrations/ziniao/ziniao-skillhub-inventory.md`
-- `docs/integrations/ziniao/ziniao-source-map.md`
-- `docs/integrations/ziniao/archive/ziniao-expansion-roadmap.md`
-- `docs/integrations/ziniao/archive/ziniao-final-summary.md`
+- `codex1/backend/app/services/naver_readonly_inquiry_service.py`
+- `codex1/backend/scripts/prepare_t24_dual_store_automatic_read.py`
 - `docs/PROJECT_CONTROL.md`
 - `docs/TASK_HANDOFF.md`
 - `CHANGELOG.md`
 
 ## 验证命令与结果
 
-- `git status --short`、分支和 HEAD 核验：开始时仅有 `docs/integrations/ziniao/` 未跟踪，分支为 `release/operator-v1`，HEAD 为 `8c054d0...`。
-- 目录清单和元数据核验：9 份原始资料、总计 107,609 bytes；移动后 7 份正式参考、2 份历史归档。
-- 敏感字段扫描：未发现可识别的真实 Token、API Key、密码、Cookie、私钥、邮箱账号、店铺账号、代理凭证或完整设备标识；仅保留 API 合同示例和布尔字段。
-- 本机路径扫描：已泛化 Demo 来源和 Source Map 中的下载/临时目录；未发现剩余机器专属绝对路径。
-- Markdown、索引链接和目录结构检查：通过；7 份正式参考、2 份历史归档和目录索引均可解析。
-- `git diff --check`：通过；跟踪文件无空白错误。
-- 允许路径核验：所有变更仅限项目文档和紫鸟研究文档，没有业务代码路径。
-- 业务测试未执行；T24 未修复。
+- `.\.venv\Scripts\python.exe -m py_compile app\services\naver_readonly_inquiry_service.py scripts\prepare_t24_dual_store_automatic_read.py`：通过。
+- `.\.venv\Scripts\python.exe scripts\verify_t24_dual_store_automatic_read.py`：第一次通过。
+- 同一 T24 独立测试第二次运行：通过。
+- T13、T14、T15、T16、T17、T18、T19、T20、T23 和全部 T24 专项：通过；`verify_recover_t24_dual_store_logistics.py` 的 PostgreSQL 并发分支按既有规则跳过。
+- `verify_all.py`：在应用当前 diff 并临时提交的干净 detached 工作树完整通过，包含 `git tracking: ok` 和 `verify_all: ok`；没有保留任何新增工作树允许项。正式提交后将再次运行。
+- `verify_all.py` 中 T22 PostgreSQL 专项仍按既有规则跳过，因为未配置 `T22_TEST_POSTGRES_URL`；这不是本任务失败。
+- 本次未运行前端构建；没有前端文件修改。
+- T21：仓库没有独立 `verify_t21*.py` 入口；已执行提交存在性、祖先关系和历史证据核验，未将历史服务器或 CI 证据冒充本次运行时测试。
+- `git diff --check`：通过。
+- `git diff --stat`：5 个文件，69 行新增、46 行删除；删除主要来自按协议覆盖上一任务的 `TASK_HANDOFF.md`。
+- `git diff --name-only`：仅包含 2 个 T24 时间相关 Python 文件和 3 个权威状态文档；没有 `verify_all.py`、模型、迁移、API、前端、依赖或配置变更。
+- `git status --short`：5 个文件未暂存修改，无暂存或未跟踪文件；提交前未推送。
 
-## 未完成内容
+## 生产代码影响
 
-- 研究结论尚未重新对照紫鸟当前官方平台；资料仅为 2026-07-13 快照。
-- 未来是否把 4 份 A 类研究资料拆分为独立专题提交，仍由项目负责人决定。
+修改了 `naver_readonly_inquiry_service.py` 的包装函数签名，但仅增加可选参数并透传现有时间入口。未传参数时行为保持不变，仍使用生产真实 UTC 时间。没有修改清理过期语义、阈值、模型、迁移、API 或平台访问行为。
 
-## 当前阻塞
+## 未解决事项
 
-没有文档整理阻塞。T24 时钟债务仍是下一任务，不属于本次范围。
+- T22 PostgreSQL 专项仍需配置一次性测试数据库后单独运行。
+- `PROJECT_CONTROL.md` 页首仍记录旧基准 HEAD `4027e761...`，与当前任务起点 `23edcd94...` 不一致；本任务按限制只更新 T24 相关字段，未擅自校准该非 T24 字段。
+- 当前阶段其他数据合同和运营流程技术债务未处理。
+- 没有新增长期架构决策。
 
 ## 下一任务准确起点
 
-下一任务固定为 `TASK-T24-CLOCK-001`：从 `docs/PROJECT_CONTROL.md`、本文件和 `docs/DECISION_LOG.md` 开始，先统一 T24 可注入测试时钟；不得先扩展紫鸟能力。
+下一任务仍从 `docs/PROJECT_CONTROL.md` 的工作流一开始，处理核心数据合同收口；T24 时钟修复不应自动扩展为咨询、库存、工作台或自动同步重构。
 
 ## 禁止误操作
 
-- 不得把紫鸟研究资料当作当前状态、授权或开发计划来源。
-- 不得修改业务代码、数据库、迁移、配置、依赖、测试、Mock、API或前端。
-- 不得删除归档文件、执行 `git clean`、修改 `.gitignore`、推送或合并。
-- 不得使用研究文档中的字段示例进行真实平台调用。
+- 不得将固定日期替换为其他固定日期来掩盖问题。
+- 不得放宽生产清理规则、删除断言或跳过失败。
+- 不得修改 T13–T23 业务目标，不得开始其他下一阶段任务。
+- 不得推送、部署或继续执行下一任务；本任务只创建一个独立提交。

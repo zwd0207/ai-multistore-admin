@@ -100,7 +100,7 @@ Workspace / Tenant（内部组织或业务空间）
 
 | 维度 | 当前判断 | 证据 | 尚未完成 | 置信度 |
 |---|---|---|---|---|
-| 工程健康度 | A2 | 前端合同、构建、Bundle 和会话扫描通过；`verify_all.py` 在 T24 夹具处失败；本地 PostgreSQL 一次性变量未配置而跳过 | 统一测试时钟、重新运行完整验证、确认生产发布链 | 高 |
+| 工程健康度 | A2 | 前端合同、构建、Bundle 和会话扫描通过；T24 时钟修复后 `verify_all.py` 通过；本地 PostgreSQL 一次性变量未配置而跳过 | 继续确认生产发布链；T22 PostgreSQL 专项仍需独立环境 | 高 |
 | 基础数据模型 | B | `Tenant/Store/Product/Order` 和物流/咨询模型存在 | Company/证照、平台账号聚合、库存/SKU和销售结算合同 | 高 |
 | 平台真实数据接入 | A2 | D047-D049 记录两店 Naver 只读和物流证据 | 当前服务器重新核验、持续稳定性、邮箱和 Coupang 业务接入 | 中 |
 | 普通运营界面 | A2 | 工作台、订单、客服、物流、发货和 390px 页面存在 | 统一 Backend 入口、隐藏旧入口、完成写入前置反馈 | 高 |
@@ -119,7 +119,7 @@ Workspace / Tenant（内部组织或业务空间）
 | 库存/SKU | `/inventory`、`/shipping`；现有库存与映射接口 | `Product` 平台值 + `LogisticsInventoryItem` 仓库值 | E/B | 名称/选项匹配和跨页库存计算 | 每个数量标来源、时间、SKU键；不得相互覆盖 |
 | 销售/待办 | `/workbench`；`GET /api/v1/dashboard/store-overview` | 后端 `operator_workbench` | A2/E | 前端派生统计、旧 summary/mock fallback | 后端单一计算源，前端只展示；跨店汇总可追溯 |
 | Backend/Mock 边界 | 生产构建和 `dataProvider` | 真实 Backend | E | 默认 Mock、Proxy 回退 | 生产缺少后端能力时显式失败，不显示 Mock |
-| T24 时间 | `verify_all.py` 与 T24 fixtures | 可注入测试时钟 | A2 | 固定 `2026-07-17` 与真实当前时间混用 | 跨日重复运行稳定；不以更换另一个固定日期解决 |
+| T24 时间 | `verify_all.py` 与 T24 fixtures | `prepare_dual_store_automatic_read(now=...)` 和清理健康检查可选 `now` | A2 | 历史缺陷：旧调用未把准备时间传入清理健康检查；已修复 | T24 独立测试重复通过；生产默认仍使用真实 UTC 时间 |
 
 ### 工作流二：内部运营主流程收口
 
@@ -152,7 +152,7 @@ Workspace / Tenant（内部组织或业务空间）
 ## 风险与待核实事项
 
 1. 当前服务器实际版本、实时同步连续性和数据一致性本次未重新连接核验（X）。
-2. T24 的 `verify_t24_dual_store_automatic_read.py:63` 固定日期与 `prepare_t24_dual_store_automatic_read.py:187` 真实时钟冲突；这是测试夹具时钟技术债务，不等同于生产逻辑失败。本次不改测试代码。
+2. T24 的 `verify_t24_dual_store_automatic_read.py:63` 固定日期与清理健康检查默认真实时钟的冲突已修复：准备层现在将受控 `now` 传入清理健康检查，生产未传入时仍使用真实 UTC 时间；T24 和 `verify_all.py` 已通过。
 3. 本地 PostgreSQL 并发验证因未设置一次性 `T22_TEST_POSTGRES_URL` 跳过；历史 CI 证据不能替代当前复验。
 4. Naver 咨询通用表/受保护表、库存/SKU、旧发货入口和 Mock 回退尚未收口。
 5. 公司主体/证照字段、邮箱收信、销售结算、客服写入官方合同和紫鸟助手配对合同仍待确认。
@@ -162,13 +162,13 @@ Workspace / Tenant（内部组织或业务空间）
 - 仅有本文件作为当前状态入口，历史文件不再竞争。
 - 两个工作流的主页面、主接口、主数据源和冻结入口均已登记。
 - A1/A2/B/C/D/E/F/X 分类可由代码、测试或明确待核实证据追溯。
-- T24 时钟债务被单独记录，不能以一次失败夸大或以一次成功掩盖。
+- T24 时钟缺陷已修复并保留专项证据；后续测试新增时间来源必须继续复用可控时钟入口。
 - 生产 Backend 不显示 Mock，核心跨店数据和权限边界有可重复测试。
 - 在任何真实写入前，咨询和发货分别完成人工确认、attempt、unknown/reconcile 和审计验收。
 
 ## 下一步三个具体动作
 
-1. 先从 `docs/TASK_HANDOFF.md` 的工作流一开始，冻结咨询、库存/SKU、销售和待办字段合同，并设计统一可注入测试时钟；本步不扩展业务功能。
+1. 先从 `docs/TASK_HANDOFF.md` 的工作流一开始，冻结咨询、库存/SKU、销售和待办字段合同；T24 时钟修复已完成，本步不扩展业务功能。
 2. 对工作流二逐页登记实际调用，先将 `/workbench`、`/orders`、`/customer-service` 和 `/shipping` 的 Backend 主链与旧入口依赖列清；本步不启用真实写入。
 3. 项目负责人审阅本基准后，单独批准下一任务；未批准前不做代码收口、迁移、部署或真实平台操作。
 

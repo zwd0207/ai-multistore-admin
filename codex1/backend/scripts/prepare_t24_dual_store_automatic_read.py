@@ -162,6 +162,7 @@ def _assert_store_ready(
     *,
     spec: StoreSpec,
     settings: Settings,
+    now: datetime,
 ) -> tuple[ApiCredential, SyncLog]:
     store = db.get(Store, spec.store_id)
     if store is None or store.status != "active" or str(store.platform).strip().lower() != "naver":
@@ -188,6 +189,7 @@ def _assert_store_ready(
             db,
             store_id=store.id,
             settings=settings,
+            now=now,
         )
     except ApiError as exc:
         raise PreparationBlocked(str(exc.error_code or "t24_cleanup_health_blocked")) from exc
@@ -274,7 +276,7 @@ def prepare_dual_store_automatic_read(
     current = _utc(now or get_utc_now())
     scheduled_activation = _validate_activation_at(now=current, activation_at=activation_at)
     ready = {
-        spec.store_id: _assert_store_ready(db, spec=spec, settings=settings)
+        spec.store_id: _assert_store_ready(db, spec=spec, settings=settings, now=current)
         for spec in normalized_specs
     }
     target_ids = [spec.store_id for spec in normalized_specs]
