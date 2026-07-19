@@ -4,6 +4,11 @@
 
 ## 2026-07-19
 
+### Documentation
+
+- 记录生产现状优先复用、生产差异先回流本地的开发策略；启动 `TASK-PROD-RECONCILE-001` 的只读核验。
+- 记录电脑端优先、手机版新增能力冻结且保留完整 390px 回归的验收策略。
+
 ### Code and Documentation
 
 - 将正式数据源默认值收口为 Backend，Mock 改为显式 Demo 模式，并在顶部显示当前模式。
