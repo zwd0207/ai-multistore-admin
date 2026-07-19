@@ -4,8 +4,11 @@
 - 任务：统一并锁定 Mock / Backend 运行边界
 - 完成日期：2026-07-19
 - 分支：`release/operator-v1`
+- 候选版本：`operator-v1.20260719.1`
 - 任务开始 HEAD：`403ed319c2f27c0662cba5e1c1f4d0e5bc15fcaa`
 - 主提交：`ac9375b`（`fix: enforce explicit backend and mock modes`）
+- 登录态验收修复：纳入候选版本 `operator-v1.20260719.1`，精确提交以 `git rev-parse HEAD` 为准。
+- 版本登记：`public/release-version.json`；服务器部署后必须从同一路径读回相同版本再登记完成。
 
 ## 实际完成内容
 
@@ -16,6 +19,9 @@
 - Settings 在 Backend 模式只读取运营就绪检查，明确显示正式设置接口尚未接入，不读取或保存 Mock 设置。
 - Stores 删除动作和仓库批次操作均经过显式 provider 分支；Mock 模式不会调用 Backend，Backend 模式不会回退 Mock。
 - provider 缺少方法时，Backend 模式返回明确不可用错误，不再代理到 Mock。
+- 登录态浏览器验收发现并修复销售订单请求超过 Backend 每页 100 条上限的问题。
+- Sales 店铺筛选、排行和明细改为使用当前 Backend 店铺列表与名称，不再显示 Demo 店铺或 `店铺 #1`。
+- Settings 将备份摘要的权限/可用性失败隔离为单项检查，后端健康和店铺总览成功结果继续显示，不回退 Mock。
 
 ## 数据源矩阵
 
@@ -64,6 +70,9 @@
 - `node scripts/warehouse-batch-contract.test.mjs`、`node scripts/manual-sync-contract.test.mjs`：通过。
 - `npm.cmd run build`：通过；显式 `VITE_DATA_SOURCE=mock` 构建也通过。
 - `npm.cmd run encoding:scan`、`npm.cmd run session:verify`、`npm.cmd run bundle:verify`：通过。
+- 全部 20 个 `scripts/*.test.mjs` 前端合同测试：通过。
+- 登录态浏览器验收：工作台、订单、销售、设置、店铺与仓库批次通过；销售店铺筛选交互通过；桌面与 390px 无横向溢出；冷加载控制台无错误或警告。
+- 正式构建 Bundle：入口 273,766 字节，共 38 个 JavaScript chunk，预算门禁通过。
 - `operator-readiness-check.mjs`：失败，因本机 `127.0.0.1:8012` 后端未启动，`fetch failed`。
 - `verify_all.py`：在干净工作树中 123.8 秒完整通过，包含 `git tracking: ok`、`docs secret scan: ok` 和 `verify_all: ok`；T22 PostgreSQL 专项因未配置 `T22_TEST_POSTGRES_URL` 按既有规则跳过。
 - `git diff --check`：通过。
@@ -72,16 +81,15 @@
 
 - Settings 正式后端配置接口尚未接入，正式模式仅提供运营就绪检查。
 - Sales 退款和优惠字段没有对应正式统计接口，当前按订单销售统计合同显示为零；不得解释为平台结算数据。
-- 尚未完成登录态浏览器验收；全量后端回归已通过。
 
 ## 阻塞问题
 
 - 无代码阻塞。
-- 正式 Backend 联调需要有效会话、选中店铺和已启动后端。
+- 当前任务无代码或浏览器验收阻塞。
 
 ## 下一任务准确起点
 
-从 `docs/PROJECT_CONTROL.md`、本文件和 `scripts/data-boundary.contract.test.mjs` 开始，先完成边界专项测试、T13-T24 相关测试及 `verify_all.py`，再进行登录态浏览器验收。不要自动开始咨询、库存、工作台数据链或 Settings 正式接口开发。
+`TASK-DATA-BOUNDARY-001` 已完成。下一任务仍从 `docs/PROJECT_CONTROL.md` 的工作流一开始，但必须由项目负责人单独批准；不要自动开始咨询、库存、工作台数据链或 Settings 正式接口开发。
 
 ## 禁止误操作事项
 

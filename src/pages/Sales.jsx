@@ -15,7 +15,6 @@ import { buildNaverOrderSalesSummary } from '../utils/naverOrderSales';
 import { formatKstDateTimeWithLabel, getKstDateOffsetString, getKstTodayString } from '../utils/time';
 
 const platforms = ['Naver', 'Coupang', 'Gmarket', '11st', 'Auction'];
-const stores = ['首尔美妆测试店', '韩国本土运动鞋店', 'Gmarket 精品店', '11st 韩系生活馆', 'K-Beauty 快闪店', 'Auction 折扣店', 'Coupang 联调店'];
 const MAX_FINANCIAL_PREVIEW_DAYS = 7;
 
 const formatWon = (value) => `₩${Number(value || 0).toLocaleString()}`;
@@ -420,7 +419,7 @@ function NaverOrderSalesSummaryPanel() {
 }
 
 export default function Sales() {
-  const { selectedStoreId } = useStoreContext();
+  const { selectedStoreId, stores: availableStores } = useStoreContext();
   const defaultFilters = useMemo(() => ({
     startDate: getKstDateOffsetString(-7),
     endDate: getKstTodayString(),
@@ -483,7 +482,7 @@ export default function Sales() {
           <label className="form-field"><span>开始日期</span><input type="date" value={draftFilters.startDate} onChange={(event) => setDraftFilters({ ...draftFilters, startDate: event.target.value })} /></label>
           <label className="form-field"><span>结束日期</span><input type="date" value={draftFilters.endDate} onChange={(event) => setDraftFilters({ ...draftFilters, endDate: event.target.value })} /></label>
           <label className="form-field"><span>平台</span><select value={draftFilters.platform} onChange={(event) => setDraftFilters({ ...draftFilters, platform: event.target.value })}><option value="">全部平台</option>{platforms.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="form-field"><span>店铺</span><select value={draftFilters.store} onChange={(event) => setDraftFilters({ ...draftFilters, store: event.target.value })}><option value="">全部店铺</option>{stores.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="form-field"><span>店铺</span><select value={draftFilters.store} onChange={(event) => setDraftFilters({ ...draftFilters, store: event.target.value })}><option value="">全部店铺</option>{availableStores.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></label>
         </div>
         <div className="filter-actions">
           <button className="button ghost" onClick={() => {

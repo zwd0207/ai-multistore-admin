@@ -92,3 +92,14 @@
 - 影响：销售页使用现有 Backend 统计与订单读取适配；Settings 在正式模式只展示后端就绪检查；仓库批次和未接入接口在 Mock/Backend 边界上显式失败。
 - 状态：已生效。
 - 证据：`src/services/dataSource.js`、`src/services/dataProvider.js`、`src/pages/Dashboard.jsx`、`src/pages/Sales.jsx`、`src/pages/Settings.jsx`、`scripts/data-boundary.contract.test.mjs`。
+
+## D060
+
+- 日期：2026-07-19
+- 决策：项目负责人授权 Codex 在任务或独立修复范围完成、相关验证通过、控制文档同步且无无关改动时，直接创建本地 Git 提交并推送当前跟踪的 `release/operator-v1` 分支，不再逐次请求确认。
+- 原因：减少跨聊天窗口重复确认、重复验证和未提交工作树造成的状态漂移，提高 Token 与项目执行效率。
+- 版本规则：使用 `operator-v1.YYYYMMDD.N` 作为人类可读发布版本，Git commit SHA 作为精确技术版本；`public/release-version.json` 是仓库与构建产物共享的版本文件，服务器部署后必须读取同一文件验证。`docs/PROJECT_CONTROL.md` 同时记录仓库候选版本和服务器已部署版本，未实际部署不得提前写成一致。
+- 提交门禁：测试失败、任务范围未完成、存在无关改动或控制文档未同步时不得自动提交；推送后以精确 commit 的 GitHub CI 结果为发布门禁。
+- 不包含授权：服务器部署、数据库或迁移操作、生产配置修改、真实平台读写、客服回复、发货回填及其他高风险外部操作仍按各自门禁执行。
+- 状态：已生效。
+- 证据：项目负责人明确确认；`public/release-version.json`、`scripts/release-version.contract.test.mjs`。

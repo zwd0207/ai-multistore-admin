@@ -2,22 +2,28 @@
 
 ## TASK-DATA-BOUNDARY-001 当前状态
 
-- 状态：A2，代码边界和完整回归已通过，待真实 Backend 登录态浏览器验收。
+- 状态：A2，代码边界、完整回归和真实 Backend 登录态浏览器验收已通过；任务收口完成。
 - 正式模式：`VITE_DATA_SOURCE` 缺省或未知值使用 Backend；只有显式 `mock` 才使用 Demo/Mock。
 - 已收口：Dashboard 不再静默吞掉 Backend 错误；Sales、Settings、Stores 和仓库批次通过 `dataProvider` 明确选择数据源；顶部显示当前数据源。
 - 未改变：数据库、后端业务合同、同步、咨询、库存、工作台业务规则和平台写入门禁。
 - 当前残余：Settings 的正式后端配置接口尚未存在，因此正式模式只展示运营就绪检查；Sales 的退款/优惠仍按现有订单统计合同显示为零，不能解释为平台结算数据。
+- 浏览器验收：有效会话、MFA 和 `pxg球包店` 店铺上下文下，工作台、订单、销售、设置、店铺和仓库批次均保持正式 Backend；桌面和 390px 无横向溢出，冷加载控制台无错误或警告，平台写入保持关闭。
+- 验收修复：销售订单查询遵守 Backend 每页 100 条上限，筛选和明细只使用当前 Backend 店铺名称；设置页将无权限或暂不可用的备份摘要隔离为单项提示，不再抹掉已成功的后端与店铺检查。
 
 - 文档版本：1.0
 - 状态：当前基准
 - 最后校准：2026-07-19
 - 当前分支：`release/operator-v1`
-- 当前业务代码基线：`ac9375b`（`fix: enforce explicit backend and mock modes`）；精确仓库 HEAD 以 `git rev-parse HEAD` 为准。
+- 当前仓库候选版本：`operator-v1.20260719.1`；精确版本以该版本所在的 Git commit SHA 为准。
+- 当前服务器已部署版本：X（本次尚未连接服务器读取 `/release-version.json`）；历史生产代码证据仍为 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`，不得写成当前版本。
+- 当前业务代码基线：`operator-v1.20260719.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是本任务最初的数据边界主提交。
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
 - 紫鸟集成研究索引：[`docs/integrations/ziniao/README.md`](integrations/ziniao/README.md)
 
 本文件是仓库内唯一的当前项目状态入口。`docs/TASK_HANDOFF.md`只记录最近一次任务交接，`docs/DECISION_LOG.md`只记录追加式决策，`CHANGELOG.md`只记录真实变更。`COMMANDER_STATE.md`和`COMMANDER_DECISIONS.md`保留为历史记录，不再作为当前状态或当前决策来源。
+
+版本登记使用 `public/release-version.json`。GitHub 候选版本由该文件和精确 commit 共同确定；服务器只有在实际部署并从 `/release-version.json` 读回相同值后才登记为已部署。不得只依据聊天、分支名、文件时间或历史部署记录判断两边版本一致。
 
 ## 当前阶段
 

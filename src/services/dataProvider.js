@@ -86,8 +86,8 @@ function salesDateInRange(value, startDate, endDate) {
   return (!startDate || date >= startDate) && (!endDate || date <= endDate);
 }
 
-function buildBackendSalesReport({ summary, byPlatform, byDate, orders }, params = {}) {
-  const rows = adapters.list(orders, adapters.order).data
+function buildBackendSalesReport({ summary, byPlatform, byDate, orders, stores }, params = {}) {
+  const rows = withStoreName(adapters.list(orders, adapters.order).data, stores)
     .filter((order) => salesDateInRange(order.createdAt, params.startDate, params.endDate))
     .filter((order) => !params.platform || comparable(order.rawPlatform || order.platform) === comparable(params.platform))
     .filter((order) => !params.store || comparable(order.store) === comparable(params.store));
@@ -156,7 +156,7 @@ function buildBackendSalesReport({ summary, byPlatform, byDate, orders }, params
 }
 
 async function getBackendSalesReport(params = {}) {
-  const { store } = await resolveBackendStore(params);
+  const { store, stores } = await resolveBackendStore(params);
   const request = {
     storeId: store.id,
     platform: params.platform || undefined,
@@ -167,9 +167,9 @@ async function getBackendSalesReport(params = {}) {
     backendApi.getSalesStats(request),
     backendApi.getSalesByPlatform(request),
     backendApi.getSalesByDate(request),
-    backendApi.getOrders({ ...request, view: 'current', page: 1, pageSize: 1000 }),
+    backendApi.getOrders({ ...request, view: 'current', page: 1, pageSize: 100 }),
   ]);
-  return buildBackendSalesReport({ summary, byPlatform, byDate, orders }, params);
+  return buildBackendSalesReport({ summary, byPlatform, byDate, orders, stores }, params);
 }
 
 function normalizeSyncPlatform(value) {
@@ -5843,7 +5843,20 @@ const sourceMethods = {
       ? adapters.storeOverview(await backendApi.getStoreOverview({ include_inactive: false }))
       : adapters.storeOverview(mockStoreOverview());
     const backup = isBackendSource
-      ? adapters.backupLocalReportSummary(await backendApi.getBackupLocalReportSummary({ limit: 5 }))
+      ? await backendApi.getBackupLocalReportSummary({ limit: 5 })
+        .then(adapters.backupLocalReportSummary)
+        .catch((error) => {
+          const permissionLimited = error?.status === 403 || error?.errorCode === 'permission_forbidden';
+          return adapters.backupLocalReportSummary({
+            status: permissionLimited ? 'permission_limited' : 'temporarily_unavailable',
+            business_message: permissionLimited
+              ? '当前账号无权读取本地备份摘要；其他运营检查结果仍然有效。'
+              : '本地备份摘要暂时不可用；后端和店铺检查结果仍然有效。',
+            backup_report_readonly: true,
+            privacy_fields_redacted: true,
+            platform_writes_enabled: false,
+          });
+        })
       : adapters.backupLocalReportSummary({
         status: 'mock_backup_summary_unavailable',
         business_message: 'mock 模式不读取本地真实备份摘要。',
@@ -5873,6 +5886,7 @@ const sourceMethods = {
       health.controlled_platform_writes_enabled ?? health.controlledPlatformWritesEnabled ?? true,
     );
     const controlledPlatformWriteReady = controlledPlatformWritesEnabled && genericPlatformWriteClosed;
+    const backupUnavailable = ['permission_limited', 'temporarily_unavailable'].includes(backup.status);
     const checks = [
       {
         key: 'backend',
@@ -5907,9 +5921,11 @@ const sourceMethods = {
       {
         key: 'backup',
         label: '备份状态',
-        status: backup.existingBackupCount ? '已有备份' : '建议先备份',
-        detail: backup.existingBackupCount ? `可用备份 ${backup.existingBackupCount} 个，需复核 ${backup.needsAttentionCount} 个。` : '交给运营前建议运行 scripts/operator-db-backup.ps1。',
-        tone: backup.existingBackupCount ? (backup.needsAttentionCount ? 'warning' : 'success') : 'warning',
+        status: backup.status === 'permission_limited' ? '权限受限' : (backupUnavailable ? '暂不可用' : (backup.existingBackupCount ? '已有备份' : '建议先备份')),
+        detail: backupUnavailable
+          ? backup.businessMessage
+          : (backup.existingBackupCount ? `可用备份 ${backup.existingBackupCount} 个，需复核 ${backup.needsAttentionCount} 个。` : '交给运营前建议运行 scripts/operator-db-backup.ps1。'),
+        tone: backupUnavailable ? 'warning' : (backup.existingBackupCount ? (backup.needsAttentionCount ? 'warning' : 'success') : 'warning'),
       },
     ];
     return {
