@@ -2,10 +2,11 @@
 
 ## TASK-PROD-RECONCILE-001 当前状态
 
-- 状态：执行中。先以只读方式核验生产与本地的代码、运行合同和自动同步证据；本任务不停止服务、不部署、不改生产配置、不迁移数据库，也不触发平台操作。
+- 状态：完成。已以只读方式核验生产与本地的代码、运行合同和自动同步证据；未停止服务、部署、修改生产配置或数据库，也未触发平台操作。
 - 前一任务：`TASK-DATA-BOUNDARY-001` 已完成 A2 收口。正式模式默认 Backend，只有显式 `mock` 才使用 Demo/Mock；相关登录态浏览器验收、完整回归和 GitHub CI 已通过。
-- 已确认代码关系：历史生产后端 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401` 与生产前端热修 `f3036e32321756997e5b54f6bd720289b97d6838` 均为当前仓库 HEAD 的祖先；本地不应重建已有生产实现。
-- 本任务目标：将服务器独有的有效热修或运行合同在脱敏后回流本地；服务器数据、密钥和环境值不复制进仓库。未完成差异分类前，不开始咨询、库存或工作台业务代码收口。
+- 已确认代码关系：服务器后端 `app/` 的 129 个受控源码文件与 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401` 完全一致；前端受控源代码 HEAD 为 `e5697e4b2e12e44a7ba1eeaed8c0ee7b85f98f25` 且无受控改动；两者均为当前仓库 HEAD 的祖先。没有服务器独有业务实现需要回流，本地不应重建已有生产实现。
+- 生产健康：API、Nginx、PostgreSQL、备份定时器、两店八个 checkpoint 和近期同步均已在本次只读审计中核验健康；所有平台写入继续关闭。活动前端静态产物未含 `release-version.json`，精确前端产物 SHA 仍为 X。
+- 域名事实：当前 Nginx 与 HTTPS 健康入口是 `aiglxt.xyz`；`aiglxt.com` 当前公共 DNS 为 NXDOMAIN。本任务不修改 DNS、域名绑定或 Nginx，域名切换须另行确认。
 - 开发优先级：电脑端为当前唯一新增界面与交互重点；手机版不增加新功能或专项优化，但每项任务仍保留完整 390px 回归，只修复本轮引入的回归、安全或阻断问题。
 
 - 文档版本：1.0
@@ -13,10 +14,11 @@
 - 最后校准：2026-07-19
 - 当前分支：`release/operator-v1`
 - 当前仓库候选版本：`operator-v1.20260719.1`；精确版本以该版本所在的 Git commit SHA 为准。
-- 当前服务器已部署版本：X（本次尚未连接服务器读取 `/release-version.json`）；历史生产代码证据仍为 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`，不得写成当前版本。
+- 当前服务器已部署版本：后端 `app/` 已核验为 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`；前端受控源代码为 `e5697e4b2e12e44a7ba1eeaed8c0ee7b85f98f25`，但活动 `dist` 缺少 `/release-version.json`，精确前端静态产物版本为 X。
 - 当前业务代码基线：`operator-v1.20260719.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是本任务最初的数据边界主提交。
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
+- 本次生产对齐审计：[`docs/PRODUCTION_RECONCILIATION_AUDIT_20260719.md`](PRODUCTION_RECONCILIATION_AUDIT_20260719.md)
 - 紫鸟集成研究索引：[`docs/integrations/ziniao/README.md`](integrations/ziniao/README.md)
 
 本文件是仓库内唯一的当前项目状态入口。`docs/TASK_HANDOFF.md`只记录最近一次任务交接，`docs/DECISION_LOG.md`只记录追加式决策，`CHANGELOG.md`只记录真实变更。`COMMANDER_STATE.md`和`COMMANDER_DECISIONS.md`保留为历史记录，不再作为当前状态或当前决策来源。
@@ -61,7 +63,7 @@
 | D（4） | `Tenant` 内部空间语义；用户/角色/成员语义；紫鸟 Windows 助手；API 能力矩阵 | 通过文案、入口和权限重新定义，暂不另建体系 |
 | E（8） | 通用/受保护咨询双表；旧 Shipping 与 WarehouseBatch；平台/物流库存；设备/环境双入口；前后端待办计算；混合账号页；`sync_service.py` 多代实现；Mock/Backend 双路径 | 确定唯一主实现，冻结旧入口，后续按调用依赖渐进迁移 |
 | F（3） | Mock 页面/数据/客户端；旧 Phase 与过期状态头；旧 SQLite 升级和历史门禁脚本 | 先隔离、标记和核查依赖，不在本阶段删除 |
-| X（1） | 当前服务器实际版本与持续同步/数据一致性 | 本次未连接服务器重新核验；不得由历史部署日志推断当前健康状态 |
+| X（1） | 服务器活动前端静态产物的精确 SHA/版本登记 | 后端源码、同步与数据健康已本次核验；活动 `dist` 缺少版本文件，不能由源码 HEAD 推断其精确构建版本 |
 
 ## 当前真实可用能力
 
@@ -164,7 +166,7 @@ Workspace / Tenant（内部组织或业务空间）
 
 ## 风险与待核实事项
 
-1. 当前服务器实际版本、实时同步连续性和数据一致性本次未重新连接核验（X）。
+1. 服务器后端版本、实时同步、数据一致性和备份已本次核验；仅活动前端静态产物的精确 SHA/版本登记仍为 X，因为 `/release-version.json` 当前落入 SPA HTML 回退。`aiglxt.com` 也尚未配置为可解析的生产域名。
 2. T24 的 `verify_t24_dual_store_automatic_read.py:63` 固定日期与清理健康检查默认真实时钟的冲突已修复：准备层现在将受控 `now` 传入清理健康检查，生产未传入时仍使用真实 UTC 时间；T24 和 `verify_all.py` 已通过。
 3. 本地 PostgreSQL 并发验证因未设置一次性 `T22_TEST_POSTGRES_URL` 跳过；历史 CI 证据不能替代当前复验。
 4. Naver 咨询通用表/受保护表、库存/SKU、旧发货入口和 Mock 回退尚未收口。
@@ -181,9 +183,9 @@ Workspace / Tenant（内部组织或业务空间）
 
 ## 下一步三个具体动作
 
-1. 执行 `TASK-PROD-RECONCILE-001`：只读核验生产发布树、PostgreSQL/Alembic、服务/备份定时器、功能开关、两店 checkpoint 和近期同步证据；将有效的服务器独有实现或合同先回流本地，不停止或覆盖服务器。
-2. 验收生产差异分类后，执行 `TASK-INQUIRY-READ-CONTRACT-001`：只收口受保护 Naver 咨询的唯一读链、统计、工作台和深链，不启用回复。
-3. 再依次执行库存/SKU双来源合同与电脑端运营主流程收口；每项均先完成桌面验收和完整 390px 回归、提交推送与 CI，服务器仅在两个业务里程碑后另行走发布门禁。
+1. 执行 `TASK-INQUIRY-READ-CONTRACT-001`：只收口受保护 Naver 咨询的唯一读链、统计、工作台和深链，不启用回复。
+2. 再执行库存/SKU双来源合同：先明确平台观察库存、仓库盘点库存、SKU/规格键和不唯一映射阻断，不新增真实写入。
+3. 完成电脑端运营主流程收口；每项均先完成桌面验收和完整 390px 回归、提交推送与 CI。下一次服务器业务里程碑发布必须部署并读回 `release-version.json`，DNS/域名切换另行走门禁。
 
 ## 文档优先级
 
