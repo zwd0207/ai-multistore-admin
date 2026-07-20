@@ -130,3 +130,12 @@
 - 影响：下一任务进入受保护 Naver 咨询唯一读链收口。服务器活动前端 `dist` 缺少 `release-version.json`，下一次业务里程碑发布必须补齐并读回该文件；Nginx 当前使用 `aiglxt.xyz`，`aiglxt.com` 的 DNS/绑定不在本次授权范围内，不得自行修改。
 - 状态：已生效。
 - 证据：[`docs/PRODUCTION_RECONCILIATION_AUDIT_20260719.md`](PRODUCTION_RECONCILIATION_AUDIT_20260719.md)。
+
+## D064
+
+- 日期：2026-07-19
+- 决策：Naver 正式客服业务面只认可受保护的 `PxgNaverReadonlyCustomerInquiry` 读链；通用 `CustomerInquiry` 的 Naver 历史/Mock 行不得进入正式列表、统计、风险、每日上下文或工作台。非 Naver 通用行仅作历史只读兼容，所有通用行回复固定关闭。
+- 原因：消除同一 Naver 咨询被双表混合统计、工作台产生不可详情深链或旧路径意外恢复回复能力的风险。
+- 影响：受保护 canonical 深链必须直接读取详情且不依赖首批列表；旧 Naver 同步和回复继续关闭。本决策不删除历史数据、不改表、不迁移、不触发平台调用。
+- 状态：已生效；2026-07-20 的登录态浏览器验收已通过，候选版本正进行最终回归、提交/推送与 GitHub CI 核验。
+- 证据：[`docs/INQUIRY_READ_CONTRACT_AUDIT_20260719.md`](INQUIRY_READ_CONTRACT_AUDIT_20260719.md)、`verify_customer_inquiry_operator_workflow.py`、`verify_operator_workbench.py`、`verify_t14_naver_readonly_inquiries.py`。

@@ -160,14 +160,14 @@ def main() -> None:
         assert data["store_count"] == 1, dashboard
         assert data["product_count"] == 3, dashboard
         assert data["order_count"] == 0, dashboard
-        assert data["customer_inquiry_count"] == 3, dashboard
-        assert data["open_customer_inquiries"] == 3, dashboard
+        assert data["customer_inquiry_count"] == 0, dashboard
+        assert data["open_customer_inquiries"] == 0, dashboard
         assert data["total_sales_amount"] == "0.00", dashboard
         assert len(data["latest_sync_logs"]) <= 5, dashboard
         assert data["recent_orders"] == [], dashboard
         risk_codes = {item["code"] for item in data["risk_flags"]}
         assert "FAILED_SYNC_LOG" in risk_codes, dashboard
-        assert "OPEN_CUSTOMER_INQUIRIES" in risk_codes, dashboard
+        assert "OPEN_CUSTOMER_INQUIRIES" not in risk_codes, dashboard
         assert "NO_RECENT_ORDERS" in risk_codes, dashboard
         assert "한글 실패 로그" in str(dashboard), dashboard
         assert "ECCO 골프화 / 中文运营测试" not in str(dashboard), dashboard
@@ -188,15 +188,15 @@ def main() -> None:
         assert context_data["scope"]["store_id"] == store_id, context
         assert context_data["sales_summary"]["total_orders"] == 0, context
         assert context_data["order_summary"]["recent_orders"] == [], context
-        assert context_data["customer_inquiry_summary"]["open"] == 3, context
+        assert context_data["customer_inquiry_summary"] == {"total": 0, "open": 0}, context
         assert context_data["sync_summary"]["failed_count"] >= 1, context
         focus_codes = {item["code"] for item in context_data["recommended_focus"]}
-        assert "CHECK_OPEN_INQUIRIES" in focus_codes, context
+        assert "CHECK_OPEN_INQUIRIES" not in focus_codes, context
         assert "CHECK_SYNC_FAILURES" in focus_codes, context
         assert "CHECK_ORDER_DROP" in focus_codes, context
-        assert "AUTHENTICITY_INQUIRIES" in focus_codes, context
-        assert "检查未处理客服咨询" in str(context), context
-        assert "정품 소명 문의 처리" in str(context), context
+        assert "AUTHENTICITY_INQUIRIES" not in focus_codes, context
+        assert "检查未处理客服咨询" not in str(context), context
+        assert "정품 소명 문의 처리" not in str(context), context
         assert "010-****-1234" not in str(context), context
 
         missing_store = client.get("/api/v1/dashboard/summary?store_id=999999")
@@ -232,11 +232,11 @@ def main() -> None:
 
     print("stage 1E verification ok")
     print("GET /api/v1/stats/sales: default excludes local test orders; diagnostic include_test_orders ok")
-    print("GET /api/v1/dashboard/summary: product/inquiry counts ok; test orders excluded by default")
+    print("GET /api/v1/dashboard/summary: protected inquiry source counts ok; test orders excluded by default")
     print("dashboard latest_sync_logs <= 5 and recent_orders <= 5: ok")
-    print("risk_flags: FAILED_SYNC_LOG and OPEN_CUSTOMER_INQUIRIES generated")
+    print("risk_flags: legacy generic Naver inquiries do not generate OPEN_CUSTOMER_INQUIRIES")
     print("GET /api/v1/ai/daily-context: structured context ok, no model call")
-    print("UTF-8: ECCO 골프화 / 中文运营测试, 한글 실패 로그, 检查未处理客服咨询")
+    print("UTF-8: ECCO 골프화 / 中文运营测试, 한글 실패 로그")
     print("security: no plaintext credentials, no full buyer phones")
 
 

@@ -21,6 +21,13 @@ assert.match(dataProvider, /queryCustomerInquiryRows/);
 assert.match(dataProvider, /item\.replyClassification/);
 assert.match(customerPage, /getCustomerInquiryDetail/);
 assert.match(customerPage, /!activeMessage\.readonlyId/);
+assert.match(customerPage, /const PROTECTED_NAVER_INQUIRY_PREFIX = 'pxg_naver_readonly:'/);
+assert.match(customerPage, /function readonlyIdFromProtectedCanonicalId\(value\)/);
+assert.match(customerPage, /return \/\^\\d\+\$\/\.test\(readonlyId\) \? readonlyId : null/);
+assert.match(customerPage, /const protectedDeepLinkReadonlyId = readonlyIdFromProtectedCanonicalId\(deepLinkInquiryId\)/);
+assert.match(customerPage, /if \(deepLinkInquiryId && !protectedDeepLinkReadonlyId\)/);
+assert.match(customerPage, /readonlyId: protectedDeepLinkReadonlyId/);
+assert.match(customerPage, /replyEnabled: false/);
 assert.match(customerPage, /正在加载客服消息详情/);
 assert.match(customerPage, /客服消息详情暂不可用/);
 assert.match(customerPage, /conversation-message-\$\{message\.actor\}/);
@@ -65,6 +72,7 @@ const generic = adaptCustomerInquiry({ inquiry_id: 'generic:1', source: 'generic
 assert.equal(generic.readonlyId, null);
 assert.equal(generic.content, 'safe generic summary');
 assert.equal(generic.detailLoaded, true);
+assert.equal(generic.replyEnabled, false);
 
 const detail = adaptCustomerInquiryDetail({
   id: 17,

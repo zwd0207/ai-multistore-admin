@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.core.timezone import get_business_date, get_business_day_range, get_business_timezone, to_business_timezone
 from app.core.exceptions import ApiError
-from app.models.customer_inquiry import CustomerInquiry
 from app.models.financial import PlatformSalesDetail, PlatformSettlementDetail
 from app.models.api_credential import ApiCredential
 from app.models.auth import ErpPermission, ErpRole, ErpRolePermission, ErpStoreMembership
@@ -388,19 +387,6 @@ def get_sales_by_date(
 
 def _count_records(db: Session, model, store_id: int | None = None, platform: str | None = None) -> int:
     statement = _apply_filters(select(model), model, store_id=store_id, platform=platform)
-    return len(db.scalars(statement).all())
-
-
-def _count_open_customer_inquiries(
-    db: Session,
-    store_id: int | None = None,
-    platform: str | None = None,
-) -> int:
-    statement = select(CustomerInquiry).where(CustomerInquiry.status == "open")
-    if store_id is not None:
-        statement = statement.where(CustomerInquiry.store_id == store_id)
-    if platform is not None:
-        statement = statement.where(CustomerInquiry.platform == platform)
     return len(db.scalars(statement).all())
 
 
@@ -1247,6 +1233,7 @@ def build_risk_flags(
     db: Session,
     store_id: int | None = None,
     platform: str | None = None,
+    customer_inquiry_summary: dict | None = None,
 ) -> list[dict]:
     stores = _get_stores(db, store_id)
     flags = []
@@ -1267,19 +1254,19 @@ def build_risk_flags(
             }
         )
 
-    open_inquiries_statement = select(CustomerInquiry).where(CustomerInquiry.status == "open")
-    if store_id is not None:
-        open_inquiries_statement = open_inquiries_statement.where(CustomerInquiry.store_id == store_id)
-    if platform is not None:
-        open_inquiries_statement = open_inquiries_statement.where(CustomerInquiry.platform == platform)
-    open_inquiries = db.scalars(open_inquiries_statement).all()
-    if open_inquiries:
+    customer_inquiry_summary = customer_inquiry_summary or customer_inquiry_service.summarize_formal_customer_inquiries(
+        db,
+        store_id=store_id,
+        platform=platform,
+    )
+    open_inquiry_count = int(customer_inquiry_summary["open_count"])
+    if open_inquiry_count:
         flags.append(
             {
                 "code": "OPEN_CUSTOMER_INQUIRIES",
                 "level": "info",
                 "message": "存在未处理客服咨询 / 미처리 고객문의가 있습니다",
-                "count": len(open_inquiries),
+                "count": open_inquiry_count,
             }
         )
 
@@ -1340,17 +1327,22 @@ def get_dashboard_summary(
         store_id=store_id,
         platform=platform,
     )
+    customer_inquiry_summary = customer_inquiry_service.summarize_formal_customer_inquiries(
+        db,
+        store_id=store_id,
+        platform=platform,
+    )
     business_metadata = _business_scope_metadata(start_date if start_date == end_date else None)
     result = {
         **business_metadata,
         "store_count": len(_get_stores(db, store_id)),
         "product_count": _count_records(db, Product, store_id=store_id, platform=platform),
         "order_count": sales["total_orders"],
-        "customer_inquiry_count": _count_records(db, CustomerInquiry, store_id=store_id, platform=platform),
+        "customer_inquiry_count": customer_inquiry_summary["total"],
         "total_sales_amount": sales["total_sales_amount"],
         "currency": sales["currency"],
         "latest_sync_logs": get_latest_sync_logs(db, store_id=store_id, platform=platform, limit=5),
-        "open_customer_inquiries": _count_open_customer_inquiries(db, store_id=store_id, platform=platform),
+        "open_customer_inquiries": customer_inquiry_summary["open_count"],
         "recent_orders": get_recent_orders(
             db,
             store_id=store_id,
@@ -1358,7 +1350,12 @@ def get_dashboard_summary(
             limit=5,
             include_test_orders=include_test_orders,
         ),
-        "risk_flags": build_risk_flags(db, store_id=store_id, platform=platform),
+        "risk_flags": build_risk_flags(
+            db,
+            store_id=store_id,
+            platform=platform,
+            customer_inquiry_summary=customer_inquiry_summary,
+        ),
         "financial_summary": financial_summary,
         "api_capability_summary": get_api_capability_summary(db, store_id=store_id, platform=platform),
     }
@@ -1387,9 +1384,20 @@ def get_daily_context(
     if context_date is None:
         context_date = get_business_date()
     store = ensure_store_exists(db, store_id) if store_id is not None else None
+    inquiry_platform = normalize_platform(store.platform) if store is not None else None
     sales_summary = get_sales_stats(db, store_id=store_id, start_date=context_date, end_date=context_date)
-    risk_flags = build_risk_flags(db, store_id=store_id)
-    open_inquiries = _count_records(db, CustomerInquiry, store_id=store_id)
+    customer_inquiry_summary = customer_inquiry_service.summarize_formal_customer_inquiries(
+        db,
+        store_id=store_id,
+        platform=inquiry_platform,
+    )
+    risk_flags = build_risk_flags(
+        db,
+        store_id=store_id,
+        platform=inquiry_platform,
+        customer_inquiry_summary=customer_inquiry_summary,
+    )
+    open_inquiries = int(customer_inquiry_summary["open_count"])
     sync_logs = get_latest_sync_logs(db, store_id=store_id, limit=5)
     recent_orders = get_recent_orders(db, store_id=store_id, start_date=context_date, end_date=context_date, limit=5)
     financial_context = _build_financial_context(
@@ -1405,13 +1413,7 @@ def get_daily_context(
         focus.append({"code": "CHECK_SYNC_FAILURES", "message": "关注同步失败平台 / 동기화 실패 플랫폼 확인"})
     if not recent_orders:
         focus.append({"code": "CHECK_ORDER_DROP", "message": "检查近期订单下降 / 최근 주문 감소 확인"})
-    authenticity_statement = select(CustomerInquiry).where(
-        CustomerInquiry.inquiry_type == "authenticity",
-        CustomerInquiry.status == "open",
-    )
-    if store_id is not None:
-        authenticity_statement = authenticity_statement.where(CustomerInquiry.store_id == store_id)
-    if db.scalars(authenticity_statement).first():
+    if int(customer_inquiry_summary["authenticity_open_count"]):
         focus.append({"code": "AUTHENTICITY_INQUIRIES", "message": "处理正品申诉类咨询 / 정품 소명 문의 처리"})
 
     return {
@@ -1429,7 +1431,7 @@ def get_daily_context(
             "recent_orders": recent_orders,
         },
         "customer_inquiry_summary": {
-            "total": _count_records(db, CustomerInquiry, store_id=store_id),
+            "total": customer_inquiry_summary["total"],
             "open": open_inquiries,
         },
         "sync_summary": {

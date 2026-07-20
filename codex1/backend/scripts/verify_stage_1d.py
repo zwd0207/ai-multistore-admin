@@ -137,14 +137,9 @@ def verify_legacy_query_payloads(client: TestClient, store_id: int) -> None:
     assert_masked_phone_only(orders)
 
     inquiries = assert_success(client.get(f"/api/v1/customer-inquiries?store_id={store_id}&platform=naver"))
-    titles = [item["title"] for item in inquiries["data"]["items"]]
-    assert inquiries["data"]["total"] == 3, inquiries
-    assert "正品申诉资料咨询" in titles, inquiries
-    assert "배송지연 문의" in titles, inquiries
-    assert "Naver 정품 소명 / 中文备注" in titles, inquiries
-    assert "请确认是否可以提供小票和卡支付明细。" in str(inquiries), inquiries
-    assert "배송이 언제 시작되는지 확인 부탁드립니다." in str(inquiries), inquiries
-    assert "고객문의 처리 후 中文运营备注에 기록해야 합니다." in str(inquiries), inquiries
+    assert inquiries["data"]["items"] == [], inquiries
+    assert inquiries["data"]["total"] == 0, inquiries
+    assert inquiries["data"]["classification_counts"] == {"all": 0, "answered": 0, "unanswered": 0}, inquiries
 
 
 def create_customer_inquiry_reader(store_id: int) -> dict[str, str]:
@@ -183,14 +178,9 @@ def verify_query_payloads(client: TestClient, store_id: int, customer_inquiry_he
         f"/api/v1/customer-inquiries?store_id={store_id}&platform=naver",
         headers=customer_inquiry_headers,
     ))
-    items = inquiries["data"]["items"]
-    assert len(items) == 3 and inquiries["data"]["total"] == 3, inquiries
-    expected = {
-        "source", "inquiry_id", "category", "inquiry_type", "status", "summary",
-        "created_at", "updated_at", "store_id", "order_context", "logistics_context", "reply_enabled",
-    }
-    assert all(item["source"] == "generic" and expected <= set(item) for item in items), inquiries
-    assert all("title" not in item and "content" not in item and "raw_data" not in item for item in items), inquiries
+    assert inquiries["data"]["items"] == [], inquiries
+    assert inquiries["data"]["total"] == 0, inquiries
+    assert inquiries["data"]["classification_counts"] == {"all": 0, "answered": 0, "unanswered": 0}, inquiries
 
 
 def verify_database_security_and_logs(store_id: int) -> None:
@@ -278,7 +268,7 @@ def main() -> None:
     print("POST /api/v1/sync/customer-inquiries/mock: ok")
     print("GET /api/v1/products: SK-II 神仙水测试商品 / 타이틀리스트 캐디백 테스트 / ECCO 골프화 / 中文运营测试")
     print("GET /api/v1/orders: 中文测试买家 / 홍길동 / 중한테스트 with masked phones only")
-    print("GET /api/v1/customer-inquiries: 正品申诉资料咨询 / 배송지연 문의 / Naver 정품 소명 / 中文备注")
+    print("GET /api/v1/customer-inquiries: legacy generic Naver rows are excluded from the formal read model")
     print("sync_logs: products / orders / customer_inquiries success records found")
     print("security: plaintext credential tokens not stored or returned")
     print("privacy: full buyer phone numbers not stored or returned")

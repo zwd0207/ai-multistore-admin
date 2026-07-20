@@ -1,7 +1,7 @@
 import re
 from datetime import timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -156,8 +156,8 @@ def _serialize_generic_inquiry(db: Session, inquiry: CustomerInquiry) -> dict:
         "store_id": inquiry.store_id,
         "order_context": order_context,
         "logistics_context": logistics_context,
-        "reply_enabled": True,
-        "reply_disabled_reason": None,
+        "reply_enabled": False,
+        "reply_disabled_reason": "legacy_readonly",
     }
 
 
@@ -234,35 +234,110 @@ def upsert_customer_inquiries(db: Session, store_id: int, platform: str, items: 
     return {"created": created, "updated": updated, "total": len(items)}
 
 
-def list_customer_inquiries(db: Session, store_id: int, platform: str | None = None) -> list[dict]:
-    ensure_store_exists(db, store_id)
+def _normalized_platform(platform: str | None) -> str | None:
+    normalized = str(platform or "").strip().casefold()
+    return normalized or None
+
+
+def _formal_customer_inquiry_rows(
+    db: Session,
+    *,
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> tuple[list[CustomerInquiry], list[PxgNaverReadonlyCustomerInquiry]]:
+    """Return the single formal read source without exposing legacy Naver rows.
+
+    `CustomerInquiry` remains for non-Naver compatibility and historical storage,
+    but Naver business views must only use the protected readonly records.
+    """
+    normalized_platform = _normalized_platform(platform)
+
     readonly_statement = select(PxgNaverReadonlyCustomerInquiry).where(
-        PxgNaverReadonlyCustomerInquiry.store_id == store_id,
+        func.lower(PxgNaverReadonlyCustomerInquiry.platform) == "naver",
     ).order_by(PxgNaverReadonlyCustomerInquiry.id.asc())
-    if platform:
-        readonly_statement = readonly_statement.where(PxgNaverReadonlyCustomerInquiry.platform == platform)
-    readonly_rows = db.scalars(readonly_statement).all()
-    readonly_hashes = {
-        (item.platform, item.external_inquiry_id_hash)
-        for item in readonly_rows
+    generic_statement = select(CustomerInquiry).where(
+        func.lower(CustomerInquiry.platform) != "naver",
+    ).order_by(CustomerInquiry.id.asc())
+    if store_id is not None:
+        readonly_statement = readonly_statement.where(PxgNaverReadonlyCustomerInquiry.store_id == store_id)
+        generic_statement = generic_statement.where(CustomerInquiry.store_id == store_id)
+    if normalized_platform is not None:
+        readonly_statement = readonly_statement.where(func.lower(PxgNaverReadonlyCustomerInquiry.platform) == normalized_platform)
+        generic_statement = generic_statement.where(func.lower(CustomerInquiry.platform) == normalized_platform)
+
+    return (
+        db.scalars(generic_statement).all(),
+        db.scalars(readonly_statement).all(),
+    )
+
+
+def _formal_customer_inquiry_summary(
+    generic_rows: list[CustomerInquiry],
+    readonly_rows: list[PxgNaverReadonlyCustomerInquiry],
+) -> dict[str, int | dict[str, int]]:
+    classifications = {"all": 0, "answered": 0, "unanswered": 0}
+    open_count = 0
+    authenticity_open_count = 0
+    for inquiry in [*generic_rows, *readonly_rows]:
+        status = str(inquiry.status or "").strip().casefold()
+        classification = _classification(status, inquiry.answered_at)
+        classifications["all"] += 1
+        classifications[classification] += 1
+        if status == "open":
+            open_count += 1
+            if str(inquiry.inquiry_type or "").strip().casefold() == "authenticity":
+                authenticity_open_count += 1
+    return {
+        "total": classifications["all"],
+        "classification_counts": classifications,
+        "open_count": open_count,
+        "authenticity_open_count": authenticity_open_count,
     }
 
-    statement = select(CustomerInquiry).where(CustomerInquiry.store_id == store_id).order_by(CustomerInquiry.id.asc())
-    if platform:
-        statement = statement.where(CustomerInquiry.platform == platform)
-    generic_rows = [
-        item
-        for item in db.scalars(statement).all()
-        if not _is_superseded_naver_legacy(item, readonly_hashes)
-    ]
 
+def get_customer_inquiry_read_model(
+    db: Session,
+    *,
+    store_id: int,
+    platform: str | None = None,
+) -> dict:
+    """Build the formal customer-inquiry list and its matching aggregate counts."""
+    ensure_store_exists(db, store_id)
+    generic_rows, readonly_rows = _formal_customer_inquiry_rows(
+        db,
+        store_id=store_id,
+        platform=platform,
+    )
     results = [_serialize_generic_inquiry(db, item) for item in generic_rows]
     results.extend(_serialize_pxg_readonly_inquiry(db, item) for item in readonly_rows)
+    deduplicated = {(item["source"], item["inquiry_id"]): item for item in results}
+    return {
+        "items": list(deduplicated.values()),
+        **_formal_customer_inquiry_summary(generic_rows, readonly_rows),
+    }
 
-    deduplicated: dict[tuple[str, str], dict] = {}
-    for item in results:
-        deduplicated[(item["source"], item["inquiry_id"])] = item
-    return list(deduplicated.values())
+
+def summarize_formal_customer_inquiries(
+    db: Session,
+    *,
+    store_id: int | None = None,
+    platform: str | None = None,
+) -> dict[str, int | dict[str, int]]:
+    """Return dashboard-safe counts from the same formal customer-inquiry source."""
+    generic_rows, readonly_rows = _formal_customer_inquiry_rows(
+        db,
+        store_id=store_id,
+        platform=platform,
+    )
+    return _formal_customer_inquiry_summary(generic_rows, readonly_rows)
+
+
+def list_customer_inquiries(db: Session, store_id: int, platform: str | None = None) -> list[dict]:
+    return get_customer_inquiry_read_model(
+        db,
+        store_id=store_id,
+        platform=platform,
+    )["items"]
 
 
 def summarize_classifications(items: list[dict]) -> dict[str, int]:

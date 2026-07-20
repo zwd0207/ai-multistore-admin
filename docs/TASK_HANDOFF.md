@@ -1,6 +1,16 @@
 # 当前任务交接
 
-> 最新任务状态：`TASK-PROD-RECONCILE-001` 已完成只读验收。生产后端与 `62e49ba...` 完全一致，未发现需回流的服务器独有源代码；详见 [`PRODUCTION_RECONCILIATION_AUDIT_20260719.md`](PRODUCTION_RECONCILIATION_AUDIT_20260719.md)。本文件以下内容保留为已完成的 `TASK-DATA-BOUNDARY-001` 交接证据。
+> 最新任务状态：`TASK-INQUIRY-READ-CONTRACT-001` 已完成代码收口、自动化和登录态浏览器验收；现正进行版本登记和最终回归。通过后应自动提交/推送并核验 GitHub CI；在 CI 通过前，不得进入库存/SKU任务或部署服务器。以下旧内容保留为已完成任务的历史交接证据。
+
+## 当前任务：TASK-INQUIRY-READ-CONTRACT-001
+
+- 任务目标：将 Naver 正式客服读链统一到 `PxgNaverReadonlyCustomerInquiry`，覆盖列表、统计、风险、每日上下文、工作台和受保护详情深链；不改表、不删历史、不调用平台、不启用回复。
+- 已完成：旧通用 Naver 行从正式业务面隐藏；非 Naver 通用行仅保留只读兼容并固定关闭回复；受保护 canonical 深链不再依赖首批 100 条列表。
+- 自动化验证：`verify_customer_inquiry_operator_workflow.py`、`verify_t14_naver_readonly_inquiries.py`、`verify_operator_workbench.py`、`verify_multi_store_workbench.py`、前端合同/构建和 `verify_all.py` 均已通过；T22 PostgreSQL 专项按既有规则跳过。
+- 浏览器验收：项目负责人已完成登录/MFA；重启经过进程、端口和命令核对的本地 8013/5181 旧服务后，工作台仅有 `pxg_naver_readonly:21` canonical 待办，打开详情成功，10 个“回复”按钮均禁用。桌面 1280×720 与 390×844 均无横向溢出，控制台无 error/warn；未重置数据或触发平台操作。
+- 最准确续接：登记 `operator-v1.20260720.1` 后，运行最终全量回归、构建和工作树校验；全部通过即自动提交/推送 `release/operator-v1`，再核验 GitHub CI。
+- 禁止事项：不启用回复、不执行刷新、不调用平台、不改数据库/迁移、不部署服务器、不修改域名/DNS；GitHub CI 通过前不进入库存/SKU任务。
+- 详细证据：[`docs/INQUIRY_READ_CONTRACT_AUDIT_20260719.md`](INQUIRY_READ_CONTRACT_AUDIT_20260719.md)。
 
 - 任务编号：`TASK-DATA-BOUNDARY-001`
 - 任务：统一并锁定 Mock / Backend 运行边界
@@ -87,11 +97,11 @@
 ## 阻塞问题
 
 - 无代码阻塞。
-- 当前任务无代码或浏览器验收阻塞。
+- 当前任务无代码或浏览器验收阻塞；仅剩最终校验、提交/推送与 GitHub CI 核验。
 
 ## 下一任务准确起点
 
-`TASK-PROD-RECONCILE-001` 已通过：生产后端源码、服务、备份、两店自动读取和写入门禁均健康，未发现服务器独有受控源代码。下一准确起点是 `TASK-INQUIRY-READ-CONTRACT-001`：统一受保护 Naver 咨询的列表、统计、工作台和详情深链；不改表、不删除历史数据、不调用平台、不启用回复。
+完成当前任务的最终校验、自动提交/推送与 GitHub CI 后，下一准确起点是库存/SKU 双来源合同：先只读盘点现有平台库存、仓库库存、SKU/规格键和不唯一映射；明确唯一口径与阻断规则前，不新增平台或仓库写入，也不启动手机版新功能。
 
 ## 禁止误操作事项
 

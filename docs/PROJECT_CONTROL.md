@@ -1,5 +1,14 @@
 # 项目控制（唯一当前状态入口）
 
+## TASK-INQUIRY-READ-CONTRACT-001 当前状态
+
+- 状态：代码、自动化验证与登录态浏览器验收已通过；正在登记候选版本并执行最终全量回归，尚未自动提交、推送或开始下一任务。
+- 已验证主实现：Naver 正式读链只使用 `PxgNaverReadonlyCustomerInquiry`；`CustomerInquiry` 的 Naver 历史/Mock 行保留但从客服列表、Dashboard、风险、每日上下文和工作台排除；非 Naver 通用记录仅作只读兼容且回复固定关闭。
+- 已验证深链：受保护 `pxg_naver_readonly:<数字ID>` 不依赖首批 100 条列表，前端直接请求受保护详情；工作台只生成该规范 ID。
+- 自动化证据：客服工作流、T14、工作台、多店隔离、前端合同/构建及 `verify_all.py` 已通过；T22 PostgreSQL 专项因未配置 `T22_TEST_POSTGRES_URL` 按既有规则跳过。
+- 浏览器事实：项目负责人已完成本地 ERP 登录/MFA。重启经核对的本地 8013/5181 旧进程后，工作台仅保留 canonical `pxg_naver_readonly:21` 待办，详情直接打开、回复保持关闭；桌面与 390px 均无横向溢出，控制台无新增 error/warn。未触发平台操作或数据重置。
+- 审计记录：[`docs/INQUIRY_READ_CONTRACT_AUDIT_20260719.md`](INQUIRY_READ_CONTRACT_AUDIT_20260719.md)。
+
 ## TASK-PROD-RECONCILE-001 当前状态
 
 - 状态：完成。已以只读方式核验生产与本地的代码、运行合同和自动同步证据；未停止服务、部署、修改生产配置或数据库，也未触发平台操作。
@@ -11,11 +20,11 @@
 
 - 文档版本：1.0
 - 状态：当前基准
-- 最后校准：2026-07-19
+- 最后校准：2026-07-20
 - 当前分支：`release/operator-v1`
-- 当前仓库候选版本：`operator-v1.20260719.1`；精确版本以该版本所在的 Git commit SHA 为准。
+- 当前仓库候选版本：`operator-v1.20260720.1`；精确版本以该版本所在的 Git commit SHA 为准。
 - 当前服务器已部署版本：后端 `app/` 已核验为 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`；前端受控源代码为 `e5697e4b2e12e44a7ba1eeaed8c0ee7b85f98f25`，但活动 `dist` 缺少 `/release-version.json`，精确前端静态产物版本为 X。
-- 当前业务代码基线：`operator-v1.20260719.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是本任务最初的数据边界主提交。
+- 当前业务代码基线：`operator-v1.20260720.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是本任务最初的数据边界主提交。
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
 - 本次生产对齐审计：[`docs/PRODUCTION_RECONCILIATION_AUDIT_20260719.md`](PRODUCTION_RECONCILIATION_AUDIT_20260719.md)
@@ -29,7 +38,7 @@
 
 正式阶段名称：**核心数据合同与内部运营主流程收口**。
 
-本次审计已锁定项目基准，但尚未开始代码收口。当前唯一主目标是：在不推倒重做的前提下，统一核心数据口径和正式运营入口，使内部运营人员能够从店铺连接进入同步、工作台、订单、客服、物流/发货和审计；所有未确认的平台写入继续关闭。
+本次生产审计已锁定基准，咨询唯一读链的代码收口、自动化与登录态浏览器验收均已完成；当前唯一主目标是完成版本登记、最终回归、自动提交/推送和 GitHub CI 核验。在不推倒重做的前提下继续统一核心数据口径和正式运营入口，所有未确认的平台写入继续关闭。
 
 ## 长期目标
 
@@ -129,7 +138,7 @@ Workspace / Tenant（内部组织或业务空间）
 | 步骤 | 正式入口/接口 | 主数据源 | 当前状态 | 旧/重复实现 | 收口验收 |
 |---|---|---|---|---|---|
 | 关系定义 | 店铺连接页 `/stores`；`GET /api/v1/stores` | `Tenant`、`Store`、凭证模型 | B/D | 混合账号页、Tenant/Company 语义混用 | 明确 Workspace/Company/Store/平台账号/凭证归属；跨店拒绝 |
-| 咨询口径 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | E/B | 通用 `CustomerInquiry`、旧 `/sync/customer-inquiries/naver` | 列表、统计、详情和后续 attempt 只认一个 Naver 主链 |
+| 咨询口径 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地自动化与登录态浏览器验收通过，待 GitHub CI/部署） | 通用 `CustomerInquiry` 的 Naver 历史行、旧 `/sync/customer-inquiries/naver` | 列表、统计、详情和后续 attempt 只认一个 Naver 主链 |
 | 库存/SKU | `/inventory`、`/shipping`；现有库存与映射接口 | `Product` 平台值 + `LogisticsInventoryItem` 仓库值 | E/B | 名称/选项匹配和跨页库存计算 | 每个数量标来源、时间、SKU键；不得相互覆盖 |
 | 销售/待办 | `/workbench`；`GET /api/v1/dashboard/store-overview` | 后端 `operator_workbench` | A2/E | 前端派生统计、旧 summary/mock fallback | 后端单一计算源，前端只展示；跨店汇总可追溯 |
 | Backend/Mock 边界 | 生产构建和 `dataProvider` | 真实 Backend | E | 默认 Mock、Proxy 回退 | 生产缺少后端能力时显式失败，不显示 Mock |
@@ -145,7 +154,7 @@ Workspace / Tenant（内部组织或业务空间）
 | 数据同步 | `/workbench`；`GET /api/v1/dashboard/store-overview` | `SyncCheckpoint`、`SyncLog` | A2 | 手工 sync、preview 和 mock 路径 | 订单/商品/咨询/物流状态均来自同一 checkpoint 合同 |
 | 今日工作台 | `/workbench`（`/dashboard` 仅别名） | 后端 `operator_workbench` | A2 | 前端工具函数派生待办 | 异常、过期、下一步和深链与后端详情一致 |
 | 订单/历史 | `/orders`；`GET /api/v1/orders`、物流 trace | `Order`、`OrderStatusEvent` | A2 | Mock 订单和旧字段兼容 | 当前/历史范围、物流和状态时间线一致 |
-| 客服 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2/B | 通用表和旧 reply endpoint | 读链唯一；人工回复另行通过 attempt/reconcile 验收 |
+| 客服 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地验收通过，待 GitHub CI/部署） | 通用表的 Naver 历史行和旧 reply endpoint | 读链唯一；人工回复另行通过 attempt/reconcile 验收 |
 | 物流/发货 | `/shipping`；`/shipping/warehouse-batches/*` | 物流快照、`WarehouseShippingBatch` | A2/B | 旧 Shipping 导出/导入/gate | 只展示单批次、精确记录、审批和不确定结果；真实写入仍关闭 |
 | 库存异常 | `/inventory` | 明确后的平台/仓库库存合同 | B/E | 前端 `naverInventory` 和名称映射 | 异常可追溯至 SKU、来源和时间，不直接改平台 |
 | 审计 | `/logs`；`OperationAuditLog` | 操作审计/同步日志 | A1 | 页面局部 mock 日志 | 敏感操作、失败和跨店访问均可追溯且无敏感原文 |
@@ -169,7 +178,7 @@ Workspace / Tenant（内部组织或业务空间）
 1. 服务器后端版本、实时同步、数据一致性和备份已本次核验；仅活动前端静态产物的精确 SHA/版本登记仍为 X，因为 `/release-version.json` 当前落入 SPA HTML 回退。`aiglxt.com` 也尚未配置为可解析的生产域名。
 2. T24 的 `verify_t24_dual_store_automatic_read.py:63` 固定日期与清理健康检查默认真实时钟的冲突已修复：准备层现在将受控 `now` 传入清理健康检查，生产未传入时仍使用真实 UTC 时间；T24 和 `verify_all.py` 已通过。
 3. 本地 PostgreSQL 并发验证因未设置一次性 `T22_TEST_POSTGRES_URL` 跳过；历史 CI 证据不能替代当前复验。
-4. Naver 咨询通用表/受保护表、库存/SKU、旧发货入口和 Mock 回退尚未收口。
+4. Naver 咨询双表的正式读链已完成本地自动化与登录态浏览器验收，候选版本尚待最终回归、提交/推送和 GitHub CI；库存/SKU、旧发货入口和其余 Mock 兼容路径仍待收口。
 5. 公司主体/证照字段、邮箱收信、销售结算、客服写入官方合同和紫鸟助手配对合同仍待确认。
 
 ## 当前阶段验收标准
@@ -183,9 +192,9 @@ Workspace / Tenant（内部组织或业务空间）
 
 ## 下一步三个具体动作
 
-1. 执行 `TASK-INQUIRY-READ-CONTRACT-001`：只收口受保护 Naver 咨询的唯一读链、统计、工作台和深链，不启用回复。
-2. 再执行库存/SKU双来源合同：先明确平台观察库存、仓库盘点库存、SKU/规格键和不唯一映射阻断，不新增真实写入。
-3. 完成电脑端运营主流程收口；每项均先完成桌面验收和完整 390px 回归、提交推送与 CI。下一次服务器业务里程碑发布必须部署并读回 `release-version.json`，DNS/域名切换另行走门禁。
+1. 为 `operator-v1.20260720.1` 运行最终全量回归、构建、版本和工作树校验。
+2. 通过后自动提交/推送并核验该精确 commit 的 GitHub CI；服务器部署、DNS/域名和真实平台操作仍不在授权范围。
+3. 仅在 GitHub CI 通过后再执行库存/SKU 双来源合同：先明确平台观察库存、仓库盘点库存、SKU/规格键和不唯一映射阻断，不新增真实写入。
 
 ## 文档优先级
 

@@ -633,7 +633,7 @@ export function adaptCustomerInquiry(item = {}) {
   const orderNo = item.order_no || relatedOrder.order_no || rawData.order_id || productOrderIds[0] || '';
   const productName = item.product_name || relatedOrder.product_name || rawData.product_name || '';
   const source = item.source || rawData.source || item.source_type || '';
-  const replyEnabled = item.reply_enabled ?? item.replyEnabled ?? (source !== 'naver_readonly');
+  const replyEnabled = item.reply_enabled ?? item.replyEnabled ?? false;
   const readonlyId = item.readonly_id ?? item.readonlyId
     ?? (String(item.inquiry_id || '').startsWith('pxg_naver_readonly:') ? String(item.inquiry_id).split(':')[1] : null);
   const safeSummary = item.summary || item.title || item.inquiry_type || item.category || 'customer inquiry';

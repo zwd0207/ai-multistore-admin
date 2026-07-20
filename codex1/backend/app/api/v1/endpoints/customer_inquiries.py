@@ -28,15 +28,15 @@ def list_customer_inquiries(
         store_id=store_id,
         platform=normalized_platform,
     )
-    items = customer_inquiry_service.list_customer_inquiries(
+    read_model = customer_inquiry_service.get_customer_inquiry_read_model(
         db,
         store_id=store_id,
         platform=normalized_platform,
     )
     return success_response(data={
-        "items": items,
-        "total": len(items),
-        "classification_counts": customer_inquiry_service.summarize_classifications(items),
+        "items": read_model["items"],
+        "total": read_model["total"],
+        "classification_counts": read_model["classification_counts"],
     })
 
 

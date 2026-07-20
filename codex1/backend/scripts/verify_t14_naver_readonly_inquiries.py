@@ -216,9 +216,9 @@ def main():
             backup_copy.unlink()
         listed = client.get("/api/v1/customer-inquiries", params={"store_id": 1}, headers=headers)
         assert listed.status_code == 200 and CONTENT not in listed.text and ANSWER_CONTENT not in listed.text and "Private title" not in listed.text and CUSTOMER_NAME not in listed.text, listed.text
-        assert listed.json()["data"]["total"] == 202, listed.text
-        assert listed.json()["data"]["classification_counts"] == {"all": 202, "answered": 1, "unanswered": 201}, listed.text
-        assert any(item["source"] == "generic" for item in listed.json()["data"]["items"]), listed.text
+        assert listed.json()["data"]["total"] == 201, listed.text
+        assert listed.json()["data"]["classification_counts"] == {"all": 201, "answered": 1, "unanswered": 200}, listed.text
+        assert all(item["source"] == "pxg_naver_readonly_local_v1" for item in listed.json()["data"]["items"]), listed.text
         assert listed.json()["data"]["items"][0]["classification"] in {"answered", "unanswered"}, listed.text
         detail = client.get(f"/api/v1/customer-inquiries/{readonly_id}", params={"store_id": 1}, headers=headers)
         assert detail.status_code == 200 and detail.json()["data"]["content"] == CONTENT, detail.text

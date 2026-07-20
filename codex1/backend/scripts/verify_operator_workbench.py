@@ -227,6 +227,7 @@ def seed() -> None:
             "confirm_batch": confirm_batch.id,
             "completed_batch": completed_batch.id,
             "generic_inquiry": generic.id,
+            "pxg_inquiry": pxg.id,
         })
 
 
@@ -267,6 +268,10 @@ def main() -> None:
         assert response.status_code == 200, response.text
         data = response.json()["data"]
         assert set(data) >= {"store_count", "order_count", "recent_orders", "operator_workbench"}, data
+        assert data["customer_inquiry_count"] == 1, data
+        assert data["open_customer_inquiries"] == 1, data
+        open_inquiry_flag = next(item for item in data["risk_flags"] if item["code"] == "OPEN_CUSTOMER_INQUIRIES")
+        assert open_inquiry_flag["count"] == 1, data["risk_flags"]
         workbench = data["operator_workbench"]
         assert set(workbench) == {"summary", "sections", "sources"}, workbench
         assert set(workbench["summary"]) == {"urgent", "action_required", "waiting", "completed_today"}, workbench
@@ -291,9 +296,19 @@ def main() -> None:
         assert workbench["sources"]["customer_inquiries"]["status"] == "ready", workbench
         assert f"batchId={IDS['review_batch']}" in next(item for item in tasks if item["task_type"] == "warehouse_review")["action_path"]
         assert f"orderId={IDS['abnormal']}" in next(item for item in tasks if item["task_type"] == "abnormal_order")["action_path"]
+        customer_tasks = [item for item in tasks if item["task_type"] == "customer_inquiry"]
+        assert len(customer_tasks) == 1, customer_tasks
+        assert customer_tasks[0]["related_inquiry_id"] == f"pxg_naver_readonly:{IDS['pxg_inquiry']}", customer_tasks
+        assert customer_tasks[0]["action_path"] == f"/customer-service?inquiryId=pxg_naver_readonly:{IDS['pxg_inquiry']}", customer_tasks
         response_text = response.text
         for secret in ["Private Buyer Name", "010-1234-5678", "Private Receiver Name", "010-9999-8888", "Full private recipient address", "010-1111-2222"]:
             assert secret not in response_text, secret
+
+        daily_context = client.get("/api/v1/ai/daily-context", params={"store_id": IDS["store"]})
+        assert daily_context.status_code == 200, daily_context.text
+        daily_data = daily_context.json()["data"]
+        assert daily_data["customer_inquiry_summary"] == {"total": 1, "open": 1}, daily_data
+        assert "CHECK_OPEN_INQUIRIES" in {item["code"] for item in daily_data["recommended_focus"]}, daily_data
 
         with SessionLocal() as db:
             cleanup = db.query(PxgNaverReadonlyCleanupStatus).filter_by(store_id=IDS["store"], platform="naver").one()
@@ -357,9 +372,11 @@ def main() -> None:
         authenticate(client, "other@example.test")
         unrelated = client.get("/api/v1/dashboard/summary", params={"store_id": IDS["other_store"]})
         assert unrelated.status_code == 200, unrelated.text
+        assert unrelated.json()["data"]["customer_inquiry_count"] == 0, unrelated.text
+        assert unrelated.json()["data"]["open_customer_inquiries"] == 0, unrelated.text
         unrelated_workbench = unrelated.json()["data"]["operator_workbench"]
         assert unrelated_workbench["sources"]["customer_inquiries"]["status"] == "ready", unrelated_workbench
-        assert any(item["task_type"] == "customer_inquiry" for item in unrelated_workbench["sections"]["action_required"]), unrelated_workbench
+        assert not any(item["task_type"] == "customer_inquiry" for item in unrelated_workbench["sections"]["action_required"]), unrelated_workbench
 
         client.cookies.clear()
         authenticate(client, "denied@example.test")

@@ -18,6 +18,7 @@ import { formatKstDateTimeWithLabel } from '../utils/time';
 
 const PAGE_SIZE = 10;
 const NAVER_REPLY_BODY_FIELD = 'answerComment';
+const PROTECTED_NAVER_INQUIRY_PREFIX = 'pxg_naver_readonly:';
 const replyClassificationOptions = [
   { value: 'unanswered', label: '未回复' },
   { value: 'answered', label: '已回复' },
@@ -32,6 +33,14 @@ const platformOptions = ['Naver', 'Coupang', 'Gmarket'];
 
 function comparable(value) {
   return String(value ?? '').trim().toLowerCase();
+}
+
+function readonlyIdFromProtectedCanonicalId(value) {
+  const canonicalId = String(value ?? '').trim();
+  if (!canonicalId.startsWith(PROTECTED_NAVER_INQUIRY_PREFIX)) return null;
+
+  const readonlyId = canonicalId.slice(PROTECTED_NAVER_INQUIRY_PREFIX.length).trim();
+  return /^\d+$/.test(readonlyId) ? readonlyId : null;
 }
 
 function text(value, fallback = '-') {
@@ -119,6 +128,7 @@ const columns = [
 export default function CustomerService() {
   const [searchParams] = useSearchParams();
   const deepLinkInquiryId = searchParams.get('inquiryId');
+  const protectedDeepLinkReadonlyId = readonlyIdFromProtectedCanonicalId(deepLinkInquiryId);
   const { selectedStoreId, loading: storeLoading, error: storeError } = useStoreContext();
   const [query, setQuery] = useState({ keyword: '', platform: '', classification: '', priority: '', page: 1 });
   const [draft, setDraft] = useState(query);
@@ -151,7 +161,7 @@ export default function CustomerService() {
       const result = await dataProvider.getCustomerInquiries(params);
       const normalized = (result.data || result.items || []).map(normalizeMessage).filter((item) => matches(item, nextQuery));
       setRows(normalized);
-      if (deepLinkInquiryId) {
+      if (deepLinkInquiryId && !protectedDeepLinkReadonlyId) {
         setActiveMessage(normalized.find((item) => String(item.id ?? item.ticketNo) === deepLinkInquiryId) || null);
       }
       return normalized;
@@ -167,6 +177,27 @@ export default function CustomerService() {
   useEffect(() => {
     load();
   }, [query, selectedStoreId, storeLoading, storeError, deepLinkInquiryId]);
+
+  useEffect(() => {
+    if (
+      !protectedDeepLinkReadonlyId
+      || !isBackendSource
+      || storeLoading
+      || storeError
+      || !selectedStoreId
+    ) return;
+
+    setActiveMessage(normalizeMessage({
+      id: deepLinkInquiryId,
+      ticketNo: deepLinkInquiryId,
+      readonlyId: protectedDeepLinkReadonlyId,
+      storeId: selectedStoreId,
+      platform: 'Naver',
+      source: 'pxg_naver_readonly_local_v1',
+      replyEnabled: false,
+      detailLoaded: false,
+    }));
+  }, [deepLinkInquiryId, protectedDeepLinkReadonlyId, selectedStoreId, storeLoading, storeError]);
 
   const summary = useMemo(() => ({
     total: rows.length,
@@ -201,7 +232,15 @@ export default function CustomerService() {
   };
 
   useEffect(() => {
-    if (!activeMessage || !activeMessage.readonlyId || activeMessage.detailLoaded || !isBackendSource || !selectedStoreId) return undefined;
+    if (
+      !activeMessage
+      || !activeMessage.readonlyId
+      || activeMessage.detailLoaded
+      || !isBackendSource
+      || storeLoading
+      || storeError
+      || !selectedStoreId
+    ) return undefined;
     let cancelled = false;
     setDetailLoading(true);
     setDetailError('');
@@ -218,7 +257,7 @@ export default function CustomerService() {
       if (!cancelled) setDetailLoading(false);
     });
     return () => { cancelled = true; };
-  }, [activeMessage?.id, activeMessage?.detailLoaded, selectedStoreId]);
+  }, [activeMessage?.id, activeMessage?.detailLoaded, selectedStoreId, storeLoading, storeError]);
 
   const openDraft = (message) => {
     setDraftModal({

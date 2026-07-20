@@ -85,7 +85,7 @@ def seed() -> None:
     now = get_utc_now()
     with SessionLocal() as db:
         store = Store(name="Customer Inquiry Test Store", platform="naver", status="active")
-        other_store = Store(name="Other Store", platform="naver", status="active")
+        other_store = Store(name="Other Store", platform="coupang", status="active")
         permitted_role = ErpRole(role_key="customer_inquiry_reader", role_label_zh="test", role_label_en="test", status="active")
         denied_role = ErpRole(role_key="customer_inquiry_denied", role_label_zh="test", role_label_en="test", status="active")
         orders_read = ErpPermission(permission_key="orders.read", permission_group="orders", permission_label_zh="test")
@@ -184,7 +184,7 @@ def seed() -> None:
         ))
         db.add(CustomerInquiry(
             store_id=other_store.id,
-            platform="naver",
+            platform="coupang",
             external_inquiry_id="generic-only-1",
             inquiry_type="product",
             customer_name="Unrelated Customer",
@@ -255,9 +255,11 @@ def main() -> None:
         response = client.get("/api/v1/customer-inquiries", params={"store_id": 1})
         assert response.status_code == 200, response.text
         items = response.json()["data"]["items"]
-        assert len(items) == 3, items
-        assert len({item["inquiry_id"] for item in items}) == 3, items
-        assert {item["source"] for item in items} == {"generic", "pxg_naver_readonly_local_v1"}, items
+        assert len(items) == 2, items
+        assert len({item["inquiry_id"] for item in items}) == 2, items
+        assert {item["source"] for item in items} == {"pxg_naver_readonly_local_v1"}, items
+        assert response.json()["data"]["total"] == 2, response.text
+        assert response.json()["data"]["classification_counts"] == {"all": 2, "answered": 0, "unanswered": 2}, response.text
         assert all(item["store_id"] == 1 for item in items), items
         assert all(set(item) >= {"source", "inquiry_id", "category", "inquiry_type", "status", "summary", "created_at", "updated_at", "store_id", "order_context", "logistics_context", "reply_enabled"} for item in items), items
         assert all("customer_name" not in item and "raw_data" not in item and "content" not in item for item in items), items
@@ -306,6 +308,11 @@ def main() -> None:
             authenticate(client, "generic@example.test")
             unrelated = client.get("/api/v1/customer-inquiries", params={"store_id": 2})
             assert unrelated.status_code == 200 and unrelated.json()["data"]["total"] == 1, unrelated.text
+            generic_item = unrelated.json()["data"]["items"][0]
+            assert generic_item["source"] == "generic", generic_item
+            assert generic_item["platform"] == "coupang", generic_item
+            assert generic_item["reply_enabled"] is False, generic_item
+            assert generic_item["reply_disabled_reason"] == "legacy_readonly", generic_item
         finally:
             os.environ["PXG_NAVER_LOCAL_READ_RETENTION_CLEANUP_ENABLED"] = "true"
             get_settings.cache_clear()
