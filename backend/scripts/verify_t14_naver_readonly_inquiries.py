@@ -306,7 +306,7 @@ def main():
         assert {"encrypted_content", "encrypted_title", "content_hash", "content_length", "encrypted_answer_content", "answer_content_hash", "answer_content_length", "encrypted_customer_name", "customer_name_hash", "customer_name_length"} <= {row[1] for row in connection.execute("PRAGMA table_info(pxg_naver_readonly_customer_inquiries)")}
         assert connection.execute("SELECT COUNT(*) FROM pxg_naver_readonly_customer_inquiries").fetchone()[0] == 1
         connection.close(); legacy_path.unlink()
-        startup_script = BACKEND_DIR.parents[1] / "scripts" / "start-local-pxg-naver-trial.ps1"
+        startup_script = BACKEND_DIR.parent / "scripts" / "start-local-pxg-naver-trial.ps1"
         startup_text = startup_script.read_text(encoding="utf-8")
         assert "upgrade_pxg_naver_readonly_schema.py" in startup_text
         assert startup_text.index("upgrade_pxg_naver_readonly_schema.py") > startup_text.index("Import-LocalEnv $runtimeEnv")

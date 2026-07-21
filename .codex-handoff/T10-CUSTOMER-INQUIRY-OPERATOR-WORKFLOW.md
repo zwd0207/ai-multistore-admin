@@ -23,9 +23,9 @@ Make the persisted real Naver inquiry for `pxg球包店 / Naver` visible in the 
 
 **Primary ownership:**
 
-- `codex1/backend/app/api/v1/endpoints/customer_inquiries.py`
-- `codex1/backend/app/services/customer_inquiry_service.py`
-- `codex1/backend/app/services/pxg_naver_readonly_persistence_service.py`
+- `backend/app/api/v1/endpoints/customer_inquiries.py`
+- `backend/app/services/customer_inquiry_service.py`
+- `backend/app/services/pxg_naver_readonly_persistence_service.py`
 - Backend schemas and verification scripts directly required by this contract
 
 **Required behavior:**

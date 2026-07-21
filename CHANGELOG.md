@@ -2,6 +2,18 @@
 
 本文件只记录已经发生的代码库变更，不记录计划、愿望或未执行的功能。
 
+## 2026-07-22
+
+### Project layout and operations
+
+- 将唯一运行仓库收口为 `codex2/`，后端由旧嵌套目录扁平迁移到 `backend/`；同步更新本地入口、合同测试、CI 和当前文档，保留数据库文件名、API、模型、迁移版本及备份 manifest 合同。
+- 将 351 份 Phase 文档归档到 `docs/archive/phases/`，将旧 README、Commander、进度和旧规则归档到 `docs/archive/governance/`，并以 `docs/PROJECT_CONTROL.md` 作为唯一当前事实入口。
+- 在验证完整 Git bundle、数据库哈希和新加密快照后，移除五个辅助 worktree、旧 SQLite、历史本地备份和旧独立仓库工作副本；保留删除清单与 SHA-256。
+- 将明文紫鸟 Key 移入受限私密目录，不读取、不输出、不轮换；现有认证不变。
+- 使用 Python 3.12 重建后端 `.venv`，保留主仓库唯一 `node_modules`，恢复并验收本地 8013/5181。生产服务器、生产数据库、DNS、域名和平台接口未操作，所有真实平台写入继续关闭。
+- 库存/SKU 的 7 项未完成改动封存到仅本地分支 `wip/inventory-sku-pre-cleanup-20260722`（`c9250dbc...`），不混入目录整理提交。
+- 登记候选版本 `operator-v1.20260722.1`。
+
 ## 2026-07-20
 
 ### Code and Documentation
@@ -37,7 +49,7 @@
 
 - 建立项目状态、任务交接、追加决策和真实变更的文档职责边界。
 - 完成目标对齐审计的分类校准，锁定当前项目基准和下一阶段两个工作流。
-- 标记 `COMMANDER_STATE.md` 与 `COMMANDER_DECISIONS.md` 为历史记录，并补充 README 状态入口。
+- 标记 `docs/archive/governance/COMMANDER_STATE.md` 与 `docs/archive/governance/COMMANDER_DECISIONS.md` 为历史记录，并补充 README 状态入口。
 - 本次没有修改业务代码、数据库模型、迁移、配置、依赖、测试、Mock 数据、API、前端页面、分支或提交历史。
 
 ## 2026-07-19

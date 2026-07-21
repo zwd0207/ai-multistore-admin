@@ -16,13 +16,13 @@ function includesAll(file, phrases) {
   }
 }
 
-includesAll('codex1/backend/app/schemas/order.py', [
+includesAll('backend/app/schemas/order.py', [
   'delivery_company: str | None = None',
   'tracking_number: str | None = None',
   'logistics_trace_status: str | None = None',
 ]);
 
-includesAll('codex1/backend/app/services/sync_service.py', [
+includesAll('backend/app/services/sync_service.py', [
   '"shippingAddress"',
   '"receiverTelNo2"',
   '"tel1"',
@@ -33,23 +33,23 @@ includesAll('codex1/backend/app/services/sync_service.py', [
   '"tracking_number"',
 ]);
 
-includesAll('codex1/backend/app/schemas/sync.py', [
+includesAll('backend/app/schemas/sync.py', [
   'class NaverOrderSingleRefreshRequest',
 ]);
 
-includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
+includesAll('backend/app/api/v1/endpoints/sync.py', [
   '@router.post("/orders/naver/refresh-one")',
   'refresh_single_naver_order_detail',
 ]);
 
-includesAll('codex1/backend/app/services/order_service.py', [
+includesAll('backend/app/services/order_service.py', [
   'def get_order_logistics_timeline(',
   'shipping_tracking_import_rows',
   'local_tracking_trace',
   '实时快递轨迹暂未接入',
 ]);
 
-includesAll('codex1/backend/app/api/v1/endpoints/orders.py', [
+includesAll('backend/app/api/v1/endpoints/orders.py', [
   '@router.get("/{order_id}/logistics-trace")',
   'get_order_logistics_trace',
 ]);
@@ -82,7 +82,7 @@ includesAll('src/pages/Orders.jsx', [
   '暂未提供实时轨迹',
 ]);
 
-const backendDir = path.join(root, 'codex1', 'backend');
+const backendDir = path.join(root, 'backend');
 const backendPython = path.join(backendDir, '.venv', 'Scripts', 'python.exe');
 const pythonBin = fs.existsSync(backendPython) ? backendPython : 'python';
 

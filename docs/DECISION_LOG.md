@@ -16,7 +16,7 @@
 - 日期：2026-07-19
 - 决策：`docs/PROJECT_CONTROL.md` 是唯一当前项目状态入口；`docs/TASK_HANDOFF.md` 是最近任务交接入口；`docs/GOAL_ALIGNMENT_AUDIT.md` 是一次性审计证据；`CHANGELOG.md` 只记录真实变更。
 - 原因：分离当前事实、任务交接、不可变决策和历史审计，避免文档职责重叠。
-- 影响：`COMMANDER_STATE.md` 和 `COMMANDER_DECISIONS.md` 仅保留历史内容并标记历史。
+- 影响：`docs/archive/governance/COMMANDER_STATE.md` 和 `docs/archive/governance/COMMANDER_DECISIONS.md` 仅保留历史内容并标记历史。
 - 状态：已生效
 - 证据：项目负责人明确确认；本次文档校准。
 
@@ -63,7 +63,7 @@
 - 原因：当前代码没有 Company/LegalEntity/证照模型，直接等同会制造错误事实；保留现有外键可降低过渡风险。
 - 影响：先通过文案、权限和数据合同重新定义；公司主体字段和法律需求确认后再评估最小扩展。
 - 状态：建议已锁定，schema 待后续决策
-- 证据：`codex1/backend/app/models/tenant.py`、`store.py`；本次审计。
+- 证据：`backend/app/models/tenant.py`、`store.py`；本次审计。
 
 ## D057
 
@@ -81,7 +81,7 @@
 - 原因：验证脚本固定 `2026-07-17`，准备流程的清理健康检查使用真实当前时间，跨日后产生错误过期判断。
 - 影响：在时钟修复和全量重跑前，不宣称 `verify_all.py` 当前全部通过；不得只替换成另一个固定日期。
 - 状态：待后续工作流处理
-- 证据：`codex1/backend/scripts/verify_t24_dual_store_automatic_read.py:63`、`prepare_t24_dual_store_automatic_read.py:187`；本次审计运行记录。
+- 证据：`backend/scripts/verify_t24_dual_store_automatic_read.py:63`、`prepare_t24_dual_store_automatic_read.py:187`；本次审计运行记录。
 
 ## D059
 
@@ -139,3 +139,12 @@
 - 影响：受保护 canonical 深链必须直接读取详情且不依赖首批列表；旧 Naver 同步和回复继续关闭。本决策不删除历史数据、不改表、不迁移、不触发平台调用。
 - 状态：已生效；2026-07-20 的登录态浏览器验收已通过，候选版本正进行最终回归、提交/推送与 GitHub CI 核验。
 - 证据：[`docs/INQUIRY_READ_CONTRACT_AUDIT_20260719.md`](INQUIRY_READ_CONTRACT_AUDIT_20260719.md)、`verify_customer_inquiry_operator_workflow.py`、`verify_operator_workbench.py`、`verify_t14_naver_readonly_inquiries.py`。
+
+## D065
+
+- 日期：2026-07-22
+- 决策：唯一运行仓库保留为 `codex2/`，后端物理目录固定为 `backend/`；不重命名 Codex1 业务术语、`codex1.db`、API、模型、迁移版本或备份 manifest 字段。历史治理资料只归档，不再竞争当前状态。
+- 原因：消除旧后端目录的重复嵌套和多工作树噪音，同时避免目录整理演变为业务兼容性改造。
+- 影响：入口脚本、CI、合同测试和当前文档统一使用 `backend/`；生产环境不操作。库存/SKU WIP 只保存在本地分支 `wip/inventory-sku-pre-cleanup-20260722`，须从整理后的发布分支新建任务分支后以无提交方式恢复，服务文件映射到 `backend/app/services/inventory_service.py`。
+- 可恢复性：目录整理前的完整 Git bundle、SHA-256、数据库基线和新加密快照保存在工作区 `archive/` 与 `backend/.local-trial/readonly-backups/`；经授权删除的旧 SQLite/备份仅保留哈希清单，数据本身不可恢复。
+- 状态：已生效；候选版本 `operator-v1.20260722.1` 正执行最终回归、推送和 CI 门禁。

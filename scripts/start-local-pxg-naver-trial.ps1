@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$backend = Join-Path $root "codex1\backend"
+$backend = Join-Path $root "backend"
 $trialDir = Join-Path $backend ".local-trial"
 $runtimeEnv = Join-Path $trialDir "runtime.env"
 $python = Join-Path $backend ".venv\Scripts\python.exe"

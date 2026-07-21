@@ -15,7 +15,7 @@ function includesAll(file, phrases) {
   }
 }
 
-includesAll('codex1/backend/app/schemas/sync.py', [
+includesAll('backend/app/schemas/sync.py', [
   'NaverCustomerInquirySyncRequest',
   'NaverCustomerInquiryReplyRequest',
   'answer_comment: str',
@@ -23,14 +23,14 @@ includesAll('codex1/backend/app/schemas/sync.py', [
   'final_operator_confirmation: bool = False',
 ]);
 
-includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
+includesAll('backend/app/api/v1/endpoints/sync.py', [
   '@router.post("/customer-inquiries/naver")',
   'sync_naver_customer_inquiries',
   '@router.post("/customer-inquiries/naver/reply")',
   'reply_naver_customer_inquiry',
 ]);
 
-includesAll('codex1/backend/app/services/sync_service.py', [
+includesAll('backend/app/services/sync_service.py', [
   'NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE',
   '/v1/pay-user/inquiries',
   '/v1/pay-merchant/inquiries/',

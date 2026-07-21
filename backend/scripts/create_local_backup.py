@@ -13,11 +13,10 @@ from typing import Any
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-CODEX1_ROOT = BACKEND_DIR.parent
-CODEX2_ROOT = CODEX1_ROOT.parent
-PROJECT_DIR = BACKEND_DIR.parent.parent.parent
+REPOSITORY_ROOT = BACKEND_DIR.parent
+WORKSPACE_ROOT = REPOSITORY_ROOT.parent
 DEFAULT_SOURCE_DB = BACKEND_DIR / "codex1.db"
-DEFAULT_BACKUP_ROOT = PROJECT_DIR / "codex1-db-backups"
+DEFAULT_BACKUP_ROOT = WORKSPACE_ROOT / "codex1-db-backups"
 
 ALLOWED_RETENTION_CLASSES = {
     "pre_write",
@@ -443,8 +442,10 @@ def main() -> None:
         retention_reason=args.retention_reason,
         backup_root=Path(args.backup_root),
         operation_audit_correlation_id=args.operation_audit_correlation_id,
-        git_commit_codex1=_git_commit(CODEX1_ROOT),
-        git_commit_codex2=_git_commit(CODEX2_ROOT),
+        # Keep both manifest fields for compatibility after the former nested
+        # Codex1 backend became part of the single codex2 repository.
+        git_commit_codex1=_git_commit(REPOSITORY_ROOT),
+        git_commit_codex2=_git_commit(REPOSITORY_ROOT),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     if result["status"] != "backup_created":

@@ -12,13 +12,13 @@ const dashboard = read('src/pages/Dashboard.jsx');
 const adapters = read('src/services/adapters.js');
 const provider = read('src/services/dataProvider.js');
 
-includesAll('codex1/backend/app/api/v1/endpoints/dashboard.py', [
+includesAll('backend/app/api/v1/endpoints/dashboard.py', [
   '@router.get("/store-overview")',
   'get_store_overview',
   'require_session',
   'require_any_store_permission',
 ]);
-includesAll('codex1/backend/app/services/stats_service.py', [
+includesAll('backend/app/services/stats_service.py', [
   'def get_store_overview',
   'display_value": "?"',
   'ip_not_allowed',
@@ -26,11 +26,11 @@ includesAll('codex1/backend/app/services/stats_service.py', [
   '_aggregate_store_overview_workbenches',
   'operator_workbench',
 ]);
-includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
+includesAll('backend/app/api/v1/endpoints/sync.py', [
   '@router.post("/manual-batch/all")',
   'manual_batch_sync_all_stores',
 ]);
-includesAll('codex1/backend/app/services/sync_service.py', [
+includesAll('backend/app/services/sync_service.py', [
   'def manual_batch_sync_all_stores',
   'store_results',
   'platform_write": False',

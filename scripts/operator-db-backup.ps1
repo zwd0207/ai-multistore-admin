@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$backend = Resolve-Path (Join-Path $root "codex1\backend")
+$backend = Resolve-Path (Join-Path $root "backend")
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
   $python = "python"

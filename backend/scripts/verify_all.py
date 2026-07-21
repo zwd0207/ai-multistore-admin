@@ -19920,7 +19920,7 @@ def verify_git_tracking() -> None:
         path
         for path in tracked
         if any(pattern in path for pattern in FORBIDDEN_TRACKED_PATTERNS)
-        and path != "backend/.env.example"
+        and not path.endswith(".env.example")
     ]
     assert not forbidden, f"Forbidden tracked files: {forbidden}"
     status = run(["git", "status", "--short"], cwd=ROOT_DIR, echo=False)

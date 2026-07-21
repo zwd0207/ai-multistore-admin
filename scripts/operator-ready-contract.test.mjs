@@ -22,7 +22,7 @@ function exists(file) {
 exists('scripts/operator-start.ps1');
 exists('scripts/operator-db-backup.ps1');
 exists('scripts/operator-readiness-check.mjs');
-exists('PHASE_CORE_ERP_OPERATOR_READY_1.md');
+exists('docs/archive/phases/PHASE_CORE_ERP_OPERATOR_READY_1.md');
 
 includesAll('scripts/operator-start.ps1', [
   'Core-ERP-Operator-Ready-1',
@@ -67,14 +67,14 @@ includesAll('src/services/backendApi.js', [
   'healthCheck',
 ]);
 
-includesAll('codex1/backend/app/api/v1/endpoints/health.py', [
+includesAll('backend/app/api/v1/endpoints/health.py', [
   'real_api_write_enabled',
   'platform_write_closed',
   'controlled_platform_writes_enabled',
   'approved_platform_write_operations',
 ]);
 
-includesAll('PHASE_CORE_ERP_OPERATOR_READY_1.md', [
+includesAll('docs/archive/phases/PHASE_CORE_ERP_OPERATOR_READY_1.md', [
   '运营试用交付',
   'Naver 订单模块',
   '手动批量刷新',

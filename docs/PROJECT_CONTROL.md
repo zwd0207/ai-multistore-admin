@@ -1,6 +1,15 @@
 # 项目控制（唯一当前状态入口）
 
-## TASK-INQUIRY-READ-CONTRACT-001 当前状态
+## TASK-WORKSPACE-CLEANUP-001 当前状态
+
+- 状态：后端扁平迁移、历史资料归档、本地数据保护、旧副本清理和 8013/5181 运行验收已完成；正在执行干净工作树上的最终全量回归、提交、推送和精确 GitHub CI 核验。
+- 唯一运行仓库：`codex2/`。后端物理路径为 `backend/`；数据库文件名 `codex1.db`、API 合同、模型和迁移版本均未改变。`codex1/` 已删除，351 份 Phase 文档已归档到 `docs/archive/phases/`。
+- 本地运行：现用配置已恢复，8013/5181 健康；真实平台写入总开关及客服、发货、商品、库存等受控写入继续关闭。生产服务器、生产数据库、DNS、域名和平台接口均未操作。
+- 可恢复点：完整 bundle 位于工作区 `archive/git/ai-multistore-pre-cleanup-20260722.bundle`；当前试运营库的新加密快照位于 `backend/.local-trial/readonly-backups/workspace-migration-pre-cleanup-20260722.sqlite.enc`。旧 SQLite 与历史本地备份已按授权删除，路径、大小和 SHA-256 记录在工作区 `archive/DATA_DELETION_MANIFEST_20260722.md`。
+- 库存/SKU WIP：仅保存在本地分支 `wip/inventory-sku-pre-cleanup-20260722`，提交 `c9250dbc4801c10a85a47730924fe06f75168d1d`，未混入本次目录整理。恢复流程见 [`docs/runbooks/INVENTORY_SKU_WIP_RECOVERY.md`](runbooks/INVENTORY_SKU_WIP_RECOVERY.md)。
+- 候选版本：`operator-v1.20260722.1`；精确技术版本以本次整理提交 SHA 为准。生产已部署版本保持原登记，本任务不部署生产。
+
+## 已完成历史：TASK-INQUIRY-READ-CONTRACT-001
 
 - 状态：代码、自动化验证与登录态浏览器验收已通过；正在登记候选版本并执行最终全量回归，尚未自动提交、推送或开始下一任务。
 - 已验证主实现：Naver 正式读链只使用 `PxgNaverReadonlyCustomerInquiry`；`CustomerInquiry` 的 Naver 历史/Mock 行保留但从客服列表、Dashboard、风险、每日上下文和工作台排除；非 Naver 通用记录仅作只读兼容且回复固定关闭。
@@ -9,7 +18,7 @@
 - 浏览器事实：项目负责人已完成本地 ERP 登录/MFA。重启经核对的本地 8013/5181 旧进程后，工作台仅保留 canonical `pxg_naver_readonly:21` 待办，详情直接打开、回复保持关闭；桌面与 390px 均无横向溢出，控制台无新增 error/warn。未触发平台操作或数据重置。
 - 审计记录：[`docs/INQUIRY_READ_CONTRACT_AUDIT_20260719.md`](INQUIRY_READ_CONTRACT_AUDIT_20260719.md)。
 
-## TASK-PROD-RECONCILE-001 当前状态
+## 已完成历史：TASK-PROD-RECONCILE-001
 
 - 状态：完成。已以只读方式核验生产与本地的代码、运行合同和自动同步证据；未停止服务、部署、修改生产配置或数据库，也未触发平台操作。
 - 前一任务：`TASK-DATA-BOUNDARY-001` 已完成 A2 收口。正式模式默认 Backend，只有显式 `mock` 才使用 Demo/Mock；相关登录态浏览器验收、完整回归和 GitHub CI 已通过。
@@ -20,17 +29,17 @@
 
 - 文档版本：1.0
 - 状态：当前基准
-- 最后校准：2026-07-20
+- 最后校准：2026-07-22
 - 当前分支：`release/operator-v1`
-- 当前仓库候选版本：`operator-v1.20260720.1`；精确版本以该版本所在的 Git commit SHA 为准。
+- 当前仓库候选版本：`operator-v1.20260722.1`；精确版本以该版本所在的 Git commit SHA 为准。
 - 当前服务器已部署版本：后端 `app/` 已核验为 `62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`；前端受控源代码为 `e5697e4b2e12e44a7ba1eeaed8c0ee7b85f98f25`，但活动 `dist` 缺少 `/release-version.json`，精确前端静态产物版本为 X。
-- 当前业务代码基线：`operator-v1.20260720.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是本任务最初的数据边界主提交。
+- 当前业务代码基线：`operator-v1.20260722.1`；精确仓库 HEAD 以 `git rev-parse HEAD` 为准，`ac9375b` 是历史数据边界主提交。
 - 生产代码证据基线：`62e49ba9cfdd19a6f6b026c25d53fc3f2ad98401`（历史部署证据，不等同于当前 HEAD）
 - 一次性对齐审计：[`docs/GOAL_ALIGNMENT_AUDIT.md`](GOAL_ALIGNMENT_AUDIT.md)
 - 本次生产对齐审计：[`docs/PRODUCTION_RECONCILIATION_AUDIT_20260719.md`](PRODUCTION_RECONCILIATION_AUDIT_20260719.md)
 - 紫鸟集成研究索引：[`docs/integrations/ziniao/README.md`](integrations/ziniao/README.md)
 
-本文件是仓库内唯一的当前项目状态入口。`docs/TASK_HANDOFF.md`只记录最近一次任务交接，`docs/DECISION_LOG.md`只记录追加式决策，`CHANGELOG.md`只记录真实变更。`COMMANDER_STATE.md`和`COMMANDER_DECISIONS.md`保留为历史记录，不再作为当前状态或当前决策来源。
+本文件是仓库内唯一的当前项目状态入口。`docs/TASK_HANDOFF.md`只记录最近一次任务交接，`docs/DECISION_LOG.md`只记录追加式决策，`CHANGELOG.md`只记录真实变更。`docs/archive/governance/COMMANDER_STATE.md`和`docs/archive/governance/COMMANDER_DECISIONS.md`保留为历史记录，不再作为当前状态或当前决策来源。
 
 版本登记使用 `public/release-version.json`。GitHub 候选版本由该文件和精确 commit 共同确定；服务器只有在实际部署并从 `/release-version.json` 读回相同值后才登记为已部署。不得只依据聊天、分支名、文件时间或历史部署记录判断两边版本一致。
 
@@ -38,7 +47,7 @@
 
 正式阶段名称：**核心数据合同与内部运营主流程收口**。
 
-本次生产审计已锁定基准，咨询唯一读链的代码收口、自动化与登录态浏览器验收均已完成；当前唯一主目标是完成版本登记、最终回归、自动提交/推送和 GitHub CI 核验。在不推倒重做的前提下继续统一核心数据口径和正式运营入口，所有未确认的平台写入继续关闭。
+本次目录整理不改变业务阶段和运行合同。当前唯一主目标是完成 `operator-v1.20260722.1` 的最终回归、提交/推送与 GitHub CI 核验；通过后从整理后的发布分支恢复库存/SKU WIP，继续统一核心数据口径。所有未确认的平台写入继续关闭。
 
 ## 长期目标
 
@@ -192,9 +201,9 @@ Workspace / Tenant（内部组织或业务空间）
 
 ## 下一步三个具体动作
 
-1. 为 `operator-v1.20260720.1` 运行最终全量回归、构建、版本和工作树校验。
-2. 通过后自动提交/推送并核验该精确 commit 的 GitHub CI；服务器部署、DNS/域名和真实平台操作仍不在授权范围。
-3. 仅在 GitHub CI 通过后再执行库存/SKU 双来源合同：先明确平台观察库存、仓库盘点库存、SKU/规格键和不唯一映射阻断，不新增真实写入。
+1. 为 `operator-v1.20260722.1` 完成干净工作树全量回归、秘密扫描、构建和版本校验。
+2. 通过后提交并推送 `release/operator-v1`，核验该精确 commit 的 GitHub CI；服务器部署、生产数据库、DNS/域名和真实平台操作仍不在授权范围。
+3. CI 通过后，从整理后的发布分支新建库存/SKU任务分支，按恢复说明以无提交方式移植 `c9250dbc...`，并将服务文件落在 `backend/app/services/inventory_service.py`；仍不新增真实写入。
 
 ## 文档优先级
 

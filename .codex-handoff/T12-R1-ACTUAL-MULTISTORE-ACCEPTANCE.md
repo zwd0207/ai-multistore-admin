@@ -6,7 +6,7 @@ Status: accepted on 2026-07-13
 
 - Frontend: `http://127.0.0.1:5181/`
 - Backend: `http://127.0.0.1:8013/`
-- Database: isolated local SQLite under `codex1/backend/.local-trial`
+- Database: isolated local SQLite under `backend/.local-trial`
 - Stable account: use the existing local credential helper; never copy secrets into task messages
 
 ## Accepted Scope

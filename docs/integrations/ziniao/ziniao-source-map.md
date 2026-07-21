@@ -242,9 +242,9 @@
 
 实际审查范围包括：
 
-- `codex1/backend/app/models/` 中的 Store、DeviceEnvironment、PlatformLoginCredential、ApiCredential、Product、Order、CustomerInquiry、Email、SyncLog、SyncCheckpoint、ApiCapability、操作审计、认证与店铺成员关系。
-- `codex1/backend/app/services/` 中的店铺、设备、凭证、平台登录、同步、能力检测、操作审计、Naver/Coupang 适配与工作台聚合。
-- `codex1/backend/app/api/v1/endpoints/` 中的 stores、credentials、device_environments、dashboard、sync、orders、products、customer inquiries 等现有路由。
+- `backend/app/models/` 中的 Store、DeviceEnvironment、PlatformLoginCredential、ApiCredential、Product、Order、CustomerInquiry、Email、SyncLog、SyncCheckpoint、ApiCapability、操作审计、认证与店铺成员关系。
+- `backend/app/services/` 中的店铺、设备、凭证、平台登录、同步、能力检测、操作审计、Naver/Coupang 适配与工作台聚合。
+- `backend/app/api/v1/endpoints/` 中的 stores、credentials、device_environments、dashboard、sync、orders、products、customer inquiries 等现有路由。
 - `src/pages/`、`src/services/`、`src/context/` 中的店铺、账号、设备、工作台、订单、咨询和同步状态页面/适配器。
 - 现有专项验证脚本和 `verify_all.py`。
 

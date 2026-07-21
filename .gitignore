@@ -3,17 +3,49 @@ dist/
 acceptance-screenshots/
 output/
 .playwright-cli/
+
+# Local configuration and secrets
 .env
 .env.*
+!.env.example
+backend/.local-trial/
+
+# Runtime logs and generated data
 *.log
+logs/
+raw_responses/
+exports/
+
+# Databases and backups
 *.db
 *.db.backup*
 *.sqlite
 *.sqlite.backup*
 *.sqlite3
 *.sqlite3.backup*
-.venv/
-venv/
-__pycache__/
 codex1-db-backups/
 backups/
+
+# Python caches and environments
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python packaging output
+build/
+*.egg-info/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

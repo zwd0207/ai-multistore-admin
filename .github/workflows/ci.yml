@@ -45,11 +45,11 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: codex1/backend/requirements.txt
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
         run: |
           npm ci
-          pip install -r codex1/backend/requirements.txt
+          pip install -r backend/requirements.txt
       - name: Verify encoding and session boundaries
         run: |
           npm run encoding:scan
@@ -87,7 +87,7 @@ jobs:
       T22_TEST_POSTGRES_URL: postgresql+psycopg://t22_test:t22_test_password@127.0.0.1:5432/t22_test
     defaults:
       run:
-        working-directory: codex1/backend
+        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -96,7 +96,7 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: codex1/backend/requirements.txt
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run complete backend verification

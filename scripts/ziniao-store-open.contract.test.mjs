@@ -12,10 +12,10 @@ const stores = read('src/pages/Stores.jsx');
 const orders = read('src/pages/Orders.jsx');
 const backendApi = read('src/services/backendApi.js');
 const dataProvider = read('src/services/dataProvider.js');
-const backendRoute = read('codex1/backend/app/api/v1/endpoints/stores.py');
-const backendService = read('codex1/backend/app/services/platform_login_service.py');
-const directoryService = read('codex1/backend/app/services/ziniao_directory_sync_service.py');
-const backendMain = read('codex1/backend/app/main.py');
+const backendRoute = read('backend/app/api/v1/endpoints/stores.py');
+const backendService = read('backend/app/services/platform_login_service.py');
+const directoryService = read('backend/app/services/ziniao_directory_sync_service.py');
+const backendMain = read('backend/app/main.py');
 
 const store = adaptStore({
   id: 8,

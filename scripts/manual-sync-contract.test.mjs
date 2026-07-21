@@ -18,13 +18,13 @@ function includesAll(file, phrases) {
   }
 }
 
-includesAll('codex1/backend/app/schemas/sync.py', [
+includesAll('backend/app/schemas/sync.py', [
   'ManualBatchSyncRequest',
   'NaverOrderManualRefreshRequest',
   'max_count: int = Field(default=20, ge=1, le=20)',
 ]);
 
-includesAll('codex1/backend/app/models/order.py', [
+includesAll('backend/app/models/order.py', [
   'external_product_order_id',
   'buyer_phone',
   'receiver_name',
@@ -33,14 +33,14 @@ includesAll('codex1/backend/app/models/order.py', [
   'zip_code',
 ]);
 
-includesAll('codex1/backend/app/api/v1/endpoints/sync.py', [
+includesAll('backend/app/api/v1/endpoints/sync.py', [
   '@router.post("/manual-batch")',
   'manual_batch_sync',
   '@router.post("/orders/naver/manual-refresh")',
   'manual_refresh_naver_orders',
 ]);
 
-includesAll('codex1/backend/app/services/sync_service.py', [
+includesAll('backend/app/services/sync_service.py', [
   'def manual_batch_sync',
   'def manual_batch_sync_all_stores',
   'ip_not_allowed',
@@ -72,7 +72,7 @@ includesAll('codex1/backend/app/services/sync_service.py', [
   'NAVER_CUSTOMER_INQUIRY_SOURCE_TYPE',
 ]);
 
-const syncServiceText = read('codex1/backend/app/services/sync_service.py');
+const syncServiceText = read('backend/app/services/sync_service.py');
 assert.ok(
   !syncServiceText.includes('_manual_sync_customer_inquiries(store_platform)'),
   'all-store manual sync exception handling must not call customer inquiry sync with missing db/store arguments',

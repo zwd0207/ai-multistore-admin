@@ -26,7 +26,7 @@
 
 - “代码存在”不等于“业务完成”。只有进入生产主路由、具备真实数据合同并有测试或生产证据，才判定为完成。
 - Mock、preview、readonly-check、dry-run 和历史 Phase 文档只证明门禁或设计，不证明真实运营闭环。
-- 当前生产事实优先取 `COMMANDER_DECISIONS.md` 的 D044-D049 和 `COMMANDER_STATE.md` 尾部的 Current Release Gate；文件顶部的旧状态不作为当前事实。
+- 当前生产事实优先取 `docs/archive/governance/COMMANDER_DECISIONS.md` 的 D044-D049 和 `docs/archive/governance/COMMANDER_STATE.md` 尾部的 Current Release Gate；文件顶部的旧状态不作为当前事实。
 - 本次未连接生产服务器、未读取生产客户数据、未调用 Naver/紫鸟真实接口。
 
 ### 2.2 当前事实
@@ -37,7 +37,7 @@
 - 生产基础已完成 PostgreSQL 16、Alembic、HTTPS、MFA 会话、小时级加密 OSS 备份和恢复演练；证据见 D044-D045。
 - 两个获批 Naver 店铺的订单、咨询、商品和物流只读自动同步已完成首轮真实验证；物流共保存 44 条受保护记录，证据见 D048-D049。
 - 平台写入、客服回复、发货回填、商品/库存修改和 AI 自动操作仍关闭。
-- AI 端点当前只返回结构化上下文，没有模型调用，见 `codex1/backend/app/api/v1/endpoints/ai.py:12`。
+- AI 端点当前只返回结构化上下文，没有模型调用，见 `backend/app/api/v1/endpoints/ai.py:12`。
 
 ### 2.3 本次验证结果
 
@@ -108,8 +108,8 @@
 | 36 | `sync_service.py` 多代实现 | E | 14,050 行，混合 Mock、Naver、Coupang、财务、回复和批量门禁；有 3 个重复顶层函数名 | 冻结新增，后续按调用边界渐进迁出 | `sync_service.py:3355-3537` |
 | 37 | Mock/Backend 双运行路径 | E | 默认数据源为 Mock，`Proxy` 对缺失方法回退 Mock | 生产构建必须 fail-closed；Mock 仅测试/演示 | `dataSource.js:1`, `dataProvider.js` 尾部 |
 | 38 | Mock 页面、数据和客户端 | F | 不进入生产主流程，但仍被开发模式使用 | 隔离到 demo/test 命名空间，先不删除 | `src/pages/Mock*`, `src/data/mockData.js`, `clients/*_client.py` |
-| 39 | 旧 Phase 文档和过期状态头 | F | 历史价值高，但当前状态相互矛盾 | 归档、只读；当前事实只认控制文档 | 351 个根目录 `PHASE_*`, `COMMANDER_STATE.md` 顶部 |
-| 40 | 旧 SQLite 升级脚本和历史门禁脚本 | F | PostgreSQL/Alembic 已成为生产主线 | 标记 legacy，确认无生产调用后再决定移除 | `codex1/backend/scripts/upgrade_*.py` |
+| 39 | 旧 Phase 文档和过期状态头 | F | 历史价值高，但当前状态相互矛盾 | 归档、只读；当前事实只认控制文档 | 351 个根目录 `PHASE_*`, `docs/archive/governance/COMMANDER_STATE.md` 顶部 |
+| 40 | 旧 SQLite 升级脚本和历史门禁脚本 | F | PostgreSQL/Alembic 已成为生产主线 | 标记 legacy，确认无生产调用后再决定移除 | `backend/scripts/upgrade_*.py` |
 
 ## 5. 已完成但暂缓扩展的能力
 
@@ -289,9 +289,9 @@
 以下内容先标记，不删除：
 
 - `src/pages/Mock*`、`src/data/mockData.js`、`src/data/shippingMockData.js`。
-- `codex1/backend/app/clients/naver_client.py` 和 `coupang_client.py` 中纯 Mock client。
+- `backend/app/clients/naver_client.py` 和 `coupang_client.py` 中纯 Mock client。
 - `/sync/*/mock`、`/permissions/*mock*`、`/batch/*readonly-check` 的历史门禁接口。
-- `codex1/backend/scripts/upgrade_*.py` 中被 Alembic 取代的 SQLite 升级脚本。
+- `backend/scripts/upgrade_*.py` 中被 Alembic 取代的 SQLite 升级脚本。
 - 351 个根目录 Phase 文档中的旧计划和旧完成度。
 - `sync_service.py` 中被后续同名函数覆盖的三个早期定义。
 
@@ -303,7 +303,7 @@
 2. **客服双数据链**：受保护 Naver 咨询已是生产主线，但旧统计和回复仍依赖通用表。
 3. **`sync_service.py` 单体累积**：14,050 行混合多平台、多阶段、Mock 和真实逻辑，并存在同名函数覆盖。
 4. **发货与库存多套口径**：WarehouseBatch 与旧 Shipping 结构并存，平台库存与物流库存没有统一来源合同。
-5. **项目事实文档过期**：`COMMANDER_STATE.md` 顶部仍写旧分支/旧状态，后部才是生产事实；大量 Phase 文档继续制造“完成/未完成”冲突。
+5. **项目事实文档过期**：`docs/archive/governance/COMMANDER_STATE.md` 顶部仍写旧分支/旧状态，后部才是生产事实；大量 Phase 文档继续制造“完成/未完成”冲突。
 
 ## 14. 当前最需要收口的三条业务链路
 
@@ -362,13 +362,13 @@
 
 ### Git 与生产事实
 
-- `COMMANDER_DECISIONS.md`：D027-D040（T11-T20）、D044-D049（生产迁移、咨询、双店、物流）。
-- `COMMANDER_STATE.md`：`Current Release Gate`、`T24 One-Time Inquiry Import Evidence`、`T24 Dual-Store Logistics Recovery Evidence`。
+- `docs/archive/governance/COMMANDER_DECISIONS.md`：D027-D040（T11-T20）、D044-D049（生产迁移、咨询、双店、物流）。
+- `docs/archive/governance/COMMANDER_STATE.md`：`Current Release Gate`、`T24 One-Time Inquiry Import Evidence`、`T24 Dual-Store Logistics Recovery Evidence`。
 - 当前 Git：`release/operator-v1` / `4027e76`；生产代码：`62e49ba`。
 
 ### 核心模型
 
-- 公司/账号：`codex1/backend/app/models/tenant.py`, `auth.py`。
+- 公司/账号：`backend/app/models/tenant.py`, `auth.py`。
 - 店铺/凭证/设备/邮箱：`store.py`, `api_credential.py`, `platform_login_credential.py`, `device_environment.py`, `email_account.py`。
 - 商品/订单：`product.py`, `order.py`, `order_status_event.py`。
 - 咨询/物流：`customer_inquiry.py`, `pxg_naver_readonly.py`。
@@ -397,8 +397,8 @@
 
 ### 验证
 
-- 后端总门禁：`codex1/backend/scripts/verify_all.py`。
-- T13-T24：`codex1/backend/scripts/verify_t13_onboarding.py` 至 `verify_t24_*.py`。
+- 后端总门禁：`backend/scripts/verify_all.py`。
+- T13-T24：`backend/scripts/verify_t13_onboarding.py` 至 `verify_t24_*.py`。
 - 前端合同：`scripts/*.test.mjs`。
 - 构建门禁：`scripts/verify-bundle-budget.mjs`, `.github/workflows/ci.yml`。
 - 当前时间夹具问题：`verify_t24_dual_store_automatic_read.py:63`, `prepare_t24_dual_store_automatic_read.py:187`。
@@ -468,12 +468,12 @@ Coupang 的长期产品定位是核心平台。当前分类为 C，仅表示本�
 
 T24 被校准为“测试夹具时钟不一致技术债务”：`verify_t24_dual_store_automatic_read.py:63` 固定 `2026-07-17`，而 `prepare_t24_dual_store_automatic_read.py:187` 调用的清理健康检查使用真实当前时间；2026-07-19 因此出现过期判断。它不证明核心生产同步失败；后续应使用可注入时钟或相对日期夹具，不应把一个固定日期替换成另一个固定日期。本次不修改测试代码。
 
-仍无法确认的事项包括：当前服务器版本和实时同步状态、公司主体与证照字段、库存最终权威口径、店铺邮箱真实收信合同、客服回复官方对账合同、生产构建的 Backend 注入方式、紫鸟 Windows 助手配对合同，以及现有 Coupang 数据是否包含必须保留的正式数据。证据路径见本文件第 17 节、`COMMANDER_STATE.md` 尾部和 `COMMANDER_DECISIONS.md` D044-D049。
+仍无法确认的事项包括：当前服务器版本和实时同步状态、公司主体与证照字段、库存最终权威口径、店铺邮箱真实收信合同、客服回复官方对账合同、生产构建的 Backend 注入方式、紫鸟 Windows 助手配对合同，以及现有 Coupang 数据是否包含必须保留的正式数据。证据路径见本文件第 17 节、`docs/archive/governance/COMMANDER_STATE.md` 尾部和 `docs/archive/governance/COMMANDER_DECISIONS.md` D044-D049。
 
 ### 校准证据索引
 
 - 状态与数量：`docs/PROJECT_CONTROL.md` 的“校准后的能力盘点”和“多维完成度与置信度”。
-- 模型关系：`codex1/backend/app/models/tenant.py`、`store.py`、`product.py`、`shipping.py`、`customer_inquiry.py`、`pxg_naver_readonly.py`。
+- 模型关系：`backend/app/models/tenant.py`、`store.py`、`product.py`、`shipping.py`、`customer_inquiry.py`、`pxg_naver_readonly.py`。
 - 主服务与接口：`automatic_read_sync_service.py`、`stats_service.py:675`、`naver_readonly_inquiry_service.py`、`warehouse_shipping_service.py`、`api/v1/endpoints/dashboard.py`、`orders.py`、`customer_inquiries.py`、`shipping.py`、`stores.py`。
 - 前端边界：`src/routes/index.jsx`、`src/services/dataSource.js`、`src/services/dataProvider.js`、`src/pages/Dashboard.jsx`、`Orders.jsx`、`CustomerService.jsx`、`ShippingAssistant.jsx`。
-- 测试与历史生产证据：`codex1/backend/scripts/verify_all.py`、`verify_t24_*.py`、`scripts/*.test.mjs`、D044-D049；本次未连接生产服务器。
+- 测试与历史生产证据：`backend/scripts/verify_all.py`、`verify_t24_*.py`、`scripts/*.test.mjs`、D044-D049；本次未连接生产服务器。

@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $phase = "Core-ERP-Operator-Ready-1"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$backend = Resolve-Path (Join-Path $root "codex1\backend")
+$backend = Resolve-Path (Join-Path $root "backend")
 $backendEnv = Join-Path $backend ".env"
 $frontendEnv = Join-Path $root ".env.local"
 $backendPort = 8012

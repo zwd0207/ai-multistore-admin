@@ -7,7 +7,7 @@ import path from 'node:path';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const textSuffixes = new Set(['.css', '.html', '.js', '.json', '.jsx', '.md', '.txt']);
 const textNames = new Set(['.editorconfig', '.env', '.env.local', '.env.example', '.gitignore']);
-const skipDirs = new Set(['.git', 'codex1', 'dist', 'node_modules']);
+const skipDirs = new Set(['.git', 'backend', 'dist', 'node_modules']);
 const mojibakeMarkers = new Map([
   ['U+FFFD replacement char', '\uFFFD'],
   ['Chinese mojibake marker', '\u951F\u65A4\u62F7'],

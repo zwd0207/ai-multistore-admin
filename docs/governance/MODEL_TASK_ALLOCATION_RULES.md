@@ -4,10 +4,10 @@
 
 总指挥不是第四个执行模型，负责维护项目唯一事实并决定任务流向：
 
-- 每轮先读取 `COMMANDER_STATE.md` 和 `COMMANDER_DECISIONS.md`。
+- 每轮先读取 `docs/PROJECT_CONTROL.md`、`docs/TASK_HANDOFF.md` 和 `docs/DECISION_LOG.md`。
 - 将需求压缩成最小必要上下文，再派给 Sol、Terra 或 Luna。
 - 负责工作树、集成分支、验收结果和阻塞项，不让执行模型各自维护不同版本的项目事实。
-- 一个结果只有经过总指挥验证并写入 `COMMANDER_STATE.md` 后，才算项目已接受。
+- 一个结果只有经过总指挥验证并写入 `docs/PROJECT_CONTROL.md` 后，才算项目已接受。
 - 默认不把完整聊天记录和全部 Phase 文档发送给执行模型。
 
 总指挥优先自行完成低 Token 的状态检查、分支核对和结果汇总；核心工程交给 Terra，高风险决策交给 Sol，低风险界面与批量工作交给 Luna。

@@ -392,7 +392,7 @@ export default function Settings() {
               <li>Naver 发货回填必须人工确认后提交；Coupang 回填、改价、改库存和自动回复仍不开放。</li>
               <li>交接或大批量手动同步前，先运行 scripts/operator-db-backup.ps1 创建本地备份。</li>
             </ol>
-            <p>详细说明见 PHASE_CORE_ERP_OPERATOR_READY_1.md。</p>
+            <p>详细历史说明见 docs/archive/phases/PHASE_CORE_ERP_OPERATOR_READY_1.md。</p>
           </div>
         </SettingsSection>
       )}

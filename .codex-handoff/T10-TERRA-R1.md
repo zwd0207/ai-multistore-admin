@@ -29,11 +29,11 @@ Make ordinary PXG/Naver inquiry reads fail closed when retention cleanup is unhe
 
 ## Ownership
 
-- `codex1/backend/app/api/v1/endpoints/customer_inquiries.py`
-- `codex1/backend/app/services/customer_inquiry_service.py`
-- `codex1/backend/app/api/v1/endpoints/sync.py`
-- `codex1/backend/app/services/sync_service.py`
-- `codex1/backend/app/services/operator_trial_service.py`
+- `backend/app/api/v1/endpoints/customer_inquiries.py`
+- `backend/app/services/customer_inquiry_service.py`
+- `backend/app/api/v1/endpoints/sync.py`
+- `backend/app/services/sync_service.py`
+- `backend/app/services/operator_trial_service.py`
 - Directly related backend verification scripts only
 
 Do not modify frontend files.

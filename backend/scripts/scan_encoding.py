@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-CODEX1_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     ".css",
     ".env",
@@ -41,11 +41,11 @@ def should_scan(path: Path) -> bool:
 
 
 def iter_text_files() -> list[Path]:
-    return sorted(path for path in CODEX1_ROOT.rglob("*") if path.is_file() and should_scan(path))
+    return sorted(path for path in BACKEND_DIR.rglob("*") if path.is_file() and should_scan(path))
 
 
 def relative(path: Path) -> str:
-    return path.relative_to(CODEX1_ROOT).as_posix()
+    return path.relative_to(BACKEND_DIR).as_posix()
 
 
 def line_number_from_bytes(raw: bytes, offset: int) -> int:

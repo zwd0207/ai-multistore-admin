@@ -1,8 +1,19 @@
 # 当前任务交接
 
-> 最新任务状态：`TASK-INQUIRY-READ-CONTRACT-001` 已完成代码收口、自动化和登录态浏览器验收；现正进行版本登记和最终回归。通过后应自动提交/推送并核验 GitHub CI；在 CI 通过前，不得进入库存/SKU任务或部署服务器。以下旧内容保留为已完成任务的历史交接证据。
+> 最新任务状态：`TASK-WORKSPACE-CLEANUP-001` 已完成后端扁平迁移、历史归档、数据保护、旧副本清理和本地运行验收；当前只剩干净工作树全量回归、提交/推送与精确 GitHub CI 核验。生产环境未操作。以下旧内容保留为历史交接证据。
 
-## 当前任务：TASK-INQUIRY-READ-CONTRACT-001
+## 当前任务：TASK-WORKSPACE-CLEANUP-001
+
+- 唯一运行仓库为 `codex2/`，后端从旧嵌套目录迁至 `backend/`；保留 `codex1.db` 名称、API、模型、迁移版本和备份 manifest 合同。
+- 351 份 Phase 文档归档到 `docs/archive/phases/`；旧 README、Commander、进度和旧规则归档到 `docs/archive/governance/`；当前事实只读 `docs/PROJECT_CONTROL.md`。
+- 五个辅助 worktree 已归档后正规移除；本地只保留 `release/operator-v1`、`main` 和 `wip/inventory-sku-pre-cleanup-20260722`。远程分支和标签未删除。
+- 旧 SQLite、历史本地备份和旧独立仓库工作副本已在 bundle/哈希验证后删除；当前开发库、试运营库、新加密快照、主 `node_modules` 和后端 `.venv` 保留。
+- 明文紫鸟 Key 已移动到工作区 `生产上线私密资料/ziniao/` 并收紧 ACL；Key 未读取、未输出、未轮换，现有认证不变。
+- 本地 8013/5181 已用既有配置恢复并验收健康；桌面和 390px 登录/MFA、店铺视图与工作台通过。未手动触发同步、客服回复、发货回填或平台写入。
+- 候选版本为 `operator-v1.20260722.1`；最终全量验证通过后按 D060 提交并推送 `release/operator-v1`，随后只核验该提交的 GitHub CI，不部署生产。
+- 库存/SKU 7 项 WIP 位于本地提交 `c9250dbc4801c10a85a47730924fe06f75168d1d`。CI 通过后按 [`docs/runbooks/INVENTORY_SKU_WIP_RECOVERY.md`](runbooks/INVENTORY_SKU_WIP_RECOVERY.md) 从干净发布分支恢复。
+
+## 已完成历史：TASK-INQUIRY-READ-CONTRACT-001
 
 - 任务目标：将 Naver 正式客服读链统一到 `PxgNaverReadonlyCustomerInquiry`，覆盖列表、统计、风险、每日上下文、工作台和受保护详情深链；不改表、不删历史、不调用平台、不启用回复。
 - 已完成：旧通用 Naver 行从正式业务面隐藏；非 Naver 通用行仅保留只读兼容并固定关闭回复；受保护 canonical 深链不再依赖首批 100 条列表。
