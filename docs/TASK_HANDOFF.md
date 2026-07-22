@@ -5,6 +5,7 @@
 - 日期：2026-07-22
 - 分支：`release/operator-v1`
 - 任务开始 HEAD：`416a888096f5a5e71714adf0419cda79126db410`
+- 基线封装提交：`9c757f2ac5ee2e50ff7aed70c05ef9f00f51270b`
 - 当前候选版本：`operator-v1.20260722.1`
 
 ## 实际完成内容
@@ -48,6 +49,7 @@
 - `npm.cmd run build`：通过，38 个 JavaScript chunk。
 - `npm.cmd run bundle:verify`：通过，入口 273,766 bytes。
 - `backend/.venv/Scripts/python.exe backend/scripts/verify_all.py`：通过，包含 T13-T24、会话、工作台、Git 跟踪和文档秘密扫描。
+- `npm.cmd run capabilities:verify:full`：在干净提交 `9c757f2...` 上通过，139.4 秒，覆盖上述前端与后端门禁。
 - 本地 T22 PostgreSQL 专项：因未配置一次性 `T22_TEST_POSTGRES_URL` 按既有规则跳过；整理提交 `416a888...` 的 GitHub PostgreSQL 16 job 已通过。
 - `git bundle verify archive/git/ai-multistore-pre-cleanup-20260722.bundle`：通过。
 - 原始库存 WIP `git apply --check --3way`：预期失败，冲突仅涉及旧路径、已归档文件和过期治理文档；业务服务与审计资料可读取。

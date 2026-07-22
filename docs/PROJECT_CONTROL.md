@@ -7,6 +7,7 @@
 - 已完成能力：以 [`COMPLETED_CAPABILITY_BASELINE.md`](COMPLETED_CAPABILITY_BASELINE.md) 登记唯一主实现和保护边界；`npm run capabilities:verify:full` 是统一本地门禁，不复制第二套业务代码。
 - 未开发能力：按 [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) 的两个工作流推进；当前唯一允许开工项是库存/SKU 双来源只读合同。
 - WIP 风险已隔离：原始库存提交 `c9250dbc...` 内容完整但整包恢复会冲突；已将可用服务与审计资料重新封装为本地分支 `wip/inventory-sku-post-cleanup-20260722` 的 `2e37c7e...`，不含旧治理文档。
+- 连续性基线提交：`9c757f2ac5ee2e50ff7aed70c05ef9f00f51270b`；统一完整门禁在该干净提交上通过。
 
 ## 已完成历史：TASK-WORKSPACE-CLEANUP-001
 
