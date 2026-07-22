@@ -147,4 +147,14 @@
 - 原因：消除旧后端目录的重复嵌套和多工作树噪音，同时避免目录整理演变为业务兼容性改造。
 - 影响：入口脚本、CI、合同测试和当前文档统一使用 `backend/`；生产环境不操作。库存/SKU WIP 只保存在本地分支 `wip/inventory-sku-pre-cleanup-20260722`，须从整理后的发布分支新建任务分支后以无提交方式恢复，服务文件映射到 `backend/app/services/inventory_service.py`。
 - 可恢复性：目录整理前的完整 Git bundle、SHA-256、数据库基线和新加密快照保存在工作区 `archive/` 与 `backend/.local-trial/readonly-backups/`；经授权删除的旧 SQLite/备份仅保留哈希清单，数据本身不可恢复。
-- 状态：已生效；候选版本 `operator-v1.20260722.1` 正执行最终回归、推送和 CI 门禁。
+- 状态：已生效；候选版本 `operator-v1.20260722.1` 的整理提交 `416a888...` 已完成本地全量回归、推送和 GitHub CI。
+
+## D066
+
+- 日期：2026-07-22
+- 决策：已完成能力不复制为第二套“封装代码”，而以唯一主实现、正式入口、保护边界、证据清单和统一回归命令组成能力基线；后续任务必须复用该基线。
+- 原因：目录整理后需要让新任务快速识别可直接保留的成果，同时避免为了“封装”再次复制服务、页面、状态机或测试逻辑。
+- 替代方案：复制一套稳定版模块，或只依靠聊天和历史 Phase 文档判断完成度；前者会制造分叉，后者无法可靠交接。
+- 影响：`docs/COMPLETED_CAPABILITY_BASELINE.md` 登记稳定能力包；`npm run capabilities:verify` 和 `npm run capabilities:verify:full` 只编排既有门禁。库存/SKU 原始 WIP 不得整包覆盖当前治理文档，只能按新路径选择性恢复。
+- 状态：已生效。
+- 证据：`scripts/verify-completed-capabilities.mjs`、目录整理后开发连续性审计、2026-07-22 本地完整回归。

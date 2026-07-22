@@ -1,13 +1,20 @@
 # 项目控制（唯一当前状态入口）
 
-## TASK-WORKSPACE-CLEANUP-001 当前状态
+## TASK-POST-CLEANUP-CONTINUITY-001 当前状态
 
-- 状态：后端扁平迁移、历史资料归档、本地数据保护、旧副本清理和 8013/5181 运行验收已完成；正在执行干净工作树上的最终全量回归、提交、推送和精确 GitHub CI 核验。
-- 唯一运行仓库：`codex2/`。后端物理路径为 `backend/`；数据库文件名 `codex1.db`、API 合同、模型和迁移版本均未改变。`codex1/` 已删除，351 份 Phase 文档已归档到 `docs/archive/phases/`。
-- 本地运行：现用配置已恢复，8013/5181 健康；真实平台写入总开关及客服、发货、商品、库存等受控写入继续关闭。生产服务器、生产数据库、DNS、域名和平台接口均未操作。
-- 可恢复点：完整 bundle 位于工作区 `archive/git/ai-multistore-pre-cleanup-20260722.bundle`；当前试运营库的新加密快照位于 `backend/.local-trial/readonly-backups/workspace-migration-pre-cleanup-20260722.sqlite.enc`。旧 SQLite 与历史本地备份已按授权删除，路径、大小和 SHA-256 记录在工作区 `archive/DATA_DELETION_MANIFEST_20260722.md`。
-- 库存/SKU WIP：仅保存在本地分支 `wip/inventory-sku-pre-cleanup-20260722`，提交 `c9250dbc4801c10a85a47730924fe06f75168d1d`，未混入本次目录整理。恢复流程见 [`docs/runbooks/INVENTORY_SKU_WIP_RECOVERY.md`](runbooks/INVENTORY_SKU_WIP_RECOVERY.md)。
-- 候选版本：`operator-v1.20260722.1`；精确技术版本以本次整理提交 SHA 为准。生产已部署版本保持原登记，本任务不部署生产。
+- 状态：目录整理影响审计、已完成能力基线封装、未开发路线图和整理后完整回归已完成；未修改业务模型、API、数据库、迁移或页面规则。
+- 影响结论：唯一运行仓库 `codex2/`、后端 `backend/`、CI、入口脚本和合同测试可持续开发；整理没有删除或改写现行业务实现。详细证据见 [`POST_CLEANUP_DEVELOPMENT_AUDIT_20260722.md`](POST_CLEANUP_DEVELOPMENT_AUDIT_20260722.md)。
+- 已完成能力：以 [`COMPLETED_CAPABILITY_BASELINE.md`](COMPLETED_CAPABILITY_BASELINE.md) 登记唯一主实现和保护边界；`npm run capabilities:verify:full` 是统一本地门禁，不复制第二套业务代码。
+- 未开发能力：按 [`DEVELOPMENT_ROADMAP.md`](DEVELOPMENT_ROADMAP.md) 的两个工作流推进；当前唯一允许开工项是库存/SKU 双来源只读合同。
+- WIP 风险已隔离：原始库存提交 `c9250dbc...` 内容完整但整包恢复会冲突；已将可用服务与审计资料重新封装为本地分支 `wip/inventory-sku-post-cleanup-20260722` 的 `2e37c7e...`，不含旧治理文档。
+
+## 已完成历史：TASK-WORKSPACE-CLEANUP-001
+
+- 状态：完成。后端扁平迁移、351 份历史资料归档、本地数据保护、旧副本清理、8013/5181 运行验收、干净工作树全量回归、提交和精确 GitHub CI 均已通过。
+- 唯一运行仓库：`codex2/`。后端物理路径为 `backend/`；数据库文件名 `codex1.db`、API 合同、模型和迁移版本均未改变。
+- 整理提交：`416a888096f5a5e71714adf0419cda79126db410`；已推送 `origin/release/operator-v1`，GitHub 三个 job 全部成功。
+- 可恢复点：完整 bundle 位于工作区 `archive/git/ai-multistore-pre-cleanup-20260722.bundle`；新加密快照位于 `backend/.local-trial/readonly-backups/workspace-migration-pre-cleanup-20260722.sqlite.enc`。
+- 生产服务器、生产数据库、DNS、域名和平台接口未操作；所有真实平台写入继续关闭。
 
 ## 已完成历史：TASK-INQUIRY-READ-CONTRACT-001
 
@@ -47,7 +54,7 @@
 
 正式阶段名称：**核心数据合同与内部运营主流程收口**。
 
-本次目录整理不改变业务阶段和运行合同。当前唯一主目标是完成 `operator-v1.20260722.1` 的最终回归、提交/推送与 GitHub CI 核验；通过后从整理后的发布分支恢复库存/SKU WIP，继续统一核心数据口径。所有未确认的平台写入继续关闭。
+目录整理与开发连续性审计已经完成，不改变业务阶段和运行合同。当前唯一主目标是从干净发布基线启动库存/SKU 双来源只读合同，统一平台观察库存、仓库盘点库存、SKU/规格键和严格阻断规则。所有未确认的平台写入继续关闭。
 
 ## 长期目标
 
@@ -147,10 +154,10 @@ Workspace / Tenant（内部组织或业务空间）
 | 步骤 | 正式入口/接口 | 主数据源 | 当前状态 | 旧/重复实现 | 收口验收 |
 |---|---|---|---|---|---|
 | 关系定义 | 店铺连接页 `/stores`；`GET /api/v1/stores` | `Tenant`、`Store`、凭证模型 | B/D | 混合账号页、Tenant/Company 语义混用 | 明确 Workspace/Company/Store/平台账号/凭证归属；跨店拒绝 |
-| 咨询口径 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地自动化与登录态浏览器验收通过，待 GitHub CI/部署） | 通用 `CustomerInquiry` 的 Naver 历史行、旧 `/sync/customer-inquiries/naver` | 列表、统计、详情和后续 attempt 只认一个 Naver 主链 |
+| 咨询口径 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地自动化、登录态浏览器和 GitHub CI 已通过，尚未部署当前候选） | 通用 `CustomerInquiry` 的 Naver 历史行、旧 `/sync/customer-inquiries/naver` | 列表、统计、详情和后续 attempt 只认一个 Naver 主链 |
 | 库存/SKU | `/inventory`、`/shipping`；现有库存与映射接口 | `Product` 平台值 + `LogisticsInventoryItem` 仓库值 | E/B | 名称/选项匹配和跨页库存计算 | 每个数量标来源、时间、SKU键；不得相互覆盖 |
 | 销售/待办 | `/workbench`；`GET /api/v1/dashboard/store-overview` | 后端 `operator_workbench` | A2/E | 前端派生统计、旧 summary/mock fallback | 后端单一计算源，前端只展示；跨店汇总可追溯 |
-| Backend/Mock 边界 | 生产构建和 `dataProvider` | 真实 Backend | E | 默认 Mock、Proxy 回退 | 生产缺少后端能力时显式失败，不显示 Mock |
+| Backend/Mock 边界 | 生产构建和 `dataProvider` | 真实 Backend | A2 | Mock 仅作显式 Demo/Test 兼容 | 生产缺少后端能力时显式失败，不显示 Mock |
 | T24 时间 | `verify_all.py` 与 T24 fixtures | `prepare_dual_store_automatic_read(now=...)` 和清理健康检查可选 `now` | A2 | 历史缺陷：旧调用未把准备时间传入清理健康检查；已修复 | T24 独立测试重复通过；生产默认仍使用真实 UTC 时间 |
 
 ### 工作流二：内部运营主流程收口
@@ -163,7 +170,7 @@ Workspace / Tenant（内部组织或业务空间）
 | 数据同步 | `/workbench`；`GET /api/v1/dashboard/store-overview` | `SyncCheckpoint`、`SyncLog` | A2 | 手工 sync、preview 和 mock 路径 | 订单/商品/咨询/物流状态均来自同一 checkpoint 合同 |
 | 今日工作台 | `/workbench`（`/dashboard` 仅别名） | 后端 `operator_workbench` | A2 | 前端工具函数派生待办 | 异常、过期、下一步和深链与后端详情一致 |
 | 订单/历史 | `/orders`；`GET /api/v1/orders`、物流 trace | `Order`、`OrderStatusEvent` | A2 | Mock 订单和旧字段兼容 | 当前/历史范围、物流和状态时间线一致 |
-| 客服 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地验收通过，待 GitHub CI/部署） | 通用表的 Naver 历史行和旧 reply endpoint | 读链唯一；人工回复另行通过 attempt/reconcile 验收 |
+| 客服 | `/customer-service`；`GET /api/v1/customer-inquiries` | 受保护 Naver 咨询 | A2（本地验收与 GitHub CI 通过，待后续部署） | 通用表的 Naver 历史行和旧 reply endpoint | 读链唯一；人工回复另行通过 attempt/reconcile 验收 |
 | 物流/发货 | `/shipping`；`/shipping/warehouse-batches/*` | 物流快照、`WarehouseShippingBatch` | A2/B | 旧 Shipping 导出/导入/gate | 只展示单批次、精确记录、审批和不确定结果；真实写入仍关闭 |
 | 库存异常 | `/inventory` | 明确后的平台/仓库库存合同 | B/E | 前端 `naverInventory` 和名称映射 | 异常可追溯至 SKU、来源和时间，不直接改平台 |
 | 审计 | `/logs`；`OperationAuditLog` | 操作审计/同步日志 | A1 | 页面局部 mock 日志 | 敏感操作、失败和跨店访问均可追溯且无敏感原文 |
@@ -186,9 +193,10 @@ Workspace / Tenant（内部组织或业务空间）
 
 1. 服务器后端版本、实时同步、数据一致性和备份已本次核验；仅活动前端静态产物的精确 SHA/版本登记仍为 X，因为 `/release-version.json` 当前落入 SPA HTML 回退。`aiglxt.com` 也尚未配置为可解析的生产域名。
 2. T24 的 `verify_t24_dual_store_automatic_read.py:63` 固定日期与清理健康检查默认真实时钟的冲突已修复：准备层现在将受控 `now` 传入清理健康检查，生产未传入时仍使用真实 UTC 时间；T24 和 `verify_all.py` 已通过。
-3. 本地 PostgreSQL 并发验证因未设置一次性 `T22_TEST_POSTGRES_URL` 跳过；历史 CI 证据不能替代当前复验。
-4. Naver 咨询双表的正式读链已完成本地自动化与登录态浏览器验收，候选版本尚待最终回归、提交/推送和 GitHub CI；库存/SKU、旧发货入口和其余 Mock 兼容路径仍待收口。
-5. 公司主体/证照字段、邮箱收信、销售结算、客服写入官方合同和紫鸟助手配对合同仍待确认。
+3. 本地 PostgreSQL 并发验证因未设置一次性 `T22_TEST_POSTGRES_URL` 跳过；整理提交的精确 GitHub CI 已在 PostgreSQL 16 环境通过，后续发布仍需对新提交重复该门禁。
+4. Naver 咨询正式读链已完成本地自动化、登录态浏览器和 GitHub CI；库存/SKU、旧发货入口和其余兼容路径仍待收口。
+5. 库存/SKU 原始 WIP 的整包补丁会冲突；业务内容未丢失，必须按恢复手册只提取服务和审计资料，不得覆盖当前控制文档。
+6. 公司主体/证照字段、邮箱收信、销售结算、客服写入官方合同和紫鸟助手配对合同仍待确认。
 
 ## 当前阶段验收标准
 
@@ -198,12 +206,13 @@ Workspace / Tenant（内部组织或业务空间）
 - T24 时钟缺陷已修复并保留专项证据；后续测试新增时间来源必须继续复用可控时钟入口。
 - 生产 Backend 不显示 Mock，核心跨店数据和权限边界有可重复测试。
 - 在任何真实写入前，咨询和发货分别完成人工确认、attempt、unknown/reconcile 和审计验收。
+- 已完成能力必须通过 `npm run capabilities:verify:full` 或等价 CI 门禁，不能靠历史聊天或单条测试判定。
 
 ## 下一步三个具体动作
 
-1. 为 `operator-v1.20260722.1` 完成干净工作树全量回归、秘密扫描、构建和版本校验。
-2. 通过后提交并推送 `release/operator-v1`，核验该精确 commit 的 GitHub CI；服务器部署、生产数据库、DNS/域名和真实平台操作仍不在授权范围。
-3. CI 通过后，从整理后的发布分支新建库存/SKU任务分支，按恢复说明以无提交方式移植 `c9250dbc...`，并将服务文件落在 `backend/app/services/inventory_service.py`；仍不新增真实写入。
+1. 完成本次开发连续性记录、能力基线和统一门禁的提交/CI，保持发布分支与权威文档一致。
+2. 从整理后的发布分支新建 `TASK-INVENTORY-SKU-CONTRACT-001` 独立任务分支，按恢复说明以无提交方式移植整理后 WIP 包 `2e37c7e...`。
+3. 先实现并验证只读库存合同、唯一映射和严格阻断；不得同时启动客服写入、发货真实写入、手机版新功能或其他路线图项目。
 
 ## 文档优先级
 

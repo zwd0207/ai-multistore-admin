@@ -4,6 +4,14 @@
 
 ## 2026-07-22
 
+### Project continuity and documentation
+
+- 完成目录整理后的开发连续性审计，确认现行前端、后端、CI、运行入口和恢复点均使用新 `backend/` 路径。
+- 建立已完成能力基线和未开发能力路线图，并增加复用现有合同、构建及后端全量验证的统一命令。
+- 明确库存/SKU 原始 WIP 不能整包覆盖当前治理文档，恢复时只选择性提取审计和服务实现到新路径。
+- 将库存/SKU 可用 WIP 重新封装为本地分支提交 `2e37c7e...`，仅包含 `backend/app/services/inventory_service.py` 和库存合同审计，不进入发布分支。
+- 本次没有修改业务模型、API、数据库、迁移、页面业务规则或平台写入门禁。
+
 ### Project layout and operations
 
 - 将唯一运行仓库收口为 `codex2/`，后端由旧嵌套目录扁平迁移到 `backend/`；同步更新本地入口、合同测试、CI 和当前文档，保留数据库文件名、API、模型、迁移版本及备份 manifest 合同。

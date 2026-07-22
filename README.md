@@ -8,6 +8,8 @@
 - [任务交接](docs/TASK_HANDOFF.md)：最近任务、验证与续接方式
 - [决策日志](docs/DECISION_LOG.md)：长期边界与追加式决策
 - [变更日志](CHANGELOG.md)：已经发生的仓库变更
+- [已完成能力基线](docs/COMPLETED_CAPABILITY_BASELINE.md)：稳定主实现、正式入口和统一验证
+- [开发收口路线图](docs/DEVELOPMENT_ROADMAP.md)：尚未完成能力的两个工作流
 - [模型分工](docs/governance/MODEL_TASK_ALLOCATION_RULES.md)
 - [试运营说明](docs/runbooks/OPERATOR_TRIAL_PXG_NAVER.md)
 
@@ -43,6 +45,8 @@ npm.cmd run build
 npm.cmd run encoding:scan
 npm.cmd run session:verify
 npm.cmd run bundle:verify
+npm.cmd run capabilities:verify
+npm.cmd run capabilities:verify:full
 backend\.venv\Scripts\python.exe backend\scripts\verify_all.py
 ```
 

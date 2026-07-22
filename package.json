@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "capabilities:verify": "node scripts/verify-completed-capabilities.mjs",
+    "capabilities:verify:full": "node scripts/verify-completed-capabilities.mjs --full",
     "encoding:scan": "node scripts/scan-encoding.mjs",
     "session:verify": "node scripts/verify-session-security.mjs",
     "ziniao:verify": "node scripts/ziniao-store-open.contract.test.mjs",
